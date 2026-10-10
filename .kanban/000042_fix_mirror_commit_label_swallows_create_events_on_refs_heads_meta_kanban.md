@@ -1,7 +1,7 @@
 ---
 name: "fix: mirror commit label swallows create events on refs/heads/meta/kanban"
 priority: "medium"
-state: "reviewing"
+state: "to-live-test"
 worktree: "fix/mirror-commit-label-swallows-create-events-on-refs-heads-meta-kanban"
 ---
 
