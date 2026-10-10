@@ -1,7 +1,7 @@
 ---
 name: "fix: dead Developer returns the task to to-do instead of to-review"
 priority: "medium"
-state: "backlog"
+state: "done"
 worktree: ""
 ---
 
