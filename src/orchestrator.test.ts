@@ -31,6 +31,37 @@ const mirrorSubjects = (root: string) => {
 	}
 };
 
+// a file's content at the mirror tip; null when the tip lacks it (or git fails)
+const showTip = (root: string, file: string): string | null => {
+	try {
+		return execSync(`git show refs/heads/meta/kanban:.kanban/${file}`, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], shell: "/bin/bash" });
+	} catch {
+		return null;
+	}
+};
+
+// an external mirror-head move, built with the same plumbing the daemon uses (full-tree
+// snapshot, parent = current tip): files is name -> content for the whole .kanban board
+const externalCommit = (root: string, files: Record<string, string>, message: string): string => {
+	const entries = Object.entries(files)
+		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+		.map(([name, content]) => {
+			const sha = execSync("git hash-object -w --stdin", { input: content, cwd: root, encoding: "utf8" }).trim();
+			return `100644 blob ${sha}\t${name}\n`;
+		})
+		.join("");
+	const board = execSync("git mktree", { input: entries, cwd: root, encoding: "utf8" }).trim();
+	const tree = execSync("git mktree", { input: `040000 tree ${board}\t.kanban\n`, cwd: root, encoding: "utf8" }).trim();
+	const parent = execSync("git rev-parse --verify refs/heads/meta/kanban", { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+	const commit = execSync(`git commit-tree ${tree} -p ${parent} -m '${message}'`, { cwd: root, encoding: "utf8", shell: "/bin/bash" }).trim();
+	execSync(`git update-ref refs/heads/meta/kanban ${commit}`, { cwd: root, shell: "/bin/bash" });
+	return commit;
+};
+
+// a task file's frontmatter, for hand-written board entries in the tests
+const taskContent = (name: string, state = "backlog") =>
+	`---\nname: "${name}"\npriority: "medium"\nstate: "${state}"\nworktree: ""\n---\n\n# Summary\nTest task.\n\n# Specs\nn/a\n\n# Notes\n`;
+
 // stub agent: parses its role out of the prompt and applies the pipeline transition;
 // the developer also commits a code change, so the merge is a real one and the blanket
 // git add -A in the worktree proves board changes cannot be staged
@@ -270,14 +301,22 @@ await waitFor(
 	rootD,
 );
 assert.equal(readlinkSync(wtBoardD), kanbanDir(rootD)); // absolute path to the shared board
+// the excludes setup lands milliseconds after the symlink: wait for convergence before asserting
+await waitFor(
+	() => {
+		try {
+			return !execSync("git status --porcelain", { cwd: wtD, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).split("\n").some((l) => l.includes(".kanban"));
+		} catch {
+			return false;
+		}
+	},
+	10000,
+	"worktree git stops showing .kanban",
+	d.output,
+);
 // the board is untracked (mirror commits never touch the index), so the worktree index
 // carries no board entries at all and the symlink stays invisible to the worktree's git
 assert.equal(execSync("git ls-files .kanban", { cwd: wtD, encoding: "utf8" }).trim(), "", "worktree index tracks no board entries");
-assert.equal(
-	execSync("git status --porcelain", { cwd: wtD, encoding: "utf8" }).split("\n").filter((l) => l.includes(".kanban")).length,
-	0,
-	"worktree git status shows no .kanban entries",
-);
 // a blanket git add -A cannot stage board changes, and the shared board sees writes through the symlink
 const wtTask = join(wtBoardD, taskD.file);
 writeFileSync(wtTask, readFileSync(wtTask, "utf8").replace(/^state: .*/m, 'state: "doing"'));
@@ -611,3 +650,66 @@ assert.deepEqual(mirrorSubjects(rootO).split("\n"), [`kanban: create ${taskO2.fi
 mo.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: ... + settled done task create-event smoke passed");
+
+// --- part P: an external mirror-head move is reconciled into the working tree within one scan
+// (external add and external deletion both propagate; the reconcile itself commits nothing)
+const rootP = fixture();
+cleaned.push(rootP);
+mkdirSync(kanbanDir(rootP), { recursive: true });
+writeFileSync(join(kanbanDir(rootP), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootP), pollMinutes: 0.05 }));
+const taskP = createTask(rootP, { name: "fix: external move", summary: "Reconcile smoke", specs: "n/a" });
+const p = await runDaemon(rootP);
+await waitFor(() => mirrorSubjects(rootP) !== "", 30000, "task mirrored", p.output);
+const contentP = readFileSync(join(kanbanDir(rootP), taskP.file), "utf8");
+// the tip gains a task while the working tree lacks it: one scan must materialize it
+const externalP = "000002_feat_external_task.md";
+const externalContentP = taskContent("fix: external task");
+const extP = externalCommit(rootP, { [taskP.file]: contentP, [externalP]: externalContentP }, "external: add a task");
+await waitFor(() => existsSync(join(kanbanDir(rootP), externalP)), 10000, "external add materialized within one scan", p.output);
+assert.equal(readFileSync(join(kanbanDir(rootP), externalP), "utf8"), externalContentP, "external content materialized byte-for-byte");
+// the tip then loses it again: the deletion propagates to the working tree
+const extP2 = externalCommit(rootP, { [taskP.file]: contentP }, "external: drop a task");
+await waitFor(() => !existsSync(join(kanbanDir(rootP), externalP)), 10000, "external deletion propagated to the working tree", p.output);
+assert.equal(readFileSync(join(kanbanDir(rootP), taskP.file), "utf8"), contentP, "untouched task file unchanged by the reconcile");
+assert.ok(showTip(rootP, taskP.file) !== null, "the untouched task stays on the branch");
+// the reconcile itself commits nothing: the board already matches the tip
+await new Promise((r) => setTimeout(r, 2500));
+assert.deepEqual(
+	mirrorSubjects(rootP).split("\n").filter((s) => s.startsWith("kanban:")),
+	[`kanban: create ${taskP.file}`],
+	"reconcile adds no mirror commits",
+);
+await waitFor(() => p.output().includes(`reconciled .kanban to ${extP2}`), 10000, "reconcile logged", p.output);
+assert.ok(p.output().includes(`reconciled .kanban to ${extP}: 1 file(s) updated, 0 deleted`), "reconcile log line carries hash, updated and deleted counts");
+assert.ok(p.output().includes(`reconciled .kanban to ${extP2}: 0 file(s) updated, 1 deleted`), "deletion reconcile logged with counts");
+p.daemon.kill("SIGTERM");
+
+// --- part Q: a stale working tree never erases branch-only files, and an unmirrored local
+// write survives the reconcile: the next mirror commit is built after the reconcile, so the
+// branch-only file folds in instead of being dropped
+const rootQ = fixture();
+cleaned.push(rootQ);
+mkdirSync(kanbanDir(rootQ), { recursive: true });
+writeFileSync(join(kanbanDir(rootQ), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootQ), pollMinutes: 0.05 }));
+const taskQ = createTask(rootQ, { name: "fix: no branch erase", summary: "Reconcile smoke", specs: "n/a" });
+const q = await runDaemon(rootQ);
+await waitFor(() => mirrorSubjects(rootQ).includes(`kanban: create ${taskQ.file}`), 30000, "task mirrored", q.output);
+// branch-only file: the tip gains it while the working tree lacks it (the drift that used to erase it)
+const externalQ = "000002_feat_branch_only.md";
+const externalContentQ = taskContent("fix: branch-only task");
+const extQ = externalCommit(rootQ, { [taskQ.file]: readFileSync(join(kanbanDir(rootQ), taskQ.file), "utf8"), [externalQ]: externalContentQ }, "external: add a branch-only task");
+// an in-flight PM write, never mirrored: the reconcile that materializes the branch-only
+// file must keep it
+const inflightQ = "000009_feat_in_flight_write.md";
+const inflightContentQ = taskContent("feat: in-flight write");
+writeFileSync(join(kanbanDir(rootQ), inflightQ), inflightContentQ);
+await waitFor(() => existsSync(join(kanbanDir(rootQ), externalQ)), 10000, "branch-only file materialized", q.output);
+assert.ok(existsSync(join(kanbanDir(rootQ), inflightQ)), "unmirrored in-flight write survives the reconcile");
+// the next mirror commit (the in-flight file's own create) must carry the branch-only file
+await waitFor(() => showTip(rootQ, externalQ) !== null && execSync(`git rev-parse refs/heads/meta/kanban`, { cwd: rootQ, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim() !== extQ, 10000, "next mirror commit keeps the branch-only file", q.output);
+assert.equal(showTip(rootQ, externalQ), externalContentQ, "branch-only file survived the next mirror commit");
+assert.ok(mirrorSubjects(rootQ).includes(`kanban: create ${inflightQ}`), "in-flight write got its own create commit");
+assert.equal(showTip(rootQ, inflightQ), inflightContentQ, "in-flight write mirrored after the reconcile");
+q.daemon.kill("SIGTERM");
+
+console.log("orchestrator.test.ts: ... + mirror reconcile smoke passed");
