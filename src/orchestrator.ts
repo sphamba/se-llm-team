@@ -205,7 +205,7 @@ function rescan(root: string, cfg: Config): void {
 }
 
 const DEAD_TRANSITIONS: Partial<Record<TaskState, TaskState>> = {
-	doing: "to-review",
+	doing: "to-do",
 	reviewing: "to-review",
 	"live-testing": "done",
 };

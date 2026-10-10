@@ -36,7 +36,7 @@ States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing,
 - to-do: creates `.worktrees/<slug>` from the task name, sets the worktree attribute, spawns a Developer, moves to doing. Unlimited lanes; the PM throttles by how many tasks it promotes to to-do.
 - to-review: spawns a Reviewer, moves to reviewing.
 - to-live-test: spawns a Live-tester, moves to live-testing.
-- Liveness poll: an agent dead without a state update moves the task on (doing and reviewing to to-review, live-testing to done). Capped at 5 respawns per task.
+- Liveness poll: an agent dead without a state update moves the task on (a dead Developer goes back to to-do for a fresh run, reviewing to to-review, live-testing to done). Capped at 5 respawns per task.
 - done with a worktree: merges the branch into the main checkout, removes the worktree, deletes the branch, then commits the task file (the done commit). On conflict, spawns a Merger agent, capped at 3 attempts. done without a worktree: the orchestrator commits the task file at the next rescan. The done commit is skipped when the file has nothing uncommitted.
 
 ## Agents
