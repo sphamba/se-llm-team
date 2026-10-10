@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { kanbanDir, listAll, STATES } from "./kanban.ts";
@@ -38,6 +38,14 @@ function taskBody(root: string, file: string): string {
 	}
 }
 
+function taskUpdated(root: string, file: string): number {
+	try {
+		return statSync(join(kanbanDir(root), file)).mtimeMs;
+	} catch {
+		return 0;
+	}
+}
+
 function serve(root: string, req: IncomingMessage, res: ServerResponse): void {
 	const path = (req.url ?? "/").split("?")[0];
 	if (req.method !== "GET") {
@@ -55,6 +63,7 @@ function serve(root: string, req: IncomingMessage, res: ServerResponse): void {
 					priority: t.priority,
 					state: t.state,
 					worktree: t.worktree,
+					updated: taskUpdated(root, t.file),
 					body: taskBody(root, t.file),
 				})),
 			),
@@ -64,48 +73,62 @@ function serve(root: string, req: IncomingMessage, res: ServerResponse): void {
 	}
 }
 
+// dark palette, written once and applied twice: explicit choice via data-theme, browser default via media query
+const DARK_VARS = `
+:root[data-theme="dark"] { --bg: #0f172a; --fg: #e2e8f0; --panel: #1e293b; --border: #334155; --heading: #cbd5e1; --muted: #94a3b8; --faint: #64748b; --soft: #cbd5e1; --hover: #273449; --overlay: rgba(0, 0, 0, .6); --code-bg: #0f172a; --link: #60a5fa;
+--low-bg: #334155; --low-fg: #cbd5e1; --medium-bg: #1e3a8a; --medium-fg: #bfdbfe; --high-bg: #7c2d12; --high-fg: #fed7aa; --critical-bg: #7f1d1d; --critical-fg: #fecaca; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0f172a; --fg: #e2e8f0; --panel: #1e293b; --border: #334155; --heading: #cbd5e1; --muted: #94a3b8; --faint: #64748b; --soft: #cbd5e1; --hover: #273449; --overlay: rgba(0, 0, 0, .6); --code-bg: #0f172a; --link: #60a5fa;
+--low-bg: #334155; --low-fg: #cbd5e1; --medium-bg: #1e3a8a; --medium-fg: #bfdbfe; --high-bg: #7c2d12; --high-fg: #fed7aa; --critical-bg: #7f1d1d; --critical-fg: #fecaca; } }
+`;
+
 const PAGE = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>se-llm-team board</title>
+<title>Software Engineering LLM Team</title>
 <style>
 * { box-sizing: border-box; }
-body { margin: 0; background: #f1f5f9; color: #0f172a; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+:root { --bg: #f1f5f9; --fg: #0f172a; --panel: #fff; --border: #e2e8f0; --heading: #334155; --muted: #64748b; --faint: #94a3b8; --soft: #475569; --hover: #f8fafc; --overlay: rgba(15, 23, 42, .45); --code-bg: #f1f5f9; --link: #2563eb;
+--low-bg: #e2e8f0; --low-fg: #475569; --medium-bg: #dbeafe; --medium-fg: #1d4ed8; --high-bg: #ffedd5; --high-fg: #c2410c; --critical-bg: #fee2e2; --critical-fg: #b91c1c; }
+${DARK_VARS}
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
 header { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 6px; }
 h1 { font-size: 16px; margin: 0; }
-#updated { font-size: 12px; color: #64748b; }
+#theme { margin-left: auto; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
+#theme:hover { background: var(--hover); }
+#updated { font-size: 12px; color: var(--muted); }
 #board { display: flex; gap: 10px; padding: 10px 18px 18px; overflow-x: auto; align-items: flex-start; }
-.col { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; border-top: 3px solid var(--ac); padding: 10px; min-width: 200px; flex: 1 0 200px; }
-.col h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin: 0 0 10px; color: #334155; }
-.count { color: #94a3b8; }
-.card { border: 1px solid #e2e8f0; border-left: 3px solid var(--ac); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
-.card:hover { background: #f8fafc; }
+.col { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; border-top: 3px solid var(--ac); padding: 10px; min-width: 200px; flex: 1 0 200px; }
+.col h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin: 0 0 10px; color: var(--heading); }
+.count { color: var(--faint); }
+.card { border: 1px solid var(--border); border-left: 3px solid var(--ac); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
+.card:hover { background: var(--hover); }
 .name { font-size: 13px; line-height: 1.35; margin-bottom: 6px; }
-.chip { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: #e2e8f0; color: #475569; }
-.p-low { background: #e2e8f0; color: #475569; }
-.p-medium { background: #dbeafe; color: #1d4ed8; }
-.p-high { background: #ffedd5; color: #c2410c; }
-.p-critical { background: #fee2e2; color: #b91c1c; }
-.empty { font-size: 12px; color: #94a3b8; }
-#modal { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); display: flex; align-items: center; justify-content: center; }
+.num { color: var(--faint); margin-right: 4px; }
+.chip { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: var(--border); color: var(--soft); }
+.p-low { background: var(--low-bg); color: var(--low-fg); }
+.p-medium { background: var(--medium-bg); color: var(--medium-fg); }
+.p-high { background: var(--high-bg); color: var(--high-fg); }
+.p-critical { background: var(--critical-bg); color: var(--critical-fg); }
+.empty { font-size: 12px; color: var(--faint); }
+#modal { position: fixed; inset: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
 #modal.hidden { display: none; }
-#m-box { background: #fff; border-radius: 10px; padding: 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
+#m-box { background: var(--panel); border-radius: 10px; padding: 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
 #m-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 #m-head h2 { font-size: 15px; margin: 0; }
-#m-close { border: 1px solid #e2e8f0; background: #fff; border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 12px; }
-#m-close:hover { background: #f1f5f9; }
-#m-attrs { font-size: 12px; color: #475569; margin-bottom: 12px; }
+#m-close { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 12px; }
+#m-close:hover { background: var(--hover); }
+#m-attrs { font-size: 12px; color: var(--soft); margin-bottom: 12px; }
 #m-attrs div { padding: 3px 0; }
-#m-attrs span { display: inline-block; min-width: 80px; color: #94a3b8; }
+#m-attrs span { display: inline-block; min-width: 80px; color: var(--faint); }
 #m-body { font-size: 13px; line-height: 1.5; }
 #m-body h1, #m-body h2, #m-body h3 { font-size: 13px; margin: 12px 0 4px; }
 #m-body ul { margin: 4px 0; padding-left: 20px; }
-#m-body pre { background: #f1f5f9; border-radius: 6px; padding: 8px 10px; overflow: auto; font-size: 12px; }
-#m-body code { background: #f1f5f9; border-radius: 4px; padding: 0 4px; font-size: 12px; }
+#m-body pre { background: var(--code-bg); border-radius: 6px; padding: 8px 10px; overflow: auto; font-size: 12px; }
+#m-body code { background: var(--code-bg); border-radius: 4px; padding: 0 4px; font-size: 12px; }
 #m-body pre code { padding: 0; background: none; }
-#m-body a { color: #2563eb; }
+#m-body a { color: var(--link); }
 /* one accent color per column, in pipeline order */
 .c-backlog { --ac: #94a3b8; }
 .c-to-do { --ac: #60a5fa; }
@@ -118,7 +141,7 @@ h1 { font-size: 16px; margin: 0; }
 </style>
 </head>
 <body>
-<header><h1>se-llm-team</h1><span id="updated"></span></header>
+<header><h1>Software Engineering LLM Team</h1><span id="updated"></span><button id="theme" onclick="toggleTheme()">Dark</button></header>
 <main id="board"></main>
 <div id="modal" class="hidden"><div id="m-box">
 <div id="m-head"><h2 id="m-title"></h2><button id="m-close" onclick="closeModal()">Close</button></div>
@@ -130,6 +153,19 @@ h1 { font-size: 16px; margin: 0; }
 const STATES = ${JSON.stringify(STATES)};
 let tasks = [];
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// 000042_fix_x.md -> #42; parseInt stops at the first non-digit and drops leading zeros
+const num = t => "#" + parseInt(t.file, 10);
+const rootEl = document.documentElement;
+const storeTheme = t => { try { localStorage.setItem("theme", t); } catch {} };
+function syncThemeBtn() { document.getElementById("theme").textContent = (rootEl.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark" ? "Light" : "Dark"; }
+function toggleTheme() {
+	const next = (rootEl.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark" ? "light" : "dark";
+	rootEl.dataset.theme = next;
+	storeTheme(next);
+	syncThemeBtn();
+}
+try { const stored = localStorage.getItem("theme"); if (stored === "dark" || stored === "light") rootEl.dataset.theme = stored; } catch {}
+syncThemeBtn();
 // minimal Markdown renderer for the board subset (headings, lists, code fences, inline code, bold,
 // links, paragraphs); ceiling: swap for a full renderer when the subset grows
 const inline = s => s
@@ -156,9 +192,9 @@ function md(src) {
 function render() {
 	const board = document.getElementById("board");
 	board.innerHTML = STATES.map(st => {
-		const inState = tasks.filter(t => t.state === st);
+		const inState = tasks.filter(t => t.state === st).sort((a, b) => b.updated - a.updated);
 		const cards = inState.map(t =>
-			'<div class="card" data-file="' + esc(t.file) + '"><div class="name">' + esc(t.name) + '</div><span class="chip p-' + esc(t.priority) + '">' + esc(t.priority) + "</span></div>"
+			'<div class="card" data-file="' + esc(t.file) + '"><div class="name"><span class="num">' + num(t) + "</span>" + esc(t.name) + '</div><span class="chip p-' + esc(t.priority) + '">' + esc(t.priority) + "</span></div>"
 		).join("");
 		return '<section class="col c-' + st + '"><h2>' + esc(st) + ' <span class="count">' + inState.length + "</span></h2>" + (cards || '<div class="empty">&mdash;</div>') + "</section>";
 	}).join("");
@@ -169,6 +205,7 @@ function openTask(file) {
 	if (!t) return;
 	document.getElementById("m-title").textContent = t.name;
 	document.getElementById("m-attrs").innerHTML =
+		"<div><span>number</span>" + num(t) + "</div>" +
 		"<div><span>file</span>" + esc(t.file) + "</div>" +
 		"<div><span>name</span>" + esc(t.name) + "</div>" +
 		"<div><span>priority</span><span class='chip p-" + esc(t.priority) + "'>" + esc(t.priority) + "</span></div>" +
