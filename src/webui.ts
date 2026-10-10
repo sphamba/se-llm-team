@@ -188,7 +188,7 @@ function refresh() {
 	}).catch(() => {});
 }
 refresh();
-setInterval(refresh, 2000);
+setInterval(refresh, 5000);
 </script>
 </body>
 </html>
