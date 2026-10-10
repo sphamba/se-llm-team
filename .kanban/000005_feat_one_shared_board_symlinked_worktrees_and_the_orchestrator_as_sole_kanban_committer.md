@@ -2,7 +2,7 @@
 name: "feat: one shared board (symlinked worktrees) and the orchestrator as sole .kanban committer"
 priority: "high"
 state: "done"
-worktree: "feat/one-shared-board-symlinked-worktrees-and-the-orchestrator-as-sole-kanban-committer"
+worktree: ""
 ---
 
 # Summary
