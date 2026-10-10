@@ -130,7 +130,7 @@ export default function (pi: ExtensionAPI) {
 		name: "orchestrator_start",
 		label: "Orchestrator start",
 		description:
-			"Start the se-llm-team orchestrator daemon for this project. It watches .kanban/, spawns Developer/Reviewer/Live-tester agents for to-do/to-review/to-live-test tasks, polls agent liveness, and merges done branches. Exits early if it already runs for this project.",
+			"Start the se-llm-team orchestrator daemon for this project. It watches .kanban/, spawns Developer/Reviewer/Live-tester agents for to-do/to-review/to-live-test tasks, polls agent liveness, and merges done branches. When webUi.enabled is set in ~/.pi/agent/se-llm-team.json it also starts an in-process web dashboard for the board. Exits early if it already runs for this project.",
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
 			if (!existsSync(board(ctx))) return text(`No ${board(ctx)} board in this project`);
