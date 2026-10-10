@@ -61,6 +61,7 @@ assert.equal((await fetch(`${base}/api/tasks`, { method: "POST" })).status, 404)
 // agent info: null for a backlog task; populated for a working task with a live pid
 assert.equal(listed[0].agent, null);
 assert.ok(page.includes('id="m-agent"'), "modal has the agent area");
+assert.ok(page.includes("#m-log.hidden { display: none; }"), "log pane hides");
 assert.ok(page.includes("/api/agent-log"), "page uses the agent log endpoint");
 setState(root, getTask(root, task.file)!, "doing");
 const slug = task.file.replace(/\.md$/, "");

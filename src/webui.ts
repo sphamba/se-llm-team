@@ -206,7 +206,9 @@ h1 { font-size: 16px; margin: 0; }
 .agent-btn { display: inline-flex; align-items: center; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 .agent-btn:hover { background: var(--hover); }
 #m-agent { margin-bottom: 12px; }
+#m-agent:empty { display: none; }
 #m-log { border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 300px; overflow: auto; }
+#m-log.hidden { display: none; }
 #m-log pre { margin: 0; padding: 8px 10px; font-size: 12px; line-height: 1.45; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: break-word; }
 #modal { position: fixed; inset: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
 #modal.hidden { display: none; }
