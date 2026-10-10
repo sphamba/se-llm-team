@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -177,6 +177,37 @@ export default function (pi: ExtensionAPI) {
 				return text("Orchestrator not running");
 			}
 			return text(`Sent SIGTERM to orchestrator pid ${pid}`);
+		},
+	});
+
+	pi.registerTool({
+		name: "orchestrator_wait",
+		label: "Orchestrator wait",
+		description:
+			"Wait for the orchestrator to record new board commits (kanban: create / kanban: done). Blocks up to the timeout, then reports what changed. No update before the timeout is normal.",
+		parameters: Type.Object({
+			timeoutSeconds: Type.Optional(Type.Number({ description: "Seconds to block, 1-900 (default 300)" })),
+		}),
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const timeout = Math.min(900, Math.max(1, params.timeoutSeconds ?? 300));
+			const started = Date.now();
+			const baseline = execSync("git rev-parse HEAD", { cwd: ctx.cwd, encoding: "utf8" }).trim();
+			while (Date.now() - started < timeout * 1000) {
+				const subjects = execSync(`git log --format=%s ${baseline}..HEAD`, { cwd: ctx.cwd, encoding: "utf8" })
+					.split("\n")
+					.filter((s) => s.startsWith("kanban: done ") || s.startsWith("kanban: create "));
+				if (subjects.length) return text(subjects.join("\n"));
+				const remaining = started + timeout * 1000 - Date.now();
+				await new Promise<void>((resolve) => {
+					const timer = setTimeout(resolve, Math.min(2000, remaining));
+					signal?.addEventListener("abort", () => {
+						clearTimeout(timer);
+						resolve();
+					}, { once: true });
+				});
+				if (signal?.aborted) break;
+			}
+			return text(`No board commits in ${Math.round((Date.now() - started) / 1000)}s.`);
 		},
 	});
 
