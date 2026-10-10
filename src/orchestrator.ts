@@ -16,7 +16,7 @@ import {
 import { loadWebUiConfig, startWebUi } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_POLL_MINUTES = 15;
+const DEFAULT_POLL_MINUTES = 1;
 const RESPAWN_CAP = 5;
 const MERGE_ATTEMPT_CAP = 3;
 
