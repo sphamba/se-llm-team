@@ -1,7 +1,7 @@
 ---
 name: "fix: orchestrator smoke test leaks daemon processes"
 priority: "low"
-state: "to-do"
+state: "doing"
 worktree: "fix/orchestrator-smoke-test-leaks-daemon-processes"
 ---
 
