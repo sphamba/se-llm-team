@@ -108,5 +108,34 @@ created.push(tr.file);
 assert.equal(new Set(created).size, created.length);
 rmSync(raceRoot, { recursive: true, force: true });
 
+// merge-conflict handling: a conflict-marked file is never rewritten
+const tc = createTask(root, { name: "fix: conflicted file", summary: "s", specs: "real specs" });
+writeFileSync(
+	join(root, ".kanban", tc.file),
+	readFileSync(join(root, ".kanban", tc.file), "utf8").replace(
+		/^state: "backlog"$/m,
+		'<<<<<<< HEAD\nstate: "done"\n=======\nstate: "to-live-test"\n>>>>>>> fix/other-branch',
+	),
+);
+assert.equal(parseTask(root, tc.file).conflicted, true);
+assert.equal(parseTask(root, t1.file).conflicted, false); // a clean file does not read as conflicted
+const conflictBefore = readFileSync(join(root, ".kanban", tc.file), "utf8");
+assert.throws(() => setState(root, tc, "done"));
+assert.throws(() => setWorktree(root, tc, "fix/x"));
+assert.throws(() => updateTask(root, tc, { summary: "x" }));
+assert.equal(readFileSync(join(root, ".kanban", tc.file), "utf8"), conflictBefore); // byte-identical: nothing resolved, nothing lost
+
+// a normal rewrite is lossless: unknown attributes and unknown sections survive
+const tu = createTask(root, { name: "feat: lossless rewrite", summary: "s" });
+writeFileSync(
+	join(root, ".kanban", tu.file),
+	readFileSync(join(root, ".kanban", tu.file), "utf8").replace(/^priority: .*/m, 'priority: "medium"\ncustom-attr: "keep me"') + "\n# Design\nextra section\n",
+);
+setState(root, tu, "to-do");
+const rawAfter = readFileSync(join(root, ".kanban", tu.file), "utf8");
+assert.match(rawAfter, /^state: "to-do"$/m);
+assert.match(rawAfter, /^custom-attr: "keep me"$/m);
+assert.match(rawAfter, /# Design\nextra section/);
+
 rmSync(root, { recursive: true, force: true });
 console.log("kanban.test.ts: all assertions passed");
