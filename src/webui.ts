@@ -106,6 +106,9 @@ h1 { font-size: 16px; margin: 0; }
 .card:hover { background: var(--hover); }
 .name { font-size: 13px; line-height: 1.35; margin-bottom: 6px; }
 .num { color: var(--faint); margin-right: 4px; }
+.spin { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border: 2px solid var(--border); border-top-color: var(--fg); border-radius: 50%; vertical-align: -1px; animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
 .chip { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: var(--border); color: var(--soft); }
 .p-low { background: var(--low-bg); color: var(--low-fg); }
 .p-medium { background: var(--medium-bg); color: var(--medium-fg); }
@@ -151,6 +154,7 @@ h1 { font-size: 16px; margin: 0; }
 <script>
 "use strict";
 const STATES = ${JSON.stringify(STATES)};
+const WORKING = ["doing", "reviewing", "live-testing"];
 let tasks = [];
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 // 000042_fix_x.md -> #42; parseInt stops at the first non-digit and drops leading zeros
@@ -194,7 +198,7 @@ function render() {
 	board.innerHTML = STATES.map(st => {
 		const inState = tasks.filter(t => t.state === st).sort((a, b) => b.updated - a.updated);
 		const cards = inState.map(t =>
-			'<div class="card" data-file="' + esc(t.file) + '"><div class="name"><span class="num">' + num(t) + "</span>" + esc(t.name) + '</div><span class="chip p-' + esc(t.priority) + '">' + esc(t.priority) + "</span></div>"
+			'<div class="card" data-file="' + esc(t.file) + '"><div class="name">' + (WORKING.includes(st) ? '<span class="spin"></span>' : "") + '<span class="num">' + num(t) + "</span>" + esc(t.name) + '</div><span class="chip p-' + esc(t.priority) + '">' + esc(t.priority) + "</span></div>"
 		).join("");
 		return '<section class="col c-' + st + '"><h2>' + esc(st) + ' <span class="count">' + inState.length + "</span></h2>" + (cards || '<div class="empty">&mdash;</div>') + "</section>";
 	}).join("");
