@@ -1,7 +1,7 @@
 ---
 name: "fix: orchestrator smoke test leaks daemon processes"
 priority: "low"
-state: "live-testing"
+state: "done"
 worktree: "fix/orchestrator-smoke-test-leaks-daemon-processes"
 ---
 
@@ -31,6 +31,7 @@ Running src/orchestrator.test.ts leaks daemon processes. Verified with ps: pids 
 - The already leaked processes are killed (housekeeping, part of this task).
 
 # Notes
+- [2026-10-10 17:20] Merge conflict for branch fix/orchestrator-smoke-test-leaks-daemon-processes, merger spawned (attempt 1).
 
 ## 2026-10-24, developer
 
@@ -67,3 +68,14 @@ Re-reviewed both commits (be34bfb, 030dae9) against the Specs. No new fixes need
 - Instrumented check at HEAD: planted a fake long-running agent (cmdline contains the fixture root) with a pidfile in the daemon's real pidfile dir `root/.kanban/.pids`. The test passed (exit 0), and after the run the fake agent was dead, the daemons were killed, and all fixture roots were removed. This confirms the agent sweep is load-bearing.
 - Ran `node src/orchestrator.test.ts`: passes (exit 0). After the run, no orch-smoke processes and no `/tmp/orch-smoke-*` roots from this run. One daemon (pid 677888) was seen mid-check, but it belonged to the concurrent test run in the role-agents-edit worktree, which was still in progress; it exited normally and was left alone.
 - Assertions unchanged, daemon code untouched, no new dependencies.
+
+## 2026-10-24, live-tester
+
+Tested commit 030dae9 in the worktree like a user. All acceptance criteria pass. No code changes made.
+
+- Happy path: `node src/orchestrator.test.ts` passes (exit 0, about 20 seconds). Ran it twice. After each run: no daemon processes from this worktree, no `/tmp/orch-smoke-*` roots, no agent stubs left. Only the repo's real orchestrator daemon (pid 420117) stayed up.
+- Interrupt path: sent SIGTERM to the test about 6 seconds into part A. The test exited 143, killed its daemon, and removed its fixture dirs. Zero leftovers.
+- Failure paths, tested with a broken copy outside the repo: a failed assert exits 1 with zero leftovers. A `waitFor` timeout (daemon could not find its agent definitions) exits 1 with zero leftovers. Both cleanup paths work.
+- Housekeeping: none of the eight leaked pids in the task (208731, 211468, 213029, 216545, 218981, 243221, 245912, 527983) is alive. No `/tmp/orch-smoke-*` roots remain on the machine.
+- Test method note: concurrent live tests from other task worktrees (commit-kanban-tasks-only-on-create-and-done, and a re-run of this task's test) created orch-smoke processes and roots during my checks. I told them apart with `TMPDIR` (the test puts its fixtures under `$TMPDIR`) and by the daemon cmdline path. Those processes belonged to those runs, not to leaks from this fix.
+- No issues found. No new tasks needed.
