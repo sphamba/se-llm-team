@@ -1,7 +1,7 @@
 ---
 name: "feat: orchestrator_wait tool plus a Watcher subagent the PM skill keeps alive"
 priority: "high"
-state: "backlog"
+state: "done"
 worktree: ""
 ---
 
