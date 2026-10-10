@@ -272,4 +272,36 @@ assert.equal(
 );
 d.daemon.kill("SIGTERM");
 
-console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board smoke passed");
+// --- part E: to-review and to-live-test tasks get their worktree ensured before the spawn ---
+const rootE = fixture();
+cleaned.push(rootE);
+mkdirSync(kanbanDir(rootE), { recursive: true });
+writeFileSync(join(kanbanDir(rootE), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootE) }));
+const taskE = createTask(rootE, { name: "fix: review without worktree", summary: "Ensured worktree", specs: "n/a" });
+setState(rootE, taskE, "to-review");
+
+const e = await runDaemon(rootE);
+const wtE = join(rootE, ".worktrees", "fix/review-without-worktree");
+await waitFor(() => e.output().includes("spawned reviewer"), 30000, "reviewer spawn with ensured worktree", e.output);
+assert.ok(existsSync(wtE), "worktree dir created for a to-review task with no worktree dir");
+assert.ok(lstatSync(join(wtE, ".kanban")).isSymbolicLink(), "worktree board is a symlink to the shared board");
+assert.ok(e.output().includes(`(cwd=${wtE})`), `reviewer spawn log shows an existing cwd: ${e.output()}`);
+assert.equal(parseTask(rootE, taskE.file).worktree, "fix/review-without-worktree", "worktree recorded on the task");
+e.daemon.kill("SIGTERM");
+
+// a to-live-test task whose worktree cannot be created stays in to-live-test, never reaches done
+const rootF = fixture();
+cleaned.push(rootF);
+mkdirSync(kanbanDir(rootF), { recursive: true });
+writeFileSync(join(rootF, ".worktrees"), "not a dir\n"); // regular file blocks worktree creation
+writeFileSync(join(kanbanDir(rootF), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootF) }));
+const taskF = createTask(rootF, { name: "fix: blocked live test", summary: "Uncreatable worktree", specs: "n/a" });
+setState(rootF, taskF, "to-live-test");
+
+const f = await runDaemon(rootF);
+await waitFor(() => f.output().includes("live-tester not spawned"), 30000, "spawn skipped for uncreatable worktree", f.output);
+assert.equal(parseTask(rootF, taskF.file).state, "to-live-test", "stayed in to-live-test instead of reaching done");
+assert.ok(!f.output().includes("spawned live-tester"), "live-tester never spawned");
+f.daemon.kill("SIGTERM");
+
+console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree smoke passed");
