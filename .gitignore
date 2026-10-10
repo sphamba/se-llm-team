@@ -1,0 +1,5 @@
+.worktrees
+.kanban/.logs/
+.kanban/.pids/
+.kanban/.orchestrator.lock
+node_modules/
