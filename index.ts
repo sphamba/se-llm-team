@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, watch, type FSWatcher } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, watch, type FSWatcher } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -160,6 +160,27 @@ export default function (pi: ExtensionAPI) {
 			const pid = readPid(ctx);
 			const running = pid !== null && pidAlive(pid);
 			return text(`${running ? `running (pid ${pid})` : "not running"}; board: ${JSON.stringify(counts)}`);
+		},
+	});
+
+	pi.registerTool({
+		name: "orchestrator_poke",
+		label: "Orchestrator poke",
+		description: "Poke the se-llm-team orchestrator daemon to trigger an immediate scan and agent scheduling.",
+		parameters: Type.Object({}),
+		async execute(_id, _params, _signal, _onUpdate, ctx) {
+			try {
+				// rm+create so every poke fires a fs.watch event; a bare open("a") on an
+				// existing file writes nothing and Linux inotify reports no event for it.
+				const poke = join(board(ctx), ".poke");
+				try { unlinkSync(poke); } catch { /* first poke */ }
+				closeSync(openSync(poke, "a"));
+			} catch {
+				/* no board yet */
+			}
+			const pid = readPid(ctx);
+			if (pid === null || !pidAlive(pid)) return text("No orchestrator daemon running for this project.");
+			return text(`Poked the orchestrator (pid ${pid}). Scan starts within a second.`);
 		},
 	});
 
