@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, kanbanDir, parseTask, setState } from "./kanban.ts";
+import { pidAlive } from "./orchestrator.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -350,4 +351,36 @@ const committedG = execSync(`git show HEAD:.kanban/${taskG.file}`, { cwd: rootG,
 assert.match(committedG, /Live test report: merge waited for the live-tester pid\./, "report folded into the done commit");
 g.daemon.kill("SIGTERM");
 
-console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree smoke passed");
+// --- part H: pid 0 is dead and a failed spawn writes no pid file, so the poll bounces per DEAD_TRANSITIONS ---
+assert.equal(pidAlive(0), false, "pid 0 is the caller's process group, not a live agent");
+assert.equal(pidAlive(-1), false, "negative pids are not alive");
+assert.equal(pidAlive(process.pid), true, "a live pid is alive");
+
+const rootH = fixture();
+cleaned.push(rootH);
+mkdirSync(kanbanDir(rootH), { recursive: true });
+// missing executable: every spawn fails with ENOENT and reports no pid
+writeFileSync(join(kanbanDir(rootH), "se-llm-team.json"), JSON.stringify({ agent: join(rootH, "missing-agent"), pollMinutes: 0.05 }));
+const taskH = createTask(rootH, { name: "fix: failed spawn", summary: "Missing agent smoke", specs: "n/a" });
+setState(rootH, taskH, "to-do");
+
+const h = await runDaemon(rootH);
+const readH = () => parseTask(rootH, taskH.file);
+await waitFor(() => h.output().includes("failed to start"), 30000, "spawn failure logged", h.output);
+const pidsH = () => {
+	try {
+		return readdirSync(join(kanbanDir(rootH), ".pids"));
+	} catch {
+		return [];
+	}
+};
+assert.deepEqual(pidsH(), [], "failed spawn left no pid file");
+// agentPid reads 0 for the missing pid file and pidAlive(0) is false, so the poll
+// bounces doing -> to-do per DEAD_TRANSITIONS and the rescan retries the spawn
+await waitFor(() => h.output().includes("agent pid=0 dead without state update, doing -> to-do"), 30000, "poll bounced the doing task", h.output);
+await waitFor(() => h.output().includes("giving up"), 60000, "respawn cap on repeated failed spawns", h.output);
+assert.deepEqual(pidsH(), [], "still no pid file after repeated failed spawns");
+assert.equal(readH().state, "doing");
+h.daemon.kill("SIGTERM");
+
+console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + failed-spawn pid guard smoke passed");

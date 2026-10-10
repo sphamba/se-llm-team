@@ -73,7 +73,7 @@ function bumpCounter(root: string, name: string): number {
 	return n;
 }
 
-function pidAlive(pid: number): boolean {
+export function pidAlive(pid: number): boolean {
 	if (!Number.isInteger(pid) || pid <= 0) return false;
 	try {
 		process.kill(pid, 0);
@@ -127,8 +127,11 @@ function spawnAgent(root: string, agent: string, role: string, task: Task, cwd: 
 	child.on("error", (err) => log(root, `agent ${role} for ${task.file} failed to start: ${err.message}`));
 	closeSync(out);
 	child.unref();
-	writePid(root, pidName ?? slug, child.pid ?? 0);
-	log(root, `spawned ${role} pid=${child.pid} for ${task.file} (cwd=${cwd})`);
+	// a failed spawn (ENOENT) reports no pid; a written 0 reads as the caller's process group
+	if (child.pid) {
+		writePid(root, pidName ?? slug, child.pid);
+		log(root, `spawned ${role} pid=${child.pid} for ${task.file} (cwd=${cwd})`);
+	}
 }
 
 function git(root: string, args: string[], allowFailure = false): string | null {
