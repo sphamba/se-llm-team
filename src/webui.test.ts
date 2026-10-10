@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createTask } from "./kanban.ts";
+import { createTask, getTask, setState } from "./kanban.ts";
 import { loadWebUiConfig, startWebUi } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -57,6 +57,60 @@ assert.ok(page.includes('id="theme"'), "page has the theme toggle");
 for (const st of STATE_NAMES) assert.ok(page.includes(st), `page mentions state ${st}`);
 assert.equal((await fetch(`${base}/nope`)).status, 404);
 assert.equal((await fetch(`${base}/api/tasks`, { method: "POST" })).status, 404);
+
+// agent info: null for a backlog task; populated for a working task with a live pid
+assert.equal(listed[0].agent, null);
+assert.ok(page.includes('id="m-agent"'), "modal has the agent area");
+assert.ok(page.includes("/api/agent-log"), "page uses the agent log endpoint");
+setState(root, getTask(root, task.file)!, "doing");
+const slug = task.file.replace(/\.md$/, "");
+mkdirSync(join(root, ".kanban", ".pids"), { recursive: true });
+writeFileSync(join(root, ".kanban", ".pids", `${slug}.pid`), String(process.pid));
+mkdirSync(join(root, ".kanban", ".logs"), { recursive: true });
+const logFile = join(root, ".kanban", ".logs", `${slug}.developer.log`);
+const logText = "H".repeat(40000) + "\nEND\n";
+writeFileSync(logFile, logText);
+const working = (await (await fetch(`${base}/api/tasks`)).json())[0];
+assert.deepEqual(working.agent, { role: "developer", alive: true, log: `${slug}.developer` });
+
+// tail: no offset returns only the last chunk, with cursors for poll and history
+const enc = encodeURIComponent(`${slug}.developer`);
+const tail = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.equal(tail.tail, logText.length);
+assert.equal(tail.head, logText.length - 16384);
+assert.equal(tail.text, logText.slice(logText.length - 16384));
+assert.equal(tail.atStart, false);
+
+// poll from an offset returns only new content
+const idle = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${tail.tail}`)).json();
+assert.equal(idle.text, "");
+writeFileSync(logFile, logText + "NEW\n");
+const appended = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${tail.tail}`)).json();
+assert.equal(appended.text, "NEW\n");
+assert.equal(appended.tail, logText.length + 4);
+
+// history: chunks before an offset down to the start of the file
+const h1 = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${tail.head}&before=1`)).json();
+assert.equal(h1.head, tail.head - 16384);
+assert.equal(h1.text, logText.slice(h1.head, tail.head));
+const h2 = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${h1.head}&before=1`)).json();
+assert.equal(h2.head, 0);
+assert.equal(h2.atStart, true);
+assert.equal(h2.text + h1.text + tail.text, logText);
+
+// unknown files and non-agent handles are rejected
+assert.equal((await fetch(`${base}/api/agent-log?file=nope.developer`)).status, 404);
+assert.equal((await fetch(`${base}/api/agent-log?file=${encodeURIComponent(slug + ".merger")}`)).status, 404);
+assert.equal((await fetch(`${base}/api/agent-log`)).status, 404);
+
+// a stale pid file reports the agent as not alive
+writeFileSync(join(root, ".kanban", ".pids", `${slug}.pid`), "999999999");
+const stale = (await (await fetch(`${base}/api/tasks`)).json())[0];
+assert.equal(stale.agent.alive, false);
+
+// leave the board as the daemon section expects it
+rmSync(join(root, ".kanban", ".pids", `${slug}.pid`));
+setState(root, getTask(root, task.file)!, "backlog");
 
 // a second startWebUi on the taken port reports failure instead of throwing
 assert.equal(await startWebUi(root, { port: ui.port }), null);
