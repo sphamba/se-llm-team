@@ -23,6 +23,9 @@ const MERGE_ATTEMPT_CAP = 3;
 // the board's home ref: a branch is the only git-native carrier (push and clone transfer
 // refs/heads/* only), so the board mirrors there and a fresh clone can bootstrap from it
 const KANBAN_REF = "refs/heads/meta/kanban";
+// the mirror head this process last materialized into the working tree or wrote with
+// update-ref: rescan reconciles whenever the branch head differs from it
+let lastMirrorHash: string | null = null;
 
 interface Config {
 	agent: string;
@@ -183,6 +186,7 @@ function commitKanban(root: string, message: string): boolean {
 	if (parent && git(root, ["rev-parse", "--verify", `${parent}^{tree}`], true) === tree) return true;
 	const commit = git(root, parent ? ["commit-tree", tree, "-p", parent, "-m", message] : ["commit-tree", tree, "-m", message]);
 	if (!commit || git(root, ["update-ref", KANBAN_REF, commit]) === null) return false;
+	lastMirrorHash = commit;
 	pushMirror(root);
 	return true;
 }
@@ -331,6 +335,109 @@ function syncBoard(root: string, wtDir: string): void {
 	git(wtDir, ["config", "--worktree", "core.excludesFile", excludes], true);
 }
 
+// whether the mirror branch's ancestry ever carried the file: a local file the tip lacks
+// was deleted on the branch when the ancestry touched it, and is an unmirrored in-flight
+// write (never committed) when not
+function everOnMirror(root: string, file: string): boolean {
+	try {
+		return execFileSync("git", ["rev-list", "-n", "1", KANBAN_REF, "--", join(".kanban", file)], {
+			cwd: root,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		}).trim() !== "";
+	} catch {
+		return false;
+	}
+}
+
+// branch wins for mirrored files: materialize refs/heads/meta/kanban into the working-tree
+// .kanban. Writes files missing from or differing from the tip, deletes local files the tip
+// lacks that the last known mirror tree had (external deletions propagate) and keeps files
+// the mirror never carried (in-flight PM writes between file write and mirror commit).
+// Never touches the index. Trigger: only when the branch head moved past the head this
+// process last materialized or wrote; our own mirror commits never re-trigger it.
+function reconcileBoard(root: string): boolean {
+	const head = git(root, ["rev-parse", "--verify", KANBAN_REF], true);
+	if (!head || head === lastMirrorHash) return false;
+	let out: string;
+	try {
+		out = execFileSync("git", ["ls-tree", "-r", KANBAN_REF, "--", ".kanban"], {
+			cwd: root,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+	} catch {
+		return false;
+	}
+	// the mirror carries flat .md names only (the taskFiles snapshot), so dot-entries and
+	// nested paths are skipped exactly as the mirror path skips them
+	const tip = new Map<string, string>();
+	for (const line of out.split("\n")) {
+		const m = line.match(/^\S+ blob (\S+)\t(.+)$/);
+		if (!m) continue;
+		const name = m[2].replace(/^\.kanban\//, "");
+		if (!name.endsWith(".md") || name.includes("/")) continue;
+		tip.set(name, m[1]);
+	}
+	const files = taskFiles(root);
+	const local = new Map<string, string>();
+	if (files.length) {
+		try {
+			const shas = execFileSync("git", ["hash-object", "--", ...files.map((f) => join(".kanban", f))], {
+				cwd: root,
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+			}).trim().split("\n");
+			files.forEach((f, i) => local.set(f, shas[i]));
+		} catch {
+			return false;
+		}
+	}
+	mkdirSync(kanbanDir(root), { recursive: true });
+	let updated = 0;
+	for (const [name, blob] of tip) {
+		if (local.get(name) === blob) continue;
+		try {
+			writeFileSync(
+				join(kanbanDir(root), name),
+				execFileSync("git", ["cat-file", "blob", blob], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+			);
+			updated++;
+		} catch {
+			/* unreadable entry, skip */
+		}
+	}
+	let deleted = 0;
+	let previous: Set<string> | null = null;
+	if (lastMirrorHash) {
+		try {
+			previous = new Set(
+				execFileSync("git", ["ls-tree", "-r", lastMirrorHash, "--", ".kanban"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+					.split("\n")
+					.map((l) => l.match(/^\S+ blob (\S+)\t(.+)$/))
+					.filter((m): m is RegExpMatchArray => !!m)
+					.map((m) => m[2].replace(/^\.kanban\//, ""))
+					.filter((n) => n.endsWith(".md") && !n.includes("/")),
+			);
+		} catch {
+			previous = null; // force-updated away from the old head: its tree is unreachable
+		}
+	}
+	for (const f of files) {
+		if (tip.has(f)) continue;
+		if (!(previous?.has(f) || everOnMirror(root, f))) continue;
+		try {
+			rmSync(join(kanbanDir(root), f));
+			deleted++;
+		} catch {
+			/* undeletable, keep */
+		}
+	}
+	lastMirrorHash = head;
+	log(root, `reconciled .kanban to ${head}: ${updated} file(s) updated, ${deleted} deleted`);
+	return true;
+}
+
 // ensures the task's worktree dir exists (creating it with the -b fallback when the branch
 // is taken), links the shared board into it and records the worktree on the task;
 // null when creation fails
@@ -348,13 +455,14 @@ function ensureWorktree(root: string, task: Task): { wt: string; wtDir: string }
 	return { wt, wtDir };
 }
 
-// a fresh clone has an empty .kanban/, and a merge that untracks the board may leave files
-// behind on main: the board lives on refs/heads/meta/kanban, so restore task files that are
-// missing from .kanban/ from the mirror branch (runs at every startup, idempotent)
+// a fresh clone has an empty .kanban/, a stale working tree can lack branch content and a
+// merge that untracks the board may leave files behind on main: the board lives on
+// refs/heads/meta/kanban, so seed the mirror ref when missing and reconcile the working tree
+// to its tip (branch wins, unmirrored writes survive; runs at every startup, idempotent)
 function bootstrapBoard(root: string): void {
 	// a fresh non-bare clone carries only the remote-tracking ref, no local branch: seed the
-	// mirror branch from it, or the guard below returns early (board never materializes) and
-	// the first mirror commit is an orphan whose push fails non-fast-forward
+	// mirror branch from it, or the reconcile below returns early (board never materializes)
+	// and the first mirror commit is an orphan whose push fails non-fast-forward
 	if (git(root, ["rev-parse", "--verify", KANBAN_REF], true) === null) {
 		const source = git(root, ["rev-parse", "--verify", "refs/remotes/origin/meta/kanban"], true) !== null
 			? "refs/remotes/origin/meta/kanban"
@@ -363,36 +471,7 @@ function bootstrapBoard(root: string): void {
 			log(root, `seeded ${KANBAN_REF} from ${source}`);
 		}
 	}
-	if (git(root, ["rev-parse", "--verify", KANBAN_REF], true) === null) return;
-	const have = new Set(taskFiles(root));
-	let out: string;
-	try {
-		out = execFileSync("git", ["ls-tree", "-r", KANBAN_REF, "--", ".kanban"], {
-			cwd: root,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-	} catch {
-		return;
-	}
-	let restored = 0;
-	for (const line of out.split("\n")) {
-		const m = line.match(/^\S+ blob (\S+)\t(.+)$/);
-		if (!m) continue;
-		const name = m[2].replace(/^\.kanban\//, "");
-		// the branch can come from a remote on a fresh clone: flat .md names only, no traversal
-		if (!name.endsWith(".md") || name.includes("/") || have.has(name)) continue;
-		try {
-			writeFileSync(
-				join(root, m[2]),
-				execFileSync("git", ["cat-file", "blob", m[1]], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
-			);
-			restored++;
-		} catch {
-			/* unreadable entry, skip */
-		}
-	}
-	if (restored) log(root, `bootstrapped ${restored} task file(s) from ${KANBAN_REF}`);
+	reconcileBoard(root);
 }
 
 function startTodo(root: string, cfg: Config, task: Task): void {
@@ -441,6 +520,10 @@ function mergeDone(root: string, cfg: Config, task: Task): boolean {
 }
 
 function rescan(root: string, cfg: Config): void {
+	// root-cause fix ordering: a snapshot commit must never be built from a tree that lacks
+	// branch-only files, so an external mirror-head move is materialized before boardStatus
+	// reads and before any commitKanban
+	reconcileBoard(root);
 	const status = boardStatus(root);
 	const tasks = listAll(root);
 	// sole commit points: board files not on the mirror yet are new, finished tasks fold in
