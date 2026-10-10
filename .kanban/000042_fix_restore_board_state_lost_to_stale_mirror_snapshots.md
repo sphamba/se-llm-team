@@ -2,7 +2,7 @@
 name: "fix: restore board state lost to stale mirror snapshots"
 priority: "high"
 state: "done"
-worktree: "fix/restore-board-state-lost-to-stale-mirror-snapshots"
+worktree: ""
 ---
 
 # Summary
