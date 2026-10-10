@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { spawn, execSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, execSync, type ChildProcess } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,6 +54,7 @@ async function runDaemon(root: string) {
 		[join(HERE, "orchestrator.ts"), "--root", root, "--rescan-seconds", "1", "--poll-minutes", "0.05"],
 		{ stdio: ["ignore", "pipe", "pipe"] },
 	);
+	daemons.push({ daemon, root });
 	let out = "";
 	daemon.stdout.on("data", (d) => (out += d));
 	daemon.stderr.on("data", (d) => (out += d));
@@ -62,7 +63,7 @@ async function runDaemon(root: string) {
 	return { daemon, output: () => out };
 }
 
-const waitFor = async (cond: () => boolean, ms: number, what: string, out: () => string, root: string) => {
+const waitFor = async (cond: () => boolean, ms: number, what: string, out: () => string) => {
 	const end = Date.now() + ms;
 	while (Date.now() < end) {
 		if (cond()) return;
@@ -70,12 +71,53 @@ const waitFor = async (cond: () => boolean, ms: number, what: string, out: () =>
 	}
 	console.error(`timeout waiting for ${what}; daemon output (live):
 ${out()}`);
-	cleanupAll(root);
+	killAll();
 	process.exit(1);
 };
 const cleaned: string[] = [];
 const cleanupAll = (...roots: string[]) => roots.forEach((r) => rmSync(r, { recursive: true, force: true }));
-process.on("exit", () => cleanupAll(...cleaned));
+const daemons: { daemon: ChildProcess; root: string }[] = [];
+// agents the daemons spawned run detached, so the test learns their pids from the daemon's pidfiles;
+// the cmdline guard keeps a recycled pid from getting an unrelated process killed
+const agentPids = (root: string): number[] => {
+	try {
+		return readdirSync(join(kanbanDir(root), ".pids")).flatMap((f) => {
+			const pid = parseInt(readFileSync(join(kanbanDir(root), ".pids", f), "utf8").trim(), 10);
+			try {
+				return readFileSync(`/proc/${pid}/cmdline`, "utf8").includes(root) ? [pid] : [];
+			} catch {
+				return [];
+			}
+		});
+	} catch {
+		return [];
+	}
+};
+// safety net for failure and interruption paths: SIGKILL the daemons (the happy path already sent
+// SIGTERM), then kill every agent they spawned from the pidfiles
+const killAll = () => {
+	for (const { daemon, root } of daemons) {
+		daemon.kill("SIGKILL");
+		for (const pid of agentPids(root)) {
+			try {
+				process.kill(pid, "SIGKILL");
+			} catch {
+				/* agent already gone */
+			}
+		}
+	}
+};
+process.on("exit", () => {
+	killAll();
+	cleanupAll(...cleaned);
+});
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+	process.on(sig, () => {
+		killAll();
+		cleanupAll(...cleaned);
+		process.exit(sig === "SIGINT" ? 130 : 143);
+	});
+}
 
 // --- part A: happy pipeline with a working stub ---
 const rootA = fixture();
@@ -91,7 +133,7 @@ const readA = () => parseTask(rootA, taskA.file);
 const taskClean = () => !execSync(`git status --porcelain -- .kanban/${taskA.file}`, { cwd: rootA, encoding: "utf8" }).trim();
 // to-do -> doing -> to-review -> reviewing -> to-live-test -> live-testing -> done -> merge -> done commit.
 // The stub transitions in milliseconds, so intermediate states are asserted through the daemon log.
-await waitFor(() => readA().state === "done" && readA().worktree === "" && taskClean(), 60000, "full pipeline + merge + done commit", a.output, rootA);
+await waitFor(() => readA().state === "done" && readA().worktree === "" && taskClean(), 60000, "full pipeline + merge + done commit", a.output);
 for (const marker of ["spawned developer", "spawned reviewer", "spawned live-tester", "merged feat/smoke-test"]) {
 	assert.ok(a.output().includes(marker), `expected daemon log to contain: ${marker}`);
 }
@@ -112,7 +154,7 @@ setState(rootB, taskB, "to-do");
 
 const b = await runDaemon(rootB);
 const readB = () => parseTask(rootB, taskB.file);
-await waitFor(() => b.output().includes("giving up"), 60000, "respawn cap", b.output, rootB);
+await waitFor(() => b.output().includes("giving up"), 60000, "respawn cap", b.output);
 assert.equal(readB().state, "reviewing");
 assert.ok(b.output().includes("doing -> to-review"), "poll moved the dead developer forward");
 b.daemon.kill("SIGTERM");
