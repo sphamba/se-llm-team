@@ -24,6 +24,7 @@ export interface Task {
 	summary: string;
 	specs: string;
 	notes: string;
+	conflicted: boolean;
 }
 
 export interface TaskRef {
@@ -46,6 +47,12 @@ export function taskFiles(root: string): string[] {
 	} catch {
 		return [];
 	}
+}
+
+// an unresolved git merge conflict leaves both marker lines in the working-tree file;
+// both are required so content that merely mentions one marker does not read as conflicted
+function hasConflictMarkers(raw: string): boolean {
+	return /^<{7} /m.test(raw) && /^>{7} /m.test(raw);
 }
 
 export function parseTask(root: string, file: string): Task {
@@ -84,6 +91,9 @@ export function parseTask(root: string, file: string): Task {
 		summary: trim(sections["summary"]),
 		specs: trim(sections["specs"]),
 		notes: trim(sections["notes"]),
+		// a conflicted file parses bogus values (duplicate keys resolve last-wins, the
+		// merged-in side wins); callers must not rewrite or act on it
+		conflicted: hasConflictMarkers(raw),
 	};
 }
 
@@ -133,6 +143,7 @@ function serializeFrontmatter(attrs: Record<string, string>): string {
 function updateAttrs(root: string, task: Task, patch: Record<string, string>): void {
 	const path = join(kanbanDir(root), task.file);
 	const raw = readFileSync(path, "utf8");
+	if (hasConflictMarkers(raw)) throw new Error(`unresolved merge conflict markers in ${task.file}; not rewriting`);
 	const m = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
 	if (!m) throw new Error(`no frontmatter in ${task.file}`);
 	const attrs: Record<string, string> = {};
@@ -160,7 +171,9 @@ export function updateTask(
 	patch: { name?: string; priority?: string; summary?: string; specs?: string },
 ): void {
 	const current = parseTask(root, task.file);
-	const m = readFileSync(join(kanbanDir(root), task.file), "utf8").match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+	const rawTask = readFileSync(join(kanbanDir(root), task.file), "utf8");
+	if (hasConflictMarkers(rawTask)) throw new Error(`unresolved merge conflict markers in ${task.file}; not rewriting`);
+	const m = rawTask.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
 	if (!m) throw new Error(`no frontmatter in ${task.file}`);
 	const attrs: Record<string, string> = {};
 	for (const line of m[1].split("\n")) {

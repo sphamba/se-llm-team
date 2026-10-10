@@ -400,3 +400,31 @@ assert.equal(readI().state, "doing");
 hi.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard smoke passed");
+
+// --- part J: a conflict-marked task file is left untouched until the merger resolves it ---
+const rootJ = fixture();
+cleaned.push(rootJ);
+mkdirSync(kanbanDir(rootJ), { recursive: true });
+writeFileSync(join(kanbanDir(rootJ), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootJ), pollMinutes: 0.05 }));
+const taskJ = createTask(rootJ, { name: "fix: conflicted task", summary: "Mid-merge conflict", specs: "n/a" });
+setState(rootJ, taskJ, "to-do");
+// simulate a mid-merge conflict on the task file itself: git leaves both markers in the
+// working-tree file, and the merged-in side's state line sits last in the frontmatter
+const taskFileJ = join(kanbanDir(rootJ), taskJ.file);
+writeFileSync(
+	taskFileJ,
+	readFileSync(taskFileJ, "utf8").replace(
+		/^state: "to-do"$/m,
+		'<<<<<<< HEAD\nstate: "done"\n=======\nstate: "to-live-test"\n>>>>>>> fix/other-branch',
+	),
+);
+const rawJ = readFileSync(taskFileJ, "utf8");
+
+const j = await runDaemon(rootJ);
+await new Promise((r) => setTimeout(r, 4000)); // a few sweeps and liveness polls
+assert.ok(!j.output().includes("spawned developer"), "no agent spawned from a conflicted task file");
+assert.ok(j.output().includes("unresolved merge conflict markers"), "daemon logs the skipped conflicted file");
+assert.equal(readFileSync(taskFileJ, "utf8"), rawJ, "conflicted task file untouched by the daemon");
+j.daemon.kill("SIGTERM");
+
+console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard + conflict skip smoke passed");
