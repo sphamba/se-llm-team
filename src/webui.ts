@@ -75,10 +75,12 @@ function serve(root: string, req: IncomingMessage, res: ServerResponse): void {
 
 // dark palette, written once and applied twice: explicit choice via data-theme, browser default via media query
 const DARK_VARS = `
-:root[data-theme="dark"] { --bg: #0f172a; --fg: #e2e8f0; --panel: #1e293b; --border: #334155; --heading: #cbd5e1; --muted: #94a3b8; --faint: #64748b; --soft: #cbd5e1; --hover: #273449; --overlay: rgba(0, 0, 0, .6); --code-bg: #0f172a; --link: #60a5fa;
---low-bg: #334155; --low-fg: #cbd5e1; --medium-bg: #1e3a8a; --medium-fg: #bfdbfe; --high-bg: #7c2d12; --high-fg: #fed7aa; --critical-bg: #7f1d1d; --critical-fg: #fecaca; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0f172a; --fg: #e2e8f0; --panel: #1e293b; --border: #334155; --heading: #cbd5e1; --muted: #94a3b8; --faint: #64748b; --soft: #cbd5e1; --hover: #273449; --overlay: rgba(0, 0, 0, .6); --code-bg: #0f172a; --link: #60a5fa;
---low-bg: #334155; --low-fg: #cbd5e1; --medium-bg: #1e3a8a; --medium-fg: #bfdbfe; --high-bg: #7c2d12; --high-fg: #fed7aa; --critical-bg: #7f1d1d; --critical-fg: #fecaca; } }
+:root[data-theme="dark"] { --bg: #282c34; --fg: #abb2bf; --panel: #2c313a; --border: #3e4451; --heading: #d7dae0; --muted: #5c6370; --faint: #5c6370; --soft: #d7dae0; --hover: #353b45; --overlay: rgba(0, 0, 0, .6); --code-bg: #21252b; --link: #61afef;
+--low-bg: rgba(152, 195, 121, .15); --low-fg: #98c379; --medium-bg: rgba(229, 192, 123, .15); --medium-fg: #e5c07b; --high-bg: rgba(209, 154, 102, .15); --high-fg: #d19a66; --critical-bg: rgba(224, 108, 117, .15); --critical-fg: #e06c75; }
+:root[data-theme="dark"] #theme { color: var(--link); border-color: var(--link); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #282c34; --fg: #abb2bf; --panel: #2c313a; --border: #3e4451; --heading: #d7dae0; --muted: #5c6370; --faint: #5c6370; --soft: #d7dae0; --hover: #353b45; --overlay: rgba(0, 0, 0, .6); --code-bg: #21252b; --link: #61afef;
+--low-bg: rgba(152, 195, 121, .15); --low-fg: #98c379; --medium-bg: rgba(229, 192, 123, .15); --medium-fg: #e5c07b; --high-bg: rgba(209, 154, 102, .15); --high-fg: #d19a66; --critical-bg: rgba(224, 108, 117, .15); --critical-fg: #e06c75; }
+:root:not([data-theme="light"]) #theme { color: var(--link); border-color: var(--link); } }
 `;
 
 const PAGE = `<!doctype html>
@@ -93,7 +95,7 @@ const PAGE = `<!doctype html>
 --low-bg: #e2e8f0; --low-fg: #475569; --medium-bg: #dbeafe; --medium-fg: #1d4ed8; --high-bg: #ffedd5; --high-fg: #c2410c; --critical-bg: #fee2e2; --critical-fg: #b91c1c; }
 ${DARK_VARS}
 body { margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-header { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 6px; }
+header { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 6px; background: var(--code-bg); }
 h1 { font-size: 16px; margin: 0; }
 #theme { margin-left: auto; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 #theme:hover { background: var(--hover); }
