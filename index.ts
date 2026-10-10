@@ -162,6 +162,23 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		name: "orchestrator_poke",
+		label: "Orchestrator poke",
+		description: "Poke the se-llm-team orchestrator daemon to trigger an immediate scan and agent scheduling.",
+		parameters: Type.Object({}),
+		async execute(_id, _params, _signal, _onUpdate, ctx) {
+		try {
+			closeSync(openSync(join(board(ctx), ".poke"), "a"));
+		} catch {
+			/* no board yet */
+		}
+			const pid = readPid(ctx);
+			if (pid === null || !pidAlive(pid)) return text("No orchestrator daemon running for this project.");
+			return text(`Poked the orchestrator (pid ${pid}). Scan starts within a second.`);
+		},
+	});
+
+	pi.registerTool({
 		name: "orchestrator_stop",
 		label: "Orchestrator stop",
 		description: "Stop the orchestrator daemon for this project.",

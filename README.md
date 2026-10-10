@@ -32,7 +32,7 @@ States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing,
 
 `src/orchestrator.ts` is a non-LLM daemon. Start it with the `orchestrator_start` tool (or `node src/orchestrator.ts --root <project>`). One daemon per project: the lockfile is `.kanban/.orchestrator.lock`.
 
-- Watches `.kanban/` (fs.watch) and rescans every 30 s.
+- Watches `.kanban/` (fs.watch) and rescans every 10 s. The `orchestrator_poke` tool touches `.kanban/.poke` for an immediate scan and agent scheduling.
 - to-do: creates `.worktrees/<slug>` from the task name, sets the worktree attribute, spawns a Developer, moves to doing. Unlimited lanes; the PM throttles by how many tasks it promotes to to-do.
 - to-review: spawns a Reviewer, moves to reviewing.
 - to-live-test: spawns a Live-tester, moves to live-testing.
@@ -45,7 +45,7 @@ Agent prompts live in `agents/`. The orchestrator runs each agent as a headless 
 
 ## Tools
 
-The PM session gets: kanban_list, kanban_get, kanban_create, kanban_update, kanban_set_state, kanban_set_worktree, orchestrator_start, orchestrator_status, orchestrator_stop. The extension also notifies the session when a task reaches done.
+The PM session gets: kanban_list, kanban_get, kanban_create, kanban_update, kanban_set_state, kanban_set_worktree, orchestrator_start, orchestrator_status, orchestrator_stop, orchestrator_poke. The extension also notifies the session when a task reaches done.
 
 ## Checks
 

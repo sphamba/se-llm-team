@@ -3,3 +3,4 @@
 .kanban/.pids/
 .kanban/.orchestrator.lock
 node_modules/
+.kanban/.poke
