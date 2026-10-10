@@ -193,8 +193,20 @@ function md(src) {
 	if (fence) html += "</code></pre>";
 	return html;
 }
+// FLIP across the innerHTML replace: measure old positions, render, invert, play. Only cards whose
+// state changed move, so a refresh with no state changes re-animates nothing.
+let prevStates = {};
 function render() {
 	const board = document.getElementById("board");
+	const states = {};
+	for (const t of tasks) states[t.file] = t.state;
+	const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+	const old = {};
+	for (const el of board.querySelectorAll(".card")) {
+		el.style.transition = "none";
+		el.style.transform = "";
+		old[el.dataset.file] = el.getBoundingClientRect();
+	}
 	board.innerHTML = STATES.map(st => {
 		const inState = tasks.filter(t => t.state === st).sort((a, b) => b.updated - a.updated);
 		const cards = inState.map(t =>
@@ -202,7 +214,20 @@ function render() {
 		).join("");
 		return '<section class="col c-' + st + '"><h2>' + esc(st) + ' <span class="count">' + inState.length + "</span></h2>" + (cards || '<div class="empty">&mdash;</div>') + "</section>";
 	}).join("");
-	for (const el of board.querySelectorAll(".card")) el.onclick = () => openTask(el.dataset.file);
+	for (const el of board.querySelectorAll(".card")) {
+		el.onclick = () => openTask(el.dataset.file);
+		const from = old[el.dataset.file], before = prevStates[el.dataset.file];
+		if (!from || before === undefined || before === states[el.dataset.file] || reduced) continue;
+		const rect = el.getBoundingClientRect(), dx = from.left - rect.left, dy = from.top - rect.top;
+		if (!dx && !dy) continue;
+		el.style.transition = "none";
+		el.style.transform = "translate(" + dx + "px," + dy + "px)";
+		el.getBoundingClientRect();
+		el.style.transition = "transform .4s ease";
+		el.style.transform = "";
+		el.ontransitionend = () => { el.style.transition = ""; el.ontransitionend = null; };
+	}
+	prevStates = states;
 }
 function openTask(file) {
 	const t = tasks.find(x => x.file === file);
