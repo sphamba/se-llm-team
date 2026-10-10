@@ -124,7 +124,7 @@ h1 { font-size: 16px; margin: 0; }
 #m-close:hover { background: var(--hover); }
 #m-attrs { font-size: 12px; color: var(--soft); margin-bottom: 12px; }
 #m-attrs div { padding: 3px 0; }
-#m-attrs span { display: inline-block; min-width: 80px; color: var(--faint); }
+#m-attrs span:not(.chip) { display: inline-block; min-width: 80px; color: var(--faint); }
 #m-body { font-size: 13px; line-height: 1.5; }
 #m-body h1, #m-body h2, #m-body h3 { font-size: 13px; margin: 12px 0 4px; }
 #m-body ul { margin: 4px 0; padding-left: 20px; }
