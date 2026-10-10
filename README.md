@@ -14,13 +14,16 @@ ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
 3. Optional config in `~/.pi/agent/se-llm-team.json` (a `.kanban/se-llm-team.json` in the project overrides it):
 
 ```json
-{ "agent": "pi", "pollMinutes": 15 }
+{ "agent": "pi", "pollMinutes": 15, "webUi": { "enabled": true, "host": "localhost", "port": 4242 } }
 ```
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `agent` | `pi` | Executable the orchestrator spawns for agents. |
 | `pollMinutes` | `15` | Agent liveness poll interval. |
+| `webUi.enabled` | off | Serve the web dashboard with the daemon. |
+| `webUi.host` | `localhost` | Dashboard bind host. |
+| `webUi.port` | `4242` | Dashboard port. |
 
 ## Kanban board
 
@@ -38,6 +41,10 @@ States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing,
 - to-live-test: spawns a Live-tester, moves to live-testing.
 - Liveness poll: an agent dead without a state update moves the task on (a dead Developer goes back to to-do for a fresh run, reviewing to to-review, live-testing to done). Capped at 5 respawns per task.
 - done with a worktree: merges the branch into the main checkout, removes the worktree, deletes the branch, then commits the task file (the done commit). On conflict, spawns a Merger agent, capped at 3 attempts. done without a worktree: the orchestrator commits the task file at the next rescan. The done commit is skipped when the file has nothing uncommitted.
+
+## Web dashboard
+
+With `webUi.enabled: true` in `~/.pi/agent/se-llm-team.json`, the orchestrator daemon serves a read-only dashboard at `http://<host>:<port>` (default `http://localhost:4242`): one column per task state, cards with a priority chip, and a popup with the full task (attributes and rendered body). The board is re-read on every request and the page refreshes itself every 2 s. A failed start (port taken) is logged and the pipeline continues.
 
 ## Agents
 
