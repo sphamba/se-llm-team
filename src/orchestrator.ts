@@ -239,7 +239,10 @@ function mergeDone(root: string, cfg: Config, task: Task): boolean {
 	const branch = task.worktree;
 	const wtDir = join(root, ".worktrees", branch);
 	const slug = task.file.replace(/\.md$/, "");
-	if (pidAlive(agentPid(root, `${slug}.merger`))) return false;
+	// the task's agent may outlive its done state (it writes its report and final worktree
+	// commits after setting done): defer the merge until the pid dies; a conflict rerun waits
+	// on the merger pid instead
+	if (pidAlive(agentPid(root, slug)) || pidAlive(agentPid(root, `${slug}.merger`))) return false;
 	if (!existsSync(wtDir) && git(root, ["branch", "--list", branch], true) === "") {
 		setWorktree(root, task, "");
 		return true;
