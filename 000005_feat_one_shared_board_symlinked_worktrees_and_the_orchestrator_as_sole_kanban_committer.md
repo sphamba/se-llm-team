@@ -1,7 +1,7 @@
 ---
 name: "feat: one shared board (symlinked worktrees) and the orchestrator as sole .kanban committer"
 priority: "high"
-state: "doing"
+state: "done"
 worktree: "feat/one-shared-board-symlinked-worktrees-and-the-orchestrator-as-sole-kanban-committer"
 ---
 
@@ -49,3 +49,8 @@ One shared board and one committer: (1) .kanban must always be synced between th
   - after worktree creation, <worktree>/.kanban is a symlink to <root>/.kanban; the worktree's git status shows no .kanban entries; a merged branch never changes .kanban in the main repo's git.
 
 # Notes
+
+- [Review] Implementation matches the specs. The library auto-commit is gone (src/kanban.ts); the PM tools and appendNote write files only. The daemon commits at exactly two points: `kanban: create <file>` for untracked board files, `kanban: done <file>` for done tasks with no worktree attribute and uncommitted changes. Dirtiness comes from `git status --porcelain -uall` per file, so clean files never re-commit. syncBoard symlinks `<worktree>/.kanban` to the root board at the to-do transition, sets skip-worktree on the stale tracked entries, and adds a per-worktree core.excludesFile (extensions.worktreeConfig) that hides the symlink and new board files from `git status` and `git add -A`. Verified: the developer's blanket add -A in the worktree cannot stage board changes, so merges carry no .kanban. A missing git repo stays tolerated.
+- [Review] Gap found and fixed: the acceptance check "done without a worktree produces exactly one done commit" had no test. Added part C to src/orchestrator.test.ts (commit caf57bd): tracked file set to done, daemon folds note plus state into one `kanban: done` commit, board log shows exactly create + done, git status clean. Also verified by hand in a scratch repo.
+- [Review] `node src/kanban.test.ts && node src/orchestrator.test.ts` pass; ran the orchestrator suite twice, no flakes.
+- [Review] Non-blocking notes: (1) syncBoard runs only at the to-do transition, so worktrees made by the old orchestrator keep a stale copy until their task re-enters to-do; the spec scopes sync to creation, so left as-is. (2) `git config extensions.worktreeConfig true` lands in the common .git/config of the target repo; the main worktree has no config.worktree, so behavior there does not change. (3) The root repo git status shows untracked .kanban/.logs, .kanban/.pids, and .orchestrator.lock noise; this existed before this task.
