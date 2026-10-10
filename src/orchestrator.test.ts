@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, execSync, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -504,3 +504,58 @@ assert.equal(execSync("git log --format=%s -- .kanban", { cwd: rootL, encoding: 
 l.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard + conflict skip + merge cap + mirror board + bootstrap smoke passed");
+
+// --- part M: a fresh non-bare clone bootstraps the board from origin's meta/kanban ---
+// a fresh `git clone` carries only refs/remotes/origin/meta/kanban, no local branch: the
+// daemon must seed refs/heads/meta/kanban from it so the board materializes and the first
+// board change mirrors with a parent (fast-forward push instead of an orphan commit)
+const rootM = fixture();
+cleaned.push(rootM);
+const remoteM = `${rootM}-origin.git`;
+execSync(`git init -q --bare ${remoteM}`, { shell: "/bin/bash" });
+execSync(`git remote add origin ${remoteM}`, { cwd: rootM, shell: "/bin/bash" });
+mkdirSync(kanbanDir(rootM), { recursive: true });
+const taskM = createTask(rootM, { name: "fix: fresh clone bootstrap", summary: "Fresh clone bootstrap smoke", specs: "n/a" });
+setState(rootM, taskM, "done");
+setWorktree(rootM, taskM, "");
+// board content on the mirror via the same plumbing the daemon uses, then both branches pushed
+const shaM = execSync(`git hash-object -w .kanban/${taskM.file}`, { cwd: rootM, encoding: "utf8", shell: "/bin/bash" }).trim();
+const boardTreeM = execSync("git mktree", { cwd: rootM, input: `100644 blob ${shaM}\t${taskM.file}\n`, encoding: "utf8" }).trim();
+const rootTreeM = execSync("git mktree", { cwd: rootM, input: `040000 tree ${boardTreeM}\t.kanban\n`, encoding: "utf8" }).trim();
+const commitM = execSync(`git commit-tree ${rootTreeM} -m "kanban: create ${taskM.file}"`, { cwd: rootM, encoding: "utf8", shell: "/bin/bash" }).trim();
+execSync(`git update-ref refs/heads/meta/kanban ${commitM}`, { cwd: rootM, shell: "/bin/bash" });
+execSync("git push -q --all origin", { cwd: rootM, shell: "/bin/bash" });
+execSync("git push -q origin meta/kanban", { cwd: rootM, shell: "/bin/bash" });
+// fresh non-bare clone: empty .kanban/ and only the remote-tracking mirror ref
+const cloneM = `${rootM}-clone`;
+execSync(`git clone -q ${remoteM} ${cloneM}`, { shell: "/bin/bash" });
+cleaned.push(cloneM);
+assert.equal(execSync("git branch --list meta/kanban", { cwd: cloneM, encoding: "utf8" }).trim(), "", "precondition: fresh clone has no local meta/kanban");
+assert.ok(execSync("git rev-parse --verify refs/remotes/origin/meta/kanban", { cwd: cloneM, encoding: "utf8" }).trim(), "precondition: clone has the remote-tracking mirror ref");
+// a fresh clone is configured before the daemon runs, like a real setup
+mkdirSync(kanbanDir(cloneM), { recursive: true });
+writeFileSync(join(kanbanDir(cloneM), "se-llm-team.json"), JSON.stringify({ agent: deadStub(cloneM), pollMinutes: 0.05 }));
+
+const m = await runDaemon(cloneM);
+await waitFor(() => existsSync(join(kanbanDir(cloneM), taskM.file)), 10000, "bootstrap materialized the board in a fresh clone", m.output);
+assert.ok(m.output().includes("seeded refs/heads/meta/kanban from refs/remotes/origin/meta/kanban"), "daemon logged the mirror seed");
+const seededShaM = execSync("git rev-parse refs/heads/meta/kanban", { cwd: cloneM, encoding: "utf8" }).trim();
+assert.equal(seededShaM, commitM, "local mirror branch seeded from the remote-tracking ref");
+assert.equal(readFileSync(join(kanbanDir(cloneM), taskM.file), "utf8"), readFileSync(join(kanbanDir(rootM), taskM.file), "utf8"), "bootstrapped content matches origin's board");
+assert.equal(execSync("git log --format=%s -- .kanban", { cwd: cloneM, encoding: "utf8" }).trim(), "", "bootstrap commits nothing on main");
+// the first board change in the clone mirrors with a parent and pushes fast-forward to origin
+appendFileSync(join(kanbanDir(cloneM), taskM.file), "\nNote: post-clone board change.\n");
+await waitFor(
+	() => execSync("git rev-parse refs/remotes/origin/meta/kanban", { cwd: cloneM, encoding: "utf8" }).trim() !== seededShaM,
+	30000,
+	"post-clone mirror commit pushed to origin",
+	m.output,
+);
+const advancedShaM = execSync("git rev-parse refs/heads/meta/kanban", { cwd: cloneM, encoding: "utf8" }).trim();
+assert.equal(execSync("git rev-parse refs/remotes/origin/meta/kanban", { cwd: cloneM, encoding: "utf8" }).trim(), advancedShaM, "remote-tracking ref advanced with the push");
+assert.equal(execSync("git rev-parse refs/heads/meta/kanban", { cwd: remoteM, encoding: "utf8" }).trim(), advancedShaM, "origin's meta/kanban advanced to the clone's commit");
+assert.deepEqual(mirrorSubjects(cloneM).split("\n"), [`kanban: done ${taskM.file}`, `kanban: create ${taskM.file}`], "mirror commit has a parent, no orphan");
+assert.ok(!m.output().includes("push of refs/heads/meta/kanban failed"), "no push failures");
+m.daemon.kill("SIGTERM");
+
+console.log("orchestrator.test.ts: all smoke parts passed (pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard + conflict skip + merge cap + mirror board + bootstrap + fresh-clone bootstrap)");
