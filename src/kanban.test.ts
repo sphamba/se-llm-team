@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendNote, createTask, getTask, listAll, listTasks, parseTask, setState, setWorktree, slugFile, slugWorktree, updateTask } from "./kanban.ts";
@@ -66,12 +67,30 @@ assert.equal(parseTask(root, t4.file).name, 'feat: "quoted" \\ and\nnewline');
 setState(root, t4, "to-do"); // attribute rewrite must not compound escaping
 assert.equal(parseTask(root, t4.file).name, 'feat: "quoted" \\ and\nnewline');
 
-// no git repo must not throw (commit returns false)
+// no git repo must not throw (mutations write files only)
 const noGit = mkdtempSync(join(tmpdir(), "kanban-nogit-"));
 const t3 = createTask(noGit, { name: "feat: no repo", summary: "s" });
 assert.equal(t3.file, "000001_feat_no_repo.md");
 assert.equal(setState(noGit, t3, "to-do"), undefined);
 rmSync(noGit, { recursive: true, force: true });
+
+// mutations commit nothing: the orchestrator daemon is the sole .kanban committer
+const gitRoot = mkdtempSync(join(tmpdir(), "kanban-git-"));
+const sh = (cmd: string) => execSync(cmd, { cwd: gitRoot, encoding: "utf8", shell: "/bin/bash" });
+execSync("git init -q", { cwd: gitRoot });
+sh("git config user.email t@t && git config user.name t && git config commit.gpgsign false");
+writeFileSync(join(gitRoot, "README.md"), "x\n");
+sh("git add -A && git commit -qm init");
+const tg = createTask(gitRoot, { name: "feat: git board", summary: "s" });
+assert.equal(sh("git rev-list --count HEAD").trim(), "1"); // create writes the file, no commit
+assert.match(sh("git status --porcelain -uall"), new RegExp(`\\?\\? \\.kanban/${tg.file}`));
+setState(gitRoot, tg, "to-do");
+setWorktree(gitRoot, tg, "feat/git-board");
+appendNote(gitRoot, tg, "note");
+updateTask(gitRoot, tg, { summary: "s2" });
+assert.equal(sh("git rev-list --count HEAD").trim(), "1"); // intermediate updates create no commits
+assert.match(sh("git status --porcelain -uall"), new RegExp(`\\?\\? \\.kanban/${tg.file}`)); // still uncommitted
+rmSync(gitRoot, { recursive: true, force: true });
 
 rmSync(root, { recursive: true, force: true });
 console.log("kanban.test.ts: all assertions passed");

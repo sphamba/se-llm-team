@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, execSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,20 +20,44 @@ function fixture(): string {
 	return root;
 }
 
-// stub agent: parses its role out of the prompt and applies the pipeline transition
+// stub agent: parses its role out of the prompt and applies the pipeline transition;
+// the developer also commits a code change, so the merge is a real one and the blanket
+// git add -A in the worktree proves board changes cannot be staged
 const roleStub = (root: string) => {
 	const stub = join(root, "stub-agent.cjs");
 	writeFileSync(
 		stub,
 		`#!/usr/bin/env node
 const { readFileSync, writeFileSync } = require("node:fs");
+const { execSync } = require("node:child_process");
 const prompt = process.argv[4] ?? "";
 const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
 if (!file || !readFileSync(file, "utf8").match(/^state: /m)) process.exit(0);
+if (prompt.includes("Developer agent")) {
+	writeFileSync("code.txt", "work\\n");
+	execSync("git add -A && git commit -qm work", { stdio: "ignore" });
+}
 const next = prompt.includes("Developer agent") ? "to-review"
 	: prompt.includes("Reviewer agent") ? "to-live-test"
 	: prompt.includes("Live-tester") ? "done" : null;
 if (next) writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: " + next));
+`,
+	);
+	chmodSync(stub, 0o755);
+	return stub;
+};
+
+// stub agent that only moves the developer forward, so the worktree persists
+const devStub = (root: string) => {
+	const stub = join(root, "dev-agent.cjs");
+	writeFileSync(
+		stub,
+		`#!/usr/bin/env node
+const { readFileSync, writeFileSync } = require("node:fs");
+const prompt = process.argv[4] ?? "";
+const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
+if (!prompt.includes("Developer agent") || !file || !readFileSync(file, "utf8").match(/^state: /m)) process.exit(0);
+writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: to-review"));
 `,
 	);
 	chmodSync(stub, 0o755);
@@ -95,6 +119,20 @@ for (const marker of ["spawned developer", "spawned reviewer", "spawned live-tes
 	assert.ok(a.output().includes(marker), `expected daemon log to contain: ${marker}`);
 }
 assert.ok(!existsSync(join(rootA, ".worktrees", "feat/smoke-test")), "worktree removed");
+// the daemon is the sole committer: done folds in the whole task life, exactly one
+// create and one done board commit, nothing else; the merged work never touched .kanban
+await waitFor(
+	() => execSync(`git status --porcelain -- .kanban/${taskA.file}`, { cwd: rootA, encoding: "utf8" }).trim() === "",
+	60000,
+	"done commit",
+	a.output,
+	rootA,
+);
+const boardLog = execSync("git log --format=%s -- .kanban", { cwd: rootA, encoding: "utf8" }).trim().split("\n");
+assert.deepEqual(boardLog, [`kanban: done ${taskA.file}`, `kanban: create ${taskA.file}`]); // newest first
+const committed = execSync(`git show HEAD:.kanban/${taskA.file}`, { cwd: rootA, encoding: "utf8", shell: "/bin/bash" });
+assert.match(committed, /^state: "done"$/m);
+assert.match(committed, /^worktree: ""$/m);
 a.daemon.kill("SIGTERM");
 
 // --- part B: dead agents get moved forward by the liveness poll, capped at 5 respawns ---
@@ -111,5 +149,50 @@ await waitFor(() => b.output().includes("giving up"), 60000, "respawn cap", b.ou
 assert.equal(readB().state, "reviewing");
 assert.ok(b.output().includes("doing -> to-review"), "poll moved the dead developer forward");
 b.daemon.kill("SIGTERM");
+
+// --- part C: the worktree board is a symlink to the shared board, invisible to the worktree's git ---
+const rootC = fixture();
+cleaned.push(rootC);
+mkdirSync(kanbanDir(rootC), { recursive: true });
+writeFileSync(join(kanbanDir(rootC), "se-llm-team.json"), JSON.stringify({ agent: devStub(rootC) }));
+const taskC = createTask(rootC, { name: "feat: shared board", summary: "Symlink smoke", specs: "n/a" });
+setState(rootC, taskC, "to-do");
+
+const c = await runDaemon(rootC);
+const wtC = join(rootC, ".worktrees", "feat/shared-board");
+const wtBoardC = join(wtC, ".kanban");
+await waitFor(
+	() => {
+		try {
+			return lstatSync(wtBoardC).isSymbolicLink();
+		} catch {
+			return false;
+		}
+	},
+	60000,
+	"worktree board symlink",
+	c.output,
+	rootC,
+);
+assert.equal(readlinkSync(wtBoardC), kanbanDir(rootC)); // absolute path to the shared board
+const tags = execSync("git ls-files -v .kanban", { cwd: wtC, encoding: "utf8" }).trim().split("\n");
+assert.ok(tags.length > 0, "stale board entries are tracked in the worktree");
+assert.ok(tags.every((l) => l.startsWith("S ")), `expected skip-worktree on all board entries: ${tags.join(", ")}`);
+assert.equal(
+	execSync("git status --porcelain", { cwd: wtC, encoding: "utf8" }).split("\n").filter((l) => l.includes(".kanban")).length,
+	0,
+	"worktree git status shows no .kanban entries",
+);
+// a blanket git add -A cannot stage board changes, and the shared board sees writes through the symlink
+const wtTask = join(wtBoardC, taskC.file);
+writeFileSync(wtTask, readFileSync(wtTask, "utf8").replace(/^state: .*/m, 'state: "doing"'));
+assert.match(readFileSync(join(kanbanDir(rootC), taskC.file), "utf8"), /^state: "doing"$/m);
+execSync("git add -A", { cwd: wtC });
+assert.equal(
+	execSync("git diff --cached --name-only", { cwd: wtC, encoding: "utf8" }).split("\n").filter((l) => l.includes(".kanban")).length,
+	0,
+	"blanket git add -A staged board changes",
+);
+c.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: pipeline + liveness smoke passed");

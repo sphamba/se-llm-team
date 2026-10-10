@@ -1,5 +1,5 @@
 import { spawn, execFileSync } from "node:child_process";
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, rmSync, symlinkSync, watch, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -140,6 +140,75 @@ function git(root: string, args: string[], allowFailure = false): string | null 
 	}
 }
 
+// the orchestrator is the sole .kanban committer; a missing git repo is tolerated
+function commitKanban(root: string, files: string[], message: string): boolean {
+	try {
+		execFileSync("git", ["add", "--", ...files.map((f) => join(".kanban", f))], { cwd: root, stdio: "ignore" });
+		execFileSync("git", ["commit", "-m", message, "--", ...files.map((f) => join(".kanban", f))], {
+			cwd: root,
+			stdio: "ignore",
+		});
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+// git status --porcelain per board file (XY code); empty when git is missing.
+// Runs git directly: the shared git() helper trims leading whitespace, which would
+// corrupt the first line's XY prefix for unstaged changes.
+function boardStatus(root: string): Map<string, string> {
+	const status = new Map<string, string>();
+	let out: string;
+	try {
+		out = execFileSync("git", ["status", "--porcelain", "-uall", "--", ".kanban"], {
+			cwd: root,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+	} catch {
+		return status;
+	}
+	for (const line of out.split("\n")) {
+		if (line.length < 4) continue;
+		status.set(line.slice(3), line.slice(0, 2));
+	}
+	return status;
+}
+
+// the worktree board is a symlink to the shared root board; hide it from the
+// worktree's git (skip-worktree on the stale tracked entries, per-worktree
+// excludesFile for the symlink itself) so merges never carry board changes
+function syncBoard(root: string, wtDir: string): void {
+	const wtBoard = join(wtDir, ".kanban");
+	const target = kanbanDir(root);
+	let linked = false;
+	try {
+		linked = lstatSync(wtBoard).isSymbolicLink() && readlinkSync(wtBoard) === target;
+	} catch {
+		/* missing, create it */
+	}
+	if (!linked) {
+		rmSync(wtBoard, { recursive: true, force: true });
+		try {
+			symlinkSync(target, wtBoard);
+		} catch (err) {
+			log(root, `could not symlink ${wtBoard} to ${target}: ${err instanceof Error ? err.message : err}`);
+			return;
+		}
+	}
+	// idempotent: a partial setup (daemon died between steps) is completed here
+	for (const path of (git(wtDir, ["ls-files", ".kanban"], true) ?? "").split("\n").filter(Boolean)) {
+		git(wtDir, ["update-index", "--skip-worktree", path], true);
+	}
+	const gitDir = git(wtDir, ["rev-parse", "--absolute-git-dir"], true);
+	if (!gitDir) return;
+	const excludes = join(gitDir, "wt-excludes");
+	if (!existsSync(excludes)) writeFileSync(excludes, ".kanban\n");
+	git(wtDir, ["config", "extensions.worktreeConfig", "true"], true);
+	git(wtDir, ["config", "--worktree", "core.excludesFile", excludes], true);
+}
+
 function startTodo(root: string, cfg: Config, task: Task): void {
 	const wt = task.worktree || slugWorktree(task.name);
 	const wtDir = join(root, ".worktrees", wt);
@@ -148,6 +217,7 @@ function startTodo(root: string, cfg: Config, task: Task): void {
 			git(root, ["worktree", "add", join(".worktrees", wt), wt]);
 		}
 	}
+	syncBoard(root, wtDir);
 	setWorktree(root, task, wt);
 	spawnAgent(root, cfg.agent, "developer", { ...task, worktree: wt }, wtDir);
 	setState(root, task, "doing");
@@ -181,8 +251,14 @@ function mergeDone(root: string, cfg: Config, task: Task): void {
 }
 
 function rescan(root: string, cfg: Config): void {
+	const status = boardStatus(root);
 	for (const task of listAll(root)) {
 		try {
+			// sole commit points: untracked board files are new, finished tasks fold in
+			// their whole life; everything else stays uncommitted until done
+			const code = status.get(join(".kanban", task.file));
+			if (code === "??") commitKanban(root, [task.file], `kanban: create ${task.file}`);
+			else if (code && task.state === "done" && !task.worktree) commitKanban(root, [task.file], `kanban: done ${task.file}`);
 			const wtDir = join(root, ".worktrees", task.worktree || slugWorktree(task.name));
 			if (task.state === "to-do") startTodo(root, cfg, task);
 			else if (task.state === "to-review") {
