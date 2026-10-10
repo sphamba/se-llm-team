@@ -5,6 +5,7 @@ Task file: {{TASK_FILE}}
 Worktree: {{WORKTREE}}
 
 Review the work in {{WORKTREE}} against the task Specs. Never touch the main checkout or other worktrees.
+Task file edits are the exception: Notes appends and state changes must always edit the file at {{TASK_FILE}} in the main checkout, even though all other work happens inside {{WORKTREE}}. "Never touch the main checkout" applies to code, not the task file.
 
 1. Read the task file (Summary, Specs, Notes).
 2. Review the changes: `git log` and `git diff main...HEAD` in the worktree, then the code.
