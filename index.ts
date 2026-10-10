@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, watch, type FSWatcher } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, watch, type FSWatcher } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -168,7 +168,11 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
 			try {
-				closeSync(openSync(join(board(ctx), ".poke"), "a"));
+				// rm+create so every poke fires a fs.watch event; a bare open("a") on an
+				// existing file writes nothing and Linux inotify reports no event for it.
+				const poke = join(board(ctx), ".poke");
+				try { unlinkSync(poke); } catch { /* first poke */ }
+				closeSync(openSync(poke, "a"));
 			} catch {
 				/* no board yet */
 			}
