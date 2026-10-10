@@ -1,7 +1,7 @@
 ---
 name: "fix: reconcile working-tree .kanban from meta/kanban on start and every scan"
 priority: "high"
-state: "doing"
+state: "reviewing"
 worktree: "fix/reconcile-working-tree-kanban-from-meta-kanban-on-start-and-every-scan"
 ---
 
@@ -31,3 +31,8 @@ The daemon mirrors the working-tree .kanban onto refs/heads/meta/kanban via full
 - Typecheck/build and the full test suite pass.
 
 # Notes
+
+- [2026-10-11 00:15] Implemented reconcileBoard in src/orchestrator.ts: materializes refs/heads/meta/kanban into the working-tree .kanban, triggered only when the branch head differs from the hash this process last materialized or wrote with update-ref (new lastMirrorHash, set by commitKanban and by reconcileBoard). Writes tip files missing from or differing from the tree (ls-tree -r + read-only hash-object comparison + cat-file blob, reusing the bootstrap materialize path and boardStatus's comparison), deletes local .md files the tip lacks that the last known mirror tree (tree of lastMirrorHash) had or the tip's ancestry ever carried (external deletions propagate; never-mirrored in-flight PM writes survive), skips dot-entries and nested paths like the mirror does, never touches the index, and logs one line per reconcile (hash, files updated, files deleted). bootstrapBoard now keeps only the remote seed and delegates to reconcileBoard, so there is one materialize path; rescan reconciles before boardStatus and before any commitKanban, the root-cause ordering.
+- [2026-10-11 00:15] Tests: added externalCommit/showTip/taskContent helpers and parts P and Q to src/orchestrator.test.ts (real daemons in tmp git fixtures, deadStub agents): (1) external commit materialized into the working tree within one scan, (2) stale tree does not erase branch-only files on the next mirror commit, (3) unmirrored local file survives a reconcile, (4) external deletion propagates to the working tree, plus reconcile log-line and no-commit-churn assertions. Also fixed a pre-existing part D race: the test now waits for the per-worktree excludesFile setup to converge instead of asserting right after the symlink appears.
+- [2026-10-11 00:15] Verified: node src/orchestrator.test.ts passes twice consecutively (all parts A-Q), node src/kanban.test.ts and node src/webui.test.ts pass, modules load under plain node (no tsconfig in the repo, Node 24 type stripping). Committed as 790722e in the worktree.
+- [2026-10-11 00:15] Note found during testing: when several tasks already exist at the first sweep, the first create commit folds the whole board into its snapshot, so later tasks get no separate create label (pre-existing full-snapshot behavior, out of scope here). Test expectations use tip existence, not per-task labels, for that case.

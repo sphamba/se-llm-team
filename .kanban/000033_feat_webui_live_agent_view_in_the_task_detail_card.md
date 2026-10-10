@@ -1,7 +1,7 @@
 ---
 name: "feat: webui live agent view in the task detail card"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "feat/webui-live-agent-view-in-the-task-detail-card"
 ---
 
@@ -37,3 +37,10 @@ Constraints:
 - HOLD: queue behind 000028 (animation) → 000029 (chip fix) → 000030 (cap/unfold) → 000032 (One Dark), all in src/webui.ts.
 
 # Notes
+- Implemented in worktree feat/webui-live-agent-view-in-the-task-detail-card, commit eb4c12f. Only src/webui.ts and src/webui.test.ts changed, per the constraint.
+- Server: /api/tasks now carries agent: { role, alive, log } for working-state tasks (doing -> developer, reviewing -> reviewer, live-testing -> live-tester), computed from the state and .kanban/.pids/{slug}.pid (pidAlive mirrored locally, since webui cannot import orchestrator without a cycle). log is only a handle ({slug}.{role}); GET /api/agent-log rebuilds the real path from the task file name, checks it against taskFiles, and 404s unknown files or non-agent handles. Tail mode (no offset) returns the last 16KB chunk with head/tail/atStart cursors; an offset returns bytes from the offset (poll); before=1 returns the chunk before the offset (history).
+- Client: renderAgent puts a button (reused .spin spinner + capitalized role name) plus a hidden #m-log pane between #m-attrs and #m-body only when an agent is alive. Opening the pane fetches the last chunk only, polls every 1s while open and the agent is alive (poll stops when the agent dies, pane stays readable), auto scrolls to the bottom only when the user is at the bottom, and on scroll-to-top fetches the earlier chunk and prepends it with the scroll position kept stable (busy guard against overlapping fetches). closeModal calls closeLog, which clears the interval and state.
+- Tests: webui.test.ts extended with the agent payload (null for backlog, deep-equal for a doing task with a live pid, stale pid -> alive false), tail/poll-from-offset/history asserts including full-file reconstruction from the three chunks, and 404 rejects. All three test files pass (webui, kanban, orchestrator).
+- Review of eb4c12f: found one functional bug. The #m-log pane carried a hidden class, but no CSS rule hid it (the page only had #modal.hidden), so the pane showed at once and the button never showed or hid it. Fix 65b43ac adds #m-log.hidden { display: none; } and a test assert for it.
+- Review also found: #m-agent kept its margin-bottom when empty, so every task without a live agent got a double gap between the attributes and the body. Fix 65b43ac adds #m-agent:empty { display: none; }.
+- Review checked the server logic against src/orchestrator.ts: the pidAlive mirror matches, the pid and log file names match spawnAgent, and the taskFiles check blocks path traversal in the log handle. Tail, poll, history, and 404 asserts all hold. All three test files pass after the fix.
