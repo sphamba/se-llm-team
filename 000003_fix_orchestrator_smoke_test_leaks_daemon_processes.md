@@ -49,3 +49,11 @@ Verification: `node src/orchestrator.test.ts` passes; after it finishes `ps aux 
 Housekeeping: killed the leaked daemons listed in the task (all already gone except pid 527983, which ran from the old poll-respawns worktree) and removed the stale `/tmp/orch-smoke-*` roots. Daemons seen during verification from the other task worktrees (orchestrator-start-tool-throws, commit-kanban-tasks) were concurrent live runs of the old test there, not mine, and were left alone. Pid 420117 is the repo's real orchestrator daemon (root se-llm-team), not a leak.
 
 Note: one earlier verification round appeared to leak pid 627243, but that was a flaw in my own test command (`cd X && node test & TESTPID=$!` made `$!` the subshell pid, so the SIGTERM never reached node, which was still running mid-test when checked). Not a code bug; later rounds with correct pid capture were clean.
+
+## 2026-10-24, reviewer
+
+One fix committed (030dae9): `agentPids()` in src/orchestrator.test.ts read the pidfiles from `root/.pids`, but the daemon writes them to `kanbanDir(root)/.pids` = `root/.kanban/.pids`. The catch swallowed the ENOENT, so the agent sweep returned `[]` every time and was dead code. That violated required behavior 1 (kill every agent the daemons spawned). Fixed by reading `join(kanbanDir(root), ".pids")` (2 lines, kanbanDir already imported).
+
+Verification of the fix: ran the same instrumented check against HEAD and against the fix. In the check a fake long-running agent is planted with a pidfile in the daemon's real pidfile dir before the exit hook fires. HEAD let the fake agent survive (confirmed the bug is load-bearing); the fixed version kills it. `node src/orchestrator.test.ts` passes (exit 0), `ps aux | grep orch-smoke` and `/tmp/orch-smoke-*` show nothing after the run. Failed-assert path spot-checked: exits 1 with no leftovers. Everything else in the diff reviewed and correct: daemons registered at spawn, SIGKILL before the agent sweep (no respawn race), cmdline guard also covers pid 0, exit and SIGINT/SIGTERM hooks idempotent, assertions unchanged, daemon code untouched, no new dependencies.
+
+Housekeeping re-checked: no orch-smoke processes and no `/tmp/orch-smoke-*` roots remain. Only the repo's real orchestrator daemon (pid 420117, root se-llm-team) runs, as the developer noted.
