@@ -2,7 +2,7 @@
 name: "fix: webui horizontal scrollbar sits mid-screen; pin it to the viewport bottom"
 priority: "medium"
 state: "done"
-worktree: "fix/webui-horizontal-scrollbar-sits-mid-screen-pin-it-to-the-viewport-bottom"
+worktree: ""
 ---
 
 # Summary
