@@ -1,7 +1,7 @@
 ---
 name: "fix: fresh non-bare clone bootstrap never materializes the board"
 priority: "medium"
-state: "to-do"
+state: "doing"
 worktree: "fix/fresh-non-bare-clone-bootstrap-never-materializes-the-board"
 ---
 
