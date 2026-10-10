@@ -46,12 +46,23 @@ assert.equal(parseTask(root, t1.file).state, "to-do");
 // notes, updateTask
 appendNote(root, t1, "first note");
 assert.match(parseTask(root, t1.file).notes, /first note/);
+// a summary/specs patch rewrites only that section: unknown sections stay byte-for-byte
+const withUnknown = readFileSync(join(root, ".kanban", t1.file), "utf8").replace(
+	/\s*$/,
+	"\n\n# Changelog\n2025-01-01 entry\n",
+);
+writeFileSync(join(root, ".kanban", t1.file), withUnknown);
 updateTask(root, t1, { summary: "New summary" });
 const after = parseTask(root, t1.file);
 assert.equal(after.summary, "New summary");
 assert.equal(after.specs, "Do it well");
 assert.match(after.notes, /first note/);
 assert.equal(after.state, "to-do");
+assert.ok(readFileSync(join(root, ".kanban", t1.file), "utf8").endsWith("# Changelog\n2025-01-01 entry\n"));
+updateTask(root, t1, { specs: "Do it very well" });
+assert.equal(parseTask(root, t1.file).specs, "Do it very well");
+assert.ok(readFileSync(join(root, ".kanban", t1.file), "utf8").endsWith("# Changelog\n2025-01-01 entry\n"));
+assert.match(parseTask(root, t1.file).notes, /first note/);
 
 // get + listing granularities
 assert.equal(getTask(root, t1.file)?.name, "feat: nice thing");
