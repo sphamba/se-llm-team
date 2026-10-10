@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, kanbanDir, parseTask, setState, setWorktree } from "./kanban.ts";
-import { pidAlive } from "./orchestrator.ts";
+import { pidAlive, waitForBoardCommits } from "./orchestrator.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -504,3 +504,31 @@ assert.equal(execSync("git log --format=%s -- .kanban", { cwd: rootL, encoding: 
 l.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard + conflict skip + merge cap + mirror board + bootstrap smoke passed");
+
+// --- part M: the board-feed wait resolves from the main checkout even when the session cwd is a worktree ---
+const rootM = fixture();
+cleaned.push(rootM);
+execSync("git worktree add -q -b feat/session .worktrees/feat/session", { cwd: rootM, shell: "/bin/bash" });
+const wtM = join(rootM, ".worktrees", "feat/session");
+// pin the session cwd's HEAD at its own advanced branch tip, like a task worktree: a
+// HEAD-based wait would satisfy itself on worktree commits and never see the board feed
+writeFileSync(join(wtM, "session.txt"), "session work\n");
+execSync("git add -A && git commit -qm 'session work'", { cwd: wtM, shell: "/bin/bash" });
+const mirrorCommit = (message: string) => {
+	const tree = execSync("git rev-parse HEAD^{tree}", { cwd: rootM, encoding: "utf8", shell: "/bin/bash" }).trim();
+	const commit = execSync(`git commit-tree ${tree} -m '${message}'`, { cwd: rootM, encoding: "utf8", shell: "/bin/bash" }).trim();
+	execSync(`git update-ref refs/heads/meta/kanban ${commit}`, { cwd: rootM, shell: "/bin/bash" });
+};
+// baseline mirror commit, wait starts from the worktree cwd, then the kanban: done commit lands
+// in the main checkout: the wait must report it
+mirrorCommit("kanban: create 000042_fix_feed.md");
+const waitM = waitForBoardCommits(wtM, 15);
+await new Promise((r) => setTimeout(r, 500));
+mirrorCommit("kanban: done 000042_fix_feed.md");
+assert.deepEqual(await waitM, ["kanban: done 000042_fix_feed.md"], "wait from a worktree cwd sees main-checkout board commits");
+// the wait started after that baseline: an unrelated mirror commit does not satisfy it
+const waitM2 = waitForBoardCommits(wtM, 1);
+mirrorCommit("unrelated mirror commit");
+assert.deepEqual(await waitM2, [], "unrelated commits do not satisfy the wait; it times out");
+
+console.log("orchestrator.test.ts: worktree-cwd board-feed wait smoke passed");
