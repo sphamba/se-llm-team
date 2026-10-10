@@ -154,34 +154,48 @@ export function setState(root: string, task: Task, state: TaskState): void {
 	updateAttrs(root, task, { state });
 }
 
+// Rewrites only the given body sections; everything else stays byte-for-byte.
+function replaceSections(root: string, task: Task, updates: Record<string, string>): void {
+	const path = join(kanbanDir(root), task.file);
+	const raw = readFileSync(path, "utf8");
+	const m = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+	const body = m ? m[2] : raw;
+	const lines = body.split("\n");
+	const headers: { index: number; name: string }[] = [];
+	lines.forEach((line, index) => {
+		const h = line.match(/^# (.+)$/);
+		if (h) headers.push({ index, name: h[1].trim().toLowerCase() });
+	});
+	const jobs = Object.entries(updates)
+		.map(([name, value]) => ({ name, value, header: headers.findLast((h) => h.name === name) }))
+		.sort((a, b) => (b.header?.index ?? -1) - (a.header?.index ?? -1));
+	const out = [...lines];
+	for (const job of jobs) {
+		if (!job.header) {
+			if (out[out.length - 1] !== "") out.push("");
+			const title = job.name[0].toUpperCase() + job.name.slice(1);
+			out.push(`# ${title}`, ...job.value.split("\n"), "");
+			continue;
+		}
+		const end = headers.find((h) => h.index > job.header.index)?.index ?? lines.length;
+		out.splice(job.header.index + 1, end - job.header.index - 1, ...job.value.split("\n"), "");
+	}
+	writeFileSync(path, (m ? raw.slice(0, raw.length - body.length) : "") + out.join("\n"));
+}
+
 export function updateTask(
 	root: string,
 	task: Task,
 	patch: { name?: string; priority?: string; summary?: string; specs?: string },
 ): void {
-	const current = parseTask(root, task.file);
-	const m = readFileSync(join(kanbanDir(root), task.file), "utf8").match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-	if (!m) throw new Error(`no frontmatter in ${task.file}`);
 	const attrs: Record<string, string> = {};
-	for (const line of m[1].split("\n")) {
-		const i = line.indexOf(":");
-		if (i < 1) continue;
-		let v = line.slice(i + 1).trim();
-		if (v.startsWith('"') && v.endsWith('"')) v = decodeAttr(v.slice(1, -1));
-		else if (v.startsWith("'") && v.endsWith("'")) v = v.slice(1, -1);
-		attrs[line.slice(0, i).trim()] = v;
-	}
 	if (patch.name !== undefined) attrs.name = patch.name;
 	if (patch.priority !== undefined) attrs.priority = patch.priority;
-	let content = serializeFrontmatter(attrs);
-	if (patch.summary !== undefined || patch.specs !== undefined) {
-		const summary = patch.summary ?? current.summary;
-		const specs = patch.specs ?? current.specs;
-		content += `\n# Summary\n${summary}\n\n# Specs\n${specs}\n\n# Notes\n${current.notes ? current.notes + "\n" : ""}`;
-	} else {
-		content += m[2];
-	}
-	writeFileSync(join(kanbanDir(root), task.file), content);
+	if (Object.keys(attrs).length) updateAttrs(root, task, attrs);
+	const sections: Record<string, string> = {};
+	if (patch.summary !== undefined) sections.summary = patch.summary;
+	if (patch.specs !== undefined) sections.specs = patch.specs;
+	if (Object.keys(sections).length) replaceSections(root, task, sections);
 }
 
 export function setWorktree(root: string, task: Task, worktree: string): void {
