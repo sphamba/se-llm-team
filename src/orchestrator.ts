@@ -378,7 +378,21 @@ function mergeDone(root: string, cfg: Config, task: Task): boolean {
 
 function rescan(root: string, cfg: Config): void {
 	const status = boardStatus(root);
-	for (const task of listAll(root)) {
+	const tasks = listAll(root);
+	// sole commit points: board files not on the mirror yet are new, finished tasks fold in
+	// their whole life; everything else stays unmirrored until done. Creates run first:
+	// commitKanban rebuilds the tree from the whole board, so a done commit later in the
+	// sweep would fold pending creates under its label and the create events would never
+	// surface on the mirror
+	for (const task of tasks) {
+		try {
+			if (task.conflicted) continue;
+			if (status.get(join(".kanban", task.file)) === "??") commitKanban(root, `kanban: create ${task.file}`);
+		} catch (err) {
+			log(root, `error handling ${task.file} (create): ${err instanceof Error ? err.message : err}`);
+		}
+	}
+	for (const task of tasks) {
 		try {
 			// a conflicted file parses bogus values (duplicate keys resolve last-wins, the merged-in
 			// side wins); rewriting or acting on it would resolve the merge with stale state, so
@@ -387,11 +401,10 @@ function rescan(root: string, cfg: Config): void {
 				log(root, `${task.file}: unresolved merge conflict markers, skipping (merger or user resolves)`);
 				continue;
 			}
-			// sole commit points: board files not on the mirror yet are new, finished tasks fold in
-			// their whole life; everything else stays unmirrored until done
+			// "??" here means the pass-one create commit failed (git error): retry it; the
+			// identical-tree guard keeps an already-mirrored file a no-op
 			const code = status.get(join(".kanban", task.file));
 			if (code === "??") commitKanban(root, `kanban: create ${task.file}`);
-			else if (code && task.state === "done" && !task.worktree) commitKanban(root, `kanban: done ${task.file}`);
 			if (task.state === "to-do") startTodo(root, cfg, task);
 			else if (task.state === "to-review") {
 				const ensured = ensureWorktree(root, task);
@@ -409,9 +422,12 @@ function rescan(root: string, cfg: Config): void {
 					setState(root, task, "live-testing");
 				}
 			} else if (task.state === "done") {
-				// the one done commit: after the merge completes, or at once with no worktree;
-				// an unchanged board mirrors as a no-op (commitKanban skips identical trees)
-				if (!task.worktree || mergeDone(root, cfg, task)) commitKanban(root, `kanban: done ${task.file}`);
+				// mergeDone always runs for a done worktree task (it completes the merge and clears
+				// the worktree); the commit is gated on the file actually differing from the mirror,
+				// since an unchanged done task would otherwise issue a whole-board commit every sweep
+				// and fold other tasks' pending changes under its label
+				const merged = !task.worktree || mergeDone(root, cfg, task);
+				if (code && merged) commitKanban(root, `kanban: done ${task.file}`);
 			}
 		} catch (err) {
 			log(root, `error handling ${task.file} (${task.state}): ${err instanceof Error ? err.message : err}`);
