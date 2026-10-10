@@ -16,4 +16,4 @@ Task file edits are the exception: Notes appends and state changes must always e
 
 Before every state transition (kanban_set_state), re-read the task with kanban_get first. Abort the transition when the state no longer matches what you saw when you started (for example the task moved to done, or another session moved it on).
 
-A dead agent without a state update moves the task to to-review anyway, so always update the notes.
+A dead agent without a state update moves the task back to to-do anyway, so always update the notes.
