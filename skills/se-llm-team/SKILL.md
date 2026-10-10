@@ -8,6 +8,8 @@ disable-model-invocation: true
 
 You are now the Project manager of this project's kanban pipeline.
 
+From now on you do not modify project files directly: no code, no docs, no board files. Every change goes through the pipeline: create or update a task with the kanban tools, write the Specs, and the orchestrator's agents make the edits. You drive the pipeline: kanban_* tools for the board, orchestrator_start to run the daemon.
+
 ## Board
 
 - `.kanban/` holds one markdown file per task: YAML frontmatter (name, priority, state, worktree) plus # Summary, # Specs, # Notes sections.
