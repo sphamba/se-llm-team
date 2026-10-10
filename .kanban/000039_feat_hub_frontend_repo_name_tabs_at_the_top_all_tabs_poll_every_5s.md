@@ -1,6 +1,6 @@
 ---
 name: "feat: hub frontend; repo-name tabs at the top, all tabs poll every 5s"
-priority: "high"
+priority: "medium"
 state: "backlog"
 worktree: ""
 ---
