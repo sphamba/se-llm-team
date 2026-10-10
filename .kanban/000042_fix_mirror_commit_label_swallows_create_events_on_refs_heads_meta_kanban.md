@@ -20,6 +20,7 @@ CONSEQUENCE: (1) A task created right after any done-no-worktree task exists nev
 SUGGESTED DIRECTION (for the dev to decide): in rescan, process "??" (create) files before done files, or label the commit from the actual diff; keep the self-heal behavior (identical-tree no-op skip, deleted-file/disk-drift heal on next mirror commit).
 
 # Notes
+- [2026-10-10 22:20] Merge conflict for branch fix/mirror-commit-label-swallows-create-events-on-refs-heads-meta-kanban, merger spawned (attempt 1).
 
 - 2026-10-10 22:15 Implemented in src/orchestrator.ts, rescan(): split the task loop into two passes. Pass one commits "kanban: create <file>" for every "??" (not-yet-mirrored) file before anything else, so a later whole-board done commit can no longer fold pending creates under its label. Pass two keeps the original branches; the create branch there now only retries a failed pass-one commit (identical-tree guard makes it a no-op otherwise).
 - Gated the done commit on the file actually differing from the mirror (`if (code && merged)`) instead of calling commitKanban unconditionally. mergeDone still runs for every done worktree task (it completes the merge and clears the worktree), so the merge lifecycle is unchanged; the redundant middle branch (`code && done && !worktree`) was removed, it is fully covered by the gated done branch.
