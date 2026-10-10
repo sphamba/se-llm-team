@@ -24,7 +24,7 @@ ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
 
 ## Kanban board
 
-`.kanban/` in the project repo holds one markdown file per task, named `000001_feat_nice_thing.md`. Flat YAML frontmatter (name, priority, state, worktree) plus # Summary, # Specs, # Notes sections. The library commits every board change (only `.kanban/` paths) to git.
+`.kanban/` in the project repo holds one markdown file per task, named `000001_feat_nice_thing.md`. Flat YAML frontmatter (name, priority, state, worktree) plus # Summary, # Specs, # Notes sections. The library commits task files to git at two points only: creation in backlog, and done (only `.kanban/` paths). Edits in between stay uncommitted and land in the one done commit.
 
 States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing, done.
 
@@ -37,7 +37,7 @@ States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing,
 - to-review: spawns a Reviewer, moves to reviewing.
 - to-live-test: spawns a Live-tester, moves to live-testing.
 - Liveness poll: an agent dead without a state update moves the task on (doing and reviewing to to-review, live-testing to done). Capped at 5 respawns per task.
-- done with a worktree: merges the branch into the main checkout, removes the worktree, deletes the branch. On conflict, spawns a Merger agent, capped at 3 attempts.
+- done with a worktree: merges the branch into the main checkout, removes the worktree, deletes the branch, then commits the task file (the done commit). On conflict, spawns a Merger agent, capped at 3 attempts. done without a worktree: the orchestrator commits the task file at the next rescan. The done commit is skipped when the file has nothing uncommitted.
 
 ## Agents
 

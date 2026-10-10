@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendNote, createTask, getTask, listAll, listTasks, parseTask, setState, setWorktree, slugFile, slugWorktree, updateTask } from "./kanban.ts";
@@ -66,11 +67,42 @@ assert.equal(parseTask(root, t4.file).name, 'feat: "quoted" \\ and\nnewline');
 setState(root, t4, "to-do"); // attribute rewrite must not compound escaping
 assert.equal(parseTask(root, t4.file).name, 'feat: "quoted" \\ and\nnewline');
 
+// commit policy: task files commit only at create and done
+const gitRoot = mkdtempSync(join(tmpdir(), "kanban-git-"));
+execSync("git init -q", { cwd: gitRoot });
+execSync("git config user.email t@t && git config user.name t && git config commit.gpgsign false", {
+	cwd: gitRoot,
+	shell: "/bin/bash",
+});
+writeFileSync(join(gitRoot, "README.md"), "x\n");
+execSync("git add -A && git commit -qm init", { cwd: gitRoot, shell: "/bin/bash" });
+const commitCount = () => parseInt(execSync("git rev-list --count HEAD", { cwd: gitRoot, encoding: "utf8" }).trim(), 10);
+const lastCommit = () => execSync("git log -1 --format=%s", { cwd: gitRoot, encoding: "utf8" }).trim();
+const dirty = (file: string) => execSync(`git status --porcelain -- .kanban/${file}`, { cwd: gitRoot, encoding: "utf8" }).trim();
+assert.equal(commitCount(), 1);
+const g1 = createTask(gitRoot, { name: "feat: committed", summary: "s" });
+assert.equal(lastCommit(), "kanban: create 000001_feat_committed.md");
+assert.equal(commitCount(), 2);
+setState(gitRoot, g1, "to-do");
+setWorktree(gitRoot, g1, "feat/committed");
+appendNote(gitRoot, g1, "mid-flight note");
+updateTask(gitRoot, g1, { summary: "s2" });
+assert.equal(commitCount(), 2); // no commits between create and done
+assert.notEqual(dirty(g1.file), ""); // edits stay uncommitted until done
+setState(gitRoot, g1, "done");
+assert.equal(lastCommit(), "kanban: done 000001_feat_committed.md");
+assert.equal(commitCount(), 3);
+assert.equal(dirty(g1.file), "");
+setState(gitRoot, g1, "done"); // no-change state move must not repeat the done commit
+assert.equal(commitCount(), 3);
+rmSync(gitRoot, { recursive: true, force: true });
+
 // no git repo must not throw (commit returns false)
 const noGit = mkdtempSync(join(tmpdir(), "kanban-nogit-"));
 const t3 = createTask(noGit, { name: "feat: no repo", summary: "s" });
 assert.equal(t3.file, "000001_feat_no_repo.md");
 assert.equal(setState(noGit, t3, "to-do"), undefined);
+assert.equal(setState(noGit, t3, "done"), undefined);
 rmSync(noGit, { recursive: true, force: true });
 
 rmSync(root, { recursive: true, force: true });
