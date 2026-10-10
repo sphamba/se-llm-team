@@ -2,7 +2,7 @@
 name: "chore: merge origin/main into main"
 priority: "high"
 state: "done"
-worktree: "chore/merge-origin-main-into-main"
+worktree: ""
 ---
 
 # Summary
