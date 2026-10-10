@@ -1,7 +1,7 @@
 ---
 name: "fix: orchestrator_start tool throws and daemon status lies"
 priority: "high"
-state: "reviewing"
+state: "to-review"
 worktree: "fix/orchestrator-start-tool-throws-and-daemon-status-lies"
 ---
 
@@ -49,3 +49,6 @@ The PM skill cannot start the orchestrator through its tool, and the tools canno
 - [2026-10-10 19:05] Defect B fixed: every sweep now verifies the lock, re-acquires it when missing, and exits when a live peer holds it, so the singleton stays intact and a lockless daemon heals or quits within one rescan. pidAlive treats EPERM as alive in both files. orchestrator_start returns "Orchestrator already running (pid X)" without spawning, which the PM skill already documents as a no-op. The fs.watch error event is guarded, so a deleted board degrades to polling instead of crashing.
 - [2026-10-10 19:05] Tests: kanban.test.ts and orchestrator.test.ts pass. New part C asserts the lock lifecycle: acquire with the daemon pid, a second start attempt exits and does not take the lock, self-heal after a mid-life deletion, release on SIGTERM stop. Manual check with the fixed code on a fixture: status reports running with the pid after start, not running after stop. No leaked processes from the runs.
 - [2026-10-10 19:05] Operational note: the running daemon (pid 420117) predates the fix and holds no lock. Stop it and start it again with the new code after merge, or its status/stop keep lying.
+- [2026-10-10 19:15] Review pass (commit 1dc0fb8): one fix. Verified defect A (daemonLog passes ctx) and defect B (sweep self-heal, EPERM-as-alive pidAlive in both files, fs.watch error guard) against every Required behavior and acceptance criterion. Ran node src/kanban.test.ts and node src/orchestrator.test.ts, both pass. Part C asserts the full lock lifecycle: acquire with the daemon pid, a second start exits without taking the lock, self-heal after a mid-life deletion, release on SIGTERM stop. No leaked processes from the runs. The message shapes of all three tools are unchanged. No merge conflict risk: the branch leaves the .kanban files unchanged from the merge base, so the task file copy in main survives the merge as is.
+- [2026-10-10 19:15] Fix (commit 1dc0fb8): acquireLock's stale-recovery path read the lock unguarded, so a lock that vanished between the failed wx and the read threw out of acquireLock. From the daemon's sweep self-heal that was an uncaught exception in a timer callback, which killed the daemon. From the initial acquire it killed the freshly spawned daemon with a stack trace instead of the clean already-runs exit. The read is now guarded: a vanished lock counts as lost the race and the caller stays out. Tests re-run and pass.
+- [2026-10-10 19:15] Residual, left as approved: two starters on a stale lock can still race, one rmSyncs the other's fresh lock, as the developer notes say. The self-heal bounds the damage to one rescan, after which the loser exits. A full fix needs an atomic replace, which the fs module does not offer for remove plus create.
