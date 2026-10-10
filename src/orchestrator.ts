@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
 	appendNote,
+	commitKanban,
 	getTask,
 	kanbanDir,
 	listAll,
@@ -153,14 +154,15 @@ function startTodo(root: string, cfg: Config, task: Task): void {
 	setState(root, task, "doing");
 }
 
-function mergeDone(root: string, cfg: Config, task: Task): void {
+// returns true when the done transition is fully processed: nothing left to merge, or the merge completed
+function mergeDone(root: string, cfg: Config, task: Task): boolean {
 	const branch = task.worktree;
 	const wtDir = join(root, ".worktrees", branch);
 	const slug = task.file.replace(/\.md$/, "");
-	if (pidAlive(agentPid(root, `${slug}.merger`))) return;
+	if (pidAlive(agentPid(root, `${slug}.merger`))) return false;
 	if (!existsSync(wtDir) && git(root, ["branch", "--list", branch], true) === "") {
 		setWorktree(root, task, "");
-		return;
+		return true;
 	}
 	if (git(root, ["merge", "--no-edit", branch], true) !== null) {
 		// --force only drops uncommitted worktree debris; the merged branch content is already in main
@@ -168,16 +170,17 @@ function mergeDone(root: string, cfg: Config, task: Task): void {
 		git(root, ["branch", "-d", branch], true);
 		setWorktree(root, task, "");
 		log(root, `merged ${branch} for ${task.file}`);
-		return;
+		return true;
 	}
 	const attempts = bumpCounter(root, `${slug}.merge-attempts`);
 	if (attempts > MERGE_ATTEMPT_CAP) {
 		log(root, `merge of ${branch} for ${task.file} still conflicts after ${MERGE_ATTEMPT_CAP} attempts, left for manual resolution`);
-		return;
+		return false;
 	}
 	log(root, `merge conflict for ${branch}, spawning merger (attempt ${attempts})`);
 	appendNote(root, task, `Merge conflict for branch ${branch}, merger spawned (attempt ${attempts}).`);
 	spawnAgent(root, cfg.agent, "merger", task, root, `${slug}.merger`);
+	return false;
 }
 
 function rescan(root: string, cfg: Config): void {
@@ -191,7 +194,10 @@ function rescan(root: string, cfg: Config): void {
 			} else if (task.state === "to-live-test") {
 				spawnAgent(root, cfg.agent, "live-tester", task, wtDir);
 				setState(root, task, "live-testing");
-			} else if (task.state === "done" && task.worktree) mergeDone(root, cfg, task);
+			} else if (task.state === "done") {
+				// the one done commit: after the merge completes, or at once with no worktree
+				if (!task.worktree || mergeDone(root, cfg, task)) commitKanban(root, [task.file], `kanban: done ${task.file}`);
+			}
 		} catch (err) {
 			log(root, `error handling ${task.file} (${task.state}): ${err instanceof Error ? err.message : err}`);
 		}
