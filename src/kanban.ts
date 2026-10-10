@@ -204,11 +204,6 @@ export function createTask(
 	root: string,
 	input: { name: string; priority?: Priority | string; summary: string; specs?: string },
 ): Task {
-	const nums = taskFiles(root)
-		.map((f) => parseInt(f.slice(0, 6), 10))
-		.filter((n) => !Number.isNaN(n));
-	const num = String((nums.length ? Math.max(...nums) : 0) + 1).padStart(6, "0");
-	const file = `${num}_${slugFile(input.name)}.md`;
 	const priority = (["low", "medium", "high", "critical"] as const).includes(input.priority as Priority)
 		? input.priority
 		: "medium";
@@ -216,6 +211,18 @@ export function createTask(
 		`${serializeFrontmatter({ name: input.name, priority, state: "backlog", worktree: "" })}\n` +
 		`# Summary\n${input.summary.trim()}\n\n# Specs\n${(input.specs ?? "").trim()}\n\n# Notes\n`;
 	mkdirSync(kanbanDir(root), { recursive: true });
-	writeFileSync(join(kanbanDir(root), file), content);
-	return parseTask(root, file);
+	for (let attempt = 0; attempt < 10; attempt++) {
+		const nums = taskFiles(root)
+			.map((f) => parseInt(f.slice(0, 6), 10))
+			.filter((n) => !Number.isNaN(n));
+		const num = String((nums.length ? Math.max(...nums) : 0) + 1).padStart(6, "0");
+		const file = `${num}_${slugFile(input.name)}.md`;
+		try {
+			writeFileSync(join(kanbanDir(root), file), content, { flag: "wx" });
+			return parseTask(root, file);
+		} catch (e) {
+			if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+		}
+	}
+	throw new Error(`could not allocate a task number for "${input.name}" after 10 attempts`);
 }

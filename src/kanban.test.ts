@@ -92,5 +92,21 @@ assert.equal(sh("git rev-list --count HEAD").trim(), "1"); // intermediate updat
 assert.match(sh("git status --porcelain -uall"), new RegExp(`\\?\\? \\.kanban/${tg.file}`)); // still uncommitted
 rmSync(gitRoot, { recursive: true, force: true });
 
+// number allocation: repeated creates never share a number
+const raceRoot = mkdtempSync(join(tmpdir(), "kanban-race-"));
+const created: string[] = [];
+for (let i = 0; i < 5; i++) {
+	created.push(createTask(raceRoot, { name: `feat: race ${i}`, summary: "s" }).file);
+}
+assert.equal(new Set(created).size, created.length);
+// a concurrent create landed between the max scan and the write: target file already exists
+writeFileSync(join(raceRoot, ".kanban", "000006_other_creator.md"), '---\nname: "other"\n---\n');
+const tr = createTask(raceRoot, { name: "feat: racer", summary: "s" });
+assert.equal(tr.file, "000007_feat_racer.md"); // bumped to the next free number
+assert.match(readFileSync(join(raceRoot, ".kanban", "000006_other_creator.md"), "utf8"), /other/); // not overwritten
+created.push(tr.file);
+assert.equal(new Set(created).size, created.length);
+rmSync(raceRoot, { recursive: true, force: true });
+
 rmSync(root, { recursive: true, force: true });
 console.log("kanban.test.ts: all assertions passed");
