@@ -12,14 +12,20 @@ export interface WebUiConfig {
 	port: number;
 }
 
-// ~/.pi/agent/se-llm-team.json; a missing file, invalid JSON or absent keys mean off
-export function loadWebUiConfig(): WebUiConfig {
-	try {
-		const webUi = JSON.parse(readFileSync(join(process.env.HOME ?? "", ".pi", "agent", "se-llm-team.json"), "utf8")).webUi;
-		return { enabled: webUi?.enabled === true, host: webUi?.host ?? DEFAULT_HOST, port: webUi?.port ?? DEFAULT_PORT };
-	} catch {
-		return { enabled: false, host: DEFAULT_HOST, port: DEFAULT_PORT };
+// se-llm-team.json: user level first, project .kanban/se-llm-team.json overrides it;
+// a missing file, invalid JSON or absent keys mean off
+export function loadWebUiConfig(root?: string): WebUiConfig {
+	const paths = [join(process.env.HOME ?? "", ".pi", "agent", "se-llm-team.json")];
+	if (root) paths.push(join(root, ".kanban", "se-llm-team.json"));
+	let webUi: { enabled?: boolean; host?: string; port?: number } | undefined;
+	for (const path of paths) {
+		try {
+			webUi = JSON.parse(readFileSync(path, "utf8")).webUi ?? webUi;
+		} catch {
+			// missing file or invalid JSON
+		}
 	}
+	return { enabled: webUi?.enabled === true, host: webUi?.host ?? DEFAULT_HOST, port: webUi?.port ?? DEFAULT_PORT };
 }
 
 function taskBody(root: string, file: string): string {

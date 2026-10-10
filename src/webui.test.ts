@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask } from "./kanban.ts";
-import { startWebUi } from "./webui.ts";
+import { loadWebUiConfig, startWebUi } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing", "done"];
@@ -25,6 +25,12 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 		process.exit(sig === "SIGINT" ? 130 : 143);
 	});
 }
+
+// absent or invalid config = off (HOME at the empty temp home, no board config yet)
+const realHome = process.env.HOME;
+process.env.HOME = home;
+assert.equal(loadWebUiConfig(root).enabled, false);
+process.env.HOME = realHome;
 
 // startWebUi on port 0 against a temp board with one task
 const task = createTask(root, { name: "feat: webui smoke", summary: "Dashboard smoke", specs: "Render the board" });
@@ -82,6 +88,17 @@ assert.equal(viaDaemon.length, 1);
 assert.equal(viaDaemon[0].file, task.file);
 daemon.kill("SIGTERM");
 await Promise.race([exited, new Promise((r) => setTimeout(r, 5000))]);
+
+// project .kanban/se-llm-team.json overrides the user file for webUi
+process.env.HOME = home;
+writeFileSync(join(root, ".kanban", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: 4243 } }));
+const overridden = loadWebUiConfig(root);
+assert.equal(overridden.host, "127.0.0.1");
+assert.equal(overridden.port, 4243);
+// a project file without webUi falls back to the user file
+writeFileSync(join(root, ".kanban", "se-llm-team.json"), JSON.stringify({ pollMinutes: 5 }));
+assert.equal(loadWebUiConfig(root).enabled, true);
+process.env.HOME = realHome;
 
 cleanup();
 console.log("webui.test.ts: all assertions passed");

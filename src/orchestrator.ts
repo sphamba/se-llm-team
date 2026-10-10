@@ -405,7 +405,7 @@ export function main(argv: string[]): void {
 	} catch (err) {
 		log(root, `fs.watch unavailable, polling only: ${err instanceof Error ? err.message : err}`);
 	}
-	const webUi = loadWebUiConfig();
+	const webUi = loadWebUiConfig(root);
 	if (webUi.enabled) {
 		startWebUi(root, webUi)
 			.then((ui) => (ui ? log(root, `web ui on http://${webUi.host}:${ui.port}`) : log(root, "web ui failed to start, continuing without it")))
