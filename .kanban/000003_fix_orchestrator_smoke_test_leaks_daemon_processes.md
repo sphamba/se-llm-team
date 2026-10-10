@@ -1,7 +1,7 @@
 ---
 name: "fix: orchestrator smoke test leaks daemon processes"
 priority: "low"
-state: "doing"
+state: "reviewing"
 worktree: "fix/orchestrator-smoke-test-leaks-daemon-processes"
 ---
 
@@ -31,3 +31,21 @@ Running src/orchestrator.test.ts leaks daemon processes. Verified with ps: pids 
 - The already leaked processes are killed (housekeeping, part of this task).
 
 # Notes
+
+## 2026-10-24, developer
+
+Root cause: `src/orchestrator.test.ts` killed its daemons only on the happy path (`daemon.kill("SIGTERM")` after the assertions). A failed assert, a `waitFor` timeout (which called `process.exit(1)` without killing anything), or an interrupt left the daemons running. Agents spawned detached by the daemons survive a daemon kill, so they needed their own cleanup path.
+
+Fix (only src/orchestrator.test.ts, 49 insertions, 7 deletions):
+
+- Every daemon is registered in a `daemons` list at spawn.
+- `killAll()` SIGKILLs all registered daemons, then kills every agent the daemons spawned, read from each root's `.pids/` pidfiles. Each pid is killed only if `/proc/<pid>/cmdline` still references the root, so a recycled pid never takes an unrelated process down.
+- Cleanup hooks: `process.on("exit")` runs `killAll()` plus the existing fixture-dir removal, so failed asserts and unhandled rejections clean up (verified: the exit event fires on both). Explicit SIGINT/SIGTERM handlers do the same and exit 130/143, since the default signal action skips exit handlers.
+- `waitFor`'s timeout path now calls `killAll()` instead of only removing the fixture dirs.
+- Assertions and daemon code unchanged.
+
+Verification: `node src/orchestrator.test.ts` passes; after it finishes `ps aux | grep orch-smoke` and `/tmp/orch-smoke-*` show nothing from that run. A deliberately broken copy (failed assert) exits 1 with no leftovers. SIGTERM mid-run exits 143 with no leftovers, confirmed with an instrumented copy showing the handler firing and killing the daemon. Agents in the smoke test are stubs that exit instantly, so the pidfile sweep is a no-op there by design.
+
+Housekeeping: killed the leaked daemons listed in the task (all already gone except pid 527983, which ran from the old poll-respawns worktree) and removed the stale `/tmp/orch-smoke-*` roots. Daemons seen during verification from the other task worktrees (orchestrator-start-tool-throws, commit-kanban-tasks) were concurrent live runs of the old test there, not mine, and were left alone. Pid 420117 is the repo's real orchestrator daemon (root se-llm-team), not a leak.
+
+Note: one earlier verification round appeared to leak pid 627243, but that was a flaw in my own test command (`cd X && node test & TESTPID=$!` made `$!` the subshell pid, so the SIGTERM never reached node, which was still running mid-test when checked). Not a code bug; later rounds with correct pid capture were clean.
