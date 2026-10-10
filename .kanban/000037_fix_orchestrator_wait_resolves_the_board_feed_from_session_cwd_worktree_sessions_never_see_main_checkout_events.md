@@ -2,7 +2,7 @@
 name: "fix: orchestrator_wait resolves the board feed from session cwd; worktree sessions never see main-checkout events"
 priority: "medium"
 state: "to-do"
-worktree: ""
+worktree: "fix/orchestrator-wait-resolves-the-board-feed-from-session-cwd-worktree-sessions-never-see-main-checkout-events"
 ---
 
 # Summary
