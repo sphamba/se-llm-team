@@ -81,8 +81,8 @@ const daemons: { daemon: ChildProcess; root: string }[] = [];
 // the cmdline guard keeps a recycled pid from getting an unrelated process killed
 const agentPids = (root: string): number[] => {
 	try {
-		return readdirSync(join(root, ".pids")).flatMap((f) => {
-			const pid = parseInt(readFileSync(join(root, ".pids", f), "utf8").trim(), 10);
+		return readdirSync(join(kanbanDir(root), ".pids")).flatMap((f) => {
+			const pid = parseInt(readFileSync(join(kanbanDir(root), ".pids", f), "utf8").trim(), 10);
 			try {
 				return readFileSync(`/proc/${pid}/cmdline`, "utf8").includes(root) ? [pid] : [];
 			} catch {
