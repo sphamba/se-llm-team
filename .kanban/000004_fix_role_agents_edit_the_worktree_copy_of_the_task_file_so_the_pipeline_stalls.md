@@ -1,7 +1,7 @@
 ---
 name: "fix: role agents edit the worktree copy of the task file, so the pipeline stalls"
 priority: "high"
-state: "to-do"
+state: "doing"
 worktree: "fix/role-agents-edit-the-worktree-copy-of-the-task-file-so-the-pipeline-stalls"
 ---
 
