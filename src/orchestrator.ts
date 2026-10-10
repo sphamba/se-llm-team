@@ -273,6 +273,13 @@ function rescan(root: string, cfg: Config): void {
 	const status = boardStatus(root);
 	for (const task of listAll(root)) {
 		try {
+			// a conflicted file parses bogus values (duplicate keys resolve last-wins, the merged-in
+			// side wins); rewriting or acting on it would resolve the merge with stale state, so
+			// leave it untouched until the merger or the user resolves it
+			if (task.conflicted) {
+				log(root, `${task.file}: unresolved merge conflict markers, skipping (merger or user resolves)`);
+				continue;
+			}
 			// sole commit points: untracked board files are new, finished tasks fold in
 			// their whole life; everything else stays uncommitted until done
 			const code = status.get(join(".kanban", task.file));
@@ -313,6 +320,8 @@ const DEAD_TRANSITIONS: Partial<Record<TaskState, TaskState>> = {
 function poll(root: string, cfg: Config): void {
 	for (const task of listAll(root)) {
 		try {
+			// no state rewrite on a conflicted file: the parse is bogus and the merger owns resolution
+			if (task.conflicted) continue;
 			const next = DEAD_TRANSITIONS[task.state];
 			if (!next) continue;
 			const slug = task.file.replace(/\.md$/, "");
