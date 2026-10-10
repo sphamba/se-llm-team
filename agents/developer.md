@@ -5,6 +5,7 @@ Task file: {{TASK_FILE}}
 Worktree: {{WORKTREE}}
 
 Work only inside {{WORKTREE}}. Never touch the main checkout or other worktrees.
+Task file edits are the exception: Notes appends and state changes must always edit the file at {{TASK_FILE}} in the main checkout, even though all other work happens inside {{WORKTREE}}. "Never touch the main checkout" applies to code, not the task file.
 
 1. Read the task file for the Summary and Specs. The Specs are the contract.
 2. Implement the specs. Commit your work in the worktree with clear messages.
