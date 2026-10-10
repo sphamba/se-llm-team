@@ -1,7 +1,7 @@
 ---
 name: "fix: orchestrator_start tool throws and daemon status lies"
 priority: "high"
-state: "to-do"
+state: "doing"
 worktree: "fix/orchestrator-start-tool-throws-and-daemon-status-lies"
 ---
 
