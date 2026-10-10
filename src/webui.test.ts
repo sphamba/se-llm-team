@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,10 +47,13 @@ assert.equal(listed[0].name, task.name);
 assert.equal(listed[0].priority, "medium");
 assert.equal(listed[0].state, "backlog");
 assert.equal(listed[0].worktree, "");
+assert.equal(listed[0].updated, statSync(join(root, ".kanban", task.file)).mtimeMs);
 assert.match(listed[0].body, /# Summary\nDashboard smoke/);
 
 // GET / mentions all 8 state names; other paths and methods are 404
 const page = await (await fetch(`${base}/`)).text();
+assert.ok(page.includes("Software Engineering LLM Team"), "page shows the new title");
+assert.ok(page.includes('id="theme"'), "page has the theme toggle");
 for (const st of STATE_NAMES) assert.ok(page.includes(st), `page mentions state ${st}`);
 assert.equal((await fetch(`${base}/nope`)).status, 404);
 assert.equal((await fetch(`${base}/api/tasks`, { method: "POST" })).status, 404);
