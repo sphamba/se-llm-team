@@ -20,7 +20,7 @@ ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `agent` | `pi` | Executable the orchestrator spawns for agents. |
-| `pollMinutes` | `15` | Agent liveness poll interval. |
+| `pollMinutes` | `1` | Agent liveness poll interval. |
 | `webUi.enabled` | off | Serve the web dashboard with the daemon. |
 | `webUi.host` | `localhost` | Dashboard bind host. |
 | `webUi.port` | `4242` | Dashboard port. |
