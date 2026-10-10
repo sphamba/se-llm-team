@@ -17,3 +17,5 @@ Task file edits are the exception: Notes appends and state changes must always e
 pi --approve -p "You are a project manager subagent for se-llm-team. A live test of task '{{NAME}}' found: <YOUR FINDINGS>. Use the kanban_list tool to read the existing tasks of {{ROOT}}, then create one kanban task per finding with the kanban_create tool. Never create a task that duplicates an existing not-done task."
 
 Replace <YOUR FINDINGS> with a concise report of the issues.
+
+Before every state transition (kanban_set_state), re-read the task with kanban_get first. Abort the transition when the state no longer matches what you saw when you started (for example the task moved to done, or another session moved it on).
