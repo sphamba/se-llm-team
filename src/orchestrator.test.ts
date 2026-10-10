@@ -21,6 +21,15 @@ function fixture(): string {
 	return root;
 }
 
+// subjects of the board mirror branch; "" before the first mirror commit (or without git)
+const mirrorSubjects = (root: string) => {
+	try {
+		return execSync("git log --format=%s refs/heads/meta/kanban", { cwd: root, encoding: "utf8" }).trim();
+	} catch {
+		return "";
+	}
+};
+
 // stub agent: parses its role out of the prompt and applies the pipeline transition;
 // the developer also commits a code change, so the merge is a real one and the blanket
 // git add -A in the worktree proves board changes cannot be staged
@@ -147,6 +156,10 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 // --- part A: happy pipeline with a working stub ---
 const rootA = fixture();
 cleaned.push(rootA);
+// bare origin for the auto-push checks: the daemon must push only the board mirror there
+const remoteA = `${rootA}-origin.git`;
+execSync(`git init -q --bare ${remoteA}`, { shell: "/bin/bash" });
+execSync(`git remote add origin ${remoteA}`, { cwd: rootA, shell: "/bin/bash" });
 mkdirSync(kanbanDir(rootA), { recursive: true });
 writeFileSync(join(kanbanDir(rootA), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootA), pollMinutes: 0.05 }));
 const taskA = createTask(rootA, { name: "feat: smoke test", summary: "Pipeline smoke", specs: "Run the full pipeline" });
@@ -155,28 +168,31 @@ setState(rootA, taskA, "to-do");
 const a = await runDaemon(rootA);
 const readA = () => parseTask(rootA, taskA.file);
 
-const taskClean = () => !execSync(`git status --porcelain -- .kanban/${taskA.file}`, { cwd: rootA, encoding: "utf8" }).trim();
-// to-do -> doing -> to-review -> reviewing -> to-live-test -> live-testing -> done -> merge -> done commit.
+const taskClean = () => mirrorSubjects(rootA).includes(`kanban: done ${taskA.file}`);
+// to-do -> doing -> to-review -> reviewing -> to-live-test -> live-testing -> done -> merge -> done mirror commit.
 // The stub transitions in milliseconds, so intermediate states are asserted through the daemon log.
-await waitFor(() => readA().state === "done" && readA().worktree === "" && taskClean(), 60000, "full pipeline + merge + done commit", a.output);
+await waitFor(() => readA().state === "done" && readA().worktree === "" && taskClean(), 60000, "full pipeline + merge + done mirror commit", a.output);
 for (const marker of ["spawned developer", "spawned reviewer", "spawned live-tester", "merged feat/smoke-test"]) {
 	assert.ok(a.output().includes(marker), `expected daemon log to contain: ${marker}`);
 }
 assert.ok(!existsSync(join(rootA, ".worktrees", "feat/smoke-test")), "worktree removed");
-// the daemon is the sole committer: done folds in the whole task life, exactly one
-// create and one done board commit, nothing else; the merged work never touched .kanban
-await waitFor(
-	() => execSync(`git status --porcelain -- .kanban/${taskA.file}`, { cwd: rootA, encoding: "utf8" }).trim() === "",
-	60000,
-	"done commit",
-	a.output,
-	rootA,
-);
-const boardLog = execSync("git log --format=%s -- .kanban", { cwd: rootA, encoding: "utf8" }).trim().split("\n");
-assert.deepEqual(boardLog, [`kanban: done ${taskA.file}`, `kanban: create ${taskA.file}`]); // newest first
-const committed = execSync(`git show HEAD:.kanban/${taskA.file}`, { cwd: rootA, encoding: "utf8", shell: "/bin/bash" });
+// the board mirrors to refs/heads/meta/kanban via plumbing, never onto the current branch:
+// done folds in the whole task life, exactly one create and one done commit, newest first;
+// the merged work never touched .kanban and main history gets no board commits
+const boardLog = mirrorSubjects(rootA).split("\n");
+assert.deepEqual(boardLog, [`kanban: done ${taskA.file}`, `kanban: create ${taskA.file}`]);
+assert.equal(execSync("git log --format=%s -- .kanban", { cwd: rootA, encoding: "utf8" }).trim(), "", "board commits landed on main history");
+const committed = execSync(`git show refs/heads/meta/kanban:.kanban/${taskA.file}`, { cwd: rootA, encoding: "utf8", shell: "/bin/bash" });
 assert.match(committed, /^state: "done"$/m);
 assert.match(committed, /^worktree: ""$/m);
+// auto-push: the board mirror reaches origin, and nothing else does
+const mirrorSha = execSync("git rev-parse refs/heads/meta/kanban", { cwd: rootA, encoding: "utf8" }).trim();
+assert.equal(execSync("git rev-parse refs/heads/meta/kanban", { cwd: remoteA, encoding: "utf8" }).trim(), mirrorSha, "meta/kanban auto-pushed to origin");
+assert.equal(
+	execSync("git for-each-ref --format='%(refname)' refs/heads", { cwd: remoteA, encoding: "utf8" }).trim(),
+	"refs/heads/meta/kanban",
+	"only meta/kanban is pushed to origin",
+);
 a.daemon.kill("SIGTERM");
 
 // --- part B: dead agents get moved forward by the liveness poll, capped at 5 respawns ---
@@ -253,9 +269,9 @@ await waitFor(
 	rootD,
 );
 assert.equal(readlinkSync(wtBoardD), kanbanDir(rootD)); // absolute path to the shared board
-const tags = execSync("git ls-files -v .kanban", { cwd: wtD, encoding: "utf8" }).trim().split("\n");
-assert.ok(tags.length > 0, "stale board entries are tracked in the worktree");
-assert.ok(tags.every((l) => l.startsWith("S ")), `expected skip-worktree on all board entries: ${tags.join(", ")}`);
+// the board is untracked (mirror commits never touch the index), so the worktree index
+// carries no board entries at all and the symlink stays invisible to the worktree's git
+assert.equal(execSync("git ls-files .kanban", { cwd: wtD, encoding: "utf8" }).trim(), "", "worktree index tracks no board entries");
 assert.equal(
 	execSync("git status --porcelain", { cwd: wtD, encoding: "utf8" }).split("\n").filter((l) => l.includes(".kanban")).length,
 	0,
@@ -335,20 +351,12 @@ await waitFor(() => parseTask(rootG, taskG.file).state === "done", 30000, "live-
 // no merge, no worktree removal, no done commit
 await new Promise((r) => setTimeout(r, 2000));
 assert.ok(existsSync(wtG), "worktree kept while the live-tester pid is alive");
-assert.ok(
-	execSync(`git status --porcelain -- .kanban/${taskG.file}`, { cwd: rootG, encoding: "utf8" }).trim() !== "",
-	"no done commit while the live-tester pid is alive",
-);
-// once the agent exits, the deferred merge and the done commit run and fold in the report
+assert.ok(!mirrorSubjects(rootG).includes(`kanban: done ${taskG.file}`), "no done mirror commit while the live-tester pid is alive");
+// once the agent exits, the deferred merge and the done mirror commit run and fold in the report
 await waitFor(() => !existsSync(wtG), 30000, "merge after agent death", g.output);
-await waitFor(
-	() => execSync(`git status --porcelain -- .kanban/${taskG.file}`, { cwd: rootG, encoding: "utf8" }).trim() === "",
-	30000,
-	"deferred done commit",
-	g.output,
-);
-const committedG = execSync(`git show HEAD:.kanban/${taskG.file}`, { cwd: rootG, encoding: "utf8", shell: "/bin/bash" });
-assert.match(committedG, /Live test report: merge waited for the live-tester pid\./, "report folded into the done commit");
+await waitFor(() => mirrorSubjects(rootG).includes(`kanban: done ${taskG.file}`), 30000, "deferred done mirror commit", g.output);
+const committedG = execSync(`git show refs/heads/meta/kanban:.kanban/${taskG.file}`, { cwd: rootG, encoding: "utf8", shell: "/bin/bash" });
+assert.match(committedG, /Live test report: merge waited for the live-tester pid\./, "report folded into the done mirror commit");
 g.daemon.kill("SIGTERM");
 
 // --- part H: the main-entry guard holds when the daemon is spawned through a symlink ---
@@ -470,4 +478,29 @@ assert.equal(giveUpsK(), 1, "give-up not logged again past the cap");
 assert.equal(parseTask(rootK, taskK.file).state, "done", "stuck task stays done for manual resolution");
 k.daemon.kill("SIGTERM");
 
-console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard + conflict skip + merge cap smoke passed");
+// --- part L: bootstrap materializes board files missing from .kanban/ from the mirror branch ---
+const rootL = fixture();
+cleaned.push(rootL);
+mkdirSync(kanbanDir(rootL), { recursive: true });
+writeFileSync(join(kanbanDir(rootL), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootL), pollMinutes: 0.05 }));
+const taskL = createTask(rootL, { name: "fix: bootstrap board", summary: "Bootstrap smoke", specs: "n/a" });
+// board content on refs/heads/meta/kanban via the same plumbing the daemon uses, then the
+// working board file removed: the daemon must materialize it on startup (fresh clone)
+const shaL = execSync(`git hash-object -w .kanban/${taskL.file}`, { cwd: rootL, encoding: "utf8", shell: "/bin/bash" }).trim();
+const boardTreeL = execSync("git mktree", { cwd: rootL, input: `100644 blob ${shaL}\t${taskL.file}\n`, encoding: "utf8" }).trim();
+const rootTreeL = execSync("git mktree", { cwd: rootL, input: `040000 tree ${boardTreeL}\t.kanban\n`, encoding: "utf8" }).trim();
+const commitL = execSync(`git commit-tree ${rootTreeL} -m "kanban: create ${taskL.file}"`, { cwd: rootL, encoding: "utf8", shell: "/bin/bash" }).trim();
+execSync(`git update-ref refs/heads/meta/kanban ${commitL}`, { cwd: rootL, shell: "/bin/bash" });
+const contentL = readFileSync(join(kanbanDir(rootL), taskL.file), "utf8");
+rmSync(join(kanbanDir(rootL), taskL.file));
+
+const l = await runDaemon(rootL);
+await waitFor(() => existsSync(join(kanbanDir(rootL), taskL.file)), 10000, "bootstrap materialized the board from the mirror branch", l.output);
+assert.equal(readFileSync(join(kanbanDir(rootL), taskL.file), "utf8"), contentL, "bootstrapped content matches the mirror branch");
+// the bootstrapped file is already on the mirror: no duplicate commits, nothing on main
+await new Promise((r) => setTimeout(r, 2500));
+assert.equal(mirrorSubjects(rootL), `kanban: create ${taskL.file}`, "bootstrap adds no mirror commits");
+assert.equal(execSync("git log --format=%s -- .kanban", { cwd: rootL, encoding: "utf8" }).trim(), "", "bootstrap commits nothing on main");
+l.daemon.kill("SIGTERM");
+
+console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard + conflict skip + merge cap + mirror board + bootstrap smoke passed");

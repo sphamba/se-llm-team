@@ -205,18 +205,39 @@ export default function (pi: ExtensionAPI) {
 		name: "orchestrator_wait",
 		label: "Orchestrator wait",
 		description:
-			"Wait for the orchestrator to record new board commits (kanban: create / kanban: done). Blocks up to the timeout, then reports what changed. No update before the timeout is normal.",
+			"Wait for the orchestrator to record new board commits (kanban: create / kanban: done) on the meta/kanban branch. Blocks up to the timeout, then reports what changed. No update before the timeout is normal.",
 		parameters: Type.Object({
 			timeoutSeconds: Type.Optional(Type.Number({ description: "Seconds to block, 1-900 (default 300)" })),
 		}),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const timeout = Math.min(900, Math.max(1, params.timeoutSeconds ?? 300));
 			const started = Date.now();
-			const baseline = execSync("git rev-parse HEAD", { cwd: ctx.cwd, encoding: "utf8" }).trim();
+			// the board lives on refs/heads/meta/kanban, not on the current branch: watch that ref
+			const mirror = "refs/heads/meta/kanban";
+			const revParse = () => {
+				try {
+					return execSync(`git rev-parse ${mirror}`, { cwd: ctx.cwd, encoding: "utf8" }).trim();
+				} catch {
+					return "";
+				}
+			};
+			const baseline = revParse();
 			while (Date.now() - started < timeout * 1000) {
-				const subjects = execSync(`git log --format=%s ${baseline}..HEAD`, { cwd: ctx.cwd, encoding: "utf8" })
-					.split("\n")
-					.filter((s) => s.startsWith("kanban: done ") || s.startsWith("kanban: create "));
+				let subjects: string[] = [];
+				const head = revParse();
+				// no baseline ref at start: the whole mirror appeared during the wait, so all its commits are new
+				if (head && head !== baseline) {
+					try {
+						subjects = execSync(`git log --format=%s ${baseline ? baseline + ".." : ""}${mirror}`, {
+							cwd: ctx.cwd,
+							encoding: "utf8",
+						})
+							.split("\n")
+							.filter((s) => s.startsWith("kanban: done ") || s.startsWith("kanban: create "));
+					} catch {
+						/* mirror ref vanished, keep waiting */
+					}
+				}
 				if (subjects.length) return text(subjects.join("\n"));
 				const remaining = started + timeout * 1000 - Date.now();
 				await new Promise<void>((resolve) => {
