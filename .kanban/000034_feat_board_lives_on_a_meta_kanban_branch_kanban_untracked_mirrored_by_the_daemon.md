@@ -35,6 +35,7 @@ Constraints:
 - The daemon must be restarted after the merge to activate the new behavior.
 
 # Notes
+- [2026-10-10 21:51] Merge conflict for branch feat/board-lives-on-a-meta-kanban-branch-kanban-untracked-mirrored-by-the-daemon, merger spawned (attempt 2).
 - [2026-10-10 21:48] Merge conflict for branch feat/board-lives-on-a-meta-kanban-branch-kanban-untracked-mirrored-by-the-daemon, merger spawned (attempt 1).
 
 - [2026-10-10 23:22] Implemented in the worktree:
