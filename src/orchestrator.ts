@@ -10,6 +10,7 @@ import {
 	setState,
 	setWorktree,
 	slugWorktree,
+	taskFiles,
 	type Task,
 	type TaskState,
 } from "./kanban.ts";
@@ -19,6 +20,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_POLL_MINUTES = 1;
 const RESPAWN_CAP = 5;
 const MERGE_ATTEMPT_CAP = 3;
+// the board's home ref: a branch is the only git-native carrier (push and clone transfer
+// refs/heads/* only), so the board mirrors there and a fresh clone can bootstrap from it
+const KANBAN_REF = "refs/heads/meta/kanban";
 
 interface Config {
 	agent: string;
@@ -144,39 +148,100 @@ function git(root: string, args: string[], allowFailure = false): string | null 
 	}
 }
 
-// the orchestrator is the sole .kanban committer; a missing git repo is tolerated
-function commitKanban(root: string, files: string[], message: string): boolean {
+// mirrors board changes onto refs/heads/meta/kanban via plumbing: git hash-object -w for the
+// board files, mktree, git commit-tree (parent = current meta/kanban head), git update-ref.
+// Never touches the index or working tree, so main history gets no kanban commits. The tree
+// is rebuilt from the whole board, so deleted files and disk drift self-heal on the next
+// mirror commit.
+function commitKanban(root: string, message: string): boolean {
+	const files = taskFiles(root);
+	if (!files.length) return false;
+	let tree: string;
 	try {
-		execFileSync("git", ["add", "--", ...files.map((f) => join(".kanban", f))], { cwd: root, stdio: "ignore" });
-		execFileSync("git", ["commit", "-m", message, "--", ...files.map((f) => join(".kanban", f))], {
+		const blobs = execFileSync("git", ["hash-object", "-w", "--", ...files.map((f) => join(".kanban", f))], {
 			cwd: root,
-			stdio: "ignore",
-		});
-		return true;
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		})
+			.trim()
+			.split("\n");
+		const board = execFileSync("git", ["mktree"], {
+			cwd: root,
+			input: files.map((f, i) => `100644 blob ${blobs[i]}\t${f}\n`).join(""),
+			encoding: "utf8",
+		}).trim();
+		tree = execFileSync("git", ["mktree"], {
+			cwd: root,
+			input: `040000 tree ${board}\t.kanban\n`,
+			encoding: "utf8",
+		}).trim();
 	} catch {
 		return false;
 	}
+	const parent = git(root, ["rev-parse", "--verify", KANBAN_REF], true);
+	// identical tree = board already mirrored: no commit, no push
+	if (parent && git(root, ["rev-parse", "--verify", `${parent}^{tree}`], true) === tree) return true;
+	const commit = git(root, parent ? ["commit-tree", tree, "-p", parent, "-m", message] : ["commit-tree", tree, "-m", message]);
+	if (!commit || git(root, ["update-ref", KANBAN_REF, commit]) === null) return false;
+	pushMirror(root);
+	return true;
 }
 
-// git status --porcelain per board file (XY code); empty when git is missing.
-// Runs git directly: the shared git() helper trims leading whitespace, which would
-// corrupt the first line's XY prefix for unstaged changes.
+// best-effort auto-push of only the board mirror ref; failures are logged, never fatal
+function pushMirror(root: string): void {
+	if (!git(root, ["remote"], true)) return;
+	try {
+		execFileSync("git", ["push", "origin", "meta/kanban"], {
+			cwd: root,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+			timeout: 30000,
+		});
+	} catch (err) {
+		log(root, `push of ${KANBAN_REF} failed (non-fatal): ${err instanceof Error ? err.message : err}`);
+	}
+}
+
+// board file status relative to the meta/kanban mirror: "??" = not on the mirror yet (new
+// task), non-empty = differs from the mirror (changed after its last mirror commit), "" =
+// identical; empty when git is missing
 function boardStatus(root: string): Map<string, string> {
 	const status = new Map<string, string>();
-	let out: string;
+	const files = taskFiles(root);
+	if (!files.length) return status;
+	if (git(root, ["rev-parse", "--git-dir"], true) === null) return status;
+	let mirrored = "";
 	try {
-		out = execFileSync("git", ["status", "--porcelain", "-uall", "--", ".kanban"], {
+		mirrored = execFileSync("git", ["ls-tree", "-r", KANBAN_REF, "--", ".kanban"], {
 			cwd: root,
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 	} catch {
+		/* no mirror branch yet: every board file is new */
+	}
+	let shas: string[];
+	try {
+		shas = execFileSync("git", ["hash-object", "--", ...files.map((f) => join(".kanban", f))], {
+			cwd: root,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		})
+			.trim()
+			.split("\n");
+	} catch {
 		return status;
 	}
-	for (const line of out.split("\n")) {
-		if (line.length < 4) continue;
-		status.set(line.slice(3), line.slice(0, 2));
+	const mirror = new Map<string, string>();
+	for (const line of mirrored.split("\n")) {
+		const m = line.match(/^\S+ blob (\S+)\t(.+)$/);
+		if (m) mirror.set(m[2], m[1]);
 	}
+	files.forEach((f, i) => {
+		const path = join(".kanban", f);
+		const blob = mirror.get(path);
+		status.set(path, blob === undefined ? "??" : blob === shas[i] ? "" : "M");
+	});
 	return status;
 }
 
@@ -228,6 +293,42 @@ function ensureWorktree(root: string, task: Task): { wt: string; wtDir: string }
 	syncBoard(root, wtDir);
 	setWorktree(root, task, wt);
 	return { wt, wtDir };
+}
+
+// a fresh clone has an empty .kanban/, and a merge that untracks the board may leave files
+// behind on main: the board lives on refs/heads/meta/kanban, so restore task files that are
+// missing from .kanban/ from the mirror branch (runs at every startup, idempotent)
+function bootstrapBoard(root: string): void {
+	if (git(root, ["rev-parse", "--verify", KANBAN_REF], true) === null) return;
+	const have = new Set(taskFiles(root));
+	let out: string;
+	try {
+		out = execFileSync("git", ["ls-tree", "-r", KANBAN_REF, "--", ".kanban"], {
+			cwd: root,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+	} catch {
+		return;
+	}
+	let restored = 0;
+	for (const line of out.split("\n")) {
+		const m = line.match(/^\S+ blob (\S+)\t(.+)$/);
+		if (!m) continue;
+		const name = m[2].replace(/^\.kanban\//, "");
+		// the branch can come from a remote on a fresh clone: flat .md names only, no traversal
+		if (!name.endsWith(".md") || name.includes("/") || have.has(name)) continue;
+		try {
+			writeFileSync(
+				join(root, m[2]),
+				execFileSync("git", ["cat-file", "blob", m[1]], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+			);
+			restored++;
+		} catch {
+			/* unreadable entry, skip */
+		}
+	}
+	if (restored) log(root, `bootstrapped ${restored} task file(s) from ${KANBAN_REF}`);
 }
 
 function startTodo(root: string, cfg: Config, task: Task): void {
@@ -286,11 +387,11 @@ function rescan(root: string, cfg: Config): void {
 				log(root, `${task.file}: unresolved merge conflict markers, skipping (merger or user resolves)`);
 				continue;
 			}
-			// sole commit points: untracked board files are new, finished tasks fold in
-			// their whole life; everything else stays uncommitted until done
+			// sole commit points: board files not on the mirror yet are new, finished tasks fold in
+			// their whole life; everything else stays unmirrored until done
 			const code = status.get(join(".kanban", task.file));
-			if (code === "??") commitKanban(root, [task.file], `kanban: create ${task.file}`);
-			else if (code && task.state === "done" && !task.worktree) commitKanban(root, [task.file], `kanban: done ${task.file}`);
+			if (code === "??") commitKanban(root, `kanban: create ${task.file}`);
+			else if (code && task.state === "done" && !task.worktree) commitKanban(root, `kanban: done ${task.file}`);
 			if (task.state === "to-do") startTodo(root, cfg, task);
 			else if (task.state === "to-review") {
 				const ensured = ensureWorktree(root, task);
@@ -308,8 +409,9 @@ function rescan(root: string, cfg: Config): void {
 					setState(root, task, "live-testing");
 				}
 			} else if (task.state === "done") {
-				// the one done commit: after the merge completes, or at once with no worktree
-				if (!task.worktree || mergeDone(root, cfg, task)) commitKanban(root, [task.file], `kanban: done ${task.file}`);
+				// the one done commit: after the merge completes, or at once with no worktree;
+				// an unchanged board mirrors as a no-op (commitKanban skips identical trees)
+				if (!task.worktree || mergeDone(root, cfg, task)) commitKanban(root, `kanban: done ${task.file}`);
 			}
 		} catch (err) {
 			log(root, `error handling ${task.file} (${task.state}): ${err instanceof Error ? err.message : err}`);
@@ -403,6 +505,7 @@ export function main(argv: string[]): void {
 	}
 	for (const dir of [".logs", ".pids"]) mkdirSync(join(kanbanDir(root), dir), { recursive: true });
 	log(root, `orchestrator started (root=${root}, agent=${cfg.agent}, poll=${pollMinutes}min, rescan=${rescanSeconds}s)`);
+	bootstrapBoard(root);
 
 	const sweep = () => {
 		// lock self-heal: an external cleanup or an acquire race can drop the lock mid-life;
