@@ -4,7 +4,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createTask, kanbanDir, parseTask, setState } from "./kanban.ts";
+import { createTask, kanbanDir, parseTask, setState, setWorktree } from "./kanban.ts";
 import { pidAlive } from "./orchestrator.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -428,3 +428,46 @@ assert.equal(readFileSync(taskFileJ, "utf8"), rawJ, "conflicted task file untouc
 j.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard + conflict skip smoke passed");
+
+// --- part K: past the merge cap, sweeps stop bumping the counter and stop logging the give-up ---
+const rootK = fixture();
+cleaned.push(rootK);
+mkdirSync(kanbanDir(rootK), { recursive: true });
+// a branch that conflicts with main: both edit README.md
+execSync("git checkout -qb fix/conflict", { cwd: rootK, shell: "/bin/bash" });
+writeFileSync(join(rootK, "README.md"), "branch\n");
+execSync("git commit -qam branch", { cwd: rootK, shell: "/bin/bash" });
+execSync("git checkout -q main", { cwd: rootK, shell: "/bin/bash" });
+writeFileSync(join(rootK, "README.md"), "main\n");
+execSync("git commit -qam main", { cwd: rootK, shell: "/bin/bash" });
+writeFileSync(join(kanbanDir(rootK), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootK), pollMinutes: 0.05 }));
+const taskK = createTask(rootK, { name: "fix: stuck conflict", summary: "Merge cap smoke", specs: "n/a" });
+setState(rootK, taskK, "done");
+setWorktree(rootK, taskK, "fix/conflict");
+
+const k = await runDaemon(rootK);
+const slugK = taskK.file.replace(/\.md$/, "");
+const attemptsK = () => {
+	try {
+		return parseInt(readFileSync(join(kanbanDir(rootK), ".logs", `${slugK}.merge-attempts.count`), "utf8").trim(), 10) || 0;
+	} catch {
+		return 0;
+	}
+};
+const giveUpsK = () => k.output().split("left for manual resolution").length - 1;
+// the merger dies without resolving, so every sweep conflicts: attempts 1-3 spawn mergers,
+// the 4th logs the give-up once, and later sweeps change nothing
+await waitFor(() => giveUpsK() > 0, 30000, "merge give-up logged at the cap", k.output);
+await waitFor(() => attemptsK() === 4, 10000, "counter frozen at cap+1", k.output);
+assert.ok(k.output().includes("spawning merger (attempt 1)"), "merger spawned on the first conflict");
+assert.ok(k.output().includes("spawning merger (attempt 3)"), "merger spawned on the third conflict");
+assert.ok(!k.output().includes("spawning merger (attempt 4)"), "no merger past the cap");
+assert.equal(giveUpsK(), 1, "give-up logged exactly once");
+// three more sweeps: counter frozen, no new give-up line
+await new Promise((r) => setTimeout(r, 3500));
+assert.equal(attemptsK(), 4, "counter unchanged past the cap");
+assert.equal(giveUpsK(), 1, "give-up not logged again past the cap");
+assert.equal(parseTask(rootK, taskK.file).state, "done", "stuck task stays done for manual resolution");
+k.daemon.kill("SIGTERM");
+
+console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard + conflict skip + merge cap smoke passed");
