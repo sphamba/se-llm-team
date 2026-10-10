@@ -2,7 +2,7 @@
 name: "feat: Explorer subagent for PM fact-finding, wired into the PM skill"
 priority: "medium"
 state: "done"
-worktree: "feat/explorer-subagent-for-pm-fact-finding-wired-into-the-pm-skill"
+worktree: ""
 ---
 
 # Summary
@@ -40,3 +40,11 @@ Reviewer: approved, no fixes. Commit f9a8fec reviewed against Specs.
 - skills/se-llm-team/SKILL.md step 2: only "Find facts yourself (repo, code, docs)." replaced with the Explorer-delegation sentence; rest of step 2 ("Leave decisions to the user.") intact. No other skill text changed.
 - git diff main...HEAD covers exactly the two Spec'd files (7 insertions, 1 deletion), no code changes, worktree clean.
 - No fixes made, moving to to-live-test.
+
+Live-tester: PASS. No issues found. Tested in worktree at commit f9a8fec.
+- Acceptance checks: .pi/agents/explorer.md exists with frontmatter (name: explorer, read-only description) and body in the watcher.md pattern, word-for-word per Specs. SKILL.md step 2 carries the Explorer-delegation sentence with "Leave decisions to the user." intact; git diff main...HEAD covers exactly the two Spec'd files, no code changes, worktree clean.
+- Live flow: spawned an Agent with subagent_type "explorer" from the worktree (the way the PM delegates fact-finding per step 2). The harness picked the agent up and its listed description matched the new frontmatter. The Explorer answered a read-only fact-finding question (orchestrator merge flow) in ~21 s with a concise report: file path with line numbers (src/orchestrator.ts mergeDone), key function names, and conflict-handling steps. Findings spot-checked against the code: accurate.
+- Read-only behavior: worktree git status stayed clean after the Explorer ran; it edited nothing.
+- Project check suite: node src/kanban.test.ts, all assertions passed.
+- Note, expected behavior (documented in README "Extension load path"): ~/.pi/agent/skills/se-llm-team resolves to the main checkout, so the skill text change goes live for real PM sessions only after this branch merges. The explorer agent itself is live already for sessions run from the worktree, and will be live for the main checkout after merge.
+- State set to done for merge.
