@@ -1,7 +1,7 @@
 ---
 name: "fix: orchestrator_start tool throws and daemon status lies"
 priority: "high"
-state: "doing"
+state: "reviewing"
 worktree: "fix/orchestrator-start-tool-throws-and-daemon-status-lies"
 ---
 
@@ -43,3 +43,9 @@ The PM skill cannot start the orchestrator through its tool, and the tools canno
 - Add assert-based checks for the lock lifecycle if practical with the existing fixture patterns (disable GPG signing in fixture repos, as the smoke test already does).
 
 # Notes
+
+- [2026-10-10 19:05] Defect A fixed: daemonLog now passes ctx (not ctx.cwd) to board. One line in index.ts.
+- [2026-10-10 19:05] Defect B root cause: the daemon checked its lock only at startup. Evidence: daemon 420117 lives since 18:05, but .orchestrator.lock, the "orchestrator started" log line, and the old task files are gone. The git reflog shows task files deleted and recreated under new names, plus origin/main checkouts, during PM experimentation between 18:05 and 18:44. No in-code path can remove a live daemon's lock: releaseLock matches only its own pid, and the stale-pid recovery needs a dead pid. So an external cleanup of the untracked .kanban files removed the lock mid-life. Two code defects made the loss permanent: the daemon never re-checked the lock, and acquireLock's stale recovery can race (two starters on a stale lock: one rmSyncs the other's fresh lock), with pidAlive treating EPERM (process exists, not signalable) as dead.
+- [2026-10-10 19:05] Defect B fixed: every sweep now verifies the lock, re-acquires it when missing, and exits when a live peer holds it, so the singleton stays intact and a lockless daemon heals or quits within one rescan. pidAlive treats EPERM as alive in both files. orchestrator_start returns "Orchestrator already running (pid X)" without spawning, which the PM skill already documents as a no-op. The fs.watch error event is guarded, so a deleted board degrades to polling instead of crashing.
+- [2026-10-10 19:05] Tests: kanban.test.ts and orchestrator.test.ts pass. New part C asserts the lock lifecycle: acquire with the daemon pid, a second start attempt exits and does not take the lock, self-heal after a mid-life deletion, release on SIGTERM stop. Manual check with the fixed code on a fixture: status reports running with the pid after start, not running after stop. No leaked processes from the runs.
+- [2026-10-10 19:05] Operational note: the running daemon (pid 420117) predates the fix and holds no lock. Stop it and start it again with the new code after merge, or its status/stop keep lying.
