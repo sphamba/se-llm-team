@@ -35,3 +35,20 @@ Constraints:
 - The daemon must be restarted after the merge to activate the new behavior.
 
 # Notes
+
+- [2026-10-10 23:22] Implemented in the worktree:
+  - src/orchestrator.ts: commitKanban now mirrors board changes onto refs/heads/meta/kanban with git plumbing only (git hash-object -w batched, git mktree, git commit-tree with parent = current mirror head, git update-ref). It never touches the index or working tree. Identical trees are skipped, so no empty commits. Messages keep the "kanban: create X" / "kanban: done X" format.
+  - pushMirror: after each mirror commit, best-effort `git push origin meta/kanban` when a remote exists (30s timeout; failures logged, never fatal; no other ref is pushed).
+  - boardStatus: per-file status relative to the mirror ("??" = not on the mirror yet, "M" = differs, "" = identical), via `git ls-tree -r` + `git hash-object`; empty map without git.
+  - bootstrapBoard: at startup, the daemon restores task files that are missing from .kanban/ from refs/heads/meta/kanban. This is a superset of the spec's empty-board case: it also heals a merge that drops files from disk.
+  - index.ts: orchestrator_wait reports new create/done commits on refs/heads/meta/kanban instead of HEAD.
+  - .gitignore: .kanban/ ignored; the old sidecar lines are removed.
+  - orchestrator.test.ts: parts A, D, G reworked for the mirror; auto-push checks (only meta/kanban reaches origin); new part L checks that bootstrap materializes the board from the branch. node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts: all pass.
+- [2026-10-10 23:22] Transition commits on this branch: "untrack .kanban: the board lives on refs/heads/meta/kanban" (34 stale index entries force-removed from this worktree index; board files stay on disk through the shared symlink). refs/heads/meta/kanban was seeded once with the same plumbing ("kanban: seed board mirror before .kanban untrack", 37 files) so bootstrap can restore anything the untracking merge drops.
+- [2026-10-10 23:22] FOR THE MERGER. The branch deletes the tracked .kanban entries because the board moved to refs/heads/meta/kanban. The merge refuses while a .kanban file is dirty in the main working tree (000034 is). Steps:
+  1. `git add .kanban && git commit -m "preserve board state before untrack merge"` in ROOT.
+  2. `git merge --no-edit <branch>`. Expect CONFLICT (modify/delete) on the previously dirty .kanban files; the HEAD version stays in the tree.
+  3. Accept the deletions, keep the disk files untracked: `git ls-files .kanban | while read -r p; do git update-index --force-remove "$p"; done` (also untracks tasks that main committed after this branch forked, for example 000036/000037; disk files remain).
+  4. `git commit` to complete the merge. .gitignore already has .kanban/.
+  5. Restart the daemon (task constraint). The new code mirrors the board to refs/heads/meta/kanban and bootstraps missing files from it. The board content on disk survives.
+- [2026-10-10 23:22] Deviations from the spec: bootstrap restores missing files, not only an empty board (safe superset, documented above). index.ts is outside the stated file list, but change 4 (orchestrator_wait) lives there. SPECS.md and README.md still describe commits at creation and done; they are stale after this merge and are not in the allowed file list.

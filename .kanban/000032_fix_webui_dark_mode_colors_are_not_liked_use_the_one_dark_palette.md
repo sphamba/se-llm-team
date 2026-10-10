@@ -1,8 +1,8 @@
 ---
 name: "fix: webui dark mode colors are not liked; use the One Dark palette"
 priority: "high"
-state: "live-testing"
-worktree: "fix/webui-dark-mode-colors-are-not-liked-use-the-one-dark-palette"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -40,3 +40,4 @@ Constraints:
 - Commit 04cab3a in the worktree. kanban, orchestrator, and webui tests pass.
 - Visual check with Playwright (dark color scheme) confirms: body #282c34, columns #2c313a, header #21252b, all four chip hues with tinted backgrounds, toggle color #61afef, and the toggle cycle light → dark → light works.
 - Review pass: no fixes needed. Diff (commit 04cab3a) matches the specs: One Dark values in both DARK_VARS blocks, variable names and toggle JS unchanged, only src/webui.ts touched. Dark-scoped #theme rules (1,2,0 specificity) override base and hover color/border without touching background, so #theme:hover still applies. Light theme stays visually identical: the new header background uses var(--code-bg), and light --code-bg (#f1f5f9) equals light --bg (#f1f5f9). HOLD respected: 000028 and 000029 merged in base, 000030 still not merged (no conflict). Re-ran node --test on webui, kanban, and orchestrator tests: 3 files, all pass.
+- Live test (Playwright, dark color scheme, daemon run from the worktree against a scratch board with cards in all four priorities): PASS. Computed styles match the One Dark specs exactly: body #282c34 with fg #abb2bf, columns and modal box #2c313a, header band #21252b, column headings and modal attrs #d7dae0, muted/faint text #5c6370, toggle #61afef. Chips: low #98c379, medium #e5c07b, high #d19a66, critical #e06c75, each on a 15% tint of the same hue, all readable on dark (screenshots checked). Toggle cycles light to dark with correct labels and data-theme attr, localStorage theme=dark survives a reload and still renders One Dark after it. Light theme visually unchanged (body #f1f5f9). No JS console errors. Existing tests re-run from the worktree: webui, kanban, orchestrator, 3 files, all pass. No issues found.
