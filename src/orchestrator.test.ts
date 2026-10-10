@@ -88,13 +88,18 @@ setState(rootA, taskA, "to-do");
 const a = await runDaemon(rootA);
 const readA = () => parseTask(rootA, taskA.file);
 
-// to-do -> doing -> to-review -> reviewing -> to-live-test -> live-testing -> done -> merge.
+const taskClean = () => !execSync(`git status --porcelain -- .kanban/${taskA.file}`, { cwd: rootA, encoding: "utf8" }).trim();
+// to-do -> doing -> to-review -> reviewing -> to-live-test -> live-testing -> done -> merge -> done commit.
 // The stub transitions in milliseconds, so intermediate states are asserted through the daemon log.
-await waitFor(() => readA().state === "done" && readA().worktree === "", 60000, "full pipeline + merge", a.output, rootA);
+await waitFor(() => readA().state === "done" && readA().worktree === "" && taskClean(), 60000, "full pipeline + merge + done commit", a.output, rootA);
 for (const marker of ["spawned developer", "spawned reviewer", "spawned live-tester", "merged feat/smoke-test"]) {
 	assert.ok(a.output().includes(marker), `expected daemon log to contain: ${marker}`);
 }
 assert.ok(!existsSync(join(rootA, ".worktrees", "feat/smoke-test")), "worktree removed");
+const logA = execSync("git log --oneline", { cwd: rootA, encoding: "utf8" });
+assert.match(logA, /kanban: done 000001_feat_smoke_test\.md/);
+assert.equal((logA.match(/kanban: done/g) ?? []).length, 1, "exactly one done commit");
+assert.ok(taskClean(), "task file clean after the done commit");
 a.daemon.kill("SIGTERM");
 
 // --- part B: dead agents get moved forward by the liveness poll, capped at 5 respawns ---

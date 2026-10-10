@@ -149,11 +149,11 @@ function updateAttrs(root: string, task: Task, patch: Record<string, string>): v
 	if (!changed.length) return;
 	for (const [k, v] of changed) attrs[k] = v;
 	writeFileSync(path, serializeFrontmatter(attrs) + m[2]);
-	commitKanban(root, [task.file], `kanban: ${task.file} ${changed.map(([k]) => k).join(",")}`);
 }
 
 export function setState(root: string, task: Task, state: TaskState): void {
 	updateAttrs(root, task, { state });
+	if (state === "done") commitKanban(root, [task.file], `kanban: done ${task.file}`);
 }
 
 export function updateTask(
@@ -184,7 +184,6 @@ export function updateTask(
 		content += m[2];
 	}
 	writeFileSync(join(kanbanDir(root), task.file), content);
-	commitKanban(root, [task.file], `kanban: update ${task.file}`);
 }
 
 export function setWorktree(root: string, task: Task, worktree: string): void {
@@ -201,7 +200,6 @@ export function appendNote(root: string, task: Task, note: string): void {
 	} else {
 		writeFileSync(path, `${raw.replace(/\s*$/, "")}\n\n# Notes${entry}\n`);
 	}
-	commitKanban(root, [task.file], `kanban: note on ${task.file}`);
 }
 
 export function createTask(
@@ -227,6 +225,15 @@ export function createTask(
 
 export function commitKanban(root: string, files: string[], message: string): boolean {
 	try {
+		// done commits run on every rescan and must not repeat when nothing is uncommitted
+		const dirty = files.some((f) =>
+			execFileSync("git", ["status", "--porcelain", "--", join(".kanban", f)], {
+				cwd: root,
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+			}).trim() !== "",
+		);
+		if (!dirty) return false;
 		execFileSync("git", ["add", "--", ...files.map((f) => join(".kanban", f))], { cwd: root, stdio: "ignore" });
 		execFileSync("git", ["commit", "-m", message, "--", ...files.map((f) => join(".kanban", f))], {
 			cwd: root,
