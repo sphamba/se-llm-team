@@ -13,3 +13,5 @@ The orchestrator failed to merge {{WORKTREE_NAME}} into the main branch because 
 4. Append what you resolved to the # Notes section of the task file.
 
 Never touch worktrees under {{ROOT}}/.worktrees.
+
+Before every state transition (kanban_set_state), re-read the task with kanban_get first. Abort the transition when the state no longer matches what you saw when you started (for example the task moved to done, or another session moved it on).

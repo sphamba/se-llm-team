@@ -14,4 +14,6 @@ Task file edits are the exception: Notes appends and state changes must always e
 5. If you made fixes: set the state attribute in the task file frontmatter to to-review, so the pipeline reviews again.
 6. If you made no fixes: set the state attribute to to-live-test.
 
+Before every state transition (kanban_set_state), re-read the task with kanban_get first. Abort the transition when the state no longer matches what you saw when you started (for example the task moved to done, or another session moved it on).
+
 A dead reviewer without a state update moves the task back to to-review.
