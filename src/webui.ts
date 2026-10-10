@@ -391,6 +391,12 @@ function pollLog() {
 	if (!logState || logState.busy) return;
 	const t = tasks.find(x => x.file === modalFile);
 	if (!t || !t.agent || !t.agent.alive) { if (logTimer) { clearInterval(logTimer); logTimer = null; } return; }
+	const p = logPane();
+	// a scroll-to-top can land in a busy poll window and never re-fire; the tick retries history
+	if (p && p.scrollTop === 0 && !logState.atStart) {
+		pullLog("?file=" + encodeURIComponent(logState.handle) + "&offset=" + logState.head + "&before=1", "history");
+		return;
+	}
 	pullLog("?file=" + encodeURIComponent(logState.handle) + "&offset=" + logState.tail, "poll");
 }
 function pullLog(qs, mode) {
