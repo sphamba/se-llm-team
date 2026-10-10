@@ -21,10 +21,11 @@ function fixture(): string {
 	return root;
 }
 
-// subjects of the board mirror branch; "" before the first mirror commit (or without git)
+// subjects of the board mirror branch; "" before the first mirror commit (or without git);
+// stderr piped so the not-yet-existing-ref fatal stays out of the test output
 const mirrorSubjects = (root: string) => {
 	try {
-		return execSync("git log --format=%s refs/heads/meta/kanban", { cwd: root, encoding: "utf8" }).trim();
+		return execSync("git log --format=%s refs/heads/meta/kanban", { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 	} catch {
 		return "";
 	}
@@ -587,3 +588,26 @@ mirrorCommit("unrelated mirror commit");
 assert.deepEqual(await waitN2, [], "unrelated commits do not satisfy the wait; it times out");
 
 console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard + conflict skip + merge cap + mirror board + bootstrap + fresh-clone bootstrap + worktree-cwd board-feed wait passed");
+
+// --- part O: a settled done task without a worktree must not swallow create events ---
+// the old code issued a "kanban: done" commit every sweep for such a task; commitKanban
+// rebuilds the tree from the whole board, so the first of those folded a newly created
+// task's file in under the done label and the create commit became a no-op
+const rootO = fixture();
+cleaned.push(rootO);
+mkdirSync(kanbanDir(rootO), { recursive: true });
+writeFileSync(join(kanbanDir(rootO), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootO), pollMinutes: 0.05 }));
+const taskO1 = createTask(rootO, { name: "fix: settled done task", summary: "Settled", specs: "n/a" });
+setState(rootO, taskO1, "done");
+
+const mo = await runDaemon(rootO);
+await waitFor(() => mirrorSubjects(rootO) !== "", 10000, "settled done task mirrored", mo.output);
+// a new task arrives while the settled done task exists: it must get its own create commit
+const taskO2 = createTask(rootO, { name: "fix: late arrival", summary: "Created after a done task", specs: "n/a" });
+await waitFor(() => mirrorSubjects(rootO).includes(`kanban: create ${taskO2.file}`), 10000, "late task create commit", mo.output);
+// further sweeps change nothing: no done-label folding, no commit churn
+await new Promise((r) => setTimeout(r, 2500));
+assert.deepEqual(mirrorSubjects(rootO).split("\n"), [`kanban: create ${taskO2.file}`, `kanban: create ${taskO1.file}`]);
+mo.daemon.kill("SIGTERM");
+
+console.log("orchestrator.test.ts: ... + settled done task create-event smoke passed");
