@@ -1,8 +1,8 @@
 ---
 name: "fix: role agents edit the worktree copy of the task file, so the pipeline stalls"
 priority: "high"
-state: "live-testing"
-worktree: "fix/role-agents-edit-the-worktree-copy-of-the-task-file-so-the-pipeline-stalls"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -50,3 +50,5 @@ Nothing says that the task file edits are the exception. Agents pick either copy
 Developer: added one explicit line to agents/developer.md, agents/reviewer.md and agents/live-tester.md in the worktree. Each line says Notes appends and state changes must always edit {{TASK_FILE}} in the main checkout, even though all other work happens inside the worktree, and that the code-only rule does not cover the task file. Checked agents/merger.md for the same ambiguity: it works in {{ROOT}} (the main checkout) and has no "never touch the main checkout" instruction, so {{TASK_FILE}} is unambiguous there, no change. Committed as cf2c836. `node src/kanban.test.ts && node src/orchestrator.test.ts` pass. Worktree copy of this task file not touched.
 
 Reviewer: reviewed commit cf2c836 in the worktree. Diff touches only the 3 prompt files, one line each, and each line matches the required wording: Notes appends and state changes must always edit the file at {{TASK_FILE}} in the main checkout, and the code-only rule does not cover the task file. agents/merger.md verified: it edits in {{ROOT}} and its prohibition covers only worktrees under {{ROOT}}/.worktrees, so no ambiguity, correctly no change. No daemon or code changes. `node src/kanban.test.ts && node src/orchestrator.test.ts` pass in the worktree. Remaining "kanban:" commits on the branch are daemon sync commits, not hand edits. No fixes needed.
+
+Live-tester: tested commit cf2c836 in the worktree. PASS: the diff touches only agents/developer.md, agents/reviewer.md and agents/live-tester.md, one line each, and each line matches the required wording. agents/merger.md has no ambiguity, correctly no change. A prompt render check with the daemon's replaceAll logic shows no leftover placeholders and the main task-file path in both the header line and the new exception line. `node src/kanban.test.ts && node src/orchestrator.test.ts` pass in the worktree. Pipeline evidence: the daemon spawned each role once for this task (developer, reviewer, live-tester), no respawns, no dead count file, and the main file state moved to-do, doing, reviewing, to-live-test, live-testing. Developer and Reviewer notes are in the main file and both say the worktree copy was not touched. Live-tester set the state to done in the main file. ISSUE found: the daemon renders prompts from its own checkout (HERE/../agents), not from the task worktree. The fix is only in the worktree until the merge, so agents spawned between the fix commit and the merge still get the old prompt. Verified: the developer of task 000005, spawned after this fix commit, and the reviewer of task 000002 got prompts without the exception line. Impact is small: after the merge, respawns get the new prompt, so the pipeline self-heals. Suggestion for a later task: read prompts from the task worktree when it exists, or document that the fix applies only after the merge.
