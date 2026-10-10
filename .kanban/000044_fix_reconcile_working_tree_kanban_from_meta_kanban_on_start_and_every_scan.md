@@ -1,7 +1,7 @@
 ---
 name: "fix: reconcile working-tree .kanban from meta/kanban on start and every scan"
 priority: "high"
-state: "backlog"
+state: "to-do"
 worktree: ""
 ---
 

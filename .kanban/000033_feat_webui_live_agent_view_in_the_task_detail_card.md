@@ -1,7 +1,7 @@
 ---
 name: "feat: webui live agent view in the task detail card"
 priority: "medium"
-state: "backlog"
+state: "to-do"
 worktree: ""
 ---
 
