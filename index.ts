@@ -22,13 +22,14 @@ export default function (pi: ExtensionAPI) {
 		name: "kanban_list",
 		label: "Kanban list",
 		description:
-			"List kanban tasks of this project. scope=backlog: tasks to prioritize. scope=in-progress: tasks being worked on. scope=done: completed tasks. Returns file, name and summary per task.",
+			"List kanban tasks of this project. scope=backlog: tasks to prioritize. scope=in-progress: tasks being worked on. scope=done: completed tasks. Optional priority filter (low/medium/high/critical). Returns file, name, priority, state and summary per task.",
 		parameters: Type.Object({
 			scope: StringEnum(["backlog", "in-progress", "done"] as const),
+			priority: Type.Optional(StringEnum(["low", "medium", "high", "critical"] as const)),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
-			const refs = listTasks(ctx.cwd, params.scope);
+			const refs = listTasks(ctx.cwd, params.scope, params.priority);
 			return {
 				content: [{ type: "text", text: JSON.stringify(refs, null, 2) }],
 				details: refs,

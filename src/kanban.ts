@@ -30,6 +30,8 @@ export interface Task {
 export interface TaskRef {
 	file: string;
 	name: string;
+	priority: string;
+	state: TaskState;
 	summary: string;
 }
 
@@ -101,12 +103,13 @@ export function listAll(root: string): Task[] {
 	return taskFiles(root).map((f) => parseTask(root, f));
 }
 
-export function listTasks(root: string, scope: Scope): TaskRef[] {
+export function listTasks(root: string, scope: Scope, priority?: Priority | string): TaskRef[] {
 	return listAll(root)
 		.filter((t) =>
 			scope === "backlog" ? t.state === "backlog" : scope === "done" ? t.state === "done" : IN_PROGRESS.has(t.state),
 		)
-		.map(({ file, name, summary }) => ({ file, name, summary }));
+		.filter((t) => priority === undefined || t.priority === priority)
+		.map(({ file, name, priority, state, summary }) => ({ file, name, priority, state, summary }));
 }
 
 export function getTask(root: string, file: string): Task | undefined {

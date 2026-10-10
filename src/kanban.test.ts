@@ -34,6 +34,17 @@ assert.deepEqual(listTasks(root, "backlog").map((t) => t.file), [t1.file, t2.fil
 assert.equal(listTasks(root, "in-progress").length, 0);
 assert.equal(listTasks(root, "done").length, 0);
 
+// listTasks returns priority and state per task
+assert.deepEqual(listTasks(root, "backlog").map((t) => ({ file: t.file, priority: t.priority, state: t.state })), [
+	{ file: t1.file, priority: "high", state: "backlog" },
+	{ file: t2.file, priority: "medium", state: "backlog" },
+]);
+
+// priority filter, alone and combined with scope
+assert.deepEqual(listTasks(root, "backlog", "high").map((t) => t.file), [t1.file]);
+assert.deepEqual(listTasks(root, "backlog", "medium").map((t) => t.file), [t2.file]);
+assert.equal(listTasks(root, "done", "high").length, 0);
+
 // state + worktree transitions preserve the body
 setState(root, t1, "to-do");
 setWorktree(root, t1, "feat/nice-thing");
@@ -71,6 +82,9 @@ assert.equal(listAll(root).length, 2);
 setState(root, t2, "done");
 assert.deepEqual(listTasks(root, "done").map((t) => t.file), [t2.file]);
 assert.deepEqual(listTasks(root, "in-progress").map((t) => t.file), [t1.file]);
+// priority filter combines with scope
+assert.deepEqual(listTasks(root, "in-progress", "high").map((t) => t.file), [t1.file]);
+assert.equal(listTasks(root, "in-progress", "low").length, 0);
 
 // quoted, backslash and newline values round-trip through the quoted frontmatter
 const t4 = createTask(root, { name: 'feat: "quoted" \\ and\nnewline', summary: "s" });
