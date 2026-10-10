@@ -9,6 +9,8 @@ worktree: ""
 Role agents append Notes and set state in the worktree copy of the task file instead of the main one. The daemon watches only the main .kanban/, so tasks stall in doing/reviewing and the poll burns respawns. Make the prompts explicit that task file edits always target the main checkout file.
 
 # Specs
+Note to you, the Developer of this task: the defect below applies to you too. When you append to # Notes and set your state, always edit the MAIN task file at /home/phamba/repos/se-llm-team/.kanban/000004_fix_role_agents_edit_the_worktree_copy_of_the_task_file_so_the_pipeline_stalls.md. Never edit the copy inside your worktree. All other work happens inside your worktree.
+
 # Need
 
 The pipeline stalls when a role agent updates the wrong copy of the task file.
