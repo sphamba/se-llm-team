@@ -1,7 +1,7 @@
 ---
 name: "fix: role agents edit the worktree copy of the task file, so the pipeline stalls"
 priority: "high"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/role-agents-edit-the-worktree-copy-of-the-task-file-so-the-pipeline-stalls"
 ---
 
@@ -48,3 +48,5 @@ Nothing says that the task file edits are the exception. Agents pick either copy
 # Notes
 
 Developer: added one explicit line to agents/developer.md, agents/reviewer.md and agents/live-tester.md in the worktree. Each line says Notes appends and state changes must always edit {{TASK_FILE}} in the main checkout, even though all other work happens inside the worktree, and that the code-only rule does not cover the task file. Checked agents/merger.md for the same ambiguity: it works in {{ROOT}} (the main checkout) and has no "never touch the main checkout" instruction, so {{TASK_FILE}} is unambiguous there, no change. Committed as cf2c836. `node src/kanban.test.ts && node src/orchestrator.test.ts` pass. Worktree copy of this task file not touched.
+
+Reviewer: reviewed commit cf2c836 in the worktree. Diff touches only the 3 prompt files, one line each, and each line matches the required wording: Notes appends and state changes must always edit the file at {{TASK_FILE}} in the main checkout, and the code-only rule does not cover the task file. agents/merger.md verified: it edits in {{ROOT}} and its prohibition covers only worktrees under {{ROOT}}/.worktrees, so no ambiguity, correctly no change. No daemon or code changes. `node src/kanban.test.ts && node src/orchestrator.test.ts` pass in the worktree. Remaining "kanban:" commits on the branch are daemon sync commits, not hand edits. No fixes needed.
