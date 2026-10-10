@@ -40,3 +40,8 @@ Constraints:
 - HOLD: queue behind 000030 (cap/unfold, reviewing) → 000033 (agent view) → 000039 (hub frontend) → 000036 (sibling FLIP), all in src/webui.ts. Priority high: it promotes first after 000030 merges.
 
 # Notes
+
+- Replaced the One Dark variable values in src/webui.ts with the Ayu palette (commit ee22e71). Ayu Dark: --bg #10141c, --panel #141821, --code-bg (header, deepest) #010102, --fg #bfbdb6, --muted/--faint #5a6673, --border #1b1f29, --link/--accent #e6b450, hover #1b1f29. Ayu Light: --bg #fcfcfc, --panel #ffffff, --code-bg (header, deepest) #ebeef0, --fg #5c6166, --muted/--faint #adaeb1, --border rgba(107, 125, 143, .12), --link/--accent #f29718, hover rgba(130, 142, 159, .1) (line highlight).
+- Priority chips now follow Ayu hues with tinted (15% alpha) backgrounds and colored text, same chip pattern: light low #86b300, medium #eba400, high #fa8532, critical #e65050; dark low #aad94c, medium #ffb454, high #ff8f40, critical #d95757.
+- Per the ayu-colors reference, Ayu defines no separate heading color, so --heading and --soft use the primary foreground (#bfbdb6 dark / #5c6166 light). Column state accents (.c-*), overlay, toggle, localStorage persistence, and CSS variable structure are unchanged. Only src/webui.ts touched.
+- Verified with an assert-style palette check (all spec'd Ayu values present, no One Dark values left) and the full test suite: webui.test.ts, kanban.test.ts, orchestrator.test.ts all pass.
