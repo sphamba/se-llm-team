@@ -1,7 +1,7 @@
 ---
 name: "fix: webui theme is One Dark; use Ayu Light and Ayu Dark instead"
 priority: "high"
-state: "reviewing"
+state: "to-review"
 worktree: "fix/webui-theme-is-one-dark-use-ayu-light-and-ayu-dark-instead"
 ---
 
