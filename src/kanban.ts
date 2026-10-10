@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -153,7 +152,6 @@ function updateAttrs(root: string, task: Task, patch: Record<string, string>): v
 
 export function setState(root: string, task: Task, state: TaskState): void {
 	updateAttrs(root, task, { state });
-	if (state === "done") commitKanban(root, [task.file], `kanban: done ${task.file}`);
 }
 
 export function updateTask(
@@ -219,28 +217,5 @@ export function createTask(
 		`# Summary\n${input.summary.trim()}\n\n# Specs\n${(input.specs ?? "").trim()}\n\n# Notes\n`;
 	mkdirSync(kanbanDir(root), { recursive: true });
 	writeFileSync(join(kanbanDir(root), file), content);
-	commitKanban(root, [file], `kanban: create ${file}`);
 	return parseTask(root, file);
-}
-
-export function commitKanban(root: string, files: string[], message: string): boolean {
-	try {
-		// done commits run on every rescan and must not repeat when nothing is uncommitted
-		const dirty = files.some((f) =>
-			execFileSync("git", ["status", "--porcelain", "--", join(".kanban", f)], {
-				cwd: root,
-				encoding: "utf8",
-				stdio: ["ignore", "pipe", "ignore"],
-			}).trim() !== "",
-		);
-		if (!dirty) return false;
-		execFileSync("git", ["add", "--", ...files.map((f) => join(".kanban", f))], { cwd: root, stdio: "ignore" });
-		execFileSync("git", ["commit", "-m", message, "--", ...files.map((f) => join(".kanban", f))], {
-			cwd: root,
-			stdio: "ignore",
-		});
-		return true;
-	} catch {
-		return false;
-	}
 }
