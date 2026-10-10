@@ -24,7 +24,7 @@ ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
 
 ## Kanban board
 
-`.kanban/` in the project repo holds one markdown file per task, named `000001_feat_nice_thing.md`. Flat YAML frontmatter (name, priority, state, worktree) plus # Summary, # Specs, # Notes sections. The library commits task files to git at two points only: creation in backlog, and done (only `.kanban/` paths). Edits in between stay uncommitted and land in the one done commit.
+`.kanban/` in the project repo holds one markdown file per task, named `000001_feat_nice_thing.md`. Flat YAML frontmatter (name, priority, state, worktree) plus # Summary, # Specs, # Notes sections. The library writes files only; the orchestrator daemon is the sole git committer for `.kanban/` paths, at two points only: creation in backlog, and done. Edits in between stay uncommitted and land in the one done commit.
 
 States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing, done.
 
