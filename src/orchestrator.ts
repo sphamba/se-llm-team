@@ -78,8 +78,8 @@ function pidAlive(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
 		return true;
-	} catch {
-		return false;
+	} catch (err) {
+		return (err as NodeJS.ErrnoException).code === "EPERM"; // exists but not signalable: still alive
 	}
 }
 
@@ -242,7 +242,12 @@ function acquireLock(root: string): boolean {
 		writeFileSync(lock, String(process.pid), { flag: "wx" });
 		return true;
 	} catch {
-		const other = parseInt(readFileSync(lock, "utf8").trim(), 10);
+		let other = 0;
+		try {
+			other = parseInt(readFileSync(lock, "utf8").trim(), 10);
+		} catch {
+			return false; // lock vanished since the wx attempt: a rival holds or released it, stay out
+		}
 		if (pidAlive(other)) return false;
 		rmSync(lock);
 		return acquireLock(root);
@@ -255,6 +260,14 @@ function releaseLock(root: string): void {
 		if (parseInt(readFileSync(lock, "utf8").trim(), 10) === process.pid) rmSync(lock);
 	} catch {
 		/* not ours */
+	}
+}
+
+function holdsLock(root: string): boolean {
+	try {
+		return readFileSync(join(kanbanDir(root), ".orchestrator.lock"), "utf8").trim() === String(process.pid);
+	} catch {
+		return false;
 	}
 }
 
@@ -276,7 +289,18 @@ export function main(argv: string[]): void {
 	for (const dir of [".logs", ".pids"]) mkdirSync(join(kanbanDir(root), dir), { recursive: true });
 	log(root, `orchestrator started (root=${root}, agent=${cfg.agent}, poll=${pollMinutes}min, rescan=${rescanSeconds}s)`);
 
-	const sweep = () => rescan(root, cfg);
+	const sweep = () => {
+		// lock self-heal: an external cleanup or an acquire race can drop the lock mid-life;
+		// without this the daemon runs lockless forever and status/stop report "not running"
+		if (!holdsLock(root)) {
+			if (acquireLock(root)) log(root, "orchestrator lock was missing, re-acquired");
+			else {
+				log(root, "another orchestrator already runs for this project, exiting");
+				process.exit(0);
+			}
+		}
+		rescan(root, cfg);
+	};
 	let scheduled: NodeJS.Timeout | undefined;
 	const scheduleSweep = () => {
 		clearTimeout(scheduled);
@@ -300,6 +324,7 @@ export function main(argv: string[]): void {
 	const poller = setInterval(() => poll(root, cfg), pollMinutes * 60 * 1000);
 	try {
 		const w = watch(kanbanDir(root), scheduleSweep);
+		w.on("error", (err) => log(root, `fs.watch error, polling only: ${err instanceof Error ? err.message : err}`));
 		process.on("exit", () => w.close());
 	} catch (err) {
 		log(root, `fs.watch unavailable, polling only: ${err instanceof Error ? err.message : err}`);

@@ -14,7 +14,7 @@ function text(s: string) {
 export default function (pi: ExtensionAPI) {
 	const extDir = dirname(fileURLToPath(import.meta.url));
 	const board = (ctx: ExtensionContext) => kanbanDir(ctx.cwd);
-	const daemonLog = (ctx: ExtensionContext) => join(board(ctx.cwd), ".logs", "orchestrator.log");
+	const daemonLog = (ctx: ExtensionContext) => join(board(ctx), ".logs", "orchestrator.log");
 	const notified = new Set<string>();
 
 	pi.registerTool({
@@ -134,6 +134,8 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
 			if (!existsSync(board(ctx))) return text(`No ${board(ctx)} board in this project`);
+			const pid = readPid(ctx);
+			if (pid && pidAlive(pid)) return text(`Orchestrator already running (pid ${pid})`);
 			for (const dir of [".logs", ".pids"]) mkdirSync(join(board(ctx), dir), { recursive: true });
 			const log = openSync(daemonLog(ctx), "a");
 			const child = spawn(process.execPath, [join(extDir, "src", "orchestrator.ts"), "--root", ctx.cwd], {
@@ -217,7 +219,7 @@ function pidAlive(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
 		return true;
-	} catch {
-		return false;
+	} catch (err) {
+		return (err as NodeJS.ErrnoException).code === "EPERM"; // exists but not signalable: still alive
 	}
 }
