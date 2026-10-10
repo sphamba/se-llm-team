@@ -1,7 +1,7 @@
 ---
 name: "feat: board lives on a meta/kanban branch; .kanban/ untracked, mirrored by the daemon"
 priority: "medium"
-state: "doing"
+state: "live-testing"
 worktree: "feat/board-lives-on-a-meta-kanban-branch-kanban-untracked-mirrored-by-the-daemon"
 ---
 
@@ -52,3 +52,5 @@ Constraints:
   4. `git commit` to complete the merge. .gitignore already has .kanban/.
   5. Restart the daemon (task constraint). The new code mirrors the board to refs/heads/meta/kanban and bootstraps missing files from it. The board content on disk survives.
 - [2026-10-10 23:22] Deviations from the spec: bootstrap restores missing files, not only an empty board (safe superset, documented above). index.ts is outside the stated file list, but change 4 (orchestrator_wait) lives there. SPECS.md and README.md still describe commits at creation and done; they are stale after this merge and are not in the allowed file list.
+- [2026-10-10 23:47] Review (worktree commit 593ea9d): implementation matches the spec. commitKanban mirrors via plumbing only (hash-object -w, mktree, commit-tree with parent, update-ref), identical trees skip commit and push, pushMirror pushes only meta/kanban best-effort, boardStatus is mirror-relative, orchestrator_wait watches the mirror ref, .gitignore ignores .kanban/, untrack commit in place. Tests verified in the worktree: kanban.test.ts, orchestrator.test.ts (parts A, D, G, L all reworked plus auto-push checks), webui.test.ts all pass. Two fixes committed: bootstrapBoard now rejects tree entries with path traversal (name must be a flat .md file, the branch can come from a remote on a fresh clone), and a stale duplicate console.log at the end of orchestrator.test.ts was removed. State set back to to-review.
+- [2026-10-10 23:58] Re-review of worktree commit 593ea9d: no fixes needed, ready for live test. Verified myself in the worktree: kanban.test.ts, orchestrator.test.ts, webui.test.ts all pass. refs/heads/meta/kanban exists with the seed and refresh commits, 37 files, names identical to disk. commitKanban never touches the index or working tree, identical trees skip commit and push, pushMirror pushes only meta/kanban and only when a remote exists, orchestrator_wait handles the mirror appearing or vanishing mid-wait, bootstrapBoard guards path traversal. Fresh-clone edge confirmed: the .logs/.pids mkdir creates .kanban/ before bootstrapBoard runs, so bootstrap works on a bare clone. Known, acceptable drift: the mirror copy of 000034 lags the disk file (state line plus the 23:47 review note were appended after the mirror seed) because commits only happen at the create/done points; it self-heals when this task reaches done. Prior-review fixes were re-checked in the code and are correct.
