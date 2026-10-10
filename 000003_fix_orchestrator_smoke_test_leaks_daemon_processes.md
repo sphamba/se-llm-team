@@ -2,7 +2,7 @@
 name: "fix: orchestrator smoke test leaks daemon processes"
 priority: "low"
 state: "done"
-worktree: "fix/orchestrator-smoke-test-leaks-daemon-processes"
+worktree: ""
 ---
 
 # Summary
@@ -79,3 +79,13 @@ Tested commit 030dae9 in the worktree like a user. All acceptance criteria pass.
 - Housekeeping: none of the eight leaked pids in the task (208731, 211468, 213029, 216545, 218981, 243221, 245912, 527983) is alive. No `/tmp/orch-smoke-*` roots remain on the machine.
 - Test method note: concurrent live tests from other task worktrees (commit-kanban-tasks-only-on-create-and-done, and a re-run of this task's test) created orch-smoke processes and roots during my checks. I told them apart with `TMPDIR` (the test puts its fixtures under `$TMPDIR`) and by the daemon cmdline path. Those processes belonged to those runs, not to leaks from this fix.
 - No issues found. No new tasks needed.
+
+## 2026-10-10 19:25, merger
+
+Merged fix/orchestrator-smoke-test-leaks-daemon-processes into main as commit 717c369.
+
+Wrinkle on arrival: the merge state found in the repo was for fix/commit-kanban-tasks-only-on-create-and-done (task 000001's branch, 3ebbb2a), not this branch. A parallel merger completed it as 1d1a5a2 while I inspected. This branch's merge (030dae9) was then started fresh.
+
+One conflict, in src/orchestrator.test.ts, the part A waitFor call: main (task 000001) added the taskClean() condition, the "full pipeline + merge + done commit" message, and the done-commit assertions after it; this branch had changed waitFor's signature to drop the root param (that hunk merged cleanly, and its timeout path now calls killAll()). Resolution: kept main's condition and message (main wins on disagreement), dropped the trailing rootA argument to match this branch's 4-arg waitFor signature. Everything else of both sides is in the merge: main's taskClean helper and done-commit assertions, this branch's daemons list, agentPids (kanbanDir(root)/.pids), killAll, and the exit/SIGINT/SIGTERM hooks.
+
+Verification: node src/orchestrator.test.ts passes (exit 0); after the run no orch-smoke daemons or fixture roots from this run remain. The only processes seen are the repo's real orchestrator daemon (pid 716639) and two /tmp/livetest-* daemons from the concurrent live test in the commit-kanban-tasks worktree, not from this run. No dependencies added; daemon code untouched.
