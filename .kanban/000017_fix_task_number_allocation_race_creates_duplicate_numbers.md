@@ -1,7 +1,7 @@
 ---
 name: "fix: task number allocation race creates duplicate numbers"
 priority: "low"
-state: "backlog"
+state: "done"
 worktree: ""
 ---
 
@@ -32,3 +32,8 @@ src/kanban.ts createTask allocates the task number by reading the current max an
 - `node src/kanban.test.ts` passes; add a small test: two creates against the same board never produce the same number.
 
 # Notes
+
+- [2026-02-04 12:00] createTask now writes the task file with the exclusive `wx` flag and retries on EEXIST: the loop rescans the max and bumps to the next free number, bounded at 10 attempts, then throws. Tool contracts unchanged (only caller is index.ts kanban_create).
+- [2026-02-04 12:00] Tests: `node src/kanban.test.ts` passes with two new assertions (5 repeated creates all get unique numbers; a pre-existing 000006 collision file makes createTask return 000007 without overwriting the existing file). Also ran a two-process concurrent create check on a shared board, no duplicates. `node src/orchestrator.test.ts` still passes.
+- [2026-02-04 12:00] Committed as efe3e31 in the worktree. State set to to-review.
+- [2026-02-04 12:30] Review: implementation matches the specs. Retry loop rescans taskFiles each attempt, writes with the exclusive wx flag, retries only on EEXIST (other errors rethrown), bounded at 10 attempts then throws. Only change in src/kanban.ts is createTask; single caller index.ts:66 untouched, tool contracts unchanged. Ran node src/kanban.test.ts (pass) and node src/orchestrator.test.ts (pass). No fixes needed; state set to to-live-test.
