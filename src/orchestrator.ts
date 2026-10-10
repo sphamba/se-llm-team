@@ -268,7 +268,7 @@ export function main(argv: string[]): void {
 	const root = args.root;
 	const cfg = loadConfig(root);
 	const pollMinutes = args.pollMinutes ?? cfg.pollMinutes;
-	const rescanSeconds = args.rescanSeconds ?? 30;
+	const rescanSeconds = args.rescanSeconds ?? 10;
 	if (!acquireLock(root)) {
 		log(root, "another orchestrator already runs for this project, exiting");
 		return;
