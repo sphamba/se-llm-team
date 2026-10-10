@@ -41,7 +41,7 @@ States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing,
 
 ## Agents
 
-Agent prompts live in `agents/`. The orchestrator runs each agent as a headless `<executable> --approve -p <prompt>` process, with the task worktree as cwd and the task file path in the prompt. Agents update their own task file directly (notes and state attribute). The Live-tester reports issues to a Project manager subagent that creates new tasks.
+Agent prompts live in `agents/`. The orchestrator runs each agent as a headless `<executable> --approve -p <prompt>` process, with the task worktree as cwd and the task file path in the prompt. The orchestrator reads the role prompt from `agents/` in its own checkout at each spawn. A prompt fix on a task worktree branch applies only after that branch merges, so do not rely on a prompt change before the merge. Agents update their own task file directly (notes and state attribute). The Live-tester reports issues to a Project manager subagent that creates new tasks.
 
 ## Tools
 
