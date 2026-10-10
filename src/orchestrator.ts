@@ -209,7 +209,10 @@ function syncBoard(root: string, wtDir: string): void {
 	git(wtDir, ["config", "--worktree", "core.excludesFile", excludes], true);
 }
 
-function startTodo(root: string, cfg: Config, task: Task): void {
+// ensures the task's worktree dir exists (creating it with the -b fallback when the branch
+// is taken), links the shared board into it and records the worktree on the task;
+// null when creation fails
+function ensureWorktree(root: string, task: Task): { wt: string; wtDir: string } | null {
 	const wt = task.worktree || slugWorktree(task.name);
 	const wtDir = join(root, ".worktrees", wt);
 	if (!existsSync(wtDir)) {
@@ -217,9 +220,16 @@ function startTodo(root: string, cfg: Config, task: Task): void {
 			git(root, ["worktree", "add", join(".worktrees", wt), wt]);
 		}
 	}
+	if (!existsSync(wtDir)) return null;
 	syncBoard(root, wtDir);
 	setWorktree(root, task, wt);
-	spawnAgent(root, cfg.agent, "developer", { ...task, worktree: wt }, wtDir);
+	return { wt, wtDir };
+}
+
+function startTodo(root: string, cfg: Config, task: Task): void {
+	const ensured = ensureWorktree(root, task);
+	if (!ensured) return;
+	spawnAgent(root, cfg.agent, "developer", { ...task, worktree: ensured.wt }, ensured.wtDir);
 	setState(root, task, "doing");
 }
 
@@ -261,14 +271,22 @@ function rescan(root: string, cfg: Config): void {
 			const code = status.get(join(".kanban", task.file));
 			if (code === "??") commitKanban(root, [task.file], `kanban: create ${task.file}`);
 			else if (code && task.state === "done" && !task.worktree) commitKanban(root, [task.file], `kanban: done ${task.file}`);
-			const wtDir = join(root, ".worktrees", task.worktree || slugWorktree(task.name));
 			if (task.state === "to-do") startTodo(root, cfg, task);
 			else if (task.state === "to-review") {
-				spawnAgent(root, cfg.agent, "reviewer", task, wtDir);
-				setState(root, task, "reviewing");
+				const ensured = ensureWorktree(root, task);
+				// a failed spawn would bounce or strand the task; leave the state for the next rescan to retry
+				if (!ensured) log(root, `${task.file}: worktree could not be created, reviewer not spawned (state unchanged)`);
+				else {
+					spawnAgent(root, cfg.agent, "reviewer", task, ensured.wtDir);
+					setState(root, task, "reviewing");
+				}
 			} else if (task.state === "to-live-test") {
-				spawnAgent(root, cfg.agent, "live-tester", task, wtDir);
-				setState(root, task, "live-testing");
+				const ensured = ensureWorktree(root, task);
+				if (!ensured) log(root, `${task.file}: worktree could not be created, live-tester not spawned (state unchanged)`);
+				else {
+					spawnAgent(root, cfg.agent, "live-tester", task, ensured.wtDir);
+					setState(root, task, "live-testing");
+				}
 			} else if (task.state === "done") {
 				// the one done commit: after the merge completes, or at once with no worktree
 				if (!task.worktree || mergeDone(root, cfg, task)) commitKanban(root, [task.file], `kanban: done ${task.file}`);
