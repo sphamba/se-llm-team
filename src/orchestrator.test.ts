@@ -304,4 +304,50 @@ assert.equal(parseTask(rootF, taskF.file).state, "to-live-test", "stayed in to-l
 assert.ok(!f.output().includes("spawned live-tester"), "live-tester never spawned");
 f.daemon.kill("SIGTERM");
 
+// --- part G: the done merge and commit wait for the task's registered agent to die ---
+const rootG = fixture();
+cleaned.push(rootG);
+mkdirSync(kanbanDir(rootG), { recursive: true });
+// live-tester stub that sets done, appends its report, then lingers alive before exiting
+const lingerStub = join(rootG, "linger-agent.cjs");
+writeFileSync(
+	lingerStub,
+	`#!/usr/bin/env node
+const { readFileSync, writeFileSync, appendFileSync } = require("node:fs");
+const prompt = process.argv[4] ?? "";
+const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
+if (!prompt.includes("Live-tester") || !file) process.exit(0);
+writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, 'state: "done"'));
+appendFileSync(file, "\\nLive test report: merge waited for the live-tester pid.\\n");
+setTimeout(() => process.exit(0), 5000);
+`,
+	{ mode: 0o755 },
+);
+writeFileSync(join(kanbanDir(rootG), "se-llm-team.json"), JSON.stringify({ agent: lingerStub, pollMinutes: 0.05 }));
+const taskG = createTask(rootG, { name: "fix: defer merge while alive", summary: "Deferred merge smoke", specs: "n/a" });
+setState(rootG, taskG, "to-live-test");
+
+const g = await runDaemon(rootG);
+const wtG = join(rootG, ".worktrees", "fix/defer-merge-while-alive");
+await waitFor(() => parseTask(rootG, taskG.file).state === "done", 30000, "live-tester set done", g.output);
+// the stub lingers 5s and the daemon rescans every 1s, so sweeps ran while the pid was alive:
+// no merge, no worktree removal, no done commit
+await new Promise((r) => setTimeout(r, 2000));
+assert.ok(existsSync(wtG), "worktree kept while the live-tester pid is alive");
+assert.ok(
+	execSync(`git status --porcelain -- .kanban/${taskG.file}`, { cwd: rootG, encoding: "utf8" }).trim() !== "",
+	"no done commit while the live-tester pid is alive",
+);
+// once the agent exits, the deferred merge and the done commit run and fold in the report
+await waitFor(() => !existsSync(wtG), 30000, "merge after agent death", g.output);
+await waitFor(
+	() => execSync(`git status --porcelain -- .kanban/${taskG.file}`, { cwd: rootG, encoding: "utf8" }).trim() === "",
+	30000,
+	"deferred done commit",
+	g.output,
+);
+const committedG = execSync(`git show HEAD:.kanban/${taskG.file}`, { cwd: rootG, encoding: "utf8", shell: "/bin/bash" });
+assert.match(committedG, /Live test report: merge waited for the live-tester pid\./, "report folded into the done commit");
+g.daemon.kill("SIGTERM");
+
 console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree smoke passed");
