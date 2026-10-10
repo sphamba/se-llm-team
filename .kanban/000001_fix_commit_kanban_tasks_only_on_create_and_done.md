@@ -1,7 +1,7 @@
 ---
 name: "fix: commit kanban tasks only on create and done"
 priority: "medium"
-state: "reviewing"
+state: "to-review"
 worktree: "fix/commit-kanban-tasks-only-on-create-and-done"
 ---
 
@@ -61,3 +61,5 @@ Reduce commit noise: .kanban/ task files must be committed to git only at two po
 - [2026-10-10 18:55] orchestrator.ts: mergeDone now returns true only when the done transition is fully processed (nothing left to merge, or the merge completed). The rescan done path commits the task file once after mergeDone completes, or at once for done with no worktree attribute. The post-merge worktree clear and merger conflict notes fold into that one done commit.
 - [2026-10-10 18:55] Tests: kanban.test.ts has a new git fixture block. It checks that create commits, that to-do, setWorktree, appendNote, and updateTask do not commit, that done commits once and leaves the file clean, and that a no-change done does not repeat. orchestrator.test.ts part A now waits for the done commit and asserts exactly one "kanban: done" commit and a clean task file after merge. Also verified in a scratch repo: done by direct edit with no worktree gives one commit and a clean status. Both test files pass.
 - [2026-10-10 18:55] Docs: README.md and SPECS.md now describe the two-point commit policy (creation and done only).
+- [2026-10-10 19:01] Review pass (commit 2733383): no fixes needed. Verified against every Required behavior and acceptance criterion: create keeps its commit; updateTask, appendNote, setState (non-done), and setWorktree no longer commit (grep shows commitKanban only on setState-to-done, createTask, and the rescan done path); the rescan done path commits after mergeDone returns true, so the post-merge worktree clear and merger notes fold into the one done commit; the dirty check in commitKanban sits inside the try, so a missing git repo still returns false with no throw; the dirty check makes the done commit a no-op on later rescans (re-verified in a scratch repo: 3 rescans after done, still 3 commits, clean status). Both test files pass. The orchestrator test asserts exactly one done commit with a clean file after the direct-edit done + merge, and kanban.test.ts covers create commits, the four no-commit mutations, done-once, no-repeat, and the no-git done path.
+- [2026-10-10 19:01] One observed consequence, not a defect: when a task with a worktree reaches done through setState (PM via kanban_set_state, or the liveness poll live-testing to done), the library commits at that point (Required behavior 3a, unconditional), and after the orchestrator merges and clears the worktree attribute the file is dirty again, so a second kanban: done commit lands. The single fold-in commit (behavior 6) applies to the direct-edit done path (3b), which the orchestrator test asserts. Leaving as approved.
