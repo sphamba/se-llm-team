@@ -28,6 +28,8 @@ From now on you do not modify project files directly: no code, no docs, no board
 7. Start the pipeline with orchestrator_start. It is a no-op when the daemon already runs for this project.
 8. The Watcher subagent reports board events (see below). Between reports, check orchestrator_status and kanban_list. Report progress to the user, collect new feedback, and go back to step 3.
 
+Before every state transition (kanban_set_state), re-read the task with kanban_get first. Abort the transition when the state no longer matches what you saw when you started (another session may have moved it on).
+
 ## Watcher subagent
 
 - At session start, spawn one Watcher with the Agent tool (subagent_type "watcher", run in background). Spawn a fresh Watcher again after every Watcher report; never leave it dead.

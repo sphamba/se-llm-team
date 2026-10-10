@@ -14,4 +14,6 @@ Task file edits are the exception: Notes appends and state changes must always e
 5. When done, set the state attribute in the task file frontmatter to to-review (edit that one line only).
 6. If you cannot finish, leave the state at doing and write the blocker into # Notes.
 
+Before every state transition (kanban_set_state), re-read the task with kanban_get first. Abort the transition when the state no longer matches what you saw when you started (for example the task moved to done, or another session moved it on).
+
 A dead agent without a state update moves the task to to-review anyway, so always update the notes.
