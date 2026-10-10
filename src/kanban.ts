@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -149,7 +148,6 @@ function updateAttrs(root: string, task: Task, patch: Record<string, string>): v
 	if (!changed.length) return;
 	for (const [k, v] of changed) attrs[k] = v;
 	writeFileSync(path, serializeFrontmatter(attrs) + m[2]);
-	commitKanban(root, [task.file], `kanban: ${task.file} ${changed.map(([k]) => k).join(",")}`);
 }
 
 export function setState(root: string, task: Task, state: TaskState): void {
@@ -184,7 +182,6 @@ export function updateTask(
 		content += m[2];
 	}
 	writeFileSync(join(kanbanDir(root), task.file), content);
-	commitKanban(root, [task.file], `kanban: update ${task.file}`);
 }
 
 export function setWorktree(root: string, task: Task, worktree: string): void {
@@ -201,7 +198,6 @@ export function appendNote(root: string, task: Task, note: string): void {
 	} else {
 		writeFileSync(path, `${raw.replace(/\s*$/, "")}\n\n# Notes${entry}\n`);
 	}
-	commitKanban(root, [task.file], `kanban: note on ${task.file}`);
 }
 
 export function createTask(
@@ -221,19 +217,5 @@ export function createTask(
 		`# Summary\n${input.summary.trim()}\n\n# Specs\n${(input.specs ?? "").trim()}\n\n# Notes\n`;
 	mkdirSync(kanbanDir(root), { recursive: true });
 	writeFileSync(join(kanbanDir(root), file), content);
-	commitKanban(root, [file], `kanban: create ${file}`);
 	return parseTask(root, file);
-}
-
-export function commitKanban(root: string, files: string[], message: string): boolean {
-	try {
-		execFileSync("git", ["add", "--", ...files.map((f) => join(".kanban", f))], { cwd: root, stdio: "ignore" });
-		execFileSync("git", ["commit", "-m", message, "--", ...files.map((f) => join(".kanban", f))], {
-			cwd: root,
-			stdio: "ignore",
-		});
-		return true;
-	} catch {
-		return false;
-	}
 }
