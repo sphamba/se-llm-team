@@ -1,4 +1,4 @@
-import { execSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, watch, type FSWatcher } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,6 +6,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { createTask, getTask, kanbanDir, listAll, listTasks, setState, updateTask, STATES, type TaskState } from "./src/kanban.ts";
+import { waitForBoardCommits } from "./src/orchestrator.ts";
 
 function text(s: string) {
 	return { content: [{ type: "text" as const, text: s }], details: undefined };
@@ -210,45 +211,9 @@ export default function (pi: ExtensionAPI) {
 			timeoutSeconds: Type.Optional(Type.Number({ description: "Seconds to block, 1-900 (default 300)" })),
 		}),
 		async execute(_id, params, signal, _onUpdate, ctx) {
-			const timeout = Math.min(900, Math.max(1, params.timeoutSeconds ?? 300));
 			const started = Date.now();
-			// the board lives on refs/heads/meta/kanban, not on the current branch: watch that ref
-			const mirror = "refs/heads/meta/kanban";
-			const revParse = () => {
-				try {
-					return execSync(`git rev-parse ${mirror}`, { cwd: ctx.cwd, encoding: "utf8" }).trim();
-				} catch {
-					return "";
-				}
-			};
-			const baseline = revParse();
-			while (Date.now() - started < timeout * 1000) {
-				let subjects: string[] = [];
-				const head = revParse();
-				// no baseline ref at start: the whole mirror appeared during the wait, so all its commits are new
-				if (head && head !== baseline) {
-					try {
-						subjects = execSync(`git log --format=%s ${baseline ? baseline + ".." : ""}${mirror}`, {
-							cwd: ctx.cwd,
-							encoding: "utf8",
-						})
-							.split("\n")
-							.filter((s) => s.startsWith("kanban: done ") || s.startsWith("kanban: create "));
-					} catch {
-						/* mirror ref vanished, keep waiting */
-					}
-				}
-				if (subjects.length) return text(subjects.join("\n"));
-				const remaining = started + timeout * 1000 - Date.now();
-				await new Promise<void>((resolve) => {
-					const timer = setTimeout(resolve, Math.min(2000, remaining));
-					signal?.addEventListener("abort", () => {
-						clearTimeout(timer);
-						resolve();
-					}, { once: true });
-				});
-				if (signal?.aborted) break;
-			}
+			const subjects = await waitForBoardCommits(ctx.cwd, params.timeoutSeconds, signal);
+			if (subjects.length) return text(subjects.join("\n"));
 			return text(`No board commits in ${Math.round((Date.now() - started) / 1000)}s.`);
 		},
 	});
