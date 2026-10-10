@@ -236,7 +236,12 @@ function acquireLock(root: string): boolean {
 		writeFileSync(lock, String(process.pid), { flag: "wx" });
 		return true;
 	} catch {
-		const other = parseInt(readFileSync(lock, "utf8").trim(), 10);
+		let other = 0;
+		try {
+			other = parseInt(readFileSync(lock, "utf8").trim(), 10);
+		} catch {
+			return false; // lock vanished since the wx attempt: a rival holds or released it, stay out
+		}
 		if (pidAlive(other)) return false;
 		rmSync(lock);
 		return acquireLock(root);
