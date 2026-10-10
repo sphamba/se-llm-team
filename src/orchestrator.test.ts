@@ -478,8 +478,6 @@ assert.equal(giveUpsK(), 1, "give-up not logged again past the cap");
 assert.equal(parseTask(rootK, taskK.file).state, "done", "stuck task stays done for manual resolution");
 k.daemon.kill("SIGTERM");
 
-console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard + conflict skip + merge cap smoke passed");
-
 // --- part L: bootstrap materializes board files missing from .kanban/ from the mirror branch ---
 const rootL = fixture();
 cleaned.push(rootL);

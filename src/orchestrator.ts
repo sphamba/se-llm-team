@@ -316,7 +316,8 @@ function bootstrapBoard(root: string): void {
 		const m = line.match(/^\S+ blob (\S+)\t(.+)$/);
 		if (!m) continue;
 		const name = m[2].replace(/^\.kanban\//, "");
-		if (!name.endsWith(".md") || have.has(name)) continue;
+		// the branch can come from a remote on a fresh clone: flat .md names only, no traversal
+		if (!name.endsWith(".md") || name.includes("/") || have.has(name)) continue;
 		try {
 			writeFileSync(
 				join(root, m[2]),
