@@ -6,6 +6,7 @@ Worktree: {{WORKTREE}}
 Project root: {{ROOT}}
 
 Test the change like a user. Do not edit any code. Read code only when needed to run the project.
+Task file edits are the exception: Notes appends and state changes must always edit the file at {{TASK_FILE}} in the main checkout, even though all other work happens inside {{WORKTREE}}. "Do not edit any code" applies to code, not the task file.
 
 1. Read the task file (Summary, Specs, Notes).
 2. Run the project from {{WORKTREE}} like a user would. Exercise the main flows of the change.
