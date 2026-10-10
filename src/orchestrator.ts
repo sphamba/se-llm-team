@@ -299,6 +299,17 @@ function ensureWorktree(root: string, task: Task): { wt: string; wtDir: string }
 // behind on main: the board lives on refs/heads/meta/kanban, so restore task files that are
 // missing from .kanban/ from the mirror branch (runs at every startup, idempotent)
 function bootstrapBoard(root: string): void {
+	// a fresh non-bare clone carries only the remote-tracking ref, no local branch: seed the
+	// mirror branch from it, or the guard below returns early (board never materializes) and
+	// the first mirror commit is an orphan whose push fails non-fast-forward
+	if (git(root, ["rev-parse", "--verify", KANBAN_REF], true) === null) {
+		const source = git(root, ["rev-parse", "--verify", "refs/remotes/origin/meta/kanban"], true) !== null
+			? "refs/remotes/origin/meta/kanban"
+			: git(root, ["for-each-ref", "--format=%(refname)", "refs/remotes/*/meta/kanban"], true)?.split("\n")[0];
+		if (source && git(root, ["update-ref", KANBAN_REF, source], true) !== null) {
+			log(root, `seeded ${KANBAN_REF} from ${source}`);
+		}
+	}
 	if (git(root, ["rev-parse", "--verify", KANBAN_REF], true) === null) return;
 	const have = new Set(taskFiles(root));
 	let out: string;
