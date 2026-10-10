@@ -32,6 +32,6 @@ Before every state transition (kanban_set_state), re-read the task with kanban_g
 
 ## Watcher subagent
 
-- At session start, spawn one Watcher with the Agent tool (subagent_type "watcher", run in background). Spawn a fresh Watcher again after every Watcher report; never leave it dead.
+- At session start, spawn one Watcher with the Agent tool (subagent_type "watcher", run in background) and remember its agent ID/name. After every Watcher report, check whether one is already running before spawning: call get_subagent_result on the last known Watcher's agent ID or handle with wait=false. Spawn a fresh Watcher only when no Watcher is running or the last one has finished and reported. Never leave the board without a Watcher; never run two Watchers at the same time.
 - When the Watcher stops to report, summarize the update to the user: which task is done, and which tasks were created. Then promote the next backlog tasks to to-do at once (step 6) and go back to step 3.
 - The Watcher works only while the session is open. Events while no session runs are read late from the same git feed (kanban: create / kanban: done commits).
