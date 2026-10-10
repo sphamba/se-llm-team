@@ -73,13 +73,13 @@ function serve(root: string, req: IncomingMessage, res: ServerResponse): void {
 	}
 }
 
-// dark palette, written once and applied twice: explicit choice via data-theme, browser default via media query
+// Ayu Dark palette (ayu-theme/ayu-colors), written once and applied twice: explicit choice via data-theme, browser default via media query
 const DARK_VARS = `
-:root[data-theme="dark"] { --bg: #282c34; --fg: #abb2bf; --panel: #2c313a; --border: #3e4451; --heading: #d7dae0; --muted: #5c6370; --faint: #5c6370; --soft: #d7dae0; --hover: #353b45; --overlay: rgba(0, 0, 0, .6); --code-bg: #21252b; --link: #61afef;
---low-bg: rgba(152, 195, 121, .15); --low-fg: #98c379; --medium-bg: rgba(229, 192, 123, .15); --medium-fg: #e5c07b; --high-bg: rgba(209, 154, 102, .15); --high-fg: #d19a66; --critical-bg: rgba(224, 108, 117, .15); --critical-fg: #e06c75; }
+:root[data-theme="dark"] { --bg: #10141c; --fg: #bfbdb6; --panel: #141821; --border: #1b1f29; --heading: #bfbdb6; --muted: #5a6673; --faint: #5a6673; --soft: #bfbdb6; --hover: #1b1f29; --overlay: rgba(0, 0, 0, .6); --code-bg: #010102; --link: #e6b450;
+--low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 180, 84, .15); --medium-fg: #ffb454; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(217, 87, 87, .15); --critical-fg: #d95757; }
 :root[data-theme="dark"] #theme { color: var(--link); border-color: var(--link); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #282c34; --fg: #abb2bf; --panel: #2c313a; --border: #3e4451; --heading: #d7dae0; --muted: #5c6370; --faint: #5c6370; --soft: #d7dae0; --hover: #353b45; --overlay: rgba(0, 0, 0, .6); --code-bg: #21252b; --link: #61afef;
---low-bg: rgba(152, 195, 121, .15); --low-fg: #98c379; --medium-bg: rgba(229, 192, 123, .15); --medium-fg: #e5c07b; --high-bg: rgba(209, 154, 102, .15); --high-fg: #d19a66; --critical-bg: rgba(224, 108, 117, .15); --critical-fg: #e06c75; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #10141c; --fg: #bfbdb6; --panel: #141821; --border: #1b1f29; --heading: #bfbdb6; --muted: #5a6673; --faint: #5a6673; --soft: #bfbdb6; --hover: #1b1f29; --overlay: rgba(0, 0, 0, .6); --code-bg: #010102; --link: #e6b450;
+--low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 180, 84, .15); --medium-fg: #ffb454; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(217, 87, 87, .15); --critical-fg: #d95757; }
 :root:not([data-theme="light"]) #theme { color: var(--link); border-color: var(--link); } }
 `;
 
@@ -91,8 +91,9 @@ const PAGE = `<!doctype html>
 <title>Software Engineering LLM Team</title>
 <style>
 * { box-sizing: border-box; }
-:root { --bg: #f1f5f9; --fg: #0f172a; --panel: #fff; --border: #e2e8f0; --heading: #334155; --muted: #64748b; --faint: #94a3b8; --soft: #475569; --hover: #f8fafc; --overlay: rgba(15, 23, 42, .45); --code-bg: #f1f5f9; --link: #2563eb;
---low-bg: #e2e8f0; --low-fg: #475569; --medium-bg: #dbeafe; --medium-fg: #1d4ed8; --high-bg: #ffedd5; --high-fg: #c2410c; --critical-bg: #fee2e2; --critical-fg: #b91c1c; }
+/* Ayu Light palette (ayu-theme/ayu-colors) */
+:root { --bg: #fcfcfc; --fg: #5c6166; --panel: #ffffff; --border: rgba(107, 125, 143, .12); --heading: #5c6166; --muted: #adaeb1; --faint: #adaeb1; --soft: #5c6166; --hover: rgba(130, 142, 159, .1); --overlay: rgba(15, 23, 42, .45); --code-bg: #ebeef0; --link: #f29718;
+--low-bg: rgba(134, 179, 0, .15); --low-fg: #86b300; --medium-bg: rgba(235, 164, 0, .15); --medium-fg: #eba400; --high-bg: rgba(250, 133, 50, .15); --high-fg: #fa8532; --critical-bg: rgba(230, 80, 80, .15); --critical-fg: #e65050; }
 ${DARK_VARS}
 body { margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
 header { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 6px; background: var(--code-bg); }
