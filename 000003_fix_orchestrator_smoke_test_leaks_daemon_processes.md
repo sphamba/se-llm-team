@@ -1,7 +1,7 @@
 ---
 name: "fix: orchestrator smoke test leaks daemon processes"
 priority: "low"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/orchestrator-smoke-test-leaks-daemon-processes"
 ---
 
@@ -57,3 +57,13 @@ One fix committed (030dae9): `agentPids()` in src/orchestrator.test.ts read the 
 Verification of the fix: ran the same instrumented check against HEAD and against the fix. In the check a fake long-running agent is planted with a pidfile in the daemon's real pidfile dir before the exit hook fires. HEAD let the fake agent survive (confirmed the bug is load-bearing); the fixed version kills it. `node src/orchestrator.test.ts` passes (exit 0), `ps aux | grep orch-smoke` and `/tmp/orch-smoke-*` show nothing after the run. Failed-assert path spot-checked: exits 1 with no leftovers. Everything else in the diff reviewed and correct: daemons registered at spawn, SIGKILL before the agent sweep (no respawn race), cmdline guard also covers pid 0, exit and SIGINT/SIGTERM hooks idempotent, assertions unchanged, daemon code untouched, no new dependencies.
 
 Housekeeping re-checked: no orch-smoke processes and no `/tmp/orch-smoke-*` roots remain. Only the repo's real orchestrator daemon (pid 420117, root se-llm-team) runs, as the developer noted.
+
+## 2026-10-10, reviewer (second round)
+
+Re-reviewed both commits (be34bfb, 030dae9) against the Specs. No new fixes needed; set the task to to-live-test.
+
+- Code check: `agentPids` reads `kanbanDir(root)/.pids` = `root/.kanban/.pids`, the same directory where the daemon's `writePid` writes agent pids. The 030dae9 fix is correct.
+- Code check: the exit hook, the SIGINT/SIGTERM handlers, and the `waitFor` timeout path all run `killAll()`. All handlers are synchronous, so they work inside `process.on("exit")`, and they are idempotent.
+- Instrumented check at HEAD: planted a fake long-running agent (cmdline contains the fixture root) with a pidfile in the daemon's real pidfile dir `root/.kanban/.pids`. The test passed (exit 0), and after the run the fake agent was dead, the daemons were killed, and all fixture roots were removed. This confirms the agent sweep is load-bearing.
+- Ran `node src/orchestrator.test.ts`: passes (exit 0). After the run, no orch-smoke processes and no `/tmp/orch-smoke-*` roots from this run. One daemon (pid 677888) was seen mid-check, but it belonged to the concurrent test run in the role-agents-edit worktree, which was still in progress; it exited normally and was left alone.
+- Assertions unchanged, daemon code untouched, no new dependencies.
