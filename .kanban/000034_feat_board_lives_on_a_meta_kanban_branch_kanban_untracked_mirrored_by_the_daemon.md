@@ -1,7 +1,7 @@
 ---
 name: "feat: board lives on a meta/kanban branch; .kanban/ untracked, mirrored by the daemon"
 priority: "medium"
-state: "live-testing"
+state: "done"
 worktree: "feat/board-lives-on-a-meta-kanban-branch-kanban-untracked-mirrored-by-the-daemon"
 ---
 
