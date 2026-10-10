@@ -258,13 +258,19 @@ function mergeDone(root: string, cfg: Config, task: Task): boolean {
 		log(root, `merged ${branch} for ${task.file}`);
 		return true;
 	}
-	const attempts = bumpCounter(root, `${slug}.merge-attempts`);
-	if (attempts > MERGE_ATTEMPT_CAP) {
-		log(root, `merge of ${branch} for ${task.file} still conflicts after ${MERGE_ATTEMPT_CAP} attempts, left for manual resolution`);
+	const attempts = readCounter(root, `${slug}.merge-attempts`);
+	if (attempts >= MERGE_ATTEMPT_CAP) {
+		// a stuck-conflict task is rescanned forever: log the give-up once at the cap,
+		// then freeze the counter instead of bumping and logging on every later sweep
+		if (attempts === MERGE_ATTEMPT_CAP) {
+			bumpCounter(root, `${slug}.merge-attempts`);
+			log(root, `merge of ${branch} for ${task.file} still conflicts after ${MERGE_ATTEMPT_CAP} attempts, left for manual resolution`);
+		}
 		return false;
 	}
-	log(root, `merge conflict for ${branch}, spawning merger (attempt ${attempts})`);
-	appendNote(root, task, `Merge conflict for branch ${branch}, merger spawned (attempt ${attempts}).`);
+	const next = bumpCounter(root, `${slug}.merge-attempts`);
+	log(root, `merge conflict for ${branch}, spawning merger (attempt ${next})`);
+	appendNote(root, task, `Merge conflict for branch ${branch}, merger spawned (attempt ${next}).`);
 	spawnAgent(root, cfg.agent, "merger", task, root, `${slug}.merger`);
 	return false;
 }
