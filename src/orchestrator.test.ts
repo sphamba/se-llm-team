@@ -189,8 +189,8 @@ setState(rootB, taskB, "to-do");
 const b = await runDaemon(rootB);
 const readB = () => parseTask(rootB, taskB.file);
 await waitFor(() => b.output().includes("giving up"), 60000, "respawn cap", b.output);
-assert.equal(readB().state, "reviewing");
-assert.ok(b.output().includes("doing -> to-review"), "poll moved the dead developer forward");
+assert.equal(readB().state, "doing");
+assert.ok(b.output().includes("doing -> to-do"), "poll moved the dead developer back to to-do");
 b.daemon.kill("SIGTERM");
 
 // --- part C: lock lifecycle: singleton, self-heal while running, release on stop ---

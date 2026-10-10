@@ -33,7 +33,7 @@ Create a pi coding agent extension (this repo is already symlinked to ~/pi/agent
 - For every new task in to-do:
   - create a unique git worktree under .worktrees/ based on the task name, and set the worktree attribute of the task
   - spawn a Developer agent and move the task to "doing"
-  - If the agent terminates without doing updating the task's state, the orchestrator moves it to "to-review"
+  - If the agent terminates without doing updating the task's state, the orchestrator moves the task back to "to-do"
 - For every new task in to-review:
   - spawn a Reviewer agent and move the task to "reviewing"
   - If terminated without updated state, move to back to "to-review"
