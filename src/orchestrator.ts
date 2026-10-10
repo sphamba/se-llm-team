@@ -13,6 +13,7 @@ import {
 	type Task,
 	type TaskState,
 } from "./kanban.ts";
+import { loadWebUiConfig, startWebUi } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_POLL_MINUTES = 15;
@@ -421,6 +422,12 @@ export function main(argv: string[]): void {
 		process.on("exit", () => w.close());
 	} catch (err) {
 		log(root, `fs.watch unavailable, polling only: ${err instanceof Error ? err.message : err}`);
+	}
+	const webUi = loadWebUiConfig(root);
+	if (webUi.enabled) {
+		startWebUi(root, webUi)
+			.then((ui) => (ui ? log(root, `web ui on http://${webUi.host}:${ui.port}`) : log(root, "web ui failed to start, continuing without it")))
+			.catch((err) => log(root, `web ui failed to start, continuing without it: ${err instanceof Error ? err.message : err}`));
 	}
 }
 
