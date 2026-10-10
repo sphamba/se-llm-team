@@ -1,7 +1,7 @@
 ---
 name: "fix: commit kanban tasks only on create and done"
 priority: "medium"
-state: "to-review"
+state: "reviewing"
 worktree: "fix/commit-kanban-tasks-only-on-create-and-done"
 ---
 
