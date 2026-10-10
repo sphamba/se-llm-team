@@ -1,0 +1,36 @@
+---
+name: "fix: updateTask summary/specs patch rebuilds the whole body and drops unknown sections"
+priority: "medium"
+state: "done"
+worktree: ""
+---
+
+# Summary
+In updateTask (src/kanban.ts), a summary or specs patch rebuilds the whole task body as Summary/Specs/Notes, dropping any unknown sections from the file. Follow the updateAttrs pattern, which already keeps the untouched body verbatim.
+
+# Specs
+Found in the live test of task 000011 (worktree commit a90e867); the review flagged it as a follow-up. Pre-existing on main, not caused by the merge-conflict rewrite path — updateAttrs keeps the body verbatim — but it contradicts task 000011's spec line "keep all sections and unknown content intact" and the kanban_update tool description "Replaces the whole Summary section".
+
+Cause: in updateTask (src/kanban.ts, ~line 157), when patch.summary or patch.specs is set, the body is rebuilt from parsed fields as "# Summary\n...\n\n# Specs\n...\n\n# Notes\n..." — any section outside Summary/Specs/Notes in the existing body is silently discarded. By contrast, updateAttrs (~line 133) rewrites only the frontmatter and re-appends the body untouched: serializeFrontmatter(attrs) + m[2].
+
+Fix:
+- When patching summary and/or specs, rewrite only the corresponding section(s) in the existing body and keep everything else (unknown sections, Notes, ordering) intact, following the updateAttrs verbatim-body pattern.
+- Update the kanban_update tool description if the real behavior differs from "Replaces the whole Summary section", or make the behavior match the description.
+
+Acceptance:
+- Patching summary or specs preserves unknown sections and Notes content byte-for-byte.
+- A task with only Summary/Specs/Notes behaves as before.
+- Existing tests pass.
+
+# Notes
+- Added replaceSections (src/kanban.ts): rewrites only the patched section content in the existing body, keeps everything else (unknown sections, Notes, ordering, frontmatter) byte-for-byte, appends a missing section at the end. updateTask now delegates name/priority to updateAttrs and summary/specs to replaceSections. kanban_update description already matched the fixed behavior, so no tool change was needed.
+- kanban.test.ts: added assertions that a summary or specs patch preserves an unknown # Changelog section byte-for-byte and keeps Notes. Existing tests pass (kanban, orchestrator, webui).
+- Edge checks: standard Summary/Specs/Notes tasks produce output byte-identical to the old rebuild (single-field and two-field patches); unknown section survives verbatim. Worktree commit e01e152.
+- Review: the branch forked at 81ce177, before main merged 000011's conflict-marker guard (a90e867). The updateTask rewrite dropped that guard region: the future done-merge conflicted in updateTask, and even a correct resolution left replaceSections without the guard, failing main's test assert.throws(() => updateTask(root, tc, { summary: "x" })).
+- Review fix (commit 0589cc5): replicated main's guard pieces byte-for-byte (hasConflictMarkers, conflicted on Task and parseTask, updateAttrs guard) and kept updateTask's head (including const current) identical to main's, so the done-merge is now conflict-free (git merge-tree exits 0). The guard runs ahead of the summary/specs patch, so conflicted files are never rewritten. const current is unused by the delegation path, kept only for merge compatibility; drop it in a later main-side cleanup.
+- Verified on the merged result in a temp worktree: clean merge, all tests pass (kanban, orchestrator including conflict-skip and merge-cap, webui). Edge checks re-run on merged code: byte-identical to the old rebuild for standard single/two-field patches; Notes, unknown sections and ordering preserved byte-for-byte; missing section appended at the end; frontmatter-less files still throw untouched.
+- An in-place rebase was attempted and aborted: the worktree's stale skip-worktree board entries and the live shared board made it unsafe (board writes go through the .kanban symlink). No board file was modified; skip-worktree restored on all 28 entries.
+- Review (commits e01e152, 0589cc5): approved, no code fixes. Verified against the specs: replaceSections rewrites only the patched section content; frontmatter and untouched body stay byte-for-byte; updateTask delegates name/priority to updateAttrs and summary/specs to replaceSections; the kanban_update description ("Replaces the whole Summary section") matches the fixed behavior, so no tool change was needed. Ran all three suites in the worktree: kanban, orchestrator, webui, all pass.
+- Review, independent edge verification (17 checks, own script): output is byte-identical to the old rebuild for standard Summary/Specs/Notes tasks with summary-only and summary+specs patches; an unknown section between Summary and Specs and unknown first/last sections survive byte-for-byte with ordering kept; Notes preserved; a missing patched section (Summary dropped from the file) is appended at the end; multi-line values round-trip; a frontmatter-less file still throws untouched; an empty patch is a no-op; combined name+summary patches work. Two initial check failures were bugs in the reviewer's own fixtures (missing decodeAttr in the old-logic twin, and a \s*$ replace that ate the newline after # Notes), not in the code.
+- Review, merge verified with a fresh clone in /tmp: merge of main into 0589cc5 is conflict-free (merge-tree clean, kanban.test.ts tails byte-identical to main); on the merged result all four orchestrator smoke parts pass (including conflict skip and merge cap), and the merged updateTask keeps both main's conflict-marker guard and the section-patch delegation. The unused const current in updateTask stays for merge compatibility, as documented; drop it in a later main-side cleanup.
+- Live test (worktree 0589cc5): PASS. All three suites pass in the worktree (kanban, orchestrator, webui). Ran 12 user-flow checks against a fixture board in /tmp driving the worktree's updateTask directly: a summary patch and a specs patch on a realistic board file with unknown # History, # Changelog and # Custom sections keep them plus Notes and the section order byte-for-byte, frontmatter untouched; a two-field summary+specs patch keeps a # Custom section after Notes; combined name+summary works; a name-only patch leaves the body byte-for-byte (updateAttrs path); a missing # Specs is appended at the end; standard Summary/Specs/Notes tasks stay byte-identical to the old rebuild for single- and two-field patches; a frontmatter-less file still throws untouched; the conflict-marker guard throws before any rewrite and leaves the file untouched; prose mentioning a single >>>>>>> marker is not treated as conflicted; multi-line summary values round-trip; duplicate # Summary headers patch the last one, matching parseTask. Two initial check failures were bugs in my own fixture (compared restored-old against swapped-new strings, and a hardcoded name in the old-rebuild twin), not in the code. The registered kanban_update tool loads the main checkout, not this worktree, so the fix was verified through fixtures per the README live-test convention; the tool description matches the fixed behavior. No issues found, no follow-up tasks created.
