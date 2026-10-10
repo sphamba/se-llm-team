@@ -1,8 +1,8 @@
 ---
 name: "feat: webui live agent view in the task detail card"
 priority: "medium"
-state: "to-do"
-worktree: ""
+state: "doing"
+worktree: "feat/webui-live-agent-view-in-the-task-detail-card"
 ---
 
 # Summary
