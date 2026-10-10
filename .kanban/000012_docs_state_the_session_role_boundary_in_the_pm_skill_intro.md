@@ -1,7 +1,7 @@
 ---
 name: "docs: state the session role boundary in the PM skill intro"
 priority: "low"
-state: "backlog"
+state: "done"
 worktree: ""
 ---
 
@@ -36,3 +36,12 @@ Invoking the se-llm-team skill must make the session's role boundaries obvious: 
 - `node src/kanban.test.ts && node src/orchestrator.test.ts` pass (they cover code, not docs; they must stay green).
 
 # Notes
+- Confirmed 000009 was done and merged; the worktree branch already contains its changes (Watcher section, fixed step 8).
+- Added a two-line role boundary to the skills/se-llm-team/SKILL.md intro, right after the Project manager greeting: no direct project file modifications (code, docs, board files), every change goes through the pipeline via kanban tools and orchestrator agents, kanban_* tools for the board, orchestrator_start for the daemon. No other restructuring.
+- Commit 7ce0dee. node src/kanban.test.ts and node src/orchestrator.test.ts pass.
+- Review: HEAD is 7ce0dee, tree clean. Diff main...HEAD is only the 2-line SKILL.md intro addition. All required boundary statements present (no direct project file edits, kanban_* tools for the board, orchestrator_start for the daemon). Task 000009 additions (Watcher section, fixed step 8) intact. Ran both test suites again: pass. No fixes.
+- Live test: HEAD 7ce0dee, tree clean, diff main...HEAD is only the 2-line SKILL.md intro addition placed right after the Project manager greeting. All three required statements present: no direct project file modifications (code, docs, board files), kanban_* tools for the board, orchestrator_start for the daemon. Matches the spec example text almost verbatim. Watcher section and fixed step 8 from 000009 intact; .pi/agents/watcher.md present.
+- Live test: node src/kanban.test.ts and node src/orchestrator.test.ts pass from the worktree.
+- Live test: loaded the skill in a real pi session from the worktree (pi --no-skills --skill skills/se-llm-team, invoked with /skill:se-llm-team). The session quoted the role sentence and the exact boundary paragraph and confirmed it mentions orchestrator_start. Frontmatter parses; the skill loads despite disable-model-invocation: true.
+- Live test observation, not a defect: with default skill discovery, /skill:se-llm-team resolves to the global symlink ~/.pi/agent/skills/se-llm-team, which points at the main checkout and served the pre-change intro until merge. The repo skills/ dir is not a pi discovery location and the repo is not installed as a pi package, so after merge the symlink serves the updated intro and no collision remains.
+- Live test result: pass. No issues found, no new tasks needed.
