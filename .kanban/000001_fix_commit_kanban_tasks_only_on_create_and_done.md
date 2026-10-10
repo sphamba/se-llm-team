@@ -1,7 +1,7 @@
 ---
 name: "fix: commit kanban tasks only on create and done"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/commit-kanban-tasks-only-on-create-and-done"
 ---
 
@@ -56,3 +56,8 @@ Reduce commit noise: .kanban/ task files must be committed to git only at two po
 - README.md line 27 and SPECS.md line 15 describe the new policy in the same simple style as the rest of the file.
 
 # Notes
+
+- [2026-10-10 18:55] Commit policy implemented in the worktree (commit 2733383). kanban.ts: removed the commits from updateAttrs (state and worktree moves), updateTask, and appendNote. setState now commits only when the new state is done, with message "kanban: done <file>". commitKanban checks `git status --porcelain -- .kanban/<file>` first and skips when the file has nothing uncommitted, so done commits do not repeat on rescan. The check keeps child git stderr silent, same as the old commit calls. A missing git repo still returns false, no throw.
+- [2026-10-10 18:55] orchestrator.ts: mergeDone now returns true only when the done transition is fully processed (nothing left to merge, or the merge completed). The rescan done path commits the task file once after mergeDone completes, or at once for done with no worktree attribute. The post-merge worktree clear and merger conflict notes fold into that one done commit.
+- [2026-10-10 18:55] Tests: kanban.test.ts has a new git fixture block. It checks that create commits, that to-do, setWorktree, appendNote, and updateTask do not commit, that done commits once and leaves the file clean, and that a no-change done does not repeat. orchestrator.test.ts part A now waits for the done commit and asserts exactly one "kanban: done" commit and a clean task file after merge. Also verified in a scratch repo: done by direct edit with no worktree gives one commit and a clean status. Both test files pass.
+- [2026-10-10 18:55] Docs: README.md and SPECS.md now describe the two-point commit policy (creation and done only).
