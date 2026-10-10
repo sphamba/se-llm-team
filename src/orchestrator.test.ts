@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, execSync, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -72,10 +72,10 @@ const deadStub = (root: string) => {
 	return stub;
 };
 
-async function runDaemon(root: string) {
+async function runDaemon(root: string, script = join(HERE, "orchestrator.ts")) {
 	const daemon = spawn(
 		process.execPath,
-		[join(HERE, "orchestrator.ts"), "--root", root, "--rescan-seconds", "1", "--poll-minutes", "0.05"],
+		[script, "--root", root, "--rescan-seconds", "1", "--poll-minutes", "0.05"],
 		{ stdio: ["ignore", "pipe", "pipe"] },
 	);
 	daemons.push({ daemon, root });
@@ -350,4 +350,18 @@ const committedG = execSync(`git show HEAD:.kanban/${taskG.file}`, { cwd: rootG,
 assert.match(committedG, /Live test report: merge waited for the live-tester pid\./, "report folded into the done commit");
 g.daemon.kill("SIGTERM");
 
-console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree smoke passed");
+// --- part H: the main-entry guard holds when the daemon is spawned through a symlink ---
+// pi loads the extension (which computes the daemon path from import.meta.url) through a
+// symlink, so the tool spawns the daemon through a symlinked path; the guard must still run main
+const rootH = fixture();
+cleaned.push(rootH);
+const symDir = mkdtempSync(join(tmpdir(), "orch-sym-"));
+const symScript = join(symDir, "orchestrator.ts");
+symlinkSync(join(HERE, "orchestrator.ts"), symScript);
+const h = await runDaemon(rootH, symScript);
+await waitFor(() => h.output().includes("orchestrator started"), 10000, "daemon start through symlinked script", h.output);
+assert.ok(existsSync(join(kanbanDir(rootH), ".orchestrator.lock")), "lock created when spawned through a symlink");
+h.daemon.kill("SIGTERM");
+rmSync(symDir, { recursive: true, force: true });
+
+console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn smoke passed");

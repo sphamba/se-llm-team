@@ -1,7 +1,7 @@
 import { spawn, execFileSync } from "node:child_process";
-import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, rmSync, symlinkSync, watch, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, realpathSync, readFileSync, readlinkSync, rmSync, symlinkSync, watch, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import {
 	appendNote,
 	getTask,
@@ -434,6 +434,19 @@ export function main(argv: string[]): void {
 	}
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+// the extension (loaded by jiti) keeps the symlink path in import.meta.url and spawns the
+// daemon through it, while plain node resolves symlinks, so the daemon's import.meta.url is
+// the real path: compare real paths on both sides or the guard fails under a symlinked
+// extension and main() never runs
+function isMainEntry(): boolean {
+	if (!process.argv[1]) return false;
+	try {
+		return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+	} catch {
+		return false; // argv[1] or the module path is not an existing file: not the entry point
+	}
+}
+
+if (isMainEntry()) {
 	main(process.argv.slice(2));
 }
