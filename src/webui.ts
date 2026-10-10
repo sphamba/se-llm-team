@@ -117,6 +117,8 @@ h1 { font-size: 16px; margin: 0; }
 .p-high { background: var(--high-bg); color: var(--high-fg); }
 .p-critical { background: var(--critical-bg); color: var(--critical-fg); }
 .empty { font-size: 12px; color: var(--faint); }
+.toggle { display: block; width: 100%; margin-top: 2px; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
+.toggle:hover { background: var(--hover); }
 #modal { position: fixed; inset: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
 #modal.hidden { display: none; }
 #m-box { background: var(--panel); border-radius: 10px; padding: 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
@@ -157,6 +159,7 @@ h1 { font-size: 16px; margin: 0; }
 "use strict";
 const STATES = ${JSON.stringify(STATES)};
 const WORKING = ["doing", "reviewing", "live-testing"];
+const VISIBLE = 5;
 let tasks = [];
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 // 000042_fix_x.md -> #42; parseInt stops at the first non-digit and drops leading zeros
@@ -198,6 +201,9 @@ function md(src) {
 // FLIP across the innerHTML replace: measure old positions, render, invert, play. Only cards whose
 // state changed move, so a refresh with no state changes re-animates nothing.
 let prevStates = {};
+// fold choice keyed by state name, so the 5 s refresh keeps it
+const expanded = new Set();
+function toggleCol(st) { if (expanded.has(st)) expanded.delete(st); else expanded.add(st); render(); }
 function render() {
 	const board = document.getElementById("board");
 	const states = {};
@@ -211,10 +217,12 @@ function render() {
 	}
 	board.innerHTML = STATES.map(st => {
 		const inState = tasks.filter(t => t.state === st).sort((a, b) => b.updated - a.updated);
-		const cards = inState.map(t =>
+		const shown = expanded.has(st) ? inState : inState.slice(0, VISIBLE);
+		const cards = shown.map(t =>
 			'<div class="card" data-file="' + esc(t.file) + '"><div class="name">' + (WORKING.includes(st) ? '<span class="spin"></span>' : "") + '<span class="num">' + num(t) + "</span>" + esc(t.name) + '</div><span class="chip p-' + esc(t.priority) + '">' + esc(t.priority) + "</span></div>"
 		).join("");
-		return '<section class="col c-' + st + '"><h2>' + esc(st) + ' <span class="count">' + inState.length + "</span></h2>" + (cards || '<div class="empty">&mdash;</div>') + "</section>";
+		const toggle = inState.length > VISIBLE ? '<button class="toggle" onclick="toggleCol(\\'' + esc(st) + '\\')">' + (expanded.has(st) ? "show less" : "show all (" + inState.length + ")") + "</button>" : "";
+		return '<section class="col c-' + st + '"><h2>' + esc(st) + ' <span class="count">' + inState.length + "</span></h2>" + (cards || '<div class="empty">&mdash;</div>') + toggle + "</section>";
 	}).join("");
 	for (const el of board.querySelectorAll(".card")) {
 		el.onclick = () => openTask(el.dataset.file);
