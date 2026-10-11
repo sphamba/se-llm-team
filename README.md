@@ -46,7 +46,7 @@ corepack enable
 corepack prepare pnpm@12.11.2 --activate
 ```
 
-There are no dependencies and no lockfile yet. The checks still run with `node` directly, see [Checks](#checks).
+There are no dependencies and no committed lockfile (pnpm writes an env lockfile that is gitignored). The checks still run with `node` directly, see [Checks](#checks).
 
 ## Kanban board
 
@@ -92,6 +92,8 @@ The PM session gets: kanban_list, kanban_get, kanban_create, kanban_update, kanb
 
 ```sh
 node src/kanban.test.ts
+node src/orchestrator.test.ts
+node src/webui.test.ts
 ```
 
 Sidecar files (`.kanban/.logs/`, `.kanban/.pids/`, `.kanban/.orchestrator.lock`) are gitignored.
