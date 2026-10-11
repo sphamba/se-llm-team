@@ -103,6 +103,7 @@ rmSync(join(root, ".kanban", held.file)); // the daemon section below expects a 
 
 // GET / mentions all 10 state names; other paths and methods are 404
 const page = await (await fetch(`${base}/`)).text();
+assert.doesNotThrow(() => new Function(page.match(/<script>([\s\S]*?)<\/script>/)![1]), "the served client script parses");
 assert.ok(page.includes("Software Engineering LLM Team"), "page shows the new title");
 assert.ok(page.includes('id="theme"'), "page has the theme toggle");
 for (const st of STATE_NAMES) assert.ok(page.includes(st), `page mentions state ${st}`);
@@ -431,6 +432,18 @@ assert.ok(!page.includes('id="m-sub-btns"'), "the single sub row is gone; subs s
 assert.match(page, /\.agent-col \{ display: flex; flex-direction: column/, "each column stacks its run card over its sub cards");
 assert.match(page, /\.agent-subs \{ display: flex; flex-direction: column/, "sub cards stack vertically below their caller");
 assert.ok(page.includes('if (gen !== agentGen || !box) return;'), "a superseded open's sub fetches never write into the new view");
+// 000121: the 5 s refresh re-derives the open detail card in place: title and attrs freely, the
+// body html-gated, the run cards re-rendered without touching the log pane or its state
+const upd = page.match(/function updateOpenTask\(t\) \{[\s\S]*?\n\}/)![0];
+assert.ok(page.includes("if (t) updateOpenTask(t); else closeModal();"), "the refresh updates the open card in place and closes it when its task is gone");
+assert.ok(upd.includes("writeHead(t)") && upd.includes("renderAgent(t, true)") && upd.includes("setBody(t)"), "the refresh re-derives title, attrs, agent row and body from the fresh payload");
+assert.ok(!upd.includes("closeLog") && !upd.includes("logState"), "the refresh path never touches the log pane, logState or the log timer");
+assert.ok(page.includes('<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><pre id="m-log-text"></pre></div></div>'), "the log pane is static markup split from the buttons row, so a run-card rebuild never clears it");
+assert.ok(!page.includes(`+ '</div><div id="m-log"`), "renderAgent no longer rebuilds the log pane with the run cards");
+const setBodySrc = page.match(/function setBody\(t\) \{[\s\S]*?\n\}/)![0];
+assert.ok(setBodySrc.includes("if (el.__html === html) return;"), "the body rewrite is html-gated: an unchanged body keeps its node and the reader's scroll");
+const ra = page.match(/function renderAgent\(t, keep\) \{[\s\S]*?\n\}/)![0];
+assert.ok(ra.includes('.agent-subs").replaceWith(box)') && ra.includes("if (keep) return;"), "a refresh carries the fetched sub boxes over by handle and fetches sub lists on open only");
 setState(root, getTask(root, task.file)!, "doing");
 const slug = task.file.replace(/\.md$/, "");
 mkdirSync(join(root, ".kanban", ".pids"), { recursive: true });
