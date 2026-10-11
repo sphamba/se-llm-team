@@ -320,6 +320,7 @@ export function taskPayload(root: string) {
 			state: t.state,
 			worktree: t.worktree,
 			issuer: t.issuer,
+			complexity: t.complexity,
 			updated: taskUpdated(root, t.file),
 			body: taskBody(root, t.file),
 			agents,
@@ -476,6 +477,12 @@ export function mergeBoards(boards, rows) {
 	for (const [name, tasks] of rows) if (tasks) boardOf(boards, name).tasks = tasks;
 }
 
+// a run label on the detail card: the role capitalized, 1-based when the role has several runs
+// (payload run 0 reads "1"), unnumbered for a solo run or a legacy unsuffixed log (a.run == null)
+export function agentLabel(a, count) {
+	return a.role[0].toUpperCase() + a.role.slice(1) + (count[a.role] > 1 && a.run != null ? " " + (a.run + 1) : "");
+}
+
 // board layout, left to right: a string is a single column, an array is a stacked pair with the
 // first state on top. backlog and done stay single side columns, the states between them stack two
 // by two in pipeline order (to-do over doing, to-review over reviewing, ...), so the queued
@@ -508,7 +515,8 @@ export function spinnerHtml(st: string) {
 
 // one card's markup; this string is the card's identity across a refresh, see syncBoard.
 // user-issued cards stay full contrast, task-issued ones (issuer "#<num>") dim the name and
-// carry a small #<num> badge instead of the plain user chip
+// carry a small #<num> badge instead of the plain user chip; the complexity chip renders quiet
+// next to the priority chip
 export function cardHtml(t: Task, st: string) {
 	const issued = !!t.issuer && t.issuer !== "user";
 	return (
@@ -524,6 +532,8 @@ export function cardHtml(t: Task, st: string) {
 		esc(t.priority) +
 		'">' +
 		esc(t.priority) +
+		'</span><span class="chip cx">' +
+		esc(t.complexity || "moderate") +
 		'</span><span class="chip' +
 		(issued ? " issuer" : "") +
 		'">' +
@@ -662,6 +672,7 @@ h1 { font-size: 16px; margin: 0; }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
 .chip { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: var(--border); color: var(--soft); }
 .chip.issuer { background: var(--code-bg); color: var(--muted); }
+.chip.cx { background: var(--code-bg); color: var(--muted); }
 .issued { color: var(--muted); }
 .p-low { background: var(--low-bg); color: var(--low-fg); }
 .p-medium { background: var(--medium-bg); color: var(--medium-fg); }
@@ -780,6 +791,7 @@ ${tabNames}
 ${tabsHtml}
 ${boardOf}
 ${mergeBoards}
+${agentLabel}
 // tabs: one per registered project, the active one renders that project's board
 function renderTabs() {
 	const el = document.getElementById("tabs");
@@ -850,7 +862,7 @@ function openTask(file) {
 	document.getElementById("m-attrs").innerHTML =
 		"<div><span>number</span>" + num(t) + "</div>" +
 		"<div><span>file</span>" + esc(t.file) + "</div>" +
-		"<div><span>priority</span><span class='chip p-" + esc(t.priority) + "'>" + esc(t.priority) + "</span></div>" +
+		"<div><span>priority</span><span class='chip p-" + esc(t.priority) + "'>" + esc(t.priority) + "</span><span class='chip cx'>" + esc(t.complexity || "moderate") + "</span></div>" +
 		"<div><span>state</span>" + esc(t.state) + "</div>" +
 		"<div><span>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>" +
 		"<div><span>issuer</span>" + esc(t.issuer || "user") + "</div>";
@@ -877,18 +889,17 @@ function markActiveAgent() {
 }
 const atBottom = () => { const p = logPane(); return p.scrollTop + p.clientHeight >= p.scrollHeight - 4; };
 // every run as one button, oldest leftmost (payload order is log mtime order), the live run
-// rightmost; a role with several runs labels them by index, so two reviewer runs never read alike
+// rightmost; a role with several runs labels them 1-based, so two reviewer runs never read alike
 function renderAgent(t) {
 	const el = document.getElementById("m-agent");
 	el.innerHTML = "";
-	const cap = s => s[0].toUpperCase() + s.slice(1);
 	const runs = (t.agents || []).slice();
 	const live = runs.find(a => a.alive);
 	if (live) { runs.splice(runs.indexOf(live), 1); runs.push(live); }
 	if (!runs.length) return;
 	const count = {};
 	for (const a of runs) count[a.role] = (count[a.role] || 0) + 1;
-	const label = a => cap(a.role) + (count[a.role] > 1 && a.run != null ? " " + a.run : "");
+	const label = a => agentLabel(a, count);
 	const btns = runs.map(a => !a.alive
 		? '<button class="agent-btn agent-past" data-handle="' + esc(a.handle) + '"><span class="check">\u2713</span>' + esc(label(a)) + "</button>"
 		: '<button class="agent-btn agent-live" data-handle="' + esc(a.handle) + '"><span class="spin"></span>' + esc(label(a)) + "</button>");

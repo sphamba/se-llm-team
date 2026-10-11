@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, setState } from "./kanban.ts";
-import { boardOf, buildShell, cardHtml, flipDiff, LAYOUT, loadWebUiConfig, LOG_CHUNK, mergeBoards, pairLayout, renderLogChunk, spinnerHtml, startWebUi, syncBoard, tabNames, tabsHtml } from "./webui.ts";
+import { agentLabel, boardOf, buildShell, cardHtml, flipDiff, LAYOUT, loadWebUiConfig, LOG_CHUNK, mergeBoards, pairLayout, renderLogChunk, spinnerHtml, startWebUi, syncBoard, tabNames, tabsHtml } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing", "to-merge", "merging", "done"];
@@ -80,6 +80,7 @@ assert.equal(listed[0].priority, "medium");
 assert.equal(listed[0].state, "backlog");
 assert.equal(listed[0].worktree, "");
 assert.equal(listed[0].issuer, "user", "absent issuer reads as user");
+assert.equal(listed[0].complexity, "moderate");
 assert.equal(listed[0].updated, statSync(join(root, ".kanban", task.file)).mtimeMs);
 assert.match(listed[0].body, /# Summary\nDashboard smoke/);
 
@@ -87,6 +88,7 @@ assert.match(listed[0].body, /# Summary\nDashboard smoke/);
 const issued = createTask(root, { name: "feat: issued by 42", summary: "s", issuer: "#42" });
 const issuedRow = (await (await fetch(`${base}/api/tasks`)).json()).find((t) => t.file === issued.file);
 assert.equal(issuedRow.issuer, "#42");
+assert.equal(issuedRow.complexity, "moderate");
 rmSync(join(root, ".kanban", issued.file)); // the daemon section below expects a one-task board
 
 // GET / mentions all 10 state names; other paths and methods are 404
@@ -177,6 +179,12 @@ const issuedCard = cardHtml({ file: "000002_b.md", name: "b", priority: "low", i
 assert.ok(issuedCard.includes('<div class="name issued">'), "a task-issued card dims its name");
 assert.ok(issuedCard.includes('<span class="chip issuer">#42</span>'), "a task-issued card carries a small #num badge");
 assert.ok(page.includes(".chip.issuer {") && page.includes(".issued {"), "the differentiation classes ship in the page css");
+// complexity badge on cards: a quiet chip next to the priority chip, default moderate when absent
+const cxCard = cardHtml({ file: "000003_c.md", name: "c", priority: "medium", complexity: "complex" }, "doing");
+assert.ok(cxCard.includes('<span class="chip p-medium">medium</span><span class="chip cx">complex</span>'), "the complexity badge sits next to the priority badge");
+assert.ok(cardHtml({ file: "000004_d.md", name: "d", priority: "high", complexity: "<x>" }, "doing").includes('<span class="chip cx">&lt;x&gt;</span>'), "the complexity badge is escaped");
+assert.ok(userCard.includes('<span class="chip cx">moderate</span>'), "an absent complexity renders as moderate");
+assert.ok(page.includes(".chip.cx {"), "the quiet complexity chip style ships in the page css");
 
 // refresh identity: the 5 s poll keeps the node of every card whose markup did not change, so its
 // spinner element keeps spinning; a state change rewrites that card's markup and nothing else
@@ -314,6 +322,7 @@ assert.deepEqual(listed[0].agents, [], "no role logs yet, empty agent history");
 assert.ok(page.includes('id="m-agent"'), "modal has the agent area");
 assert.ok(!page.includes("<div><span>name</span>"), "the detail card drops the name attribute row the title already shows");
 assert.ok(page.includes('"<div><span>issuer</span>" + esc(t.issuer || "user")'), "the detail card shows the issuer row");
+assert.ok(page.includes("esc(t.complexity || \"moderate\")"), "the detail card shows the complexity badge next to priority");
 assert.ok(page.includes("#m-log.hidden { display: none; }"), "log pane hides");
 assert.ok(page.includes("/api/agent-log"), "page uses the agent log endpoint");
 assert.ok(page.includes('<span class="check">✓</span>'), "past agent buttons render a green checkmark");
@@ -536,6 +545,15 @@ assert.deepEqual(
 	"indexed runs are their own entries, a legacy file ties first within its role, mtime orders across roles, the newest run of the live role is the live one",
 );
 assert.deepEqual(history.agent, { role: "developer", alive: true, log: `${slug}.developer.1` }, "the agent handle points at the live run, never the legacy file");
+
+// 000108: a run label renders 1-based on the payload's 0-based run index; a legacy unsuffixed log
+// (run null) and a solo run stay unnumbered, disk names and handles unchanged
+const devRuns = history.agents.filter((a) => a.role === "developer");
+assert.equal(agentLabel(devRuns[1], { developer: 3 }), "Developer 1", "run index 0 labels 1 when the role has several runs");
+assert.equal(agentLabel(devRuns[2], { developer: 3 }), "Developer 2", "run index 1 labels 2");
+assert.equal(agentLabel(devRuns[0], { developer: 3 }), "Developer", "a legacy unsuffixed run keeps its unnumbered label");
+assert.equal(agentLabel({ role: "reviewer", run: 0 }, { reviewer: 1 }), "Reviewer", "a solo run keeps its unnumbered label");
+assert.ok(page.includes(String(agentLabel)), "the page ships the tested agentLabel source");
 
 // a run-suffixed handle resolves to its own indexed file, a plain handle to the legacy file
 const get = (file: string) => fetch(`${base}/api/agent-log?file=${encodeURIComponent(file)}`);
