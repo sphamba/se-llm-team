@@ -46,7 +46,7 @@ corepack enable
 corepack prepare pnpm@12.11.2 --activate
 ```
 
-There are no dependencies and no lockfile yet. The checks still run with `node` directly, see [Checks](#checks).
+There are no dependencies and no committed lockfile (pnpm writes an env lockfile that is gitignored). The checks still run with `node` directly, see [Checks](#checks).
 
 ## Kanban board
 
