@@ -1,8 +1,8 @@
 ---
 name: "fix: unconditional dead-agent bounce; idle-cooldown respawn past the cap"
 priority: "critical"
-state: "to-merge"
-worktree: "fix/95-unconditional-dead-agent"
+state: "done"
+worktree: ""
 ---
 
 # Summary
