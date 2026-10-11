@@ -7,7 +7,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readHubRegistry, startHub } from "./hub.ts";
 import { createTask, kanbanDir, parseTask, setState, setWorktree } from "./kanban.ts";
-import { pidAlive, waitForBoardCommits } from "./orchestrator.ts";
+import { pidAlive, removeTask, waitForBoardCommits } from "./orchestrator.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -866,6 +866,11 @@ mkdirSync(kanbanDir(rootR), { recursive: true });
 // 0.05min = 3s idle window; the dead stub keeps any started task active forever (to-do/doing cycle)
 writeFileSync(join(kanbanDir(rootR), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootR), pollMinutes: 0.05, autoScheduleMinutes: 0.05 }));
 const taskR0 = createTask(rootR, { name: "feat: active task", summary: "Failsafe smoke", specs: "n/a" });
+// the oldest candidate: without the open-questions guard it would win the sort and be promoted
+const taskRQ = createTask(rootR, { name: "feat: blocked by questions", priority: "critical", summary: "Failsafe smoke", specs: "n/a", openQuestions: "- [user] Which API?" });
+// the next critical: its explicitly empty questions section must not block promotion
+const taskRE = createTask(rootR, { name: "feat: empty questions", priority: "critical", summary: "Failsafe smoke", specs: "n/a" });
+appendFileSync(join(kanbanDir(rootR), taskRE.file), "\n# Open questions\n");
 const taskR1 = createTask(rootR, { name: "feat: older critical", priority: "critical", summary: "Failsafe smoke", specs: "n/a" });
 const taskR3 = createTask(rootR, { name: "feat: newer critical", priority: "critical", summary: "Failsafe smoke", specs: "n/a" });
 const taskR2 = createTask(rootR, { name: "feat: low task", priority: "low", summary: "Failsafe smoke", specs: "n/a" });
@@ -873,6 +878,8 @@ setState(rootR, taskR0, "to-do");
 
 const r = await runDaemon(rootR);
 const readR = (file: string) => parseTask(rootR, file);
+assert.equal(readR(taskRQ.file).openQuestions, "- [user] Which API?", "precondition: unanswered open questions present");
+assert.equal(readR(taskRE.file).openQuestions, "", "precondition: explicit empty questions section");
 // while taskR0 cycles to-do/doing the board is never idle: no promotion despite the elapsed window
 await new Promise((res) => setTimeout(res, 10000));
 assert.ok(!r.output().includes("promoting"), "no promotion while a task is active");
@@ -883,15 +890,19 @@ writeFileSync(
 	join(kanbanDir(rootR), taskR0.file),
 	readFileSync(join(kanbanDir(rootR), taskR0.file), "utf8").replace(/^state: .*/m, 'state: "done"'),
 );
-// the window elapses: the failsafe promotes the older critical task, not the newer one or the low one
-await waitFor(() => r.output().includes(`promoting ${taskR1.file} to to-do`), 30000, "failsafe promotion of the oldest critical task", r.output);
-assert.ok(["to-do", "doing"].includes(readR(taskR1.file).state), "promoted task is active");
+// the window elapses: the failsafe promotes the oldest critical task whose questions are
+// answered, never the older critical task that still has unanswered open questions
+await waitFor(() => r.output().includes(`promoting ${taskRE.file} to to-do`), 30000, "failsafe promotion of the empty-questions task", r.output);
+assert.ok(["to-do", "doing"].includes(readR(taskRE.file).state), "promoted task is active");
+assert.equal(readR(taskRQ.file).state, "backlog", "task with unanswered open questions never promoted");
 assert.equal(readR(taskR2.file).state, "backlog", "lower priority not promoted first");
 assert.equal(readR(taskR3.file).state, "backlog", "newer task in the same priority not promoted first");
+assert.equal(readR(taskR1.file).state, "backlog", "critical task after the promoted one not promoted");
 // the promoted task stays active, so the window never re-arms: no second promotion
 await new Promise((res) => setTimeout(res, 8000));
 assert.equal(readR(taskR2.file).state, "backlog", "no second promotion while the promoted task is active");
 assert.equal(readR(taskR3.file).state, "backlog", "no second promotion while the promoted task is active");
+assert.equal(readR(taskRQ.file).state, "backlog", "no second promotion while the promoted task is active");
 assert.equal(r.output().split("promoting ").length - 1, 1, "exactly one promotion logged");
 r.daemon.kill("SIGTERM");
 
@@ -957,6 +968,29 @@ assert.equal(s.output().split("WARNING: auto-push").length - 1, 1, "push warning
 s.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: ... + push warning smoke passed");
+
+// --- part T2: a stale push-failures counter above the cap still warns, once per streak ---
+const rootT2 = fixture();
+cleaned.push(rootT2);
+// origin points at a non-repo path: every push fails fast, no SSH involved
+execSync("git remote add origin /nonexistent/se-llm-team.git", { cwd: rootT2, shell: "/bin/bash" });
+mkdirSync(join(kanbanDir(rootT2), ".logs"), { recursive: true });
+// a counter restored from a backup or left by an earlier run sits above the cap already
+writeFileSync(join(kanbanDir(rootT2), ".logs", "push-failures.count"), "5");
+writeFileSync(join(kanbanDir(rootT2), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootT2), pollMinutes: 0.05 }));
+// one task = one failed push: the stale counter never reaches equality, >= must still warn
+const sT2 = await runDaemon(rootT2);
+const taskT2 = createTask(rootT2, { name: "fix: push warn stale", summary: "Push warning smoke", specs: "n/a" });
+await waitFor(() => mirrorSubjects(rootT2).includes(`kanban: create ${taskT2.file}`), 30000, "stale-counter create mirror commit", sT2.output);
+await waitFor(() => sT2.output().includes("WARNING: auto-push of refs/heads/meta/kanban"), 10000, "warning despite a stale counter above the cap", sT2.output);
+// a further failure stays silent: one warning per streak, not one per failure
+const taskT2b = createTask(rootT2, { name: "fix: push warn stale 2", summary: "Push warning smoke", specs: "n/a" });
+await waitFor(() => mirrorSubjects(rootT2).includes(`kanban: create ${taskT2b.file}`), 30000, "second create mirror commit", sT2.output);
+await new Promise((r) => setTimeout(r, 2000));
+assert.equal(sT2.output().split("WARNING: auto-push").length - 1, 1, "stale-counter warning logged once per streak");
+sT2.daemon.kill("SIGTERM");
+
+console.log("orchestrator.test.ts: ... + stale push counter warning smoke passed");
 
 // async variant of waitFor for fetch-based conditions
 const waitForAsync = async (cond: () => Promise<boolean>, ms: number, what: string) => {
@@ -1319,3 +1353,86 @@ await waitFor(() => parseTask(rootAA, taskAA.file).state === "done" && parseTask
 assert.equal(runsAA(), 0, "counter still cleared after the pipeline completed");
 aa.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + reviewer successful-run cap smoke passed");
+
+// --- part AB: kanban task removal: the file and the mirror go in one operation ---
+// reconcileBoard restores files the working tree lacks whenever the mirror tip still carries
+// them, so a removal must reach the mirror itself or the task comes back (the self-heal)
+const rootAB = fixture();
+cleaned.push(rootAB);
+mkdirSync(kanbanDir(rootAB), { recursive: true });
+writeFileSync(join(kanbanDir(rootAB), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAB), pollMinutes: 0.05 }));
+const taskAB = createTask(rootAB, { name: "fix: mistaken task", summary: "Removal smoke", specs: "n/a" });
+const taskAB2 = createTask(rootAB, { name: "fix: keep me", summary: "Stays on the board", specs: "n/a" });
+
+const ab = await runDaemon(rootAB);
+// both tasks reach the mirror first: creates run for every file not on the mirror yet
+await waitFor(() => showTip(rootAB, taskAB.file) !== null && showTip(rootAB, taskAB2.file) !== null, 30000, "both tasks mirrored", ab.output);
+
+// removal while the daemon runs: the file leaves the tree and the mirror in one operation
+assert.equal(await removeTask(rootAB, taskAB.file), null, "removal succeeds");
+assert.equal(existsSync(join(kanbanDir(rootAB), taskAB.file)), false, "task file deleted");
+assert.equal(showTip(rootAB, taskAB.file), null, "task gone from the mirror tip");
+assert.ok(mirrorSubjects(rootAB).includes(`kanban: delete ${taskAB.file}`), "delete commit recorded on the mirror");
+assert.ok(showTip(rootAB, taskAB2.file) !== null, "other task untouched on the mirror");
+assert.equal(existsSync(join(kanbanDir(rootAB), taskAB2.file)), true, "other task untouched in the tree");
+
+// the running daemon's reconcile self-heal must not restore the removed task
+await new Promise((r) => setTimeout(r, 2500));
+assert.equal(existsSync(join(kanbanDir(rootAB), taskAB.file)), false, "daemon sweep does not restore the removed task");
+
+// a restart re-materializes from the mirror tip: the removal survives it too
+ab.daemon.kill("SIGTERM");
+await Promise.race([new Promise((r) => ab.daemon.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
+const ab2 = await runDaemon(rootAB);
+await new Promise((r) => setTimeout(r, 2500));
+assert.equal(existsSync(join(kanbanDir(rootAB), taskAB.file)), false, "daemon restart does not restore the removed task");
+ab2.daemon.kill("SIGTERM");
+await Promise.race([new Promise((r) => ab2.daemon.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
+
+// removing the last task empties the mirror board: the tip no longer carries the file
+assert.equal(await removeTask(rootAB, taskAB2.file), null, "last-task removal succeeds");
+assert.equal(existsSync(join(kanbanDir(rootAB), taskAB2.file)), false, "last task file deleted");
+assert.equal(showTip(rootAB, taskAB2.file), null, "last task gone from the mirror tip");
+assert.ok((await removeTask(rootAB, "000999_ghost.md"))!.includes("No task"), "unknown task reported, nothing deleted");
+
+console.log("orchestrator.test.ts: ... + task removal smoke passed");
+
+// --- part AC: the failsafe never auto-promotes a task with unfinished blockers; a ghost ref
+// is ignored, and the blocked task schedules normally once its blocker is done ---
+const rootAC = fixture();
+cleaned.push(rootAC);
+mkdirSync(kanbanDir(rootAC), { recursive: true });
+// 0.05min = 3s idle window and poll; the dead stub keeps a promoted task active forever
+writeFileSync(join(kanbanDir(rootAC), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAC), pollMinutes: 0.05, autoScheduleMinutes: 0.05 }));
+const taskAC0 = createTask(rootAC, { name: "feat: blocker task", summary: "Failsafe smoke", specs: "n/a" });
+const taskAC1 = createTask(rootAC, { name: "feat: blocked critical", priority: "critical", summary: "Failsafe smoke", specs: "n/a", blockedBy: `#${parseInt(taskAC0.file, 10)}` });
+const taskAC2 = createTask(rootAC, { name: "feat: ghost ref", priority: "critical", summary: "Failsafe smoke", specs: "n/a", blockedBy: "#999" });
+
+const ac = await runDaemon(rootAC);
+const readAC = (file: string) => parseTask(rootAC, file);
+// the ghost ref is ignored: the critical ghost task is promotable and wins by priority over
+// the medium blocker task, while the blocked critical task stays held despite its priority
+await waitFor(() => ac.output().includes(`promoting ${taskAC2.file} to to-do`), 30000, "ghost-only task promoted", ac.output);
+assert.equal(readAC(taskAC1.file).state, "backlog", "blocked critical task not promoted despite priority");
+// settle the ghost task: the respawn cap exhausts and the poll stops rewriting it
+await waitFor(() => ac.output().includes(`${taskAC2.file.replace(/\.md$/, "")}: agent died`), 60000, "respawn cap on the ghost task", ac.output);
+writeFileSync(
+	join(kanbanDir(rootAC), taskAC2.file),
+	readFileSync(join(kanbanDir(rootAC), taskAC2.file), "utf8").replace(/^state: .*/m, 'state: "done"'),
+);
+// the blocker task is still backlog: the blocked critical task stays held, the medium task promotes
+await waitFor(() => ac.output().includes(`promoting ${taskAC0.file} to to-do`), 30000, "unblocked medium task promoted", ac.output);
+assert.equal(readAC(taskAC1.file).state, "backlog", "still held while the blocker is not done");
+// settle the blocker: the blocked critical task now schedules normally
+await waitFor(() => ac.output().includes(`${taskAC0.file.replace(/\.md$/, "")}: agent died`), 60000, "respawn cap on the blocker task", ac.output);
+writeFileSync(
+	join(kanbanDir(rootAC), taskAC0.file),
+	readFileSync(join(kanbanDir(rootAC), taskAC0.file), "utf8").replace(/^state: .*/m, 'state: "done"'),
+);
+await waitFor(() => ac.output().includes(`promoting ${taskAC1.file} to to-do`), 30000, "blocked task promoted after the blocker is done", ac.output);
+assert.ok(["to-do", "doing"].includes(readAC(taskAC1.file).state), "promoted task is active");
+ac.daemon.kill("SIGTERM");
+// full exit before the removal: a sweep mid-flight still writes into the fixture
+await Promise.race([new Promise((r) => ac.daemon.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
+cleanupAll(rootAC);
+console.log("orchestrator.test.ts: ... + blockedBy failsafe smoke passed");
