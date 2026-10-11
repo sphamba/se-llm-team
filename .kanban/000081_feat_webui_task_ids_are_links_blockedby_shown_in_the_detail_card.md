@@ -1,7 +1,7 @@
 ---
 name: "feat: webui task ids are links; blockedBy shown in the detail card"
 priority: "high"
-state: "doing"
+state: "reviewing"
 worktree: "feat/81-webui-task-ids"
 ---
 
@@ -42,3 +42,24 @@ Constraints:
 - HOLD behind 000080 (blockedBy must parse and flow to /api/tasks first), and behind the webui lane - one webui rewrite at a time: 000079 (reviewing) and 000088 (reviewing) land first, then this task, then 000099 (complexity badge).
 
 # Notes
+
+## 2026-10-11 (developer)
+
+- Both holds resolved before starting: 000080 done and merged (blockedBy parses and flows), 000079/000088 done and merged; branch sat at main tip b7b9407, src/kanban.ts already carried blockedBy (Task interface, parseTask, listTasks, updateTask, createTask).
+- src/webui.ts:
+  - taskPayload gains blockedBy: t.blockedBy (TaskRef carries it as an empty string when absent), so /api/tasks serves it; the client reads it via String(t.blockedBy || "") so older payloads without the field draw nothing.
+  - New exported numLinkHtml(file, cls) emits <span class="num-link [num]" data-task="<esc(file)>">#<parseInt(file,10)></span>; no inline onclick (file names can hold quotes) - the column card's click bubbles to the card's own openTask handler, and the detail card binds its #m-attrs .num-link elements to openTask after render via querySelectorAll.
+  - The column card .num span and the detail card number row now render through numLinkHtml; the old num() helpers (webui.ts export and the page-script literal) became dead and were dropped.
+  - New exported curve(from, to, same): cubic bezier running from the blocked card to the blocker card (so a decreasing stroke-dashoffset moves dashes blocked -> blocker), 40px control-point bow, endpoints at the vertical middle of the chosen side edges. same = same state OR |to.x - from.x| < 1 (stacked pair columns share one x, so they loop out of the right sides instead of drawing through the cards - deliberate judgment call).
+  - New exported relationPaths(tasks, rectOf): one curve per stored blockedBy relation whose blocker is not in state done and whose card is currently rendered; refs map via parseInt after stripping a leading #; ghost refs, unparseable refs, unrendered cards and done blockers are skipped.
+  - Page-script cardBox(el) (board-content relative {x,y,w,h}, page scroll cancels and board scroll adds back, so a scrolled refresh measures identically and animates nothing) is hoisted from render's local pos(); drawRelations() sizes the overlay to the rendered card extent (+40 for the loop bulge), maps relationPaths to <path> elements, and rewrites the SVG innerHTML only when the joined path strings change so the dash animation is not restarted.
+  - render() creates the #relations SVG once with buildShell (createElementNS, pointer-events none, inserted as board.firstChild) and registers a window resize -> drawRelations listener; drawRelations() runs at the end of the FLIP-diff computation (settled positions), and card transitionend handlers redraw after a FLIP settles; fold toggles go through render() which redraws.
+  - CSS: #board gains position:relative; #relations is position:absolute top 0 left 0 z-index 1 pointer-events none; paths stroke var(--muted), dasharray 6 4, dashflow keyframe (stroke-dashoffset -10); .num-link gets var(--link) + pointer + hover underline; #m-attrs span rule narrowed to :not(.chip):not(.num-link) so id links are exempt from the label styling; reduced-motion block kills the path animation too.
+- src/webui.test.ts:
+  - cardHtml num assertion updated to the new link markup; new numLinkHtml unit asserts (default class, escaped data-task for a quote in the file name).
+  - curve/relationPaths unit asserts: one curve per relation, same-column right-side sprout both ends, different-state at the same x (stacked pair) loops right too, multiple blockers draw one curve each, blocker-left (blocked's left edge to blocker's right edge) and blocker-right (reversed) sprout rules, done blocker draws nothing, ghost/unparseable refs draw nothing, unrendered cards draw nothing, payload without blockedBy draws nothing.
+  - PAGE source asserts: the three helpers ship in the page, #board position:relative, #relations absolute/z-index/pointer-events none + setAttribute, dasharray, dashflow keyframes, reduced-motion kills the path animation, resize listener, transitionend redraw, detail-card id-link binding, blockedBy row markup and the empty-list early return, .num-link styling and the attrs-rule exemption.
+  - taskPayload asserts: absent blockedBy reads as an empty string; a task with a blockedBy attribute serves it with the payload.
+- Smoke (headless Chromium via Playwright against a temp root, --no-sandbox): overlay non-interactive and inside #board, 2 paths drawn for blocked->blocker (doing) and ghost->blocked (backlog), first path d confirms the right-side loop sprouting at the vertical middle of the card edges, dashes flow (animation dashflow), the detail card's number row and blockedBy row render as links, clicking the blockedBy ref opens the blocker's card in place with the modal staying open, card clicks still work with the overlay present, no page errors after resize. Pre-existing /api/projects 404 console noise on the single-project server exists on main too, not from this change.
+- All three suites green: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts.
+- Committed in the worktree as 8303099.

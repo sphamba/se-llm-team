@@ -1,8 +1,8 @@
 ---
 name: "feat: webui complexity badge on cards and the detail card"
 priority: "medium"
-state: "to-merge"
-worktree: "feat/99-webui-complexity-badge"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -38,3 +38,7 @@ Constraints:
 - Note: `esc()` and the `|| "moderate"` fallback are not reachable at runtime because `kanban.ts` clamps complexity to a legal value at read time. The unit tests cover these two paths. This is not a defect.
 - Note: the running hub on port 4242 serves the pre-branch code, so its `/api/tasks` has no complexity. `hub.ts` calls the same `taskPayload`, so a restarted daemon serves it. This is not a defect of this change.
 - Result: no live-test findings. All checks pass. No open questions.
+- Merge step 1: base branch resolved as main (7c22de8); `git merge main` in the worktree auto-merged cleanly with the ort strategy, no conflicts. Verified the auto-merge: the complexity chip code survived (taskPayload `complexity: t.complexity`, cardHtml `.chip.cx` after the priority chip, detail-card priority row chip) and main's agentLabel 1-based run-label change (000108) landed alongside it; webui.test.ts gained the agentLabel import and its 000108 asserts. Merge commit f180a4e in the worktree.
+- All four suites green in the worktree after the merge: webui.test.ts, kanban.test.ts, orchestrator.test.ts, extension.test.ts. Nothing to fix, no extra commits.
+- Merge step 2: base branch re-resolved as main (unchanged, 7c22de8); `git merge --no-edit feat/99-webui-complexity-badge` in the project root fast-forwarded main to f180a4e, no conflicts. Root clean, `chip cx` present in src/webui.ts on main.
+- No open questions.
