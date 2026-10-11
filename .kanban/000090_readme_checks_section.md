@@ -1,8 +1,8 @@
 ---
 name: "docs: README Checks section lists only one of three test files"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "docs/90-readme-checks-section"
 ---
 
 # Summary
@@ -28,3 +28,7 @@ Constraints:
 - Files: README.md only.
 
 # Notes
+- Developer: verified src/kanban.test.ts, src/orchestrator.test.ts and src/webui.test.ts all exist on the worktree tree.
+- Updated README.md "## Checks" code block to list the three suites in order. No other section changed (git diff: README.md only, +2 lines).
+- Ran all three listed commands: kanban.test.ts all assertions passed, orchestrator.test.ts all smoke parts passed, webui.test.ts all assertions passed.
+- Commit 92da32a on branch docs/90-readme-checks-section.

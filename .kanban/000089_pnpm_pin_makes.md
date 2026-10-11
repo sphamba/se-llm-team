@@ -1,8 +1,8 @@
 ---
 name: "fix: pnpm pin makes every pnpm invocation write an untracked pnpm-lock.yaml"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "fix/89-pnpm-pin-makes"
 ---
 
 # Summary
@@ -30,3 +30,9 @@ Constraints:
 - Do NOT try to fix `pnpm install` failing with ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK: reproduced in a control project without the pin, so it is a sandbox mount limitation, not a project defect.
 
 # Notes
+
+Developer run (fix/89):
+- Added `pnpm-lock.yaml` to .gitignore (after `node_modules/`).
+- README "Package manager" sentence now reads: "There are no dependencies and no committed lockfile (pnpm writes an env lockfile that is gitignored)."
+- Checks: `corepack pnpm --version` prints 12.11.2, creates `pnpm-lock.yaml`, and `git status --porcelain` shows only the two intended file edits (lockfile is ignored; `git check-ignore -v pnpm-lock.yaml` confirms .gitignore:3). `node src/kanban.test.ts`, `node src/orchestrator.test.ts`, `node src/webui.test.ts` all pass.
+- Commit: cd6c16c. `pnpm install` left alone per the constraint (sandbox mount limitation).

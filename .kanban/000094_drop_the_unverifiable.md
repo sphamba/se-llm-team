@@ -1,8 +1,8 @@
 ---
 name: "chore: drop the unverifiable typecheck acceptance line; name the runnable checks"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "chore/94-drop-the-unverifiable"
 ---
 
 # Summary
@@ -34,3 +34,6 @@ Constraints:
 - Do not edit other task files, other agents' prompts or the board.
 
 # Notes
+- Changed `skills/se-llm-team/SKILL.md` step 5 only (commit b31fae3): added two bullets naming `node src/kanban.test.ts`, `node src/orchestrator.test.ts` and `node src/webui.test.ts` as the acceptance baseline, and stating the repo has no tsconfig and no typecheck command, so "Typecheck and the full test suite pass" must not be an acceptance criterion (an ad hoc strict tsc comparison against the pre-change baseline belongs in # Notes as evidence only).
+- No other file changed; README untouched (belongs to #90). No tsconfig, package.json scripts, dependencies, lockfile or TypeScript tooling added.
+- Ran all three suites on the branch: `node src/kanban.test.ts` (all assertions passed), `node src/orchestrator.test.ts` (all smoke parts passed), `node src/webui.test.ts` (all assertions passed).

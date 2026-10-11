@@ -1,7 +1,7 @@
 ---
 name: "feat: to-merge and merging states; orchestrator spawns mergers from to-merge, one at a time"
 priority: "critical"
-state: "reviewing"
+state: "live-testing"
 worktree: "feat/78-to-merge-and"
 ---
 
@@ -62,3 +62,13 @@ Constraints:
 - The sequenced-after-#95 hold was overtaken: #95 is still in backlog while this task is in review. The branch's mapping works on the current poll; #95's Spec facts (live-testing -> done, mergeDone runs for done) are now stale and #95 must rebase on this mapping when it starts.
 - main has moved past d56b833 (c5c7ae9, #77 web ui refresh, which edits src/webui.test.ts). This branch does not contain it. The Merger must merge main into the branch and resolve src/webui.test.ts there.
 - A merger that dies without requeueing leaves its task in merging until the next rescan: that rescan's poll sees the dead global merger pid, clears it and bounces merging -> to-merge, and the same rescan's sweep then applies the idle cooldown. Recovery is one daemon tick, not immediate in-process. #95 owns the bounce machinery.
+
+## Review (reviewer, 50b42de re-review)
+
+- Re-verified Specs items 1-8 on 50b42de and found no new mistake. The round-one fix in agents/merger.md is correct: step 1 now completes and commits the worktree merge and commits its test fixes on the branch, so step 2 carries them into main and doneCleanup cannot drop them.
+- Suites re-run on 50b42de in the worktree: node src/kanban.test.ts, node src/webui.test.ts and SE_LLM_TEAM_NO_WEBUI=1 node src/orchestrator.test.ts all pass (exit 0). The repo has no TypeScript compiler (the global tsc is a stub), so the suites are the check.
+- main is now at c5c7ae9. A trial git merge --no-commit --no-ff main in the worktree is clean, with no conflict in src/webui.test.ts, because #77's new block is additive and does not touch the state list. The trial was aborted directly after; the Merger still owns the real merge.
+- Finding for #95, not fixed here (pre-existing poll shape, and #95 rewrites poll): poll reads the task list once, then re-reads the file and writes the dead transition without a state equality check. A merger that sets done between the list read and the write can be moved back to to-merge. The task self-heals after the cooldown through the nothing-to-merge path, so the impact is one needless merger run.
+- SPECS.md and skills/se-llm-team/SKILL.md still list the 8 states. Both are outside the task constraints (README.md only), so they stay stale, as in round one.
+- src/webui.ts is untouched, per the constraint. A task in merging shows no agent log button (AGENT_ROLE has no merging entry); #79 owns that.
+- No fixes made in this round.

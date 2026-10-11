@@ -1,8 +1,8 @@
 ---
 name: "fix: verify the merged webui board after 47 - pair width, spinner identity, hub tabs"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/93-verify-the-merged"
 ---
 
 # Summary
