@@ -215,10 +215,10 @@ const taskClean = () => mirrorSubjects(rootA).includes(`kanban: done ${taskA.fil
 // to-do -> doing -> to-review -> reviewing -> to-live-test -> live-testing -> done -> merge -> done mirror commit.
 // The stub transitions in milliseconds, so intermediate states are asserted through the daemon log.
 await waitFor(() => readA().state === "done" && readA().worktree === "" && taskClean(), 60000, "full pipeline + merge + done mirror commit", a.output);
-for (const marker of ["spawned developer", "spawned reviewer", "spawned live-tester", "merged feat/smoke-test"]) {
+for (const marker of ["spawned developer", "spawned reviewer", "spawned live-tester", "merged feat/1-smoke-test"]) {
 	assert.ok(a.output().includes(marker), `expected daemon log to contain: ${marker}`);
 }
-assert.ok(!existsSync(join(rootA, ".worktrees", "feat/smoke-test")), "worktree removed");
+assert.ok(!existsSync(join(rootA, ".worktrees", "feat/1-smoke-test")), "worktree removed");
 // the board mirrors to refs/heads/meta/kanban via plumbing, never onto the current branch:
 // done folds in the whole task life, exactly one create and one done commit, newest first;
 // the merged work never touched .kanban and main history gets no board commits
@@ -302,7 +302,7 @@ const taskD = createTask(rootD, { name: "feat: shared board", summary: "Symlink 
 setState(rootD, taskD, "to-do");
 
 const d = await runDaemon(rootD);
-const wtD = join(rootD, ".worktrees", "feat/shared-board");
+const wtD = join(rootD, ".worktrees", "feat/1-shared-board");
 const wtBoardD = join(wtD, ".kanban");
 await waitFor(
 	() => {
@@ -354,12 +354,12 @@ const taskE = createTask(rootE, { name: "fix: review without worktree", summary:
 setState(rootE, taskE, "to-review");
 
 const e = await runDaemon(rootE);
-const wtE = join(rootE, ".worktrees", "fix/review-without-worktree");
+const wtE = join(rootE, ".worktrees", "fix/1-review-without-worktree");
 await waitFor(() => e.output().includes("spawned reviewer"), 30000, "reviewer spawn with ensured worktree", e.output);
 assert.ok(existsSync(wtE), "worktree dir created for a to-review task with no worktree dir");
 assert.ok(lstatSync(join(wtE, ".kanban")).isSymbolicLink(), "worktree board is a symlink to the shared board");
 assert.ok(e.output().includes(`(cwd=${wtE})`), `reviewer spawn log shows an existing cwd: ${e.output()}`);
-assert.equal(parseTask(rootE, taskE.file).worktree, "fix/review-without-worktree", "worktree recorded on the task");
+assert.equal(parseTask(rootE, taskE.file).worktree, "fix/1-review-without-worktree", "worktree recorded on the task");
 e.daemon.kill("SIGTERM");
 
 // a to-live-test task whose worktree cannot be created stays in to-live-test, never reaches done
@@ -401,7 +401,8 @@ const taskG = createTask(rootG, { name: "fix: defer merge while alive", summary:
 setState(rootG, taskG, "to-live-test");
 
 const g = await runDaemon(rootG);
-const wtG = join(rootG, ".worktrees", "fix/defer-merge-while-alive");
+// "fix: defer merge while alive" caps at 4 words then drops the type word: defer-merge-while
+const wtG = join(rootG, ".worktrees", "fix/1-defer-merge-while");
 await waitFor(() => parseTask(rootG, taskG.file).state === "done", 30000, "live-tester set done", g.output);
 // the stub lingers 5s and the daemon rescans every 1s, so sweeps ran while the pid was alive:
 // no merge, no worktree removal, no done commit

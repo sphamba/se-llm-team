@@ -12,12 +12,12 @@ Create a pi coding agent extension (this repo is already symlinked to ~/pi/agent
 
 
 # Kanban board
-- List of markdown, e.g. 000001_feat_nice_thing.md, files under .kanban/, committed to git only at creation and when done
+- List of markdown, e.g. 000001_nice_thing.md, files under .kanban/, committed to git only at creation and when done
 - Markdown structure:
   - "name" attribute
   - "priority" attribute: low, medium, high, critical
   - "state" attribute: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing, done
-  - "worktree" attribute: name of the worktree under .worktrees/, e.g. feat/nice-thing
+  - "worktree" attribute: name of the worktree under .worktrees/, e.g. feat/1-nice-thing
   - "Summary" section: concise, coming from Project manager + user
   - "Specs" section: detailed description of needs
   - "Notes" section: live implementation and review notes

@@ -41,7 +41,7 @@ export default function (pi: ExtensionAPI) {
 		name: "kanban_get",
 		label: "Kanban get",
 		description: "Read one kanban task in full detail (state, worktree, summary, specs, notes).",
-		parameters: Type.Object({ file: Type.String({ description: "Task file name, e.g. 000001_feat_nice_thing.md" }) }),
+		parameters: Type.Object({ file: Type.String({ description: "Task file name, e.g. 000001_nice_thing.md" }) }),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
 			const task = getTask(ctx.cwd, params.file);
@@ -117,7 +117,7 @@ export default function (pi: ExtensionAPI) {
 		description: "Set or clear (empty string) the worktree attribute of a task.",
 		parameters: Type.Object({
 			file: Type.String({ description: "Task file name" }),
-			worktree: Type.String({ description: "Worktree name under .worktrees/, e.g. feat/nice-thing" }),
+			worktree: Type.String({ description: "Worktree name under .worktrees/, e.g. feat/1-nice-thing" }),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);

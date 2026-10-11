@@ -124,17 +124,29 @@ export function getTask(root: string, file: string): Task | undefined {
 	return taskFiles(root).includes(f) ? parseTask(root, f) : undefined;
 }
 
-export function slugFile(name: string): string {
-	return name
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "_")
-		.replace(/^_+|_+$/g, "");
+// capped at 4 words with the leading type prefix ("feat: " ...) dropped from the slug;
+// the task name itself still carries the type word
+function slugParts(name: string): { type?: string; words: string[] } {
+	const lower = name.toLowerCase();
+	const words = lower.replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean).slice(0, 4);
+	const colon = lower.indexOf(":");
+	const type = colon > 0 ? lower.slice(0, colon).replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean) : [];
+	if (!type.length) return { words };
+	const short = words.slice(type.length);
+	return { type: type.join("-"), words: short.length ? short : words };
 }
 
-export function slugWorktree(name: string): string {
-	const [prefix, rest] = name.toLowerCase().split(/:\s*/);
-	const tail = rest === undefined ? prefix.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") : `${prefix}/${rest.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`;
-	return tail.replace(/\/+$/g, "");
+export function slugFile(name: string): string {
+	return slugParts(name).words.join("_");
+}
+
+// branch/worktree {typeDir}/{num}-{shortSlug} with the non-padded number from the task file
+export function slugWorktree(name: string, file?: string | number): string {
+	const { type, words } = slugParts(name);
+	const slug = words.join("-");
+	const num = typeof file === "number" ? file : file ? parseInt(file, 10) : Number.NaN;
+	if (Number.isNaN(num)) return type ? `${type}/${slug}` : slug;
+	return `${type ?? "task"}/${num}-${slug}`;
 }
 
 function encodeAttr(v: string): string {
