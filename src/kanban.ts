@@ -9,6 +9,8 @@ export const STATES = [
 	"reviewing",
 	"to-live-test",
 	"live-testing",
+	"to-merge",
+	"merging",
 	"done",
 ] as const;
 export type TaskState = (typeof STATES)[number];
@@ -22,6 +24,7 @@ export interface Task {
 	state: TaskState;
 	worktree: string;
 	issuer: string;
+	blockedBy: string;
 	summary: string;
 	specs: string;
 	notes: string;
@@ -36,11 +39,21 @@ export interface TaskRef {
 	priority: string;
 	state: TaskState;
 	issuer: string;
+	blockedBy: string;
 	summary: string;
 	openQuestions: string;
 }
 
-const IN_PROGRESS = new Set<TaskState>(["to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing"]);
+const IN_PROGRESS = new Set<TaskState>([
+	"to-do",
+	"doing",
+	"to-review",
+	"reviewing",
+	"to-live-test",
+	"live-testing",
+	"to-merge",
+	"merging",
+]);
 
 export function kanbanDir(root: string): string {
 	return join(root, ".kanban");
@@ -102,6 +115,7 @@ export function parseTask(root: string, file: string): Task {
 		state: (STATES as readonly string[]).includes(attrs.state) ? (attrs.state as TaskState) : "backlog",
 		worktree: attrs.worktree ?? "",
 		issuer: attrs.issuer ?? "user",
+		blockedBy: attrs.blockedBy ?? "",
 		summary: trim(sections["summary"]),
 		specs: trim(sections["specs"]),
 		notes: trim(sections["notes"]),
@@ -122,7 +136,7 @@ export function listTasks(root: string, scope: Scope, priority?: Priority | stri
 			scope === "backlog" ? t.state === "backlog" : scope === "done" ? t.state === "done" : IN_PROGRESS.has(t.state),
 		)
 		.filter((t) => priority === undefined || t.priority === priority)
-		.map(({ file, name, priority, state, issuer, summary, openQuestions }) => ({ file, num: taskNum(file), name, priority, state, issuer, summary, openQuestions }));
+		.map(({ file, name, priority, state, issuer, blockedBy, summary, openQuestions }) => ({ file, num: taskNum(file), name, priority, state, issuer, blockedBy, summary, openQuestions }));
 }
 
 export function getTask(root: string, file: string): Task | undefined {
@@ -225,7 +239,7 @@ function replaceSections(root: string, task: Task, updates: Record<string, strin
 export function updateTask(
 	root: string,
 	task: Task,
-	patch: { name?: string; priority?: string; summary?: string; specs?: string; openQuestions?: string },
+	patch: { name?: string; priority?: string; blockedBy?: string; summary?: string; specs?: string; openQuestions?: string },
 ): void {
 	const current = parseTask(root, task.file);
 	const rawTask = readFileSync(join(kanbanDir(root), task.file), "utf8");
@@ -235,6 +249,7 @@ export function updateTask(
 	const attrs: Record<string, string> = {};
 	if (patch.name !== undefined) attrs.name = patch.name;
 	if (patch.priority !== undefined) attrs.priority = patch.priority;
+	if (patch.blockedBy !== undefined) attrs.blockedBy = patch.blockedBy;
 	if (Object.keys(attrs).length) updateAttrs(root, task, attrs);
 	const sections: Record<string, string> = {};
 	if (patch.summary !== undefined) sections.summary = patch.summary;
@@ -261,7 +276,7 @@ export function appendNote(root: string, task: Task, note: string): void {
 
 export function createTask(
 	root: string,
-	input: { name: string; priority?: Priority | string; summary: string; specs?: string; openQuestions?: string; issuer?: string },
+	input: { name: string; priority?: Priority | string; summary: string; specs?: string; openQuestions?: string; issuer?: string; blockedBy?: string },
 ): Task {
 	const priority = (["low", "medium", "high", "critical"] as const).includes(input.priority as Priority)
 		? input.priority
@@ -269,8 +284,10 @@ export function createTask(
 	// issuer is set at creation only and never changed afterwards; anything but "user" or "#<num>" falls back to "user"
 	const issuer = input.issuer !== undefined && (input.issuer === "user" || /^#\d+$/.test(input.issuer)) ? input.issuer : "user";
 	const open = (input.openQuestions ?? "").trim();
+	const front: Record<string, string> = { name: input.name, priority, state: "backlog", worktree: "", issuer };
+	if (input.blockedBy) front.blockedBy = input.blockedBy;
 	const content =
-		`${serializeFrontmatter({ name: input.name, priority, state: "backlog", worktree: "", issuer })}\n` +
+		`${serializeFrontmatter(front)}\n` +
 		`# Summary\n${input.summary.trim()}\n\n# Specs\n${(input.specs ?? "").trim()}\n\n# Notes\n` +
 		(open ? `\n# Open questions\n${open}\n` : "");
 	mkdirSync(kanbanDir(root), { recursive: true });

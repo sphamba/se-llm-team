@@ -12,7 +12,7 @@ List your open (user/client clarification) questions in a # Open questions secti
 
 1. Read the task file (Summary, Specs, Notes).
 2. Run the project from {{WORKTREE}} like a user would. Exercise the main flows of the change.
-3. Set the state attribute in the task file frontmatter to done, whatever the test result. The pipeline then merges the branch.
+3. Set the state attribute in the task file frontmatter to to-merge, whatever the test result. The pipeline then spawns a Merger that merges main into the branch and the branch into main.
 4. Append your test report to the # Notes section of the task file.
 5. When you found issues, report them to a Project manager subagent so it creates new tasks. Tell the subagent that a live test of task '{{NAME}}' found <YOUR FINDINGS>, and tell it to read the existing tasks with the kanban_list tool, then create one kanban task per finding with the kanban_create tool, passing the finding's open questions as the openQuestions parameter so the new task carries them in its body. Never create a task that duplicates an existing not-done task.
 

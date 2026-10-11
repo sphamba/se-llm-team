@@ -1,9 +1,8 @@
 import { spawn, execFileSync, execSync } from "node:child_process";
-import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, readFileSync, readlinkSync, rmSync, symlinkSync, watch, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-	appendNote,
 	getTask,
 	kanbanDir,
 	listAll,
@@ -22,7 +21,6 @@ const DEFAULT_POLL_MINUTES = 1;
 const DEFAULT_AUTO_SCHEDULE_MINUTES = 5;
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const RESPAWN_CAP = 5;
-const MERGE_ATTEMPT_CAP = 3;
 const REVIEWER_RUN_CAP = 3;
 // consecutive failed auto-pushes before the daemon logs its once-only warning (a success
 // resets the count); the per-failure line is easy to miss, the warning names the consequence
@@ -251,17 +249,20 @@ function git(root: string, args: string[], allowFailure = false): string | null 
 // Never touches the index or working tree, so main history gets no kanban commits. The tree
 // is rebuilt from the whole board, so deleted files and disk drift self-heal on the next
 // mirror commit.
-function commitKanban(root: string, message: string, files: string[]): boolean {
-	if (!files.length) return false;
+function commitKanban(root: string, message: string, files: string[], allowEmpty = false): boolean {
+	if (!files.length && !allowEmpty) return false;
 	let tree: string;
 	try {
-		const blobs = execFileSync("git", ["hash-object", "-w", "--", ...files.map((f) => join(".kanban", f))], {
-			cwd: root,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-		})
-			.trim()
-			.split("\n");
+		// empty board (removal of the last task): mktree with no entries yields the empty tree
+		const blobs = files.length
+			? execFileSync("git", ["hash-object", "-w", "--", ...files.map((f) => join(".kanban", f))], {
+					cwd: root,
+					encoding: "utf8",
+					stdio: ["ignore", "pipe", "pipe"],
+				})
+					.trim()
+					.split("\n")
+			: [];
 		const board = execFileSync("git", ["mktree"], {
 			cwd: root,
 			input: files.map((f, i) => `100644 blob ${blobs[i]}\t${f}\n`).join(""),
@@ -287,8 +288,8 @@ function commitKanban(root: string, message: string, files: string[]): boolean {
 
 // best-effort auto-push of only the board mirror ref; failures are logged, never fatal.
 // PUSH_WARN_AFTER consecutive failures log a prominent warning once (a success resets the
-// count), so a permanently unreachable origin is visible instead of silently defeating the
-// mirror and the fresh-clone bootstrap
+// count and the warned marker), so a permanently unreachable origin is visible instead of
+// silently defeating the mirror and the fresh-clone bootstrap
 function pushMirror(root: string): void {
 	if (!git(root, ["remote"], true)) return;
 	try {
@@ -299,13 +300,50 @@ function pushMirror(root: string): void {
 			timeout: 30000,
 		});
 		if (readCounter(root, "push-failures") > 0) writeFileSync(counterPath(root, "push-failures"), "0");
+		if (readCounter(root, "push-warned") > 0) writeFileSync(counterPath(root, "push-warned"), "0");
 	} catch (err) {
 		log(root, `push of ${KANBAN_REF} failed (non-fatal): ${err instanceof Error ? err.message : err}`);
-		// counter keeps growing while pushes keep failing; log the warning only once per streak
-		if (bumpCounter(root, "push-failures") === PUSH_WARN_AFTER) {
+		// >= plus a warned marker: a stale counter past PUSH_WARN_AFTER never hits equality, and
+		// >= alone would warn on every failure past the cap instead of once per streak
+		if (bumpCounter(root, "push-failures") >= PUSH_WARN_AFTER && readCounter(root, "push-warned") === 0) {
+			writeFileSync(counterPath(root, "push-warned"), "1");
 			log(root, `WARNING: auto-push of ${KANBAN_REF} to origin failed ${PUSH_WARN_AFTER} times in a row; the board mirror is not reaching origin and fresh-clone bootstrap cannot work. Check SSH access to origin for the daemon user (known_hosts entry, deploy key). This warning is logged once until a push succeeds.`);
 		}
 	}
+}
+
+// removes a task in one operation: delete the file, then commit a whole-board mirror
+// snapshot, so the removal reaches refs/heads/meta/kanban and reconcileBoard cannot restore
+// it (the tip no longer carries the file). The daemon is the only other mirror writer: a
+// sweep mid-flight with a pre-removal board snapshot can re-add the file with its commit, so
+// while a daemon runs the tip is checked after a settle delay and the removal retries when
+// the file returned. Returns null on success, else a reason string.
+export async function removeTask(root: string, file: string): Promise<string | null> {
+	const name = file.endsWith(".md") ? file : `${file}.md`;
+	if (!taskFiles(root).includes(name)) return `No task ${file}`;
+	const hasGit = git(root, ["rev-parse", "--git-dir"], true) !== null;
+	rmSync(join(kanbanDir(root), name), { force: true });
+	// no git, no mirror and no reconcile: deleting the file is the whole removal
+	if (!hasGit) return null;
+	let daemonPid = 0;
+	try {
+		daemonPid = parseInt(readFileSync(join(kanbanDir(root), ".orchestrator.lock"), "utf8").trim(), 10) || 0;
+	} catch {
+		/* no lock: no daemon runs */
+	}
+	for (let attempt = 0; attempt < 3; attempt++) {
+		if (!commitKanban(root, `kanban: delete ${name}`, taskFiles(root), true)) {
+			return `mirror commit for ${name} failed, the board may restore the file: retry`;
+		}
+		// let a racing in-flight daemon commit land before the tip check
+		if (pidAlive(daemonPid)) await new Promise((resolve) => setTimeout(resolve, 1000));
+		const onTip = git(root, ["ls-tree", "--name-only", KANBAN_REF, "--", join(".kanban", name)], true);
+		if (onTip === null) return "git unavailable, the removal may not be mirrored";
+		if (!onTip) return null;
+		// a racing sweep re-added the file: the daemon may have restored it to the tree too
+		rmSync(join(kanbanDir(root), name), { force: true });
+	}
+	return `${name} returned to the mirror (a daemon sweep raced the removal): retry`;
 }
 
 // board file status relative to the meta/kanban mirror: "??" = not on the mirror yet (new
@@ -590,42 +628,81 @@ function startTodo(root: string, cfg: Config, task: Task): void {
 	setState(root, task, "doing");
 }
 
-// returns true when the done transition is fully processed: nothing left to merge, or the merge completed
-function mergeDone(root: string, cfg: Config, task: Task): boolean {
-	const branch = task.worktree;
-	const wtDir = join(root, ".worktrees", branch);
+// one failed-merge marker per task: written when the sweep spawns a merger, it survives the
+// merger requeueing the task and daemon restarts. A to-merge task whose marker exists re-runs
+// only after it sat idle in to-merge for the idle interval, and the per-task file keeps the
+// cooldown of a failed task intact while another task's merger spawns
+const mergerAttemptPath = (root: string, slug: string) => join(kanbanDir(root), ".pids", `${slug}.merge-attempted`);
+
+function clearMergerAttempt(root: string, slug: string): void {
+	try {
+		rmSync(mergerAttemptPath(root, slug));
+	} catch {
+		/* already gone */
+	}
+}
+
+// the to-merge sweep, replacing merge-on-done: a task the live-tester passed sits in to-merge
+// until a Merger merges main into the branch worktree and then the branch into main. One
+// merger per project (the global pid file, spawned one at a time by the sequential sweep);
+// the task's own agent may still be writing its report, so the spawn defers while that pid
+// lives. The task moves to merging at spawn; a merger that requeues the task re-runs only
+// after the idle cooldown.
+function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	const slug = task.file.replace(/\.md$/, "");
-	// the task's agent may outlive its done state (it writes its report and final worktree
-	// commits after setting done): defer the merge until the pid dies; a conflict rerun waits
-	// on the merger pid instead
-	if (pidAlive(agentPid(root, slug)) || pidAlive(agentPid(root, `${slug}.merger`))) return false;
-	if (!existsSync(wtDir) && git(root, ["branch", "--list", branch], true) === "") {
+	// the live-tester may still be committing and writing its report after setting to-merge
+	if (pidAlive(agentPid(root, slug))) return;
+	// at most one merger at a time, project-wide
+	if (pidAlive(agentPid(root, "merger"))) return;
+	// an earlier attempt on this task failed and requeued it: retry only after it sat idle in
+	// to-merge for the idle interval. Read before any write: ensureWorktree/setWorktree bump the
+	// task file's mtime, which is the idle clock, so this check must come first
+	if (existsSync(mergerAttemptPath(root, slug)) && Date.now() - statSync(join(kanbanDir(root), task.file)).mtimeMs < cfg.autoScheduleMinutes * 60_000) return;
+	const wt = task.worktree;
+	if (!wt || (git(root, ["branch", "--list", wt], true) === "" && !existsSync(join(root, ".worktrees", wt)))) {
+		// nothing to merge: no worktree and no branch
 		setWorktree(root, task, "");
-		return true;
+		setState(root, task, "done");
+		log(root, `${task.file}: nothing to merge, set done`);
+		return;
 	}
-	if (git(root, ["merge", "--no-edit", branch], true) !== null) {
-		// --force only drops uncommitted worktree debris; the merged branch content is already in main
+	const ensured = ensureWorktree(root, task);
+	// a failed spawn would strand the task; leave the state for the next rescan to retry
+	if (!ensured) {
+		log(root, `${task.file}: worktree could not be created, merger not spawned (state unchanged)`);
+		return;
+	}
+	mkdirSync(join(kanbanDir(root), ".pids"), { recursive: true });
+	writeFileSync(mergerAttemptPath(root, slug), "");
+	spawnAgent(root, cfg, "merger", { ...task, worktree: ensured.wt }, root, "merger");
+	setState(root, task, "merging");
+}
+
+// a done task's worktree and branch: the Merger merged the branch into main before setting
+// done, so cleanup is all that is left here. -d refuses an unmerged branch, so a manual done
+// with unfinished work keeps both branch and worktree for a manual merge.
+function doneCleanup(root: string, task: Task): void {
+	const wt = task.worktree;
+	if (!wt) return;
+	const wtDir = join(root, ".worktrees", wt);
+	const hasBranch = git(root, ["branch", "--list", wt], true) !== "";
+	if (!hasBranch && !existsSync(wtDir)) {
+		// stale attribute: nothing left to clean
+		setWorktree(root, task, "");
+		return;
+	}
+	if (!hasBranch) {
+		// worktree dir without a branch: nothing mergeable, drop the dir and the attribute
 		git(root, ["worktree", "remove", wtDir, "--force"], true);
-		git(root, ["branch", "-d", branch], true);
 		setWorktree(root, task, "");
-		log(root, `merged ${branch} for ${task.file}`);
-		return true;
+		return;
 	}
-	const attempts = readCounter(root, `${slug}.merge-attempts`);
-	if (attempts >= MERGE_ATTEMPT_CAP) {
-		// a stuck-conflict task is rescanned forever: log the give-up once at the cap,
-		// then freeze the counter instead of bumping and logging on every later sweep
-		if (attempts === MERGE_ATTEMPT_CAP) {
-			bumpCounter(root, `${slug}.merge-attempts`);
-			log(root, `merge of ${branch} for ${task.file} still conflicts after ${MERGE_ATTEMPT_CAP} attempts, left for manual resolution`);
-		}
-		return false;
-	}
-	const next = bumpCounter(root, `${slug}.merge-attempts`);
-	log(root, `merge conflict for ${branch}, spawning merger (attempt ${next})`);
-	appendNote(root, task, `Merge conflict for branch ${branch}, merger spawned (attempt ${next}).`);
-	spawnAgent(root, cfg, "merger", task, root, `${slug}.merger`);
-	return false;
+	if (git(root, ["merge-base", "--is-ancestor", wt, "HEAD"], true) === null) return;
+	// --force only drops uncommitted worktree debris; the merged branch content is already in main
+	if (existsSync(wtDir)) git(root, ["worktree", "remove", wtDir, "--force"], true);
+	git(root, ["branch", "-d", wt], true);
+	setWorktree(root, task, "");
+	log(root, `merged ${wt} for ${task.file}`);
 }
 
 function rescan(root: string, cfg: Config): void {
@@ -698,17 +775,29 @@ function rescan(root: string, cfg: Config): void {
 					spawnAgent(root, cfg, "live-tester", task, ensured.wtDir);
 					setState(root, task, "live-testing");
 				}
+			} else if (task.state === "to-merge") {
+				sweepToMerge(root, cfg, task);
+			} else if (task.state === "merging") {
+				// its merger runs: the liveness poll requeues the task when the merger dies
 			} else if (task.state === "done") {
-				// mergeDone always runs for a done worktree task (it completes the merge and clears
-				// the worktree); the commit is gated on the file actually differing from the mirror,
-				// since an unchanged done task would otherwise issue a whole-board commit every sweep
-				// and fold other tasks' pending changes under its label
-				const merged = !task.worktree || mergeDone(root, cfg, task);
-				if (code && merged) commitKanban(root, `kanban: done ${task.file}`, files);
+				// cleanup always runs for a done worktree task (the merger merged before setting
+				// done, so only the worktree/branch removal is left); the commit is gated on the
+				// file actually differing from the mirror, since an unchanged done task would
+				// otherwise issue a whole-board commit every sweep and fold other tasks' pending
+				// changes under its label
+				doneCleanup(root, task);
+				if (code) commitKanban(root, `kanban: done ${task.file}`, files);
 			}
 		} catch (err) {
 			log(root, `error handling ${task.file} (${task.state}): ${err instanceof Error ? err.message : err}`);
 		}
+	}
+	// merger spawn bookkeeping: clear the global merger pid once no task is merging and the
+	// merger is gone; the failed-merge markers stay while their task waits, and are dropped once
+	// the task moved on (a successful merge ends in done)
+	if (!tasks.some((t) => t.state === "merging") && !pidAlive(agentPid(root, "merger"))) clearPid(root, "merger");
+	for (const task of tasks) {
+		if (task.state !== "to-merge" && task.state !== "merging") clearMergerAttempt(root, task.file.replace(/\.md$/, ""));
 	}
 	autoSchedule(root, cfg, tasks);
 }
@@ -716,7 +805,8 @@ function rescan(root: string, cfg: Config): void {
 const DEAD_TRANSITIONS: Partial<Record<TaskState, TaskState>> = {
 	doing: "to-do",
 	reviewing: "to-review",
-	"live-testing": "done",
+	"live-testing": "to-merge",
+	merging: "to-merge",
 };
 
 const PRIORITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -732,10 +822,22 @@ const taskNum = (file: string) => {
 // continuous idle. Module state like lastMirrorHash: one locked daemon per project.
 let idleSince: number | null = null;
 
+// a blockedBy entry ("#<num>") holds the task while its blocker exists and is not done;
+// a ref resolving to no existing task is ignored
+function blockedByUndone(tasks: Task[], task: Task): boolean {
+	if (!task.blockedBy) return false;
+	const states = new Map(tasks.map((t) => [taskNum(t.file), t.state]));
+	return task.blockedBy.split(",").some((ref) => {
+		const num = parseInt(ref.trim().replace(/^#/, ""), 10);
+		return num > 0 && states.get(num) !== undefined && states.get(num) !== "done";
+	});
+}
+
 function autoSchedule(root: string, cfg: Config, tasks: Task[]): void {
 	// conflicted files parse bogus state values: neither promotable nor proof of activity
 	const candidates = tasks.filter((t) => !t.conflicted);
-	const backlog = candidates.filter((t) => t.state === "backlog");
+	// unanswered open questions mean the task waits for the user: never promote it
+	const backlog = candidates.filter((t) => t.state === "backlog" && !t.openQuestions);
 	if (!backlog.length || candidates.some((t) => t.state !== "backlog" && t.state !== "done")) {
 		idleSince = null;
 		return;
@@ -746,8 +848,12 @@ function autoSchedule(root: string, cfg: Config, tasks: Task[]): void {
 		return;
 	}
 	if (now - idleSince < cfg.autoScheduleMinutes * 60_000) return;
-	// taskFiles sorts by file name, so the stable sort keeps the oldest first within a rank
-	const next = [...backlog].sort((a, b) => rank(a.priority) - rank(b.priority) || taskNum(a.file) - taskNum(b.file))[0];
+	// taskFiles sorts by file name, so the stable sort keeps the oldest first within a rank;
+	// unfinished blockers hold the task: the failsafe never auto-promotes a blocked task
+	const next = [...backlog]
+		.filter((t) => !blockedByUndone(tasks, t))
+		.sort((a, b) => rank(a.priority) - rank(b.priority) || taskNum(a.file) - taskNum(b.file))[0];
+	if (!next) return;
 	idleSince = null;
 	log(root, `no active task for ${cfg.autoScheduleMinutes}min, promoting ${next.file} to to-do (failsafe)`);
 	try {
@@ -763,11 +869,15 @@ function poll(root: string, cfg: Config): void {
 			// no state rewrite on a conflicted file: the parse is bogus and the merger owns resolution
 			if (task.conflicted) continue;
 			const next = DEAD_TRANSITIONS[task.state];
-			if (!next) continue;
 			const slug = task.file.replace(/\.md$/, "");
-			const pid = agentPid(root, slug);
+			// a merging task's agent is the project-wide merger (the global pid file); every other
+			// state maps to the task's own agent pid. Clear before the transition check: a pidfile
+			// for a state with no transition (to-merge, done) would otherwise linger forever
+			const pidName = task.state === "merging" ? "merger" : slug;
+			const pid = agentPid(root, pidName);
 			if (pidAlive(pid)) continue;
-			clearPid(root, slug);
+			clearPid(root, pidName);
+			if (!next) continue;
 			if (bumpCounter(root, `${slug}.dead`) > RESPAWN_CAP) {
 				// counter keeps growing while the pidfile stays dead; log the give-up only once
 				if (readCounter(root, `${slug}.dead`) === RESPAWN_CAP + 1) {
