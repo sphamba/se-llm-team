@@ -1,7 +1,7 @@
 ---
 name: "feat: configure LLM provider, model, and reasoning level; overrides per agent type"
 priority: "critical"
-state: "doing"
+state: "reviewing"
 worktree: "feat/71-configure-llm-provider"
 ---
 
@@ -39,3 +39,10 @@ Constraints:
 - Do not use env vars for per-invocation selection; flags only (see Facts).
 
 # Notes
+
+- Implemented the LLM config in src/orchestrator.ts. Top-level provider/model/thinking keys plus a top-level roles object with per-agent-type entries. loadConfig validates the values. An unknown thinking level drops with a warning. spawnAgent resolves the flags per role. A provider without a model drops with a warning. Flags are appended after --mode json and before -p, in the order provider, model, thinking.
+- Per-field precedence: roles.<role> > global > unset. Unset fields add no flag. A ":<thinking>" suffix in the model pattern stays native.
+- README.md: new config table rows, an updated example, and the documented spawn command now names the flags.
+- Tests in src/orchestrator.test.ts: part X checks the global flags, a developer override, a reviewer provider+model override, the live-tester globals, and a merger override through a real merge conflict. Part Y checks the bad-value warnings and the absence of flags. The daemon stays alive in both parts.
+- Checks pass: node src/kanban.test.ts, node src/orchestrator.test.ts (all parts), node src/webui.test.ts. A strict tsc run reports no error in src/orchestrator.ts or the new test code. The repo has no tsconfig. Pre-existing strict errors remain in untouched files.
+- Commit f28f0de in the worktree.

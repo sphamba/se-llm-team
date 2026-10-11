@@ -1,8 +1,8 @@
 ---
 name: "fix: webui task detail card shows the name twice - drop it from the attributes"
 priority: "low"
-state: "live-testing"
-worktree: "fix/58-webui-task-detail"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -33,3 +33,12 @@ Constraints:
 - Ran in the worktree: node src/webui.test.ts, node src/kanban.test.ts, node src/orchestrator.test.ts. All pass.
 - Worktree clean, one commit ahead of main, no uncommitted files. Conflict constraint holds: the change removes one statement inside #m-attrs, so the #56 additions below #m-attrs merge cleanly.
 - No fixes needed.
+
+## Live test (live-tester)
+- Ran the worktree UI from /home/phamba/repos/se-llm-team/.worktrees/fix/58-webui-task-detail as a user. Started src/webui.ts from the worktree on 127.0.0.1:4399 against the shared .kanban board, then drove it with headless Chrome (Playwright).
+- Opened 6 task cards across the columns, task #58 included. In every card the title shows the task name once, and #m-attrs shows only number, file, priority, state and worktree. The name row is absent. The attribute text does not repeat the title. The task body renders.
+- Before and after check: the main daemon on port 4242 still shows the name row in #m-attrs for task #58. The worktree page does not. The fix works.
+- The agent buttons below #m-attrs still work. Task #58 shows the past Developer and Reviewer buttons, the live Live-tester button, and the log pane streams the current log.
+- Tests in the worktree: node src/webui.test.ts and node src/kanban.test.ts pass. node src/orchestrator.test.ts passed on two runs. A first run timed out in the push-warning part while another live-test session ran the same suite concurrently in worktree fix/68. That is environmental and unrelated to this diff.
+- Evidence: /tmp/live-58-modal.png, /tmp/live-58-board.png, /tmp/live-worktree-new.png, /tmp/live-main-old.png.
+- No issues found. Accepted.
