@@ -137,8 +137,39 @@ function bumpCounter(root: string, name: string): number {
 	return n;
 }
 
-export function pidAlive(pid: number): boolean {
+// /proc/<pid>/stat field 22 (starttime, ticks since boot): a discriminator that survives pid
+// reuse, since a recycled pid starts at a different tick. comm (field 2) can contain spaces
+// and parens, so parse after the last ')'; fields[0] after it is state (field 3), which puts
+// field 22 at index 19. Null when /proc is unreadable (non-Linux)
+function procStartTicks(pid: number): string | null {
+	try {
+		const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+		return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? null;
+	} catch {
+		return null;
+	}
+}
+
+function procCmdline(pid: number): string | null {
+	try {
+		return readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ").trim() || null;
+	} catch {
+		return null;
+	}
+}
+
+// the discriminator recorded next to a pid: the process start time, or the cmdline when the
+// start time is unreadable; null when neither is available (non-Linux keeps today's behavior)
+function pidDiscriminator(pid: number): string | null {
+	return procStartTicks(pid) ?? procCmdline(pid);
+}
+
+export function pidAlive(pid: number, disc?: string | null): boolean {
 	if (!Number.isInteger(pid) || pid <= 0) return false;
+	// /proc readable for this pid: compare the discriminator, so a recycled pid reads dead
+	// even though kill(pid, 0) would pass. An unreadable /proc entry (dead pid, or non-Linux)
+	// falls through to the signal check, which is correct in both cases (ESRCH: dead)
+	if (disc != null && procStartTicks(pid) !== null) return pidDiscriminator(pid) === disc;
 	try {
 		process.kill(pid, 0);
 		return true;
@@ -149,7 +180,10 @@ export function pidAlive(pid: number): boolean {
 
 function writePid(root: string, name: string, pid: number): void {
 	mkdirSync(dirname(pidPath(root, name)), { recursive: true });
-	writeFileSync(pidPath(root, name), String(pid));
+	// the discriminator next to the pid makes the liveness check pid-reuse-proof: a recycled
+	// pid re-reads dead because its start time (or cmdline) no longer matches
+	const disc = pidDiscriminator(pid);
+	writeFileSync(pidPath(root, name), disc === null ? String(pid) : `${pid} ${disc}`);
 }
 
 function clearPid(root: string, name: string): void {
@@ -160,12 +194,32 @@ function clearPid(root: string, name: string): void {
 	}
 }
 
+// parseInt stops at the space, so a "<pid> <disc>" file still reads as the pid
 function agentPid(root: string, slug: string): number {
 	try {
 		return parseInt(readFileSync(pidPath(root, slug), "utf8").trim(), 10);
 	} catch {
 		return 0;
 	}
+}
+
+// a pid file's entry: the pid plus its discriminator, for the reuse-proof liveness check;
+// a legacy pid-only file (or a missing one) reads a null discriminator
+function pidEntry(root: string, name: string): { pid: number; disc: string | null } {
+	try {
+		const raw = readFileSync(pidPath(root, name), "utf8").trim();
+		const [pidStr, ...rest] = raw.split(/\s+/);
+		return { pid: parseInt(pidStr, 10) || 0, disc: rest.length ? rest.join(" ") : null };
+	} catch {
+		return { pid: 0, disc: null };
+	}
+}
+
+// liveness of the agent a pid file names: the discriminator decides, so a pid recycled by
+// another process reads dead instead of wedging the gate and the state transitions
+function agentAlive(root: string, name: string): boolean {
+	const { pid, disc } = pidEntry(root, name);
+	return pidAlive(pid, disc);
 }
 
 function renderPrompt(root: string, role: string, task: Task, worktreeDir?: string): string {
@@ -286,30 +340,59 @@ function commitKanban(root: string, message: string, files: string[], allowEmpty
 	return true;
 }
 
-// best-effort auto-push of only the board mirror ref; failures are logged, never fatal.
-// PUSH_WARN_AFTER consecutive failures log a prominent warning once (a success resets the
-// count and the warned marker), so a permanently unreachable origin is visible instead of
-// silently defeating the mirror and the fresh-clone bootstrap
+// serialized in-flight push: the pushes were synchronous, so "consecutive failures" was
+// well-defined; the queue keeps that order without blocking the daemon loop
+let pushQueue: Promise<void> = Promise.resolve();
+
+// best-effort auto-push of only the board mirror ref, detached: the daemon loop never waits
+// on the network (a hanging SSH held the single-threaded sweep for the full 30s cap per
+// changed board file). The 30s cap kills a hanging push; results (success/failure count) are
+// logged and counted from the child's exit, asynchronously. PUSH_WARN_AFTER consecutive
+// failures log a prominent warning once (a success resets the count and the warned marker),
+// so a permanently unreachable origin is visible instead of silently defeating the mirror
+// and the fresh-clone bootstrap
 function pushMirror(root: string): void {
 	if (!git(root, ["remote"], true)) return;
-	try {
-		execFileSync("git", ["push", "origin", "meta/kanban"], {
-			cwd: root,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-			timeout: 30000,
-		});
-		if (readCounter(root, "push-failures") > 0) writeFileSync(counterPath(root, "push-failures"), "0");
-		if (readCounter(root, "push-warned") > 0) writeFileSync(counterPath(root, "push-warned"), "0");
-	} catch (err) {
-		log(root, `push of ${KANBAN_REF} failed (non-fatal): ${err instanceof Error ? err.message : err}`);
-		// >= plus a warned marker: a stale counter past PUSH_WARN_AFTER never hits equality, and
-		// >= alone would warn on every failure past the cap instead of once per streak
-		if (bumpCounter(root, "push-failures") >= PUSH_WARN_AFTER && readCounter(root, "push-warned") === 0) {
-			writeFileSync(counterPath(root, "push-warned"), "1");
-			log(root, `WARNING: auto-push of ${KANBAN_REF} to origin failed ${PUSH_WARN_AFTER} times in a row; the board mirror is not reaching origin and fresh-clone bootstrap cannot work. Check SSH access to origin for the daemon user (known_hosts entry, deploy key). This warning is logged once until a push succeeds.`);
-		}
-	}
+	pushQueue = pushQueue.then(() => doPush(root)).catch(() => {});
+}
+
+// in-flight push children, killed on daemon exit so a stopped daemon leaves no orphaned
+// hanging push behind (the child's kill timer dies with the daemon that spawned it)
+const pushChildren = new Set<ReturnType<typeof spawn>>();
+
+function doPush(root: string): Promise<void> {
+	return new Promise<void>((resolvePush) => {
+		let settled = false;
+		const finish = (failed: boolean, detail: string) => {
+			if (settled) return;
+			settled = true;
+			pushChildren.delete(child);
+			clearTimeout(timer);
+			if (!failed) {
+				if (readCounter(root, "push-failures") > 0) writeFileSync(counterPath(root, "push-failures"), "0");
+				if (readCounter(root, "push-warned") > 0) writeFileSync(counterPath(root, "push-warned"), "0");
+			} else {
+				log(root, `push of ${KANBAN_REF} failed (non-fatal): ${detail}`);
+				// >= plus a warned marker: a stale counter past PUSH_WARN_AFTER never hits equality, and
+				// >= alone would warn on every failure past the cap instead of once per streak
+				if (bumpCounter(root, "push-failures") >= PUSH_WARN_AFTER && readCounter(root, "push-warned") === 0) {
+					writeFileSync(counterPath(root, "push-warned"), "1");
+					log(root, `WARNING: auto-push of ${KANBAN_REF} to origin failed ${PUSH_WARN_AFTER} times in a row; the board mirror is not reaching origin and fresh-clone bootstrap cannot work. Check SSH access to origin for the daemon user (known_hosts entry, deploy key). This warning is logged once until a push succeeds.`);
+				}
+			}
+			resolvePush();
+		};
+		const child = spawn("git", ["push", "origin", "meta/kanban"], { cwd: root, detached: true, stdio: ["ignore", "ignore", "pipe"] });
+		pushChildren.add(child);
+		child.unref();
+		let stderr = "";
+		child.stderr?.on("data", (d) => (stderr += d));
+		child.stderr?.unref();
+		const timer = setTimeout(() => child.kill("SIGKILL"), 30000);
+		timer.unref();
+		child.on("error", (err) => finish(true, err.message));
+		child.on("close", (code) => finish(code !== 0, stderr.trim() || `exit code ${code}`));
+	});
 }
 
 // removes a task in one operation: delete the file, then commit a whole-board mirror
@@ -651,9 +734,12 @@ function clearMergerAttempt(root: string, slug: string): void {
 function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	const slug = task.file.replace(/\.md$/, "");
 	// the live-tester may still be committing and writing its report after setting to-merge
-	if (pidAlive(agentPid(root, slug))) return;
+	if (agentAlive(root, slug)) return;
 	// at most one merger at a time, project-wide
-	if (pidAlive(agentPid(root, "merger"))) return;
+	if (agentAlive(root, "merger")) return;
+	// a task bounced here past the respawn cap (dead live-tester or merger) also waits for
+	// the idle cooldown before its merger spawns
+	if (deadCooldownActive(root, cfg, task)) return;
 	// an earlier attempt on this task failed and requeued it: retry only after it sat idle in
 	// to-merge for the idle interval. Read before any write: ensureWorktree/setWorktree bump the
 	// task file's mtime, which is the idle clock, so this check must come first
@@ -705,6 +791,40 @@ function doneCleanup(root: string, task: Task): void {
 	log(root, `merged ${wt} for ${task.file}`);
 }
 
+// past RESPAWN_CAP the fresh agent waits for the idle cooldown: the unconditional bounce
+// still moves the task back one step, only the respawn backs off. The task file's update
+// time is the idle clock (the bounce's setState wrote it). Read before any write:
+// ensureWorktree/setWorktree bump the mtime and would restart the clock mid-check
+function deadCooldownActive(root: string, cfg: Config, task: Task): boolean {
+	if (readCounter(root, `${task.file.replace(/\.md$/, "")}.dead`) <= RESPAWN_CAP) return false;
+	return Date.now() - statSync(join(kanbanDir(root), task.file)).mtimeMs < cfg.autoScheduleMinutes * 60_000;
+}
+
+// stale per-task merger pid leftovers (the old per-task merger scheme, e.g. 000038.merger.pid):
+// current code reads only the global merger pid, so a leftover is dead weight. Drop each one
+// whose process is dead; a live pid keeps its file, and a task still in merging is skipped
+function janitorPids(root: string, tasks: Task[]): void {
+	const merging = new Set(tasks.filter((t) => t.state === "merging").map((t) => t.file.replace(/\.md$/, "")));
+	let files: string[] = [];
+	try {
+		files = readdirSync(join(kanbanDir(root), ".pids"));
+	} catch {
+		return; // no .pids dir yet
+	}
+	for (const f of files) {
+		if (!f.endsWith(".merger.pid")) continue;
+		const name = f.slice(0, -".pid".length); // "<slug>.merger"
+		if (merging.has(name.slice(0, -".merger".length))) continue;
+		const { pid, disc } = pidEntry(root, name);
+		if (pidAlive(pid, disc)) continue; // never remove a running process's pid file
+		try {
+			rmSync(join(kanbanDir(root), ".pids", f));
+		} catch {
+			/* already gone */
+		}
+	}
+}
+
 function rescan(root: string, cfg: Config): void {
 	// root-cause fix ordering: a snapshot commit must never be built from a tree that lacks
 	// branch-only files, so an external mirror-head move is materialized before boardStatus
@@ -741,8 +861,9 @@ function rescan(root: string, cfg: Config): void {
 			// identical-tree guard keeps an already-mirrored file a no-op
 			const code = status.get(join(".kanban", task.file));
 			if (code === "??") commitKanban(root, `kanban: create ${task.file}`, files);
-			if (task.state === "to-do") startTodo(root, cfg, task);
-			else if (task.state === "to-review") {
+			// past the respawn cap the fresh developer waits for the idle cooldown (state unchanged)
+			if (task.state === "to-do" && !deadCooldownActive(root, cfg, task)) startTodo(root, cfg, task);
+			else if (task.state === "to-review" && !deadCooldownActive(root, cfg, task)) {
 				const ensured = ensureWorktree(root, task);
 				// a failed spawn would bounce or strand the task; leave the state for the next rescan to retry
 				if (!ensured) log(root, `${task.file}: worktree could not be created, reviewer not spawned (state unchanged)`);
@@ -765,7 +886,7 @@ function rescan(root: string, cfg: Config): void {
 						if (pid) writeFileSync(armedPath(root, slug), String(pid));
 					}
 				}
-			} else if (task.state === "to-live-test") {
+			} else if (task.state === "to-live-test" && !deadCooldownActive(root, cfg, task)) {
 				const ensured = ensureWorktree(root, task);
 				if (!ensured) log(root, `${task.file}: worktree could not be created, live-tester not spawned (state unchanged)`);
 				else {
@@ -795,10 +916,11 @@ function rescan(root: string, cfg: Config): void {
 	// merger spawn bookkeeping: clear the global merger pid once no task is merging and the
 	// merger is gone; the failed-merge markers stay while their task waits, and are dropped once
 	// the task moved on (a successful merge ends in done)
-	if (!tasks.some((t) => t.state === "merging") && !pidAlive(agentPid(root, "merger"))) clearPid(root, "merger");
+	if (!tasks.some((t) => t.state === "merging") && !agentAlive(root, "merger")) clearPid(root, "merger");
 	for (const task of tasks) {
 		if (task.state !== "to-merge" && task.state !== "merging") clearMergerAttempt(root, task.file.replace(/\.md$/, ""));
 	}
+	janitorPids(root, tasks);
 	autoSchedule(root, cfg, tasks);
 }
 
@@ -859,20 +981,30 @@ function poll(root: string, cfg: Config): void {
 			// state maps to the task's own agent pid. Clear before the transition check: a pidfile
 			// for a state with no transition (to-merge, done) would otherwise linger forever
 			const pidName = task.state === "merging" ? "merger" : slug;
-			const pid = agentPid(root, pidName);
-			if (pidAlive(pid)) continue;
+			const { pid, disc } = pidEntry(root, pidName);
+			if (pidAlive(pid, disc)) continue;
+			const hadPid = pid > 0;
 			clearPid(root, pidName);
-			if (!next) continue;
-			if (bumpCounter(root, `${slug}.dead`) > RESPAWN_CAP) {
-				// counter keeps growing while the pidfile stays dead; log the give-up only once
-				if (readCounter(root, `${slug}.dead`) === RESPAWN_CAP + 1) {
-					log(root, `${slug}: agent died ${RESPAWN_CAP}+ times, giving up (state ${task.state})`);
+			if (!next) {
+				// a completed run leaves its stale pidfile behind, a bounce clears it first, so a
+				// stale pidfile here means the agent advanced the task out of the mapped state by
+				// its own action: the death streak is over. Clearing on a missing pidfile too would
+				// wipe the counter of a past-cap task still waiting out its respawn cooldown
+				if (hadPid && readCounter(root, `${slug}.dead`) > 0) {
+					writeFileSync(counterPath(root, `${slug}.dead`), "0");
+					log(root, `${slug}: run completed, cleared the dead-agent counter`);
 				}
 				continue;
 			}
+			// the bounce is unconditional: a frozen mid-flight task is worse than a bounced one
 			log(root, `${slug}: agent pid=${pid} dead without state update, ${task.state} -> ${next}`);
 			const fresh = getTask(root, task.file);
 			if (fresh) setState(root, fresh, next);
+			// past the cap the fresh spawn waits for the idle cooldown (the sweep defers it);
+			// logged once at cap+1, like the old give-up line
+			if (bumpCounter(root, `${slug}.dead`) === RESPAWN_CAP + 1) {
+				log(root, `${slug}: agent died ${RESPAWN_CAP}+ times; respawn waits for the idle cooldown (state ${next})`);
+			}
 		} catch (err) {
 			log(root, `error polling ${task.file} (${task.state}): ${err instanceof Error ? err.message : err}`);
 		}
@@ -961,7 +1093,10 @@ export function main(argv: string[]): void {
 	};
 	process.on("SIGINT", stop);
 	process.on("SIGTERM", stop);
-	process.on("exit", () => releaseLock(root));
+	process.on("exit", () => {
+		releaseLock(root);
+		for (const child of pushChildren) child.kill("SIGKILL");
+	});
 
 	sweep();
 	poll(root, cfg);

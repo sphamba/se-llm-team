@@ -9,7 +9,7 @@ Project root: {{ROOT}}
 First, set the state attribute in the task file frontmatter to merging (edit that one line).
 
 Then merge in two steps:
-1. In the worktree {{ROOT}}/.worktrees/{{WORKTREE_NAME}}: merge the main branch into {{WORKTREE_NAME}} (git merge main). Resolve conflicts there. Read the task Specs and Notes to understand the intent of both sides. When the two sides disagree, the main branch wins unless the task Specs say otherwise. Complete the merge, stage the resolved files and commit. Run the project's test suites in the worktree and fix what they expose; commit those fixes on the branch too, so step 2 carries them.
+1. In the worktree {{ROOT}}/.worktrees/{{WORKTREE_NAME}}: merge the main branch into {{WORKTREE_NAME}} (git merge main). Read the task Specs and Notes to understand the intent of both sides. When the two sides disagree, the main branch wins unless the task Specs say otherwise. If the merge is clean (no conflicts), skip the test suites entirely and go straight to step 2: every branch was already developer-reviewed and live-tested, and re-running the suites doubles the merge time for the common case. Only when you had to resolve conflicts (semantic-merge risk) run the project's test suites in the worktree and fix what they expose; commit those fixes on the branch too, so step 2 carries them. Complete the merge, stage the resolved files and commit.
 2. In the project root {{ROOT}}: merge {{WORKTREE_NAME}} into the main branch (git merge --no-edit {{WORKTREE_NAME}}). The main side should be clean now; if conflicts still appear, resolve them the same way and commit.
 
 When both merges are complete, set the state attribute in the task file frontmatter to done and append what you resolved to the # Notes section of the task file.
