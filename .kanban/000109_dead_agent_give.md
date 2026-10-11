@@ -49,4 +49,14 @@ What was exercised (worktree fix/109-dead-agent-give, commit 6127996):
   3. The revived agent dies again: the second streak reaches the cap and logs its own "giving up", exactly one line, so two in total. No over-logging within a streak.
 - Same harness against the pre-fix code (main checkout, no alive-sighting reset): the counter never resets, so the revive step times out. This confirms the fix is what makes the second give-up work.
 
+## Merge (2026-10-11)
+
+Both merges complete: main merged into fix/109-dead-agent-give in the worktree (merge commit 7c22de8), then the branch fast-forwarded into main at the root (main -> 7c22de8).
+
+Merge conflict in src/orchestrator.ts, resolved in favour of the base branch: main's task 000095 rework ("unconditional dead-agent bounce; idle-cooldown respawn past the cap", commit 4934ea6) restructured the whole death-handling section after this branch was cut. The branch's alive-sighting counter reset is incompatible with that design: under the cap the respawn is immediate, so every fresh agent produces an alive sighting, and resetting the counter there would pin it near 1 forever - the respawn cap and its idle cooldown could never engage, regressing task 000095's fix for the runaway bounce (tasks #72/#74). Main's design also already fixes this task's named bug: the run-completed reset (task outside the mapped states with a stale pidfile and counter > 0 clears the counter) ends every death streak, so a second streak after user intervention starts from 0 and its crossing fires the cooldown log at exactly RESPAWN_CAP + 1. The equality gate is safe because every streak starts from a reset counter. The branch's premise ("the counter is never reset anywhere") was true at its merge-base but is stale against main.
+
+- src/orchestrator.ts: took main's side wholesale (no net poll change on main).
+- src/orchestrator.test.ts: the auto-merge had combined the branch's part B addition with main's rework; the branch's block asserted an alive-sighting counter reset and a "giving up" message that no longer exists in main (the message became "respawn waits for the idle cooldown"), so it would have failed. Replaced it with an adapted block encoding the task's scenario in main's semantics: after the first cooldown log, set the task to backlog with a stale (dead) pidfile, wait for the "run completed, cleared the dead-agent counter" reset, set the task back to to-do, then wait for a second "respawn waits for the idle cooldown" and assert exactly two occur. Net change onto main: 8 added lines in src/orchestrator.test.ts only.
+- Tests in the worktree after the merge commit: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/extension.test.ts, node src/webui.test.ts all exit 0 (orchestrator includes the adapted part B and main's part AI dead-counter clear).
+
 # Open questions
