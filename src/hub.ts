@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
@@ -9,7 +10,8 @@ import { agentLogPayload, PAGE, pidAlive, taskPayload } from "./webui.ts";
 // All timestamps are epoch milliseconds.
 export interface HubEntry {
 	name: string; // repo basename
-	root: string; // project root
+	root: string; // project root, the entry identity: two checkouts of one repo share the name
+	branch: string; // the root checkout's current branch, resolved live; "" on a detached HEAD
 	start: number; // registration time
 	lastHeartbeat: number;
 }
@@ -31,6 +33,16 @@ const DEFAULT_STALE_MS = 15000;
 const HEALTH_FAILS = 2;
 const REQUEST_TIMEOUT = 1000;
 
+// the root checkout's current branch, resolved live at register and every heartbeat; a detached
+// HEAD or a non-git root sends "" and the webui label falls back to the plain name
+export function currentBranch(root: string): string {
+	try {
+		return execFileSync("git", ["branch", "--show-current"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+	} catch {
+		return "";
+	}
+}
+
 const piAgentDir = () => join(process.env.HOME || homedir(), ".pi", "agent");
 const hubRegistryPath = () => join(piAgentDir(), REGISTRY_FILE);
 const hubLockPath = () => join(piAgentDir(), LOCK_FILE);
@@ -46,15 +58,17 @@ export function readHubRegistry(): HubEntry[] {
 	try {
 		const parsed = JSON.parse(readFileSync(hubRegistryPath(), "utf8"));
 		return Array.isArray(parsed)
-			? parsed.filter(
-					(e) =>
-						e &&
-						typeof e === "object" &&
-						typeof e.name === "string" &&
-						typeof e.root === "string" &&
-						typeof e.start === "number" &&
-						typeof e.lastHeartbeat === "number",
-				)
+			? parsed
+					.filter(
+						(e) =>
+							e &&
+							typeof e === "object" &&
+							typeof e.name === "string" &&
+							typeof e.root === "string" &&
+							typeof e.start === "number" &&
+							typeof e.lastHeartbeat === "number",
+					)
+				.map((e) => ({ ...e, branch: typeof e.branch === "string" ? e.branch : "" })) // a pre-branch registry entry survives the seed
 			: [];
 	} catch {
 		return [];
@@ -116,6 +130,20 @@ const readBody = (req: IncomingMessage): Promise<string> =>
 		req.on("error", reject);
 	});
 
+// project selects by root (the tab identity); a bare name still finds its entry when unique, so
+// name-only clients keep working — with duplicate names a bare name is ambiguous and answers none
+function resolveEntry(entries: Map<string, HubEntry>, project: string): HubEntry | undefined {
+	const direct = entries.get(project);
+	if (direct) return direct;
+	let found: HubEntry | undefined;
+	for (const e of entries.values()) {
+		if (e.name !== project) continue;
+		if (found) return undefined;
+		found = e;
+	}
+	return found;
+}
+
 async function route(
 	opts: HubOptions,
 	entries: Map<string, HubEntry>,
@@ -126,7 +154,7 @@ async function route(
 	const url = new URL(req.url ?? "/", "http://hub");
 	const path = url.pathname;
 	// no project param = the hub's own project: the pre-tab ui polls /api/tasks bare
-	const project = url.searchParams.get("project") ?? opts.name;
+	const project = url.searchParams.get("project") ?? opts.root;
 	if (req.method === "GET" && path === "/health") {
 		res.writeHead(200, { "content-type": "text/plain; charset=utf-8", connection: "close" });
 		res.end("ok");
@@ -136,14 +164,14 @@ async function route(
 	} else if (req.method === "GET" && path === "/api/projects") {
 		json(res, [...entries.values()]);
 	} else if (req.method === "GET" && path === "/api/tasks") {
-		const entry = entries.get(project);
+		const entry = resolveEntry(entries, project);
 		if (!entry) {
 			res.writeHead(404).end(); // unknown projects are rejected
 		} else {
 			json(res, taskPayload(entry.root));
 		}
 	} else if (req.method === "GET" && path === "/api/agent-log") {
-		const entry = entries.get(project);
+		const entry = resolveEntry(entries, project);
 		const payload = entry ? agentLogPayload(entry.root, url.searchParams) : null;
 		if (!payload) {
 			res.writeHead(404).end();
@@ -166,8 +194,9 @@ async function route(
 			res.writeHead(400).end();
 			return;
 		}
-		const entry: HubEntry = { name, root, start: Date.now(), lastHeartbeat: Date.now() };
-		entries.set(name, entry);
+		const branch = typeof body?.branch === "string" ? body.branch.trim().slice(0, 200) : "";
+		const entry: HubEntry = { name, root, branch, start: Date.now(), lastHeartbeat: Date.now() };
+		entries.set(root, entry); // root is the identity: same-named checkouts register their own entries
 		flush();
 		json(res, entry);
 	} else if (req.method === "POST" && path === "/heartbeat") {
@@ -177,11 +206,19 @@ async function route(
 		} catch {
 			body = null;
 		}
-		const entry = typeof body?.name === "string" ? entries.get(body.name) : undefined;
+		// the body's root finds the sender's own entry when names duplicate; without a root (old
+		// daemon) the name resolves it, and an unregistered sender 404s into re-registering
+		const beatRoot = typeof body?.root === "string" && isAbsolute(body.root) ? resolve(body.root) : "";
+		const entry = beatRoot
+			? entries.get(beatRoot)
+			: typeof body?.name === "string"
+				? resolveEntry(entries, body.name)
+				: undefined;
 		if (!entry) {
 			res.writeHead(404).end(); // unregistered or aged out: the daemon re-registers
 		} else {
 			entry.lastHeartbeat = Date.now();
+			if (typeof body?.branch === "string") entry.branch = body.branch.trim().slice(0, 200); // live: the label tracks the checkout as it moves
 			flush();
 			json(res, entry);
 		}
@@ -198,9 +235,9 @@ export async function startHub(opts: HubOptions): Promise<{ port: number; close:
 	const tickMs = opts.healthMs ?? envMs("SE_LLM_TEAM_HUB_HEALTH_MS", DEFAULT_HEALTH_MS);
 	const now = Date.now();
 	const entries = new Map<string, HubEntry>();
-	for (const e of readHubRegistry()) if (now - e.lastHeartbeat <= staleMs) entries.set(e.name, e);
-	const self: HubEntry = { name: opts.name, root: opts.root, start: now, lastHeartbeat: now };
-	entries.set(opts.name, self);
+	for (const e of readHubRegistry()) if (e.root && now - e.lastHeartbeat <= staleMs) entries.set(e.root, e);
+	const self: HubEntry = { name: opts.name, root: opts.root, branch: currentBranch(opts.root), start: now, lastHeartbeat: now };
+	entries.set(opts.root, self);
 	const flush = () => writeRegistry([...entries.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)));
 	flush();
 
@@ -272,7 +309,7 @@ export function joinHub(opts: HubOptions): void {
 				await fetch(`${base}/register`, {
 					method: "POST",
 					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ name: opts.name, root: opts.root }),
+					body: JSON.stringify({ name: opts.name, root: opts.root, branch: currentBranch(opts.root) }),
 					signal: AbortSignal.timeout(REQUEST_TIMEOUT),
 				})
 			).ok;
@@ -286,7 +323,7 @@ export function joinHub(opts: HubOptions): void {
 				await fetch(`${base}/heartbeat`, {
 					method: "POST",
 					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ name: opts.name }),
+					body: JSON.stringify({ name: opts.name, root: opts.root, branch: currentBranch(opts.root) }),
 					signal: AbortSignal.timeout(REQUEST_TIMEOUT),
 				})
 			).status;

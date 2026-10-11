@@ -440,18 +440,27 @@ export function flipDiff(oldPos, newPos) {
 // html escape, shipped to the client and shared with the tab renderer
 export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-// tab labels from the hub's /api/projects entries: one tab per registered project, and none for a
+// tab descriptors from the hub's /api/projects entries: one tab per registered project, and none for a
 // single project, so a single-project setup (or the single-project server, whose /api/projects is
-// a 404) keeps the old single-board ui
+// a 404) keeps the old single-board ui. The identity is the entry's root, unique per checkout, so
+// two same-named checkouts select their own boards; a name registered more than once appends the
+// branch to the label ("" on a detached HEAD keeps the plain name)
 export function tabNames(projects) {
-	return projects.length > 1 ? projects.map((p) => p.name) : [];
+	if (projects.length < 2) return [];
+	const seen = {};
+	for (const p of projects) seen[p.name] = (seen[p.name] ?? 0) + 1;
+	return projects.map((p) => ({
+		id: p.root,
+		label: seen[p.name] > 1 && p.branch ? p.name + " (" + p.branch + ")" : p.name,
+	}));
 }
 
-// tab bar html: one button per project, the active one marked; a single project renders no bar
-export function tabsHtml(names, active) {
-	if (names.length < 2) return "";
-	return names
-		.map((n) => '<button class="tab' + (n === active ? " active" : "") + '" data-project="' + esc(n) + '">' + esc(n) + "</button>")
+// tab bar html: one button per tab, data-project carries the root identity, the active one
+// marked; a single project renders no bar
+export function tabsHtml(tabs, active) {
+	if (tabs.length < 2) return "";
+	return tabs
+		.map((t) => '<button class="tab' + (t.id === active ? " active" : "") + '" data-project="' + esc(t.id) + '">' + esc(t.label) + "</button>")
 		.join("");
 }
 
@@ -610,7 +619,7 @@ export function syncBoard(cols, tasks, expanded, els, make, visible) {
 }
 
 // served by the single-project server and by the hub for every registered project; the tab bar
-// comes from the hub's /api/projects and each tab polls /api/tasks?project=NAME
+// comes from the hub's /api/projects and each tab polls /api/tasks?project=<root id>
 export const PAGE = `<!doctype html>
 <html lang="en">
 <head>
@@ -714,8 +723,8 @@ h1 { font-size: 16px; margin: 0; }
 <script>
 "use strict";
 const VISIBLE = 5;
-let projects = [""]; // one tab per registered project; [""] is the single-project server, no tabs
-let active = "";
+let projects = [{ id: "", label: "" }]; // one tab per registered project; id "" is the single-project ui, one board, no tabs
+let active = ""; // the active tab's id: a registry root, or "" for the single-project board
 const boards = Object.create(null);
 const esc = ${esc};
 // 000042_fix_x.md -> #42; parseInt stops at the first non-digit and drops leading zeros
@@ -997,19 +1006,19 @@ function refresh() {
 		// the single-project server 404s here, and a transient hub failure keeps the last known
 		// tabs: only a real projects list replaces them
 		if (Array.isArray(list)) {
-			const names = tabNames(list);
-			projects = names.length ? names : [""]; // single project: the old ui, one board, no tabs
+			const tabs = tabNames(list);
+			projects = tabs.length ? tabs : [{ id: "", label: "" }]; // single project: the old ui, one board, no tabs
 		}
 		// a project that vanished from the registry closes the modal its task lived in
-		if (!projects.includes(active)) { active = projects[0]; closeModal(); }
-		const url = name => name ? "/api/tasks?project=" + encodeURIComponent(name) : "/api/tasks";
+		if (!projects.some(t => t.id === active)) { active = projects[0].id; closeModal(); }
+		const url = t => t.id ? "/api/tasks?project=" + encodeURIComponent(t.id) : "/api/tasks";
 		// every tab polls every cycle, only the active one renders
-		return Promise.all(projects.map(name => fetch(url(name)).then(r => r.ok ? r.json() : null).catch(() => null).then(t => [name, t])));
+		return Promise.all(projects.map(t => fetch(url(t)).then(r => r.ok ? r.json() : null).catch(() => null).then(tasks => [t.id, tasks])));
 	}).then(rows => {
 		mergeBoards(boards, rows);
 		render();
 		// stamp only a served board: during a hub outage the old stamp stays visible
-		const current = rows.find(([name]) => name === active);
+		const current = rows.find(([id]) => id === active);
 		if (current && current[1]) document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
 	}).catch(() => {});
 }

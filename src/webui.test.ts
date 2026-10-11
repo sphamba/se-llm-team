@@ -229,19 +229,34 @@ sync(ordered, new Set(["backlog"]));
 assert.deepEqual(shown("backlog"), backlogOrder, "a refresh with the same payload keeps the backlog order");
 
 // tabs: one per registered project; a single project keeps the old ui, no tab bar
-assert.deepEqual(tabNames([{ name: "alpha" }, { name: "beta" }]), ["alpha", "beta"], "one tab per registered project");
-assert.deepEqual(tabNames([{ name: "solo" }]), [], "a single project renders no tab bar");
 assert.deepEqual(tabNames([]), [], "an empty registry renders no tab bar");
-assert.equal(
-	tabsHtml(["alpha", "beta"], "beta"),
-	'<button class="tab" data-project="alpha">alpha</button><button class="tab active" data-project="beta">beta</button>',
-	"the projects list renders one tab per project, the active one marked",
+assert.deepEqual(tabNames([{ name: "solo", root: "/r1", branch: "main" }]), [], "a single project renders no tab bar");
+assert.deepEqual(
+	tabNames([{ name: "alpha", root: "/r1", branch: "main" }, { name: "beta", root: "/r2", branch: "dev" }]),
+	[{ id: "/r1", label: "alpha" }, { id: "/r2", label: "beta" }],
+	"unique names keep the plain label",
 );
-assert.equal(tabsHtml(["solo"], "solo"), "", "a single project renders no tab bar html");
+// 000103: two checkouts of one repo - the label appends the branch, the identity is the root
+assert.deepEqual(
+	tabNames([{ name: "repo", root: "/r1", branch: "main" }, { name: "repo", root: "/r2", branch: "feat/x" }]),
+	[{ id: "/r1", label: "repo (main)" }, { id: "/r2", label: "repo (feat/x)" }],
+	"a duplicated name appends the branch to every duplicate",
+);
+assert.deepEqual(
+	tabNames([{ name: "repo", root: "/r1", branch: "" }, { name: "repo", root: "/r2", branch: "feat" }]),
+	[{ id: "/r1", label: "repo" }, { id: "/r2", label: "repo (feat)" }],
+	"a detached HEAD (empty branch) keeps the plain label",
+);
 assert.equal(
-	tabsHtml(["a<b>", "b"], "b"),
-	'<button class="tab" data-project="a&lt;b&gt;">a&lt;b&gt;</button><button class="tab active" data-project="b">b</button>',
-	"tab labels are escaped",
+	tabsHtml(tabNames([{ name: "repo", root: "/r1", branch: "main" }, { name: "repo", root: "/r2", branch: "feat" }]), "/r2"),
+	'<button class="tab" data-project="/r1">repo (main)</button><button class="tab active" data-project="/r2">repo (feat)</button>',
+	"the tab identity is the root, so same-named checkouts get their own button",
+);
+assert.equal(tabsHtml([{ id: "/r1", label: "solo" }], "/r1"), "", "a single project renders no tab bar html");
+assert.equal(
+	tabsHtml([{ id: 'a"b', label: "a<b>" }, { id: "c", label: "c" }], "c"),
+	'<button class="tab" data-project="a&quot;b">a&lt;b&gt;</button><button class="tab active" data-project="c">c</button>',
+	"tab ids and labels are escaped",
 );
 assert.ok(
 	[tabNames, tabsHtml, boardOf, mergeBoards].every((fn) => page.includes(String(fn))),
@@ -251,7 +266,7 @@ assert.ok(page.includes('<nav id="tabs"></nav>'), "page has the tab bar");
 assert.ok(page.includes("switchTab(b.dataset.project)"), "each tab button switches the active board");
 assert.match(page, /function switchTab\(name\) \{[\s\S]*?closeModal\(\);[\s\S]*?\}/, "a tab switch closes the open modal");
 assert.ok(page.includes("render(true); // no FLIP across boards"), "a tab switch never flips from the other board's layout");
-assert.ok(page.includes("Promise.all(projects.map(name => fetch(url(name))"), "every tab polls each cycle");
+assert.ok(page.includes("Promise.all(projects.map(t => fetch(url(t))"), "every tab polls each cycle");
 assert.ok(page.includes("setInterval(refresh, 5000)"), "the poll keeps the 5 s cadence");
 assert.ok(page.includes('(active ? "&project=" + encodeURIComponent(active) : "")'), "agent-log polls carry the active tab's project");
 
@@ -272,9 +287,9 @@ assert.ok(page.includes("Object.create(null)"), "the page keys per-project state
 
 // single-project mode is unchanged: no registry, one bare board, no project param
 assert.equal((await fetch(`${base}/api/projects`)).status, 404, "the single-project server has no registry");
-assert.ok(page.includes('projects = names.length ? names : [""]'), "the page falls back to one unnamed tab");
+assert.ok(page.includes('projects = tabs.length ? tabs : [{ id: "", label: "" }]'), "the page falls back to one unnamed tab");
 assert.ok(
-	page.includes('name ? "/api/tasks?project=" + encodeURIComponent(name) : "/api/tasks"'),
+	page.includes('t.id ? "/api/tasks?project=" + encodeURIComponent(t.id) : "/api/tasks"'),
 	"the single-project fallback polls /api/tasks bare",
 );
 
