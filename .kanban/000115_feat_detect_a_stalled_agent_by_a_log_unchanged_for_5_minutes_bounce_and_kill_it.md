@@ -58,8 +58,8 @@ Result: no issues found. The stall window is configurable, applies within the wi
 
 ## Merge report (2026-10-11)
 
-Step 1: the root checkout was on `main`; merged `main` into `feat/115-detect-a-stalled` in the worktree. Git auto-merged `src/orchestrator.test.ts` (main's two-token pid-file test assertions from 016a975 vs the branch's stall tests); clean, no conflicts, no manual resolution. Merge commit `fa562ae`... wait, that is the fast-forward on root; the worktree merge commit is the one on the branch. Since the merge was clean (no conflicts), the test suites were skipped per the merge procedure.
+Step 1: the root checkout was on `main`; merged `main` into `feat/115-detect-a-stalled` in the worktree (merge commit `fa562ae`). Git auto-merged `src/orchestrator.test.ts` (main's two-token pid-file test assertions from 016a975 vs the branch's stall tests); clean, no conflicts, no manual resolution. Since the merge was clean (no conflicts), the test suites were skipped per the merge procedure.
 
-Step 2: the root checkout was still on `main`; merged `feat/115-detect-a-stalled` into `main` in the project root with `git merge --no-edit`. Fast-forward (`1f3e1bb` -> `fa562ae`), clean; no conflicts and no test run.
+Step 2: the root checkout was still on `main`; merged `feat/115-detect-a-stalled` into `main` in the project root with `git merge --no-edit`. Fast-forward (`1f3e1bb` -> `fa562ae`), clean; no conflicts and no test run. The branch and worktree were then removed by the merge cleanup; `main` carries the feature at `fa562ae`.
 
 Both merges complete; state set to done.
