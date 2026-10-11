@@ -51,12 +51,13 @@ function loadConfig(root: string): Config {
 	};
 }
 
-function parseArgs(argv: string[]): { root?: string; rescanSeconds?: number; pollMinutes?: number } {
-	const args: { root?: string; rescanSeconds?: number; pollMinutes?: number } = {};
+function parseArgs(argv: string[]): { root?: string; rescanSeconds?: number; pollMinutes?: number; noWebui?: boolean } {
+	const args: { root?: string; rescanSeconds?: number; pollMinutes?: number; noWebui?: boolean } = {};
 	for (let i = 0; i < argv.length; i++) {
 		if (argv[i] === "--root") args.root = resolve(argv[++i]);
 		else if (argv[i] === "--rescan-seconds") args.rescanSeconds = Number(argv[++i]);
 		else if (argv[i] === "--poll-minutes") args.pollMinutes = Number(argv[++i]);
+		else if (argv[i] === "--no-webui") args.noWebui = true;
 	}
 	return args;
 }
@@ -699,7 +700,7 @@ function holdsLock(root: string): boolean {
 export function main(argv: string[]): void {
 	const args = parseArgs(argv);
 	if (!args.root) {
-		process.stderr.write("usage: node orchestrator.ts --root <project-dir>\n");
+		process.stderr.write("usage: node orchestrator.ts --root <project-dir> [--no-webui]\n");
 		process.exitCode = 1;
 		return;
 	}
@@ -755,10 +756,15 @@ export function main(argv: string[]): void {
 	} catch (err) {
 		log(root, `fs.watch unavailable, polling only: ${err instanceof Error ? err.message : err}`);
 	}
+	// smoke runs read the same global config as production, so without this they bind the
+	// production webui port and steal the real UI
+	const noWebUi = args.noWebui || ["1", "true"].includes((process.env.SE_LLM_TEAM_NO_WEBUI ?? "").toLowerCase());
 	const webUi = loadWebUiConfig(root);
-	if (webUi.enabled) {
+	if (webUi.enabled && noWebUi) {
+		log(root, "web ui disabled (no-webui)");
+	} else if (webUi.enabled) {
 		startWebUi(root, webUi)
-			.then((ui) => (ui ? log(root, `web ui on http://${webUi.host}:${ui.port}`) : log(root, "web ui failed to start, continuing without it")))
+			.then((ui) => (ui ? log(root, `web ui on http://${webUi.host}:${ui.port}`) : log(root, `web ui failed to start on ${webUi.host}:${webUi.port} (port taken by another webui?), continuing without it`)))
 			.catch((err) => log(root, `web ui failed to start, continuing without it: ${err instanceof Error ? err.message : err}`));
 	}
 }
