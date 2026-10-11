@@ -64,11 +64,7 @@ export function clearPid(root: string, name: string): void {
 // parseInt stops at the space, so a "<pid> <disc>" file still reads as the pid;
 // a missing or garbage file reads 0
 export function agentPid(root: string, slug: string): number {
-	try {
-		return parseInt(readFileSync(pidPath(root, slug), "utf8").trim(), 10) || 0;
-	} catch {
-		return 0;
-	}
+	return pidEntry(root, slug).pid;
 }
 
 // a pid file's entry: the pid plus its discriminator, for the reuse-proof liveness check;
