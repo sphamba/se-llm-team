@@ -1037,6 +1037,7 @@ assert.equal((await fetch(`${hubBase}/api/tasks`, { method: "POST" })).status, 4
 await waitFor(() => readHubRegistry().map((e) => e.name).join() === "a", 5000, "running hub ages out silent entries", () => "");
 assert.equal((await fetch(`${hubBase}/api/tasks?project=b`)).status, 404, "aged-out project no longer served");
 hubU.close();
+assert.deepEqual(readHubRegistry(), [], "close removes the hub's own entry from the registry");
 process.env.HOME = realHome;
 console.log("orchestrator.test.ts: ... + hub server unit smoke passed");
 

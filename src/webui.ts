@@ -447,7 +447,7 @@ export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", 
 // branch to the label ("" on a detached HEAD keeps the plain name)
 export function tabNames(projects) {
 	if (projects.length < 2) return [];
-	const seen = {};
+	const seen = Object.create(null); // a repo basename can collide with Object.prototype keys
 	for (const p of projects) seen[p.name] = (seen[p.name] ?? 0) + 1;
 	return projects.map((p) => ({
 		id: p.root,

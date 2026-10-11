@@ -247,6 +247,11 @@ assert.deepEqual(
 	[{ id: "/r1", label: "repo" }, { id: "/r2", label: "repo (feat)" }],
 	"a detached HEAD (empty branch) keeps the plain label",
 );
+assert.deepEqual(
+	tabNames([{ name: "constructor", root: "/r1", branch: "main" }, { name: "constructor", root: "/r2", branch: "dev" }]),
+	[{ id: "/r1", label: "constructor (main)" }, { id: "/r2", label: "constructor (dev)" }],
+	"a name colliding with Object.prototype keys still counts as duplicated",
+);
 assert.equal(
 	tabsHtml(tabNames([{ name: "repo", root: "/r1", branch: "main" }, { name: "repo", root: "/r2", branch: "feat" }]), "/r2"),
 	'<button class="tab" data-project="/r1">repo (main)</button><button class="tab active" data-project="/r2">repo (feat)</button>',

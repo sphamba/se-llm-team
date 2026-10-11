@@ -272,7 +272,7 @@ export async function startHub(opts: HubOptions): Promise<{ port: number; close:
 				port: addr && typeof addr === "object" ? addr.port : Number(opts.port),
 				close: () => {
 					clearInterval(reap);
-					if (entries.get(opts.name) === self) entries.delete(opts.name);
+					if (entries.get(opts.root) === self) entries.delete(opts.root); // entries key by root
 					flush();
 					server.close();
 				},
