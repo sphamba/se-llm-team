@@ -1,8 +1,8 @@
 ---
 name: "feat: shortName attribute drives file and branch/worktree names; PM generates it"
 priority: "medium"
-state: "to-merge"
-worktree: "feat/100-shortname-attribute-drives"
+state: "done"
+worktree: ""
 ---
 
 # Summary

@@ -1,7 +1,7 @@
 ---
 name: "feat: webui task ids are links; blockedBy shown in the detail card"
 priority: "high"
-state: "reviewing"
+state: "to-merge"
 worktree: "feat/81-webui-task-ids"
 ---
 
@@ -63,3 +63,28 @@ Constraints:
 - Smoke (headless Chromium via Playwright against a temp root, --no-sandbox): overlay non-interactive and inside #board, 2 paths drawn for blocked->blocker (doing) and ghost->blocked (backlog), first path d confirms the right-side loop sprouting at the vertical middle of the card edges, dashes flow (animation dashflow), the detail card's number row and blockedBy row render as links, clicking the blockedBy ref opens the blocker's card in place with the modal staying open, card clicks still work with the overlay present, no page errors after resize. Pre-existing /api/projects 404 console noise on the single-project server exists on main too, not from this change.
 - All three suites green: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts.
 - Committed in the worktree as 8303099.
+
+## 2026-10-11 (reviewer)
+
+- Reviewed the worktree diff (main...HEAD, commit 8303099, only src/webui.ts and src/webui.test.ts per the constraints) against all 10 spec changes and the acceptance list. No fixes needed.
+- Verified per spec: taskPayload serves blockedBy and the client reads it tolerantly (String(t.blockedBy || ""), asserted with a payload lacking the field); numLinkHtml escapes the data-task file (including single quotes - esc covers &<>"') and never builds an inline onclick, the column card id click bubbles to the card's own openTask, the detail card binds its .num-link elements to openTask after render; blockedRow drops the row when absent/empty and renders refs with no matching task as escaped plain text; #board gained position:relative, #relations is absolute top 0 left 0 z-index 1 pointer-events none (CSS rule plus a setAttribute on the createElementNS node); relationPaths draws one curve per not-done blocker with a rendered card, maps refs via parseInt after stripping a leading #, and skips done blockers, ghost/unparseable refs and unrendered cards; same-column (and same-x stacked pair) relations loop out of the right sides, cross-column relations take the minimal-length side pair (verified both directions in the unit asserts); dashflow keyframe decreases stroke-dashoffset to -10, which moves dashes along the path direction, blocked -> blocker; reduced-motion disables the path animation alongside .spin; recompute hooks all present (render/5s refresh, transitionend, window resize, fold toggle via render()).
+- Cross-checks beyond the asserts: the .num-link color rule wins over .num by source order (equal specificity); the #m-attrs label rule exemption :not(.num-link) keeps the number row link styled as a link; curve's leftward bow (blocker left of blocked) cannot clip at the SVG's left edge for the real board (first column sits at x=18, minimum curve x stays positive); the w+40 overlay width covers the right-side loop bulge; cardBox is the hoisted former pos() plus w/h, so the FLIP identity behavior is unchanged.
+- Re-ran all three suites in the worktree: kanban, orchestrator, webui - all green. A live browser smoke could not be repeated in this environment (Playwright not installed); the developer's documented smoke covers the runtime behavior and matches the reviewed code.
+- State set to to-live-test.
+
+## 2026-10-11 (live-tester)
+
+- Ran the webui as a user would: started the real `startWebUi` server from the worktree against a temp root (8 tasks plus one hostile-name task), drove it in a headless Chromium via Playwright (`--no-sandbox`) on the real page, real `/api/tasks` payload.
+- All 23 live checks passed, no findings:
+  - Column card ids render as `.num-link[data-task]`; clicking a card's own id opens its own card in place.
+  - Detail card number row is a `.num-link`; blockedBy row present when the attribute is set, absent (no row at all) when it is empty; a ref with no matching task renders as escaped plain text, no link.
+  - Clicking a blockedBy ref replaces the shown card in place with the blocker's card; the modal stays open.
+  - `/api/tasks` serves `blockedBy` (`"#2"` observed).
+  - Board overlay: `#relations` exists inside `#board`, `position: absolute`, `pointer-events: none`; one path per not-done blocker with a rendered card (done blocker and ghost ref each drew nothing); paths dashed `6px, 4px` with `animation: dashflow`; same-column pair sprouts both ends at the card right edge (x=307 both ends), cross-column pair takes the minimal left/right side pair.
+  - Card body click still opens the card with the overlay present (nothing intercepts clicks).
+  - Theme toggle flips `--link` from `rgb(242,151,24)` to `rgb(230,180,80)`; id links keep `cursor: pointer`.
+  - Reduced-motion page: path `animation-name` is `none`.
+  - Escaping: a task name of `<img src=x onerror=alert(1)> "quote"` renders as literal text in the card and the detail card, injects no img element, fires no alert/XSS dialog, and its blockedBy link to `#8` still works. No page errors across the run.
+- No issues found; no follow-up tasks created.
+
+# Open questions
