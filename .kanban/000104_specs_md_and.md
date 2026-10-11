@@ -1,8 +1,8 @@
 ---
 name: "docs: SPECS.md and the PM skill still list only 8 states; add to-merge/merging and the merger flow"
 priority: "medium"
-state: "to-merge"
-worktree: "docs/104-specs-md-and"
+state: "done"
+worktree: ""
 issuer: "#78"
 ---
 
@@ -50,3 +50,9 @@ Exercised flows:
 No regressions. Dedup held: #79, #95, #102 all untouched by this diff.
 
 Follow-up handed to the Project manager: the SPECS.md liveness bullet (line 47, "If dead, kill the agent, and respawn at same state") is stale against src/orchestrator.ts (poll bounces via DEAD_TRANSITIONS and the sweep respawns for the bounced-to state). It is pre-existing and outside this task's spec; #95 rewrites that machinery but its file list (src/orchestrator.ts, src/orchestrator.test.ts) does not include SPECS.md.
+
+## Merge (Merger, both steps complete)
+- Step 1: base branch was main. Merged main into docs/104-specs-md-and in the worktree (merge commit 5fda623). One conflict in skills/se-llm-team/SKILL.md: main added kanban_delete to the board-tools line plus a kanban_delete guidance bullet, while this branch added the 10-state list. Resolved by keeping both: the kanban_delete lines from main and the 10-state list with the Merger-ownership sentence from this branch (the Specs mandate the 10-state list). No other conflicts.
+- Tests in the worktree after the merge: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts and node src/extension.test.ts all pass. No fixes needed.
+- Step 2: base branch still main. Merged docs/104-specs-md-and into main at the project root; fast-forward from 2b6de16 to 5fda623, no conflicts. Root clean after the merge.
+- Final check at the root: SPECS.md, skills/se-llm-team/SKILL.md and README.md all list the 10 states; the ## Merger section is present in SPECS.md.
