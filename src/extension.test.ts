@@ -55,6 +55,16 @@ assert.equal(validator.Check({ file: "000001_x.md", notes: "anything" }), false,
 assert.ok([...validator.Errors({ file: "000001_x.md", notes: "anything" })].some((e: any) => e.keyword === "additionalProperties"));
 assert.equal(validator.Check({ file: "000001_x.md", summary: "s", notes: "anything" }), false, "mixed call must fail validation too");
 
+// kanban_create gets the same guard: an unsupported field (e.g. notes) must fail
+// pi's validator instead of being dropped while the tool reports "Created"
+const create = tools["kanban_create"];
+if (!create) fail("kanban_create not registered");
+assert.equal(create.parameters.additionalProperties, false);
+const createValidator = Compile(create.parameters);
+assert.equal(createValidator.Check({ name: "feat: x", summary: "s", notes: "anything" }), false, "unknown field must fail validation");
+assert.ok([...createValidator.Errors({ name: "feat: x", summary: "s", notes: "anything" })].some((e: any) => e.keyword === "additionalProperties"));
+assert.equal(createValidator.Check({ name: "feat: x", summary: "s", priority: "high", complexity: "complex", issuer: "#42", specs: "s", openQuestions: "q", blockedBy: "#42" }), true, "all supported fields must pass validation");
+
 // a call with only file updates nothing and says so instead of claiming an update
 const t1 = createTask(root, { name: "feat: update guard", summary: "before" });
 const before = readFileSync(taskFile(t1.file), "utf8");
