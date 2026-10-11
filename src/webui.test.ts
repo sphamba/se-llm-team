@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, setState } from "./kanban.ts";
-import { agentLabel, boardOf, buildShell, cardHtml, curve, flipDiff, LAYOUT, loadWebUiConfig, LOG_CHUNK, mergeBoards, numLinkHtml, pairLayout, relationPaths, renderLogChunk, spinnerHtml, startWebUi, syncBoard, tabNames, tabsHtml } from "./webui.ts";
+import { agentLabel, boardOf, buildShell, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_CHUNK, mergeBoards, numLinkHtml, pairLayout, relationPaths, renderLogChunk, spinnerHtml, startWebUi, syncBoard, tabNames, tabsHtml } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing", "to-merge", "merging", "done"];
@@ -402,18 +402,27 @@ assert.ok(
 assert.ok(page.includes("#m-log.hidden { display: none; }"), "log pane hides");
 assert.ok(page.includes("/api/agent-log"), "page uses the agent log endpoint");
 assert.ok(page.includes('<span class="check">✓</span>'), "past agent buttons render a green checkmark");
-assert.ok(page.includes(".agent-btn-active"), "the shown agent button gets an active class");
-// 000076: the small font belongs to the log text, not the selector buttons, and the buttons share
-// one wrapping row, oldest leftmost, the live agent last
-const agentBtnCss = page.match(/\.agent-btn \{[^}]*\}/)![0];
-assert.ok(agentBtnCss.includes("font-size: 12px") && agentBtnCss.includes("padding: 3px 10px"), ".agent-btn keeps its original 12px size");
+assert.ok(page.includes(".agent-card-active"), "the shown agent card gets an active class");
+// 000076: the small font belongs to the log text, not the selector cards; 000120: each run is a
+// bit larger card in one wrapping row of columns, the live run last, its subs stacked below it
+const agentCardCss = page.match(/\.agent-card \{[^}]*\}/)![0];
+assert.ok(agentCardCss.includes("font-size: 12px") && agentCardCss.includes("padding: 6px 10px"), ".agent-card is a bit larger than the old button");
 assert.ok(page.match(/#m-log pre \{[^}]*\}/)![0].includes("font-size: 10px"), "the agent log text drops to 10px");
-assert.ok(/display: flex; flex-wrap: wrap/.test(page.match(/#m-agent-btns \{[^}]*\}/)![0]), "the button container is one wrapping flex row");
-assert.ok(!page.includes(".agent-past {") && !page.includes(".agent-live {"), "no per-button block row styles remain");
-const pastAt = page.indexOf('class="agent-btn agent-past"');
-const liveAt = page.indexOf('class="agent-btn agent-live"');
-assert.ok(pastAt >= 0 && liveAt > pastAt, "buttons render chronologically: oldest first, live agent last");
+assert.ok(/display: flex; flex-wrap: wrap/.test(page.match(/#m-agent-btns \{[^}]*\}/)![0]), "the run columns render as one wrapping flex row");
+assert.ok(!page.includes(".agent-past {") && !page.includes(".agent-live {"), "no per-card block row styles remain");
+assert.ok(page.includes('"agent-past"') && page.includes('"agent-live"'), "past and live cards carry their state class");
+assert.ok(page.includes("runs.splice(runs.indexOf(live), 1); runs.push(live);"), "cards render chronologically: the live run moves last, past runs keep payload order");
 assert.ok(!page.includes("openAgentLog(&quot;"), "no run handle reaches inline JS: quotes and backslashes would break the onclick");
+// 000120 detail-card agent history: one horizontal row of run columns, each run a card with the
+// tokens and duration next to the label, its subagent cards stacked below, always visible
+assert.ok(page.includes('class="agent-stats"'), "each card carries a tokens/duration stats line");
+assert.ok(page.includes('"Sub-" + a.role'), "sub cards label Sub-<caller role>, without the id string");
+assert.ok(page.includes("openSubLog(b.dataset.handle, Number(b.dataset.sub))"), "a sub card opens its own run's subagent transcript");
+assert.ok(page.includes("runs.forEach((a, i) => fetchSubs(gen, a, boxes[i]))"), "on openTask every run's sub list is fetched in parallel, not only the clicked run's");
+assert.ok(!page.includes('id="m-sub-btns"'), "the single sub row is gone; subs stack under their caller column");
+assert.match(page, /\.agent-col \{ display: flex; flex-direction: column/, "each column stacks its run card over its sub cards");
+assert.match(page, /\.agent-subs \{ display: flex; flex-direction: column/, "sub cards stack vertically below their caller");
+assert.ok(page.includes('if (gen !== agentGen || !box) return;'), "a superseded open's sub fetches never write into the new view");
 setState(root, getTask(root, task.file)!, "doing");
 const slug = task.file.replace(/\.md$/, "");
 mkdirSync(join(root, ".kanban", ".pids"), { recursive: true });
@@ -424,7 +433,7 @@ const logText = Array.from({ length: 2600 }, () => "H".repeat(63) + "\n").join("
 writeFileSync(logFile, logText);
 const working = (await (await fetch(`${base}/api/tasks`)).json())[0];
 assert.deepEqual(working.agent, { role: "developer", alive: true, log: `${slug}.developer` });
-assert.deepEqual(working.agents, [{ role: "developer", run: null, alive: true, handle: `${slug}.developer` }], "legacy role log, live agent only");
+assert.deepEqual(working.agents, [{ role: "developer", run: null, alive: true, handle: `${slug}.developer`, tokens: null, duration: null }], "legacy role log, live agent only, no stats in a non-JSON log");
 
 // tail: no offset returns only the last chunk, with cursors for poll and history
 const enc = encodeURIComponent(`${slug}.developer`);
@@ -463,8 +472,8 @@ const past = (await (await fetch(`${base}/api/tasks`)).json())[0];
 assert.deepEqual(
 	past.agents,
 	[
-		{ role: "developer", run: null, alive: true, handle: `${slug}.developer` },
-		{ role: "reviewer", run: null, alive: false, handle: `${slug}.reviewer` },
+		{ role: "developer", run: null, alive: true, handle: `${slug}.developer`, tokens: null, duration: null },
+		{ role: "reviewer", run: null, alive: false, handle: `${slug}.reviewer`, tokens: null, duration: null },
 	],
 	"past reviewer after the live developer, pipeline order",
 );
@@ -478,8 +487,8 @@ assert.equal(stale.agent.alive, false);
 assert.deepEqual(
 	stale.agents,
 	[
-		{ role: "developer", run: null, alive: false, handle: `${slug}.developer` },
-		{ role: "reviewer", run: null, alive: false, handle: `${slug}.reviewer` },
+		{ role: "developer", run: null, alive: false, handle: `${slug}.developer`, tokens: null, duration: null },
+		{ role: "reviewer", run: null, alive: false, handle: `${slug}.reviewer`, tokens: null, duration: null },
 	],
 	"a dead state-mapped agent is past too",
 );
@@ -609,14 +618,14 @@ const history = (await (await fetch(`${base}/api/tasks`)).json())[0];
 assert.deepEqual(
 	history.agents,
 	[
-		{ role: "merger", run: 0, alive: false, handle: `${slug}.merger.0` },
-		{ role: "developer", run: null, alive: false, handle: `${slug}.developer` },
-		{ role: "developer", run: 0, alive: false, handle: `${slug}.developer.0` },
-		{ role: "developer", run: 1, alive: true, handle: `${slug}.developer.1` },
-		{ role: "live-tester", run: 0, alive: false, handle: `${slug}.live-tester.0` },
-		{ role: "reviewer", run: 0, alive: false, handle: `${slug}.reviewer.0` },
-		{ role: "live-tester", run: 1, alive: false, handle: `${slug}.live-tester.1` },
-		{ role: "merger", run: 1, alive: false, handle: `${slug}.merger.1` },
+		{ role: "merger", run: 0, alive: false, handle: `${slug}.merger.0`, tokens: null, duration: null },
+		{ role: "developer", run: null, alive: false, handle: `${slug}.developer`, tokens: null, duration: null },
+		{ role: "developer", run: 0, alive: false, handle: `${slug}.developer.0`, tokens: null, duration: null },
+		{ role: "developer", run: 1, alive: true, handle: `${slug}.developer.1`, tokens: null, duration: null },
+		{ role: "live-tester", run: 0, alive: false, handle: `${slug}.live-tester.0`, tokens: null, duration: null },
+		{ role: "reviewer", run: 0, alive: false, handle: `${slug}.reviewer.0`, tokens: null, duration: null },
+		{ role: "live-tester", run: 1, alive: false, handle: `${slug}.live-tester.1`, tokens: null, duration: null },
+		{ role: "merger", run: 1, alive: false, handle: `${slug}.merger.1`, tokens: null, duration: null },
 	],
 	"indexed runs are their own entries, a legacy file ties first within its role, mtime orders across roles, the newest run of the live role is the live one",
 );
@@ -630,6 +639,17 @@ assert.equal(agentLabel(devRuns[2], { developer: 3 }), "Developer 2", "run index
 assert.equal(agentLabel(devRuns[0], { developer: 3 }), "Developer", "a legacy unsuffixed run keeps its unnumbered label");
 assert.equal(agentLabel({ role: "reviewer", run: 0 }, { reviewer: 1 }), "Reviewer", "a solo run keeps its unnumbered label");
 assert.ok(page.includes(String(agentLabel)), "the page ships the tested agentLabel source");
+
+// 000120 card stats: tokens render in kilo (42k), raw below 1000; duration keeps one decimal
+// below 10s then minutes; missing stats render empty
+assert.equal(fmtTokens(42311), "42k", "tokens render in kilo");
+assert.equal(fmtTokens(999), "999", "tokens below 1000 render raw");
+assert.equal(fmtTokens(null), "", "missing tokens render empty");
+assert.equal(fmtDur(3479), "3.5s", "a duration below 10s keeps one decimal");
+assert.equal(fmtDur(60000), "1m", "a whole minute drops the zero seconds");
+assert.equal(fmtDur(86592), "1m 27s", "minutes and seconds");
+assert.equal(fmtDur(null), "", "a missing duration renders empty");
+assert.ok(page.includes(String(fmtTokens)) && page.includes(String(fmtDur)), "the page ships the tested stats formatters");
 
 // a run-suffixed handle resolves to its own indexed file, a plain handle to the legacy file
 const get = (file: string) => fetch(`${base}/api/agent-log?file=${encodeURIComponent(file)}`);
@@ -645,6 +665,19 @@ writeFileSync(dev1, terminalLog);
 const walkedRun = await (await get(`${slug}.developer.1`)).json();
 assert.ok(walkedRun.text.includes("final output line\n") && walkedRun.head === 0, "an unrenderable tail of a run log walks back to renderable content");
 
+// 000120 usage stats: agentHistory entries carry tokens (the sum of the turn_end
+// message.usage.totalTokens, cache reads included) and duration (the last record timestamp minus
+// the first); timestamps arrive as ISO strings and epoch-ms numbers alike
+writeFileSync(dev1, [
+	JSON.stringify({ type: "session", version: 3, id: "s", timestamp: "2026-10-11T09:35:54.121Z" }),
+	JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "working" } }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 1500, cost: { total: 0 } } }, timestamp: Date.parse("2026-10-11T09:36:24.121Z") }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 27500 } }, timestamp: "2026-10-11T09:37:24.121Z" }),
+].join("\n") + "\n");
+const statEntry = (await (await fetch(`${base}/api/tasks`)).json())[0].agents.find((a) => a.handle === `${slug}.developer.1`);
+assert.equal(statEntry.tokens, 29000, "tokens sums the turn_end totals across the run log");
+assert.equal(statEntry.duration, 90000, "duration is the last record timestamp minus the first (the session record here), ISO and epoch-ms alike");
+
 // 000088 subagent transcripts: the Agent tool result in the parent log names each background agent
 // and its .output file; sub=list enumerates them, sub=<n> serves the n-th through the same payload
 mkdirSync("/tmp/pi-subagents-1000", { recursive: true });
@@ -652,7 +685,11 @@ const subDir = mkdtempSync("/tmp/pi-subagents-1000/webui-test-");
 const out0 = join(subDir, "aaaaaaaa-0000-0000-0000-000000000000.output");
 const out1 = join(subDir, "bbbbbbbb-0000-0000-0000-000000000000.output");
 writeFileSync(out0, "SUB ZERO\n");
-writeFileSync(out1, JSON.stringify({ isSidechain: true, agentId: "bbbbbbbb", type: "user", message: { role: "user", content: "do the thing" } }) + "\nplain fallback\n");
+writeFileSync(out1, [
+	JSON.stringify({ isSidechain: true, agentId: "bbbbbbbb", type: "user", message: { role: "user", content: "do the thing" }, timestamp: "2026-10-11T09:40:00.000Z" }),
+	JSON.stringify({ isSidechain: true, type: "assistant", message: { role: "assistant", usage: { totalTokens: 11000 } }, timestamp: "2026-10-11T09:40:11.239Z" }),
+	"plain fallback",
+].join("\n") + "\n");
 const subPath = (id: string, file: string) =>
 	JSON.stringify({
 		type: "tool_execution_end",
@@ -678,10 +715,10 @@ const subList = await (await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=list
 assert.deepEqual(
 	subList,
 	[
-		{ id: "aaaaaaaa-0000-0000-0000-000000000000", index: 0 },
-		{ id: "bbbbbbbb-0000-0000-0000-000000000000", index: 1 },
+		{ id: "aaaaaaaa-0000-0000-0000-000000000000", index: 0, tokens: null, duration: null },
+		{ id: "bbbbbbbb-0000-0000-0000-000000000000", index: 1, tokens: 11000, duration: 11239 },
 	],
-	"sub=list enumerates background agents in log order and drops non-transcript records and paths outside pi's .output dir",
+	"sub=list enumerates background agents in log order with their tokens and duration, and drops non-transcript records and paths outside pi's .output dir",
 );
 const subZero = await (await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=0`)).json();
 assert.equal(subZero.text, "SUB ZERO\n", "sub=0 serves the first subagent transcript through the chunked payload");
