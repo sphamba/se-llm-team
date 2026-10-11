@@ -2,7 +2,7 @@
 name: "fix: renderLogChunk drops blank lines from legacy passthrough text"
 priority: "low"
 state: "done"
-worktree: "fix/68-renderlogchunk-drops-blank"
+worktree: ""
 ---
 
 # Summary
