@@ -1,8 +1,8 @@
 ---
 name: "fix: kanban_create silently drops an unsupported field and reports a false success"
 priority: "medium"
-state: "to-merge"
-worktree: "fix/111-kanban-create-silently"
+state: "done"
+worktree: ""
 issuer: "#85"
 ---
 
@@ -41,5 +41,6 @@ Acceptance:
   - Unsupported field (notes): pi rejected the call before execute with `Validation failed for tool "kanban_create": - notes: schema is false / - root: must not have additional properties`. No `Created` message appeared and no task file was made (the board still held only the valid task).
   - Control run against main index.ts (no additionalProperties): the same unsupported notes call returned `Created 000001_main_false_success.md (#1)`, made the file, and dropped the notes text. This confirms that the worktree change turns the false success into a rejection.
   - The unit suites were not run here (developer/reviewer gate). No open questions.
+- 2026-10-11 merge (Merger): Step 1 merged main (654dbd3) into fix/111-kanban-create-silently in the worktree. Clean merge with the ort strategy, no conflicts. The auto-merge in index.ts kept both sides: the kanban_create additionalProperties fix and main's changes to kanban.ts, webui.ts, orchestrator.ts. Committed as 50c4833. Ran all four node suites in the worktree after the merge: extension, kanban, webui instant and green, orchestrator full smoke green. No fixes needed. Step 2 merged fix/111-kanban-create-silently into main in the project root (base branch resolved again as main). Fast-forward to 50c4833, clean, 2 files changed (index.ts, src/extension.test.ts). Both merges complete. No open questions.
 
 # Open questions
