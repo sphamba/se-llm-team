@@ -7,7 +7,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readHubRegistry, startHub } from "./hub.ts";
 import { createTask, kanbanDir, parseTask, setState, setWorktree } from "./kanban.ts";
-import { pidAlive, waitForBoardCommits } from "./orchestrator.ts";
+import { pidAlive, removeTask, waitForBoardCommits } from "./orchestrator.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -1318,4 +1318,46 @@ assert.deepEqual(reviewerLogsAA, [`${slugAA}.reviewer.0.log`, `${slugAA}.reviewe
 await waitFor(() => parseTask(rootAA, taskAA.file).state === "done" && parseTask(rootAA, taskAA.file).worktree === "", 60000, "pipeline after the cap refusal", aa.output);
 assert.equal(runsAA(), 0, "counter still cleared after the pipeline completed");
 aa.daemon.kill("SIGTERM");
-console.log("orchestrator.test.ts: ... + reviewer successful-run cap smoke passed");
+
+// --- part AB: kanban task removal: the file and the mirror go in one operation ---
+// reconcileBoard restores files the working tree lacks whenever the mirror tip still carries
+// them, so a removal must reach the mirror itself or the task comes back (the self-heal)
+const rootAB = fixture();
+cleaned.push(rootAB);
+mkdirSync(kanbanDir(rootAB), { recursive: true });
+writeFileSync(join(kanbanDir(rootAB), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAB), pollMinutes: 0.05 }));
+const taskAB = createTask(rootAB, { name: "fix: mistaken task", summary: "Removal smoke", specs: "n/a" });
+const taskAB2 = createTask(rootAB, { name: "fix: keep me", summary: "Stays on the board", specs: "n/a" });
+
+const ab = await runDaemon(rootAB);
+// both tasks reach the mirror first: creates run for every file not on the mirror yet
+await waitFor(() => showTip(rootAB, taskAB.file) !== null && showTip(rootAB, taskAB2.file) !== null, 30000, "both tasks mirrored", ab.output);
+
+// removal while the daemon runs: the file leaves the tree and the mirror in one operation
+assert.equal(await removeTask(rootAB, taskAB.file), null, "removal succeeds");
+assert.equal(existsSync(join(kanbanDir(rootAB), taskAB.file)), false, "task file deleted");
+assert.equal(showTip(rootAB, taskAB.file), null, "task gone from the mirror tip");
+assert.ok(mirrorSubjects(rootAB).includes(`kanban: delete ${taskAB.file}`), "delete commit recorded on the mirror");
+assert.ok(showTip(rootAB, taskAB2.file) !== null, "other task untouched on the mirror");
+assert.equal(existsSync(join(kanbanDir(rootAB), taskAB2.file)), true, "other task untouched in the tree");
+
+// the running daemon's reconcile self-heal must not restore the removed task
+await new Promise((r) => setTimeout(r, 2500));
+assert.equal(existsSync(join(kanbanDir(rootAB), taskAB.file)), false, "daemon sweep does not restore the removed task");
+
+// a restart re-materializes from the mirror tip: the removal survives it too
+ab.daemon.kill("SIGTERM");
+await Promise.race([new Promise((r) => ab.daemon.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
+const ab2 = await runDaemon(rootAB);
+await new Promise((r) => setTimeout(r, 2500));
+assert.equal(existsSync(join(kanbanDir(rootAB), taskAB.file)), false, "daemon restart does not restore the removed task");
+ab2.daemon.kill("SIGTERM");
+await Promise.race([new Promise((r) => ab2.daemon.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
+
+// removing the last task empties the mirror board: the tip no longer carries the file
+assert.equal(await removeTask(rootAB, taskAB2.file), null, "last-task removal succeeds");
+assert.equal(existsSync(join(kanbanDir(rootAB), taskAB2.file)), false, "last task file deleted");
+assert.equal(showTip(rootAB, taskAB2.file), null, "last task gone from the mirror tip");
+assert.ok((await removeTask(rootAB, "000999_ghost.md"))!.includes("No task"), "unknown task reported, nothing deleted");
+
+console.log("orchestrator.test.ts: ... + task removal smoke passed");
