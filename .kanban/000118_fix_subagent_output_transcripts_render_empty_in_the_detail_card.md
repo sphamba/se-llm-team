@@ -1,8 +1,8 @@
 ---
 name: "fix: subagent output transcripts render empty in the detail card"
 priority: "medium"
-state: "to-merge"
-worktree: "fix/118-subagent-output-transcripts"
+state: "done"
+worktree: ""
 blockedBy: "#52"
 ---
 
@@ -46,5 +46,11 @@ Live-tester notes (2026-10-11). Worktree fix/118-subagent-output-transcripts, HE
 - Walk-back: a fixture transcript with a prompt and a 120116-byte non-rendering tail renders no text from its tail chunk. Opening it serves head 0 with atStart true and shows "[prompt] LIVE TEST PROMPT: this prompt sits before a non-rendering tail." The #88 whole-file walk to an empty pane is gone.
 - Browser history: three scroll-to-top pulls grew the sub pane from 45167 to 131443 characters through offset/before=1 requests, and the pane stayed readable.
 - Evidence: screenshots /tmp/lt118/3-sub1-append.png (completed split record) and /tmp/lt118/4-sub2-walkback.png (walk-back prompt). Fixture and daemon log under /tmp/lt118/.
-- Observation, pre-existing on main and out of scope for this change: the client treats a subagent transcript as written once. pollLog computes live=false for every sub view (logState.sub == null), so the first empty poll stops the timer and a running subagent's pane freezes until the run button is clicked again. The subagent button list is also fetched only when the run is opened, so a subagent spawned later needs the same re-click. Both behaviours are untouched by this change. Measured on the branch UI: after opening a truncated sub pane (43159 characters), the client made exactly two sub=1 calls (init plus one empty poll) and then no call at all in the next 6 seconds while the test appended the rest of the transcript, and the pane stayed unchanged with the record marker absent. Re-opening the run button and then the sub button showed the completed record with the marker exactly once. Reported to the PM as a separate finding.
+- Observation, pre-existing on main and out of scope for this change: the client treats a subagent transcript as written once. pollLog computes live=false for every sub view (logState.sub == null), so the first empty poll stops the timer and a running subagent's pane freezes until the run button is clicked again. The subagent button list is also fetched only when the run is opened, so a subagent spawned later needs the same re-click. Both behaviours are untouched by this change. Measured on the branch UI: after opening a truncated sub pane (43159 characters), the client made exactly two sub=1 calls (init plus one empty poll) and then no call at all in the next 6 seconds while the test appended the rest of the transcript, and the pane stayed unchanged with the record marker absent. Re-opening the run button and then the sub button showed the completed record with the marker exactly once. Reported to the PM as a separate finding. The PM created #130 (fix: subagent transcript panes keep updating; refresh sub lists while the parent run is alive), blockedBy #118.
 - Verdict: the change works in real usage, the subagent pane renders real transcripts, the walk-back and the dedupe hold. No issues found in the change.
+
+Merger notes (2026-10-11). Root checkout base branch main, both steps.
+
+- Step 1: merged main (37d633b, which carried fix/121's merge) into fix/118-subagent-output-transcripts in the worktree. Clean 'ort' merge, no conflicts (src/webui.ts and src/webui.test.ts auto-merged both sides). Merge commit b5e2342. Clean merge, so the test suites were skipped per the task rules; every branch was developer-reviewed and live-tested.
+- Step 2: base branch re-resolved as main (unchanged). Merged fix/118-subagent-output-transcripts into main in the project root: fast-forward to b5e2342 (net src/webui.ts +43, src/webui.test.ts +33). Root side clean, no conflicts.
+- Final state: root main and the worktree branch both at b5e2342, both trees clean. No open questions.
