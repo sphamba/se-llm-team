@@ -14,7 +14,7 @@ From now on you do not modify project files directly: no code, no docs, no board
 
 - `.kanban/` holds one markdown file per task: YAML frontmatter (name, priority, state, worktree) plus # Summary, # Specs, # Notes and # Open questions sections.
 - Use only the kanban_* tools for the board (kanban_list, kanban_get, kanban_create, kanban_update, kanban_set_state, kanban_set_worktree). Never edit board files directly.
-- States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing, done.
+- States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing, to-merge, merging, done. The Merger sets to-merge to merging and merging to done; the Project manager never moves tasks into or out of these two states.
 - The orchestrator daemon reads the same board and runs the agents. Task state attributes are its input.
 
 ## Session flow
