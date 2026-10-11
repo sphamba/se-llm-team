@@ -782,7 +782,6 @@ the cards, pointer-events none so their clicks pass through */
 #m-agent-btns { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
 .check { color: var(--low-fg); margin-right: 5px; }
 #m-agent { margin-bottom: 12px; }
-#m-agent:empty { display: none; }
 #m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 300px; overflow: auto; }
 #m-log.hidden { display: none; }
 #m-log pre { margin: 0; padding: 8px 10px; font-size: 10px; line-height: 1.45; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: break-word; }
@@ -823,7 +822,7 @@ the cards, pointer-events none so their clicks pass through */
 <div id="modal" class="hidden"><div id="m-box">
 <div id="m-head"><h2 id="m-title"></h2><button id="m-close" onclick="closeModal()">Close</button></div>
 <div id="m-attrs"></div>
-<div id="m-agent"></div>
+<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><pre id="m-log-text"></pre></div></div>
 <div id="m-body"></div>
 </div></div>
 <script>
@@ -981,14 +980,15 @@ function render(skipFlip) {
 		el.ontransitionend = () => { el.style.transition = ""; el.ontransitionend = null; drawRelations(); };
 	}
 }
-function openTask(file) {
-	const t = activeBoard().tasks.find(x => x.file === file);
-	if (!t) return;
-	closeLog();
-	modalFile = file;
+// the title and attrs block: stateless markup, rewritten freely on open and on every refresh
+function writeHead(t) {
 	document.getElementById("m-title").textContent = t.name;
-	document.getElementById("m-attrs").innerHTML =
-		"<div><span>number</span>" + numLinkHtml(t.file) + "</div>" +
+	document.getElementById("m-attrs").innerHTML = attrsHtml(t);
+	for (const a of document.querySelectorAll("#m-attrs .num-link")) a.onclick = () => openTask(a.dataset.task);
+}
+// the attrs rows, shared by openTask and the 5 s refresh of the open card
+function attrsHtml(t) {
+	return "<div><span>number</span>" + numLinkHtml(t.file) + "</div>" +
 		"<div><span>file</span>" + esc(t.file) + "</div>" +
 		"<div><span>priority</span><span class='chip p-" + esc(t.priority) + "'>" + esc(t.priority) + "</span></div>" +
 		"<div><span>complexity</span><span class='chip cx'>" + esc(t.complexity || "moderate") + "</span></div>" +
@@ -996,10 +996,32 @@ function openTask(file) {
 		"<div><span>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>" +
 		"<div><span>issuer</span>" + esc(t.issuer || "user") + "</div>" +
 		blockedRow(t);
-	for (const a of document.querySelectorAll("#m-attrs .num-link")) a.onclick = () => openTask(a.dataset.task);
+}
+// the body block, html-gated like syncBoard's cards: an unchanged body keeps its DOM node and
+// with it the reader's scroll position
+function setBody(t) {
+	const el = document.getElementById("m-body");
+	const html = md(t.body || "");
+	if (el.__html === html) return;
+	el.innerHTML = html;
+	el.__html = html;
+}
+function openTask(file) {
+	const t = activeBoard().tasks.find(x => x.file === file);
+	if (!t) return;
+	closeLog();
+	modalFile = file;
+	writeHead(t);
 	renderAgent(t);
-	document.getElementById("m-body").innerHTML = md(t.body || "");
+	setBody(t);
 	document.getElementById("modal").classList.remove("hidden");
+}
+// the 5 s refresh of the open detail card: every block re-derives from the fresh payload with no
+// close/reopen; renderAgent's keep mode re-renders the run cards and leaves the log pane alone
+function updateOpenTask(t) {
+	writeHead(t);
+	renderAgent(t, true);
+	setBody(t);
 }
 function closeModal() { closeLog(); document.getElementById("modal").classList.add("hidden"); }
 // the blockedBy row: each stored ref links to its task's card when that task is on the board, and
@@ -1039,35 +1061,37 @@ function agentCardHtml(extraCls, attrs, label, tokens, duration, mark) {
 }
 // the agent history as one horizontal row of columns: every run a card with its subagent cards
 // stacked below, always visible (fetched for every run on open), oldest leftmost (payload order
-// is log mtime order), the live run rightmost; a role with several runs labels them 1-based
-function renderAgent(t) {
-	const el = document.getElementById("m-agent");
-	const gen = ++agentGen;
-	el.innerHTML = "";
+// is log mtime order), the live run rightmost; a role with several runs labels them 1-based.
+// keep=true is the 5 s refresh of the open card: the run cards re-render, each run's fetched sub
+// box is carried over by handle with no re-fetch, and the log pane beside the row is untouched
+function renderAgent(t, keep) {
+	const el = document.getElementById("m-agent-btns");
 	const runs = (t.agents || []).slice();
 	const live = runs.find(a => a.alive);
 	if (live) { runs.splice(runs.indexOf(live), 1); runs.push(live); }
-	if (!runs.length) return;
+	const oldSubs = keep ? new Map() : null;
+	if (oldSubs) for (const c of el.querySelectorAll(".agent-col > .agent-card")) oldSubs.set(c.dataset.handle, c.parentElement.querySelector(".agent-subs"));
+	if (!runs.length) { el.innerHTML = ""; return; }
 	const count = {};
 	for (const a of runs) count[a.role] = (count[a.role] || 0) + 1;
-	const cols = runs.map(a =>
+	el.innerHTML = runs.map(a =>
 		'<div class="agent-col">' +
 		agentCardHtml(a.alive ? "agent-live" : "agent-past", 'data-handle="' + esc(a.handle) + '"', agentLabel(a, count), a.tokens, a.duration, a.alive ? '<span class="spin"></span>' : '<span class="check">✓</span>') +
-		'<div class="agent-subs"></div></div>');
-	el.innerHTML = '<div id="m-agent-btns">' + cols.join("") + '</div><div id="m-log" class="hidden"><pre id="m-log-text"></pre></div>';
+		'<div class="agent-subs"></div></div>').join("");
 	// bind by dataset: a hand-written task file name can hold quotes or backslashes, which no
 	// amount of HTML escaping makes safe inside inline JS
 	for (const b of el.querySelectorAll(".agent-col > .agent-card")) b.onclick = () => openAgentLog(b.dataset.handle);
+	if (oldSubs) for (const c of el.querySelectorAll(".agent-col")) {
+		const box = oldSubs.get(c.querySelector(".agent-col > .agent-card").dataset.handle);
+		if (box) c.querySelector(".agent-subs").replaceWith(box);
+	}
 	markActiveAgent();
+	if (keep) return;
 	// every run's subs on open, in parallel: one sub=list fetch per run handle, each list rendered
 	// under its caller column
+	const gen = ++agentGen;
 	const boxes = el.querySelectorAll(".agent-subs");
 	runs.forEach((a, i) => fetchSubs(gen, a, boxes[i]));
-	const p = logPane();
-	p.onscroll = () => {
-		if (!logState || logState.busy || logState.atStart || p.scrollTop > 0) return;
-		pullLog(logUrl("&offset=" + logState.head + "&before=1"), "history");
-	};
 }
 // one run's subagent cards, labeled Sub-<caller role> without the id string, one per background
 // Agent call in log order
@@ -1160,6 +1184,12 @@ function pullLog(qs, mode) {
 	}).catch(() => {}).finally(() => { if (logState === st) st.busy = false; });
 }
 document.getElementById("modal").onclick = e => { if (e.target.id === "modal") closeModal(); };
+// the log pane is static markup: the scroll handler binds once and reads the live logState
+const pane = logPane();
+pane.onscroll = () => {
+	if (!logState || logState.busy || logState.atStart || pane.scrollTop > 0) return;
+	pullLog(logUrl("&offset=" + logState.head + "&before=1"), "history");
+};
 function refresh() {
 	fetch("/api/projects").then(r => r.ok ? r.json() : null).catch(() => null).then(list => {
 		// the single-project server 404s here, and a transient hub failure keeps the last known
@@ -1176,6 +1206,12 @@ function refresh() {
 	}).then(rows => {
 		mergeBoards(boards, rows);
 		render();
+		// the open detail card re-derives from the fresh payload: a state change or a new agent run
+		// shows in place, and a task gone from the board closes the card
+		if (modalFile && !document.getElementById("modal").classList.contains("hidden")) {
+			const t = activeBoard().tasks.find(x => x.file === modalFile);
+			if (t) updateOpenTask(t); else closeModal();
+		}
 		// stamp only a served board: during a hub outage the old stamp stays visible
 		const current = rows.find(([id]) => id === active);
 		if (current && current[1]) document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
