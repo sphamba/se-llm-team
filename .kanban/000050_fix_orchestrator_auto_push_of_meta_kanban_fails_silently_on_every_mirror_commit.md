@@ -1,7 +1,7 @@
 ---
 name: "fix: orchestrator auto-push of meta/kanban fails silently on every mirror commit"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/orchestrator-auto-push-of-meta-kanban-fails-silently-on-every-mirror-commit"
 ---
 
