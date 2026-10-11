@@ -90,6 +90,8 @@ The PM session gets: kanban_list, kanban_get, kanban_create, kanban_update, kanb
 
 ```sh
 node src/kanban.test.ts
+node src/orchestrator.test.ts
+node src/webui.test.ts
 ```
 
 Sidecar files (`.kanban/.logs/`, `.kanban/.pids/`, `.kanban/.orchestrator.lock`) are gitignored.
