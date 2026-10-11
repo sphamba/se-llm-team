@@ -55,6 +55,21 @@ assert.equal(validator.Check({ file: "000001_x.md", notes: "anything" }), false,
 assert.ok([...validator.Errors({ file: "000001_x.md", notes: "anything" })].some((e: any) => e.keyword === "additionalProperties"));
 assert.equal(validator.Check({ file: "000001_x.md", summary: "s", notes: "anything" }), false, "mixed call must fail validation too");
 
+// kanban_create gets the same guard: an unsupported field (e.g. notes) must fail
+// pi's validator instead of being dropped while the tool reports "Created"
+const create = tools["kanban_create"];
+if (!create) fail("kanban_create not registered");
+assert.equal(create.parameters.additionalProperties, false);
+const createValidator = Compile(create.parameters);
+assert.equal(createValidator.Check({ name: "feat: x", summary: "s", notes: "anything" }), false, "unknown field must fail validation");
+assert.ok([...createValidator.Errors({ name: "feat: x", summary: "s", notes: "anything" })].some((e: any) => e.keyword === "additionalProperties"));
+assert.equal(createValidator.Check({ name: "feat: x", summary: "s", priority: "high", complexity: "complex", issuer: "#42", specs: "s", openQuestions: "q", blockedBy: "#42" }), true, "all supported fields must pass validation");
+
+// execute with all supported fields keeps the "Created <file> (#N)" response
+const created = await run(create, { name: "feat: create guard", summary: "s", priority: "high", complexity: "complex", issuer: "#42", specs: "s", openQuestions: "q", blockedBy: "#42" });
+assert.equal(created.content[0].text, `Created ${created.details.file} (#${taskNum(created.details.file)})`, "all-supported call must keep the Created response");
+assert.equal(getTask(root, created.details.file)?.issuer, "#42", "supported fields must still be written");
+
 // kanban_set_state and kanban_set_worktree are strict too, an unrecognized
 // field errors before execute instead of a dropped, silently-ignored param
 const strict = (name: string) => {

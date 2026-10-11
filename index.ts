@@ -57,8 +57,11 @@ export default function (pi: ExtensionAPI) {
 		label: "Kanban create",
 		description:
 			"Create a kanban task in state backlog. Name tasks with a type prefix like 'feat: ', 'fix: ', 'perf: '. Write the specs with the user. Set issuer to '#<num>' when the task was created after live-testing of task #<num>; the default 'user' means the user requested it. The issuer is set at creation only and never changed afterwards. Set complexity to simple, moderate (default) or complex; it drives which per-complexity LLM config entry and reviewer-pass cap apply. Complexity stays updatable later via kanban_update.",
+		// additionalProperties: false so pi rejects an unrecognized field (e.g. notes)
+		// with a validation error instead of dropping it and reporting a false create
 		parameters: Type.Object({
 			name: Type.String({ description: "Task name with type prefix, e.g. 'feat: nice thing'" }),
+			shortName: Type.Optional(Type.String({ description: "Max 5 lowercase words joined by hyphens, e.g. 'this-is-a-short-name'; names the task file and the branch/worktree. Set at creation only, never updatable" })),
 			priority: Type.Optional(StringEnum(["low", "medium", "high", "critical"] as const)),
 			complexity: Type.Optional(StringEnum(["simple", "moderate", "complex"] as const)),
 			issuer: Type.Optional(Type.String({ description: "'user' (default) or '#<num>' when created after live-testing of task #<num>, e.g. '#42'" })),
@@ -66,7 +69,7 @@ export default function (pi: ExtensionAPI) {
 			specs: Type.Optional(Type.String({ description: "Detailed description of needs" })),
 			openQuestions: Type.Optional(Type.String({ description: "User/client clarification questions, written to the task body's # Open questions section" })),
 			blockedBy: Type.Optional(Type.String({ description: "Comma-joined blocker task refs, e.g. '#42, #43'; the task waits for them" })),
-		}),
+		}, { additionalProperties: false }),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
 			const task = createTask(ctx.cwd, params);
