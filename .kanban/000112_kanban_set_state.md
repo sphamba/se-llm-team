@@ -39,5 +39,9 @@ Acceptance:
   - kanban_set_worktree with {file, worktree, notes} rejected the same way, naming `notes`; no write happened.
   - Valid calls kept current behavior and response: set_state `state -> doing` persisted, set_worktree `worktree -> feat/1-x` persisted, empty-string `worktree -> ` cleared the attribute to `""`.
   - No issues found.
+- Merge (Merger): step 1, base `main` at 50c4833 merged into fix/112-kanban-set-state in the worktree. One conflict in src/extension.test.ts: the branch's set_state/set_worktree strict tests and main's kanban_create strict tests (#111) added blocks at the same spot. Both kept - the Specs settle that all three tools reject unknown fields for consistency - main's create block first, then the branch's strict() block. index.ts auto-merged (all four mutating registrations carry { additionalProperties: false }). Committed as 603cedc.
+- All five suites re-run green in the worktree after the merge: kanban, orchestrator, webui, extension, index (exit 0 each); no test-exposed fixes needed.
+- Step 2, base re-resolved to `main` (root did not move): fix/112-kanban-set-state fast-forwarded into main (50c4833 -> 603cedc), no conflicts. Root clean after the merge.
+- # Open questions: none.
 
 # Open questions
