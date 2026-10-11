@@ -1,7 +1,7 @@
 ---
 name: "fix: verify the merged webui board after 47 - pair width, spinner identity, hub tabs"
 priority: "high"
-state: "doing"
+state: "to-merge"
 worktree: "fix/93-verify-the-merged"
 ---
 
@@ -43,3 +43,35 @@ Constraints:
 - Files touched: src/webui.ts and/or src/webui.test.ts only, unless the Notes justify more.
 
 # Notes
+
+## Developer verification (2026-10-11)
+- Precondition: the #47 merge commit 52b119b is an ancestor of the worktree HEAD. The worktree started at main 50937a6. Main advanced to 01136ea while this task ran (the #78 to-merge merge and a docs commit). `git diff 50937a6 01136ea -- src/webui.ts` is empty: the webui source is byte-identical, only the state list in src/kanban.ts grew to 10 states. The branch was fast-forwarded to main tip 01136ea. All checks below ran on 01136ea, not on a stale base.
+- Check 1, source and merge resolution: PASS. `.pair` has `min-width: 300px; flex: 1 0 300px`, the same floor as `.col`; 000096 adds only `.pair .col { flex: 0 0 auto; }` (a height floor fix). buildShell, syncBoard, cardHtml and spinnerHtml are exported, interpolated into PAGE, and used by the per-tab render path (buildShell and syncBoard in render(), cardHtml in syncBoard, spinnerHtml in cardHtml). tabNames, tabsHtml, boardOf, mergeBoards, renderTabs, switchTab, boards and tab.expanded all survive and render() reads tab.tasks and tab.expanded through activeBoard(). A read-only merge audit (`git diff 52b119b^1 52b119b -- src/webui.ts`, `git diff 52b119b^2 52b119b -- src/webui.ts`) shows a correct union: no helper and no behavior from either parent is missing, the only deletions are the replaced old client body and the complementary sides of main's newer work. `git merge-tree --write-tree HEAD 6c90c11` reports no conflict (6c90c11 is an ancestor).
+- Check 2, full suite on 01136ea: PASS on the first run. `node src/kanban.test.ts` -> all assertions passed. `node src/orchestrator.test.ts` -> all smoke parts passed. `node src/webui.test.ts` -> all assertions passed. No flake, so no re-run was necessary.
+- Check 3, browser (headless Chromium, Playwright 1.63.0 from the npx cache, temp boards, port 0, HOME isolated, production webui on 4242 never touched): 17/17 PASS. Command: `node /tmp/check93/browser.mts` (the probe script stays at /tmp/check93/browser.mts for this session).
+  - Structure: backlog | to-do+doing | to-review+reviewing | to-live-test+live-testing | to-merge+merging | done. Four `.pair` wrappers. The to-merge/merging pair comes from #78, which landed during this task.
+  - Geometry at 1280px and at 700px: all six top-level boxes and all ten columns are 300px wide. Every `.pair` is as wide as its widest inner `.col`, every `.col` stays inside its `.pair` (left >= pair.left - 1, right <= pair.right + 1), adjacent boxes keep the 10px gap, the top-level boxes stay on one row, and the board scrolls horizontally (scrollWidth > clientWidth).
+  - Spinner identity: after 11.2s (two 5s refreshes) the `.spin` node and its Animation object are the same objects, playState is "running" and currentTime advanced to 11699ms. The refresh did not restart the animation.
+  - State change: doing -> to-review moves the card, keeps its card element, rewrites its markup and removes the spinner. to-review -> reviewing keeps the card element, rewrites the markup and starts a running spinner. An untouched backlog card and an untouched merging card keep both their card node and their `.name` node, so an unchanged card is not rewritten. Counts update (doing 0, reviewing 1).
+  - Hub tabs: the hub serves both registered projects alpha and beta. Both tabs render with alpha active. A click on beta shows beta's cards in the four-pair layout and marks beta active. A click back on alpha restores alpha's board. The hub-served page ships every helper name that main's tests assert.
+  - Screenshots: /tmp/check93/wide-1280.png, /tmp/check93/narrow-700.png, /tmp/check93/hub-alpha.png.
+- Probe history: the first two probe runs failed on probe-side bugs (a wrong pairLayout index and a missing rect height), not on product behavior. The final probe passed 17/17. I did not change any source file.
+- Outcome: the merge resolution is correct. No code change is needed, so the branch has no diff and `git status --short` is clean. This is the valid no-diff pass that the acceptance allows.
+
+## Reviewer verification (2026-10-11)
+- Base check: worktree HEAD is 01136ea, the main tip; `git diff main...HEAD` and `git diff HEAD..main` are both empty and `git status --short` is clean. The precondition holds (the #47 merge is an ancestor and `.pair` plus the reconciliation helpers are present).
+- Check 1 re-verified from source: src/webui.ts line 527 `.pair` has `min-width: 300px; flex: 1 0 300px`, the same floor as `.col` on line 528. tabNames, tabsHtml, boardOf, mergeBoards, pairLayout, spinnerHtml, cardHtml, buildShell and syncBoard are exported, interpolated into PAGE, and the per-tab render path uses them (render() calls renderTabs() and syncBoard(cols, tab.tasks, tab.expanded, ...) through activeBoard(); syncBoard calls cardHtml; cardHtml calls spinnerHtml). `git diff 52b119b^1 52b119b -- src/webui.ts` and `git diff 52b119b^2 52b119b -- src/webui.ts` delete no helper from either parent.
+- Check 2 re-run by the reviewer on the same tree, all first try, no flake: `node src/kanban.test.ts` -> all assertions passed; `node src/orchestrator.test.ts` -> all smoke parts passed; `node src/webui.test.ts` -> all assertions passed.
+- Check 3 re-run independently by the reviewer: `node /tmp/check93/browser.mts` exited 0 with 17/17 passed (temp boards, port 0, Playwright 1.63.0, production webui on 4242 untouched). Geometry at 1280px and 700px: every pair and column 300px, no spill, 10px gaps, one row, horizontal scroll. Spinner: same `.spin` node and same Animation after 11.2s, playState "running", currentTime 11699ms. Hub: both tabs render and switch, switched board keeps the four-pair layout, page ships every asserted helper name. Probe output: /tmp/check93/reviewer-probe.json.
+- Verdict: PASS, no fixes made. The worktree stays at main with no diff, which the acceptance allows for an already-correct resolution.
+
+## Live test (2026-10-11)
+- Precondition re-checked by the live tester: worktree HEAD is 01136ea, `52b119b` (the #47 merge) is an ancestor, `git diff main...HEAD` and `git diff HEAD..main` are both empty, and `git status --short` is clean. No stale base.
+- Full suite on the worktree, all first try, no flake: `node src/kanban.test.ts` -> all assertions passed; `node src/orchestrator.test.ts` -> all smoke parts passed (including hub failover, llm config flags, restart preserves in-flight board state, reviewer successful-run cap); `node src/webui.test.ts` -> all assertions passed.
+- Browser check as a user: `node /tmp/check93/browser.mts` from /tmp, headless Chromium, temp boards on port 0, production webui on 4242 untouched. Exit 0, 17/17 passed. Probe output saved at /tmp/check93/livetest-probe.json.
+  - Pair layout: 4 `.pair` wrappers (to-do/doing, to-review/reviewing, to-live-test/live-testing, to-merge/merging) plus backlog and done. The wide-1280 screenshot shows no overlap and the board scrolls right to the fifth pair and done.
+  - Geometry at 1280px and 700px: every pair and column 300px, no spill, 10px gaps, one row, horizontal scroll.
+  - Spinner: same `.spin` node and same Animation after two 5s refreshes, playState "running", currentTime 11699ms. State change moves the card, rewrites only its markup, keeps untouched cards' nodes, and starts/stops the spinner.
+  - Hub tabs: alpha and beta render, clicking beta shows beta's cards in the pair layout, clicking back restores alpha. The hub page ships every asserted helper name.
+- Verification-only pass: the merged resolution is correct, no code was edited, no issue found.
+- Open questions: none.

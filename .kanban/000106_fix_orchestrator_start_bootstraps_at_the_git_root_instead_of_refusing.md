@@ -1,8 +1,8 @@
 ---
 name: "fix: orchestrator_start bootstraps at the git root instead of refusing"
 priority: "critical"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "fix/106-orchestrator-start-bootstraps"
 ---
 
 # Summary
@@ -34,3 +34,11 @@ Constraints:
 - Normal case unchanged: pi launched at the repo root resolves the same root as today.
 
 # Notes
+- Committed e763866 on fix/106-orchestrator-start-bootstraps (index.ts, new index.test.ts).
+- index.ts: exported resolveRoot(cwd) runs `git -C <cwd> rev-parse --show-toplevel` (stderr piped, output trimmed) and returns {root} or {root: null}. orchestrator_start returns the specified refusal text when no root exists, otherwise spawns `--root <root>`. orchestrator_status/poke/stop resolve the same root, falling back to ctx.cwd when there is no git root, so their behavior in a non-git directory is unchanged.
+- The mkdir of .kanban/.logs and .pids stays, because the log fd must exist before the spawn and the daemon creates those dirs only after it starts. It is wrapped in try/catch so an unusable .kanban path (for example a dangling symlink) returns "Cannot start the orchestrator: ..." instead of throwing. The removed existsSync guard used to cover that case.
+- kanban_* tools and the session board watcher still use ctx.cwd. The specs scope the root resolution to the four orchestrator tools, so a session in a subdirectory still gets a subdirectory board from kanban_create.
+- New index.test.ts (root, next to index.ts) tests resolveRoot (git root, subdirectory, plain dir), orchestrator_start from a subdirectory (stubbed spawn records ["--root", <repo>]), the non-git refusal, the unusable .kanban path, and status/poke/stop from a subdirectory against the root board and lock. It stubs @earendil-works/pi-ai, typebox and node:child_process with node:module registerHooks, because pi loads index.ts with jiti and plain node cannot resolve the pi packages. A separate file was chosen over extending src/orchestrator.test.ts so the hooks never leak into that suite, and the specs constrain the change to index.ts plus its test.
+- Verified green: node index.test.ts, node src/kanban.test.ts, SE_LLM_TEAM_NO_WEBUI=1 node src/orchestrator.test.ts, node src/webui.test.ts.
+- Known limit, conformant with the spec's prescribed command: --show-toplevel inside a linked git worktree resolves the worktree root, not the main checkout (git-common-dir would be the main root). Orchestrated worktrees have .kanban symlinked to the main board, so the lock dedupes there. A follow-up task could fold worktrees into the main root if the PM wants that.
+- Not changed on purpose: README Checks still lists only src/kanban.test.ts (pre-existing staleness), and orchestrator_wait still uses ctx.cwd (the specs name exactly four tools).

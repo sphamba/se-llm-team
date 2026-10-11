@@ -1,7 +1,7 @@
 ---
 name: "feat: webui agent history per run; subagent logs in the detail card"
 priority: "medium"
-state: "doing"
+state: "merging"
 worktree: "feat/88-webui-agent-history"
 ---
 
@@ -26,3 +26,36 @@ Acceptance: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/web
 HOLD: none. The earlier holds (#87 naming, #76 row, #47 merge) are all satisfied and dropped. #84 is scheduled at the same time; both touch the agent-log serve region (agentLogPayload) in separate worktrees and the merger resolves the overlap.
 
 # Notes
+
+Developer notes (2026-10-11). Worktree feat/88-webui-agent-history.
+
+- 3a04942 feat: webui agent history per run, subagent logs in the detail card (src/webui.ts +251/-59, src/webui.test.ts +146). Server: LOG_ROLES (pipeline roles plus merger), AgentEntry {role, run, alive, handle}, agentHistory gives one entry per .logs/<slug>.<role>[.<n>].log ordered by log mtime across roles (tie-breakers: run index ascending, legacy first, role pipeline order), the run-suffix and merger allowlist in agentLogPath, the subagentLogs parser (resolve() then the /tmp/pi-subagents-1000 prefix and the .output suffix), and sub=list / sub=<n> in agentLogPayload. Client: logState {handle, sub}, run buttons carry data-handle, sub buttons stack vertically with data-handle and data-sub, a log is live only when sub is null and the alive entry handle matches.
+- f8896ae fix: review follow-up. Run and sub buttons bind their listener after render, not through an inline onclick that interpolated the handle. A file name with a quote made the button dead, a backslash opened the wrong log. Sub list parsing now pre-filters lines before JSON.parse and memoizes per path until the file size changes (369 ms first, 0.4 ms repeat on a 55 MB log). A sub index must be fully numeric, so 1abc gives 404.
+
+Acceptance: node src/kanban.test.ts, node src/orchestrator.test.ts (includes the reviewer successful-run cap smoke) and node src/webui.test.ts all pass. The PAGE client JS was extracted and passes node --check.
+
+Browser smoke (Playwright against a temp root, startWebUi port 0): clicked through per-run buttons, sub buttons and pane content. Task files 000002_quo"te.md and 000003_back\slash.md resolve the exact handle and show their log. Zero page errors.
+
+Verified limitation (spec point 6): real pi subagent .output transcripts are sidechain records ({isSidechain:true,...} with user/assistant/toolResult types) that renderLogChunk drops, so an unchanged serve shows an empty pane. The sub=1 test pins this: the sidechain JSON record renders to nothing, the non-JSON line passes through.
+
+Reviewer notes (2026-10-11). Reviewed 3a04942 and f8896ae against the Specs in worktree feat/88-webui-agent-history. No fixes made, the code matches specs 1 to 6 and the tests pin them.
+
+- Acceptance re-run in one sequence: node src/kanban.test.ts, node src/orchestrator.test.ts and node src/webui.test.ts all pass. The worktree is clean at f8896ae.
+- Independent Playwright smoke on a fixture root: 4 runs render in one horizontal row. Labels are Developer 0, Live-tester, Reviewer, Developer 1, so only the role with several runs carries an index. The live run sits rightmost with its spinner. Two subagent buttons stack vertically below the reviewer run. A sub click opens the pane and marks the sub button active. A run switch clears the old sub buttons. No page errors.
+- The sub parser was checked against a real parent log in the main checkout (000072 reviewer log). sub=list returns the real subagent id f4089c91-f3de-47d, so the "Agent ID" and "Output file" wording matches the actual pi output.
+- The open question is confirmed with a real .output file: sub=0 serves text "" and the walk-back reads the whole 281 KB file. A real transcript holds user, assistant and toolResult sidechain records, and renderLogChunk drops all of them. No fix here: spec 6 forbids special casing and existing tests pin that parsed JSON records never leak raw JSON. The user decides on the follow-up.
+- Harmless observation, no action: rolePid has a merger branch that is unreachable today, because AGENT_ROLE has no merge state. The merger log still lists and serves through the merger handle.
+
+Live-test report (2026-10-11). Worktree feat/88-webui-agent-history at f8896ae, tree clean.
+
+- Acceptance re-run: `node src/kanban.test.ts`, `node src/orchestrator.test.ts` and `node src/webui.test.ts` all pass.
+- Browser smoke (Playwright, real HTTP server via startWebUi port 0, temp fixture root with 3 tasks and a real subagent fixture). Result: 26 of 27 checks pass. The one miss is an expected, pre-existing 404 on `/api/projects` in the single-project server (the page tolerates it); it is not related to this change.
+- Passed, user flows: run buttons render in one row in log-mtime order across roles with the live run rightmost and spinning; a reviewer run with two Agent calls shows two subagent buttons stacked vertically (`flex-direction: column`); a sub click opens that transcript and marks the button active; switching runs clears the sub buttons; a legacy-only task opens its legacy log; a finished run's pane shows its rendered content.
+- Passed, API and trust boundary: run-suffixed handles serve their own file (never the legacy one); merger handle accepted; junk handle, path traversal, `sub=1abc` and an out-of-range `sub` all 404; a log with no Agent records returns an empty list; `sub=list` returns the two fixtures in log order.
+- Passed, escaping fix (f8896ae): task files named `000001_quo"te.md` and `000002_back\slash.md` each open their own log through their run button, with zero page errors.
+- Reconfirmed spec 6 limitation: a sidechain-only `.output` (real pi shape) serves 200 but renders an empty pane; a non-JSON line in the same file passes through. This is the open question below.
+- Verdict: the change matches specs 1 to 6 and no code fix is needed. State set to to-merge.
+
+# Open questions
+
+1. Subagent transcripts show an empty pane. A real pi .output file holds sidechain records that renderLogChunk drops. Spec point 6 says no special casing, so the file is served unchanged. Do you want a follow-up task that teaches renderLogChunk the sidechain record shapes, or is the empty pane acceptable?
