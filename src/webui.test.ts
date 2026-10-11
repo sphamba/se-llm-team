@@ -360,6 +360,9 @@ assert.ok(page.includes('<nav id="tabs"></nav>'), "page has the tab bar");
 assert.ok(page.includes("switchTab(b.dataset.project)"), "each tab button switches the active board");
 assert.match(page, /function switchTab\(name\) \{[\s\S]*?closeModal\(\);[\s\S]*?\}/, "a tab switch closes the open modal");
 assert.match(page, /#tabs \{ position: relative; z-index: 1;/, "the tab bar stacks above the #modal overlay (000091)");
+const modalZ = page.match(/#modal \{[^}]*z-index: (\d+)/)?.[1];
+const relationsZ = page.match(/#relations \{[^}]*z-index: (\d+)/)?.[1];
+assert.ok(modalZ && relationsZ && Number(modalZ) > Number(relationsZ), "the #modal backdrop and card stack above the #relations lines (000119)");
 assert.ok(page.includes("render(true); // no FLIP across boards"), "a tab switch never flips from the other board's layout");
 assert.ok(page.includes("Promise.all(projects.map(t => fetch(url(t))"), "every tab polls each cycle");
 assert.ok(page.includes("setInterval(refresh, 5000)"), "the poll keeps the 5 s cadence");
@@ -396,7 +399,14 @@ assert.deepEqual(listed[0].agents, [], "no role logs yet, empty agent history");
 assert.ok(page.includes('id="m-agent"'), "modal has the agent area");
 assert.ok(!page.includes("<div><span>name</span>"), "the detail card drops the name attribute row the title already shows");
 assert.ok(page.includes('"<div><span>issuer</span>" + esc(t.issuer || "user")'), "the detail card shows the issuer row");
-assert.ok(page.includes("esc(t.complexity || \"moderate\")"), "the detail card shows the complexity badge next to priority");
+assert.ok(
+	page.includes("\"<div><span>complexity</span><span class='chip cx'>\" + esc(t.complexity || \"moderate\")"),
+	"the detail card gives the complexity badge its own labeled row",
+);
+assert.ok(
+	page.includes("\"<div><span>priority</span><span class='chip p-\" + esc(t.priority) + \"'>\" + esc(t.priority) + \"</span></div>\" +"),
+	"the detail card keeps the priority row with only the priority chip",
+);
 assert.ok(page.includes("#m-log.hidden { display: none; }"), "log pane hides");
 assert.ok(page.includes("/api/agent-log"), "page uses the agent log endpoint");
 assert.ok(page.includes('<span class="check">✓</span>'), "past agent buttons render a green checkmark");
