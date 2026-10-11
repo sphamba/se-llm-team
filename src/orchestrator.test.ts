@@ -1309,7 +1309,7 @@ const runsAA = () => {
 	}
 };
 // three successful reviewer runs (each back to to-review), then the 4th spawn is refused
-await waitFor(() => aa.output().includes("reviewer succeeded 3+ times, moving to to-live-test"), 60000, "reviewer cap refusal logged", aa.output);
+await waitFor(() => aa.output().includes(`reviewer succeeded 3+ times, moving ${slugAA} to to-live-test`), 60000, "reviewer cap refusal logged", aa.output);
 assert.equal(aa.output().split("spawned reviewer").length - 1, 3, "exactly three reviewer spawns before the refusal");
 assert.equal(runsAA(), 0, "the counter cleared on the forced to-live-test advance");
 const reviewerLogsAA = readdirSync(join(kanbanDir(rootAA), ".logs")).filter((f) => f.startsWith(`${slugAA}.reviewer.`) && f.endsWith(".log")).sort();
