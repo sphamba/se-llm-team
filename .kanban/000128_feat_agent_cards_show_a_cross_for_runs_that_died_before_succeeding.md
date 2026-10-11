@@ -3,6 +3,8 @@ name: "feat: agent cards show a cross for runs that died before succeeding"
 priority: "medium"
 state: "backlog"
 worktree: ""
+complexity: complex
+blockedBy: "#118, #125"
 ---
 
 # Summary

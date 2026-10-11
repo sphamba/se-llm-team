@@ -1,7 +1,7 @@
 ---
 name: "fix: subagent output transcripts render empty in the detail card"
 priority: "medium"
-state: "live-testing"
+state: "to-merge"
 worktree: "fix/118-subagent-output-transcripts"
 blockedBy: "#52"
 ---
@@ -36,3 +36,15 @@ Reviewer notes (2026-10-11, second round). Worktree fix/118-subagent-output-tran
 - renderLogChunk has one caller (agentLogPayload), which is unchanged; the walk-back break condition (text || head === 0 || !walk) is intact and the new sub=3 fixture pins head 0 with the prompt. Non-sidechain branches are byte-identical (diff is the new else-if branch plus a doc comment only).
 - Main moved 4 commits ahead (blockedBy lines, agent cards) touching the same two files; merge-tree shows both files changed in both branches with zero conflict markers, the merge stays clean.
 - Acceptance rerun: webui.test.ts, kanban.test.ts, orchestrator.test.ts (exit 0, needs several minutes on a loaded machine) and extension.test.ts all pass.
+
+Live-tester notes (2026-10-11). Worktree fix/118-subagent-output-transcripts, HEAD 03ee4fe. No code changes. No unit test suite ran.
+
+- Setup: fixture project /tmp/lt118/fixture with a task file and a real parent agent log (a copy of the real 000088 developer log, so the subagent list comes from a real Agent tool result). The subagent transcripts are real files under /tmp/pi-subagents-1000/. The branch daemon ran the real entry point from the worktree, with HOME=/tmp/lt118/home so its hub lock and registry stay private to the test. Command: node src/orchestrator.ts --root /tmp/lt118/fixture --rescan-seconds 30 --poll-minutes 30. It became the hub on http://127.0.0.1:4391 and served the branch code.
+- Before/after on identical bytes (main's webui.ts vs the branch, same agentLogPayload rules): main renders 0 characters for the real 347640-byte transcript, because the walk goes to head 0 and renders nothing (the reported empty pane). The branch serves 45167 characters at head 265720. For a transcript whose tail chunk renders nothing, main gives 0 characters and the branch walks to head 0 and renders the prompt (73 characters).
+- Browser flow with headless Chromium on the real UI: open the board, click the task card, click the Developer run button, click a subagent button. The sub pane renders 45167 characters with the prompt, thinking blocks, text and 12 [tool] lines, and no raw JSON. The real transcript has 104 sidechain records (1 user, 45 assistant, 58 toolResult). The run log pane renders 2590 characters before and after, the same as main. No console errors, every /api/agent-log call returned 200.
+- Split record across poll windows: a copy of the real transcript cut inside its last record renders 43159 characters on open, and the partial record stays dropped (tail 340072, a record boundary). The test appended the rest while the pane was open. The next poll served the completed record once: 49824 characters, the old text is a prefix of the new text, the marker "## Verdict" appears exactly once, no duplicate and no raw JSON. API calls: sub=1 offset=340072, then offset=347640.
+- Walk-back: a fixture transcript with a prompt and a 120116-byte non-rendering tail renders no text from its tail chunk. Opening it serves head 0 with atStart true and shows "[prompt] LIVE TEST PROMPT: this prompt sits before a non-rendering tail." The #88 whole-file walk to an empty pane is gone.
+- Browser history: three scroll-to-top pulls grew the sub pane from 45167 to 131443 characters through offset/before=1 requests, and the pane stayed readable.
+- Evidence: screenshots /tmp/lt118/3-sub1-append.png (completed split record) and /tmp/lt118/4-sub2-walkback.png (walk-back prompt). Fixture and daemon log under /tmp/lt118/.
+- Observation, pre-existing on main and out of scope for this change: the client treats a subagent transcript as written once. pollLog computes live=false for every sub view (logState.sub == null), so the first empty poll stops the timer and a running subagent's pane freezes until the run button is clicked again. The subagent button list is also fetched only when the run is opened, so a subagent spawned later needs the same re-click. Both behaviours are untouched by this change. Reported to the PM as a separate finding.
+- Verdict: the change works in real usage, the subagent pane renders real transcripts, the walk-back and the dedupe hold. No issues found in the change.

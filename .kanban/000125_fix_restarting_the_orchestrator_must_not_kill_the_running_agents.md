@@ -1,7 +1,7 @@
 ---
 name: "fix: restarting the orchestrator must not kill the running agents"
 priority: "high"
-state: "doing"
+state: "reviewing"
 worktree: "fix/125-restarting-the-orchestrator"
 ---
 
@@ -30,3 +30,10 @@ Restarting (or stopping and starting) the orchestrator must not kill spawned age
 src/orchestrator.test.ts: start the daemon, let it spawn a fake long-running agent that writes lines continuously, kill the daemon (SIGTERM), and assert the fake agent is still alive and its log still grows after the daemon's death. Files: src/orchestrator.ts and src/orchestrator.test.ts only.
 
 # Notes
+
+- 2026-10-11 (fix implemented in worktree fix/125-restarting-the-orchestrator, commit 653f41e):
+  - spawnAgent no longer pipes agent stdout/stderr through the write-time compactor. The agent's stdout and stderr are now the per-run log file fd itself (openSync(path, "a"), stdio: ["ignore", fd, fd]); the child owns a dup of the fd, so killing or restarting the daemon cannot close its write end and EPIPE-kill it. logFeeders and logCompactor (the write-time pipe machinery) are deleted; compactLogLine stays.
+  - Compaction moved to the retro pass per the constraint: poll() tracks run ends (a stale pidfile of a completed run in a non-working state, a bounced dead working agent, a stall-killed agent) and calls compactFinishedLogs(root) at the end of that pass. The first poll after a daemon restart also cleans up logs left raw by a daemon that died mid-run. --compact-logs still works.
+  - compactFinishedLogs' guard now checks pid liveness (agentAlive) instead of pidfile existence, so a finished run's stale pidfile (e.g. overwritten by the next role's spawn before the poll saw it) no longer blocks the rewrite of already-finished logs. Log path/naming and the webui read path are unchanged.
+  - Tests (src/orchestrator.test.ts): new part AQ starts a daemon with a fake long-running agent that writes a JSONL line every 100ms, SIGTERMs the daemon, and asserts the agent is still alive and its log still grows after the daemon's death; a second daemon then picks the agent up as alive (no twin spawn, state "doing" intact, log keeps growing). Part AB now runs the compactor fixture through compactLogLine line-by-line (the way the retro pass does) instead of through the deleted Transform; the pipe-integration parts AD and AE are gone with the machinery they tested. Part A waits for the retro compaction of the finished developer log before asserting its compacted content.
+  - All suites pass: orchestrator, kanban, webui, extension, index (node <file>.test.ts, exit 0 each).
