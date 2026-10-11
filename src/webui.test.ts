@@ -219,12 +219,13 @@ const ordered = [
 	{ file: "000006_f.md", name: "f", priority: "low", state: "reviewing", updated: 5 },
 	{ file: "000007_g.md", name: "g", priority: "critical", state: "reviewing", updated: 3 },
 	{ file: "000008_h.md", name: "h", priority: "low", state: "reviewing", updated: 3 },
+	{ file: "000009_i.md", name: "i", priority: "medium", state: "backlog", updated: 50 },
 ];
-const backlogOrder = ["000005_e.md", "000002_b.md", "000003_c.md", "000004_d.md", "000001_a.md"];
-sync(ordered);
+const backlogOrder = ["000005_e.md", "000002_b.md", "000003_c.md", "000004_d.md", "000009_i.md", "000001_a.md"];
+sync(ordered, new Set(["backlog"]));
 assert.deepEqual(shown("backlog"), backlogOrder, "backlog sorts priority-desc, then update-desc; equal keys keep task-number order");
 assert.deepEqual(shown("reviewing"), ["000006_f.md", "000007_g.md", "000008_h.md"], "other columns sort update-desc with no priority weighting; equal update times keep task-number order");
-sync(ordered);
+sync(ordered, new Set(["backlog"]));
 assert.deepEqual(shown("backlog"), backlogOrder, "a refresh with the same payload keeps the backlog order");
 
 // tabs: one per registered project; a single project keeps the old ui, no tab bar
