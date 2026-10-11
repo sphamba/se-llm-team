@@ -59,6 +59,7 @@ export default function (pi: ExtensionAPI) {
 			"Create a kanban task in state backlog. Name tasks with a type prefix like 'feat: ', 'fix: ', 'perf: '. Write the specs with the user. Set issuer to '#<num>' when the task was created after live-testing of task #<num>; the default 'user' means the user requested it. The issuer is set at creation only and never changed afterwards. Set complexity to simple, moderate (default) or complex; it drives which per-complexity LLM config entry and reviewer-pass cap apply. Complexity stays updatable later via kanban_update.",
 		parameters: Type.Object({
 			name: Type.String({ description: "Task name with type prefix, e.g. 'feat: nice thing'" }),
+			shortName: Type.Optional(Type.String({ description: "Max 5 lowercase words joined by hyphens, e.g. 'this-is-a-short-name'; names the task file and the branch/worktree. Set at creation only, never updatable" })),
 			priority: Type.Optional(StringEnum(["low", "medium", "high", "critical"] as const)),
 			complexity: Type.Optional(StringEnum(["simple", "moderate", "complex"] as const)),
 			issuer: Type.Optional(Type.String({ description: "'user' (default) or '#<num>' when created after live-testing of task #<num>, e.g. '#42'" })),
