@@ -3,6 +3,8 @@ name: "feat: orchestrator promotes and maintains blockedBy; SKILL.md keeps heuri
 priority: "high"
 state: "backlog"
 worktree: ""
+complexity: complex
+blockedBy: "#131, #132"
 ---
 
 # Summary
