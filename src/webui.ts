@@ -231,16 +231,21 @@ function logStats(path: string): { tokens: number | null; duration: number | nul
 }
 
 // pi --mode json writes JSONL event records (docs/json.md); everything else in the log file is
-// non-JSON: stderr diagnostics and legacy print-mode final text. One tool line per call: the
-// streamed toolcall_end and the execution start both carry name + args, so dedupe by id within
-// the chunk. An assistant message_end repeats its streamed text deltas, so only the user prompt
-// (the run's opening message) renders from message_end. A subagent .output transcript is sidechain
-// session records (user/assistant/toolResult) instead: prompt, thinking and text render like their
-// event-stream equivalents, and toolcall blocks and toolResults join the same one-line-per-call dedupe.
+// non-JSON: stderr diagnostics and legacy print-mode final text, passed through escaped. The
+// chunk renders to the HTML fragments the detail card ingests (ingest, the PAGE script): text and
+// prompts as escaped lines, thinking blocks and tool calls as collapsed <details> elements. One
+// tool block per call: the streamed toolcall_end and the execution start both carry name + args,
+// so dedupe by id within the chunk; a block stays open for its result across chunks (data-tc),
+// and a result whose block lives in an earlier chunk renders the joinable span. An assistant
+// message_end repeats its streamed text deltas, so only the user prompt (the run's opening
+// message) renders from message_end. A subagent .output transcript is sidechain session records
+// (user/assistant/toolResult): prompt and text render as lines, thinking and tool calls join the
+// same blocks and dedupe.
 const ARG_KEYS = ["command", "path", "file_path", "pattern", "url", "query"];
 const cap = (s: string, max = 160) => (s.length > max ? s.slice(0, max - 3) + "..." : s);
 
-function argSummary(args: unknown): string {
+// the string argument a tool summary keys on: an ARG_KEYS match first, else the first string value
+function argValue(args: unknown): string {
 	if (!args || typeof args !== "object") return "";
 	const rec = args as Record<string, unknown>;
 	let value: unknown;
@@ -251,13 +256,30 @@ function argSummary(args: unknown): string {
 		}
 	}
 	value ??= Object.values(rec).find((v) => typeof v === "string" && v);
-	return typeof value === "string" ? cap(value.replace(/\s+/g, " ").trim()) : "";
+	return typeof value === "string" ? value : "";
 }
 
-function textOf(result: unknown): string {
+// the one-liner under the tool name in the collapsed summary: the first line of the command/input
+// or the file path, capped at 80 chars
+function oneLiner(args: unknown): string {
+	const value = argValue(args);
+	return value ? cap(value.split("\n")[0].replace(/\s+/g, " ").trim(), 80) : "";
+}
+
+function textOf(result: unknown, max = 200): string {
 	const content = (result as { content?: { type?: string; text?: string }[] } | undefined)?.content;
 	const text = Array.isArray(content) ? content.find((c) => c?.type === "text")?.text : undefined;
-	return typeof text === "string" ? cap(text.replace(/\s+/g, " ").trim(), 200) : "";
+	return typeof text === "string" ? cap(text.replace(/\s+/g, " ").trim(), max) : "";
+}
+
+interface ToolBlock {
+	idx: number;
+	id: string;
+	name: string;
+	args: string;
+	one: string;
+	result: string;
+	fail: string | null;
 }
 
 export function renderLogChunk(text: string): string {
@@ -265,62 +287,132 @@ export function renderLogChunk(text: string): string {
 	let pending = "";
 	const flush = () => {
 		if (pending) {
-			out.push(pending + "\n");
+			out.push(esc(pending) + "\n");
 			pending = "";
 		}
 	};
 	const lines = text.split("\n");
 	lines.pop(); // split's last element is the trailing-newline sentinel or a byte-split partial record, not content
 	const seenTools = new Set<string>();
+	// tool blocks opened in this chunk, keyed by toolCallId: a tool_execution_end for an id here
+	// fills the block, an id from an earlier chunk renders the joinable span the client resolves
+	const tools = new Map<string, ToolBlock>();
+	const toolHtml = (t: ToolBlock) =>
+		'<details class="lg-tool" data-tc="' +
+		esc(t.id) +
+		'"><summary>' +
+		esc(t.fail !== null ? t.name + " failed: " + t.fail : t.name + (t.one ? ": " + t.one : "")) +
+		'</summary><pre class="lg-args">' +
+		esc(t.args) +
+		"</pre>" +
+		(t.result ? '<pre class="lg-out">' + esc(t.result) + "</pre>" : "") +
+		"</details>";
+	let think: string | null = null; // the open thinking block's deltas, filled at thinking_end or chunk end
+	let thinkIdx = -1;
+	const thinkHtml = (open: boolean) =>
+		'<details class="lg-think"' + (open ? ' data-open="think"' : "") + "><summary>Thinking</summary><pre>" + esc(think ?? "") + "</pre></details>";
+	let cont: string | null = null; // thinking deltas continuing the previous chunk's block, one span per chunk
+	let contIdx = -1;
+	const openTool = (id: unknown, name: unknown, args: unknown) => {
+		if (typeof id !== "string" || !id || seenTools.has(id)) return;
+		seenTools.add(id);
+		flush();
+		out.push("");
+		tools.set(id, {
+			idx: out.length - 1,
+			id,
+			name: typeof name === "string" && name ? name : "?",
+			args: JSON.stringify(args ?? {}, null, 2),
+			one: oneLiner(args),
+			result: "",
+			fail: null,
+		});
+	};
+	const joinTool = (id: unknown, name: unknown, isError: boolean, result: unknown) => {
+		const t = typeof id === "string" ? tools.get(id) : undefined;
+		if (t) {
+			t.result = textOf(result, 2000);
+			if (isError) t.fail = textOf(result);
+			return;
+		}
+		// the block lives in an earlier chunk: the span joins it client-side, or shows the text as a
+		// line (errors as their failed summary) when the walk-back left the block unloaded
+		if (typeof id !== "string" || !id) return;
+		const err = isError ? textOf(result) : null;
+		const text = textOf(result, 2000);
+		if (!text && err === null) return;
+		flush();
+		out.push(
+			'<span class="lg-tres" data-tc="' +
+				esc(id) +
+				'"' +
+				(err !== null ? ' data-sum="' + esc((typeof name === "string" && name ? name : "?") + " failed: " + err) + '"' : "") +
+				">" +
+				esc(text) +
+				"</span>",
+		);
+	};
 	for (const line of lines) {
 		let rec: Record<string, any>;
 		try {
 			rec = JSON.parse(line);
 		} catch {
 			flush();
-			out.push(line + "\n");
+			out.push(esc(line) + "\n");
 			continue;
 		}
 		if (!rec || typeof rec !== "object") {
 			flush();
-			out.push(line + "\n");
+			out.push(esc(line) + "\n");
 			continue;
 		}
 		if (rec.type === "message_update") {
 			const ev = rec.assistantMessageEvent;
 			if (!ev || typeof ev !== "object") continue;
 			if (ev.type === "thinking_start") {
-				flush();
-				out.push("── thinking ──\n");
-			} else if (ev.type === "thinking_delta" || ev.type === "text_delta") {
+				if (think === null) {
+					flush();
+					out.push("");
+					thinkIdx = out.length - 1;
+					think = "";
+				}
+			} else if (ev.type === "thinking_delta") {
+				if (think !== null) {
+					think += ev.delta ?? "";
+				} else {
+					// deltas with no thinking_start in this chunk continue the previous chunk's block
+					if (cont === null) {
+						flush();
+						out.push("");
+						contIdx = out.length - 1;
+						cont = "";
+					}
+					cont += ev.delta ?? "";
+				}
+			} else if (ev.type === "thinking_end") {
+				// the authoritative content replaces the reconstructed deltas (docs/json.md)
+				if (think !== null) {
+					if (typeof ev.content === "string") think = ev.content;
+					out[thinkIdx] = thinkHtml(false);
+					think = null;
+					thinkIdx = -1;
+				}
+			} else if (ev.type === "text_delta") {
 				pending += ev.delta ?? "";
 			} else if (ev.type === "text_start") {
 				flush();
 			} else if (ev.type === "toolcall_end") {
-				const id = ev.toolCall?.id;
-				if (typeof id === "string" && !seenTools.has(id)) {
-					seenTools.add(id);
-					flush();
-					const summary = argSummary(ev.toolCall.arguments);
-					out.push("[tool] " + (ev.toolCall.name ?? "?") + (summary ? ": " + summary : "") + "\n");
-				}
+				openTool(ev.toolCall?.id, ev.toolCall?.name, ev.toolCall?.arguments);
 			}
 		} else if (rec.type === "tool_execution_start") {
-			if (typeof rec.toolCallId === "string" && !seenTools.has(rec.toolCallId)) {
-				seenTools.add(rec.toolCallId);
-				flush();
-				const summary = argSummary(rec.args);
-				out.push("[tool] " + (rec.toolName ?? "?") + (summary ? ": " + summary : "") + "\n");
-			}
-		} else if (rec.type === "tool_execution_end" && rec.isError === true) {
-			flush();
-			const err = textOf(rec.result);
-			out.push("[tool] " + (rec.toolName ?? "?") + " failed" + (err ? ": " + err : "") + "\n");
+			openTool(rec.toolCallId, rec.toolName, rec.args);
+		} else if (rec.type === "tool_execution_end") {
+			joinTool(rec.toolCallId, rec.toolName, rec.isError === true, rec.result);
 		} else if (rec.type === "message_end") {
 			const msg = rec.message;
 			if (msg?.role === "user" && typeof msg.content === "string" && msg.content.trim()) {
 				flush();
-				out.push("[prompt] " + cap(msg.content.replace(/\s+/g, " ").trim()) + "\n");
+				out.push("[prompt] " + esc(cap(msg.content.replace(/\s+/g, " ").trim())) + "\n");
 			}
 		} else if (rec.isSidechain === true && rec.message && typeof rec.message === "object") {
 			const msg = rec.message;
@@ -328,42 +420,29 @@ export function renderLogChunk(text: string): string {
 				const text = typeof msg.content === "string" ? msg.content : "";
 				if (text.trim()) {
 					flush();
-					out.push("[prompt] " + cap(text.replace(/\s+/g, " ").trim()) + "\n");
+					out.push("[prompt] " + esc(cap(text.replace(/\s+/g, " ").trim())) + "\n");
 				}
 			} else if (msg.role === "assistant") {
 				const blocks = Array.isArray(msg.content) ? msg.content : [];
 				for (const block of blocks) {
 					if (block?.type === "toolCall") {
-						const id = block.id;
-						if (typeof id === "string" && !seenTools.has(id)) {
-							seenTools.add(id);
-							flush();
-							const summary = argSummary(block.arguments);
-							out.push("[tool] " + (block.name ?? "?") + (summary ? ": " + summary : "") + "\n");
-						}
+						openTool(block.id, block.name, block.arguments);
 					} else if (block?.type === "thinking" && typeof block.thinking === "string" && block.thinking) {
 						flush();
-						out.push("── thinking ──\n");
-						pending += block.thinking;
+						out.push('<details class="lg-think"><summary>Thinking</summary><pre>' + esc(block.thinking) + "</pre></details>");
 					} else if (block?.type === "text" && typeof block.text === "string" && block.text) {
-						flush();
 						pending += block.text;
 					}
 				}
 			} else if (msg.role === "toolResult") {
-				// the toolcall block of the same call usually shares the chunk and renders the args,
-				// so the result text surfaces only for a call whose toolcall fell in an earlier chunk
-				const id = msg.toolCallId;
-				if (typeof id === "string" && !seenTools.has(id)) {
-					seenTools.add(id);
-					flush();
-					const text = textOf(msg);
-					out.push("[tool] " + (msg.toolName ?? "?") + (msg.isError === true ? " failed" : "") + (text ? ": " + text : "") + "\n");
-				}
+				joinTool(msg.toolCallId, msg.toolName, msg.isError === true, msg);
 			}
 		}
 	}
 	flush();
+	if (cont !== null) out[contIdx] = '<span class="lg-cont">' + esc(cont) + "</span>";
+	if (think !== null) out[thinkIdx] = thinkHtml(true); // the block continues into the next chunk
+	for (const t of tools.values()) out[t.idx] = toolHtml(t);
 	return out.join("");
 }
 
@@ -827,7 +906,12 @@ none so the card clicks pass through */
 #m-agent { margin-bottom: 12px; }
 #m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 300px; overflow: auto; }
 #m-log.hidden { display: none; }
-#m-log pre { margin: 0; padding: 8px 10px; font-size: 10px; line-height: 1.45; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: break-word; }
+/* the log text renders in the page's sans serif stack; blocks are collapsed <details> the client fills in */
+#m-log-text { margin: 0; padding: 8px 10px; font-size: 10px; line-height: 1.45; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; white-space: pre-wrap; overflow-wrap: break-word; }
+#m-log-text pre { font: inherit; margin: 0; padding: 0; }
+#m-log-text details { margin: 2px 0; }
+#m-log-text summary { cursor: pointer; }
+#m-log-text details > pre { padding-left: 12px; }
 #modal { position: fixed; inset: 0; z-index: 3; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
 #modal.hidden { display: none; }
 #m-box { background: var(--panel); border-radius: 10px; padding: 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
@@ -865,7 +949,7 @@ none so the card clicks pass through */
 <div id="modal" class="hidden"><div id="m-box">
 <div id="m-head"><h2 id="m-title"></h2><button id="m-close" onclick="closeModal()">Close</button></div>
 <div id="m-attrs"></div>
-<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><pre id="m-log-text"></pre></div></div>
+<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>
 <div id="m-body"></div>
 </div></div>
 <script>
@@ -1096,6 +1180,45 @@ function markActiveAgent() {
 	}
 }
 const atBottom = () => { const p = logPane(); return p.scrollTop + p.clientHeight >= p.scrollHeight - 4; };
+// the live auto-scroll glides to the bottom, an instant auto scroll under reduced motion
+function glide(p) {
+	const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+	p.scrollTo({ top: p.scrollHeight, behavior: behavior });
+}
+// the rendered chunk lands in the pane first, then the cross-chunk fixups run over the whole pane:
+// duplicate tool blocks (a record split across poll windows re-serves the start) drop keeping the
+// first; a later tool result joins its block by toolCallId, or shows as a line when the walk-back
+// left the block unloaded; thinking deltas continuing the previous chunk's block append into it
+function ingest(html, where) {
+	const el = document.getElementById("m-log-text");
+	if (where === "init") el.innerHTML = html;
+	else el.insertAdjacentHTML(where === "history" ? "afterbegin" : "beforeend", html);
+	const seen = new Set();
+	for (const d of el.querySelectorAll("details.lg-tool[data-tc]")) {
+		if (seen.has(d.dataset.tc)) d.remove(); else seen.add(d.dataset.tc);
+	}
+	for (const s of el.querySelectorAll(".lg-tres")) {
+		const b = el.querySelector('details.lg-tool[data-tc="' + CSS.escape(s.dataset.tc) + '"]');
+		if (b) {
+			if (s.dataset.sum) b.querySelector("summary").textContent = s.dataset.sum;
+			const out = document.createElement("pre");
+			out.className = "lg-out";
+			out.textContent = s.textContent;
+			b.appendChild(out);
+			s.remove();
+		} else if (s.dataset.sum) {
+			s.textContent = s.dataset.sum;
+		}
+	}
+	for (const s of el.querySelectorAll(".lg-cont")) {
+		let b = s.previousElementSibling;
+		while (b && !(b.classList.contains("lg-think") && b.dataset.open === "think")) b = b.previousElementSibling;
+		if (b) {
+			b.querySelector("pre").append(s.textContent);
+			s.remove();
+		}
+	}
+}
 // one agent card: the role label, then a tokens/duration stats line (42k · 5m 12s); mark is the
 // live spinner or the past check, empty on a sub card
 function agentCardHtml(extraCls, attrs, label, tokens, duration, mark) {
@@ -1207,7 +1330,7 @@ function pullLog(qs, mode) {
 			st.atStart = d.atStart;
 			if (d.text) {
 				const before = p.scrollHeight;
-				el.textContent = d.text + el.textContent;
+				ingest(d.text, "history");
 				p.scrollTop += p.scrollHeight - before;
 			}
 		} else {
@@ -1216,12 +1339,12 @@ function pullLog(qs, mode) {
 			if (mode === "init") {
 				st.head = d.head;
 				st.atStart = d.atStart;
-				el.textContent = d.text;
-				p.scrollTop = p.scrollHeight;
+				ingest(d.text, "init");
+				glide(p);
 			} else if (d.text) {
 				const stick = atBottom();
-				el.textContent += d.text;
-				if (stick) p.scrollTop = p.scrollHeight;
+				ingest(d.text, "poll");
+				if (stick) glide(p);
 			}
 		}
 	}).catch(() => {}).finally(() => { if (logState === st) st.busy = false; });

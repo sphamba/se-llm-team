@@ -49,11 +49,12 @@ const jsonl = [
 	"pi: diagnostic that never was JSON",
 ].join("\n") + "\n";
 const rendered = renderLogChunk(jsonl);
-assert.ok(rendered.includes("── thinking ──\n"), "thinking start renders a thinking line");
-assert.ok(rendered.includes("Read the specs first.\n"), "thinking delta renders");
+assert.ok(rendered.includes('<details class="lg-think" data-open="think"><summary>Thinking</summary><pre>Read the specs first.</pre></details>'), "the thinking block renders as a collapsed details with a Thinking summary, left open at the chunk end for the next chunk's deltas");
 assert.ok(rendered.includes("Starting the run.\n"), "text delta renders as text");
-assert.equal(rendered.split("[tool] bash: git status --short").length - 1, 1, "one tool line per call: toolcall_end and execution start deduped by id");
-assert.ok(rendered.includes("[tool] bash failed: boom: exit 1\n"), "failed tool execution renders an error line");
+assert.equal(rendered.split('data-tc="t1"').length - 1, 1, "one tool block per call: toolcall_end and execution start dedupe by id");
+assert.ok(rendered.includes("<summary>bash failed: boom: exit 1</summary>"), "a failed tool execution surfaces its error in the collapsed summary");
+assert.ok(rendered.includes('<pre class="lg-args">{\n  &quot;command&quot;: &quot;git status --short&quot;\n}</pre>'), "the tool block body holds the full args");
+assert.ok(rendered.includes('<pre class="lg-out">boom: exit 1</pre>'), "the tool result joins the same block");
 assert.ok(rendered.includes("pi: diagnostic that never was JSON\n"), "non-JSON line passes through unchanged");
 assert.ok(rendered.includes("[prompt] Run the checks\n"), "user message_end renders the prompt");
 assert.ok(!rendered.includes('"type"'), "parsed JSON records never leak raw JSON");
@@ -65,8 +66,29 @@ assert.equal(renderLogChunk(legacy), legacy, "blank paragraph lines in non-JSON 
 const mixed = JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "paragraph" } }) + "\n\nlegacy line\n";
 assert.equal(renderLogChunk(mixed), "paragraph\n\nlegacy line\n", "a blank line flushes pending text and passes through");
 
-// sidechain subagent transcripts (.output session records): user prompt, assistant text and
-// thinking, and toolResult all render; toolResults join the one-line-per-call dedupe
+// 000122 collapsible log blocks: thinking_end closes with the authoritative content, the tool
+// summary one-liner caps at 80 chars on the first line only, and a tool end whose block lives in
+// an earlier chunk renders the joinable span the client resolves
+const closed = renderLogChunk([
+	JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } }),
+	JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "reconstructed" } }),
+	JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "authoritative thinking" } }),
+].join("\n") + "\n");
+assert.ok(closed.includes('<details class="lg-think"><summary>Thinking</summary><pre>authoritative thinking</pre></details>'), "thinking_end closes the block with the authoritative content");
+assert.ok(!closed.includes("data-open"), "a closed thinking block carries no continuation marker");
+
+const longCmd = "curl -s " + "x".repeat(120) + " \\\n  --header 'Accept: application/json'";
+const toolChunk = renderLogChunk(JSON.stringify({ type: "tool_execution_start", toolCallId: "t2", toolName: "bash", args: { command: longCmd } }) + "\n");
+const sum = toolChunk.match(/<summary>([^<]*)<\/summary>/)![1];
+assert.ok(sum.startsWith("bash: curl -s ") && sum.length <= "bash: ".length + 80, "the tool summary one-liner caps at 80 chars");
+assert.ok(!sum.includes("--header"), "the tool summary shows the first line of the command only");
+assert.ok(toolChunk.includes("x".repeat(120)), "the full command stays in the block body");
+
+const joinChunk = renderLogChunk(JSON.stringify({ type: "tool_execution_end", toolCallId: "t1", toolName: "bash", result: { content: [{ type: "text", text: "boom: exit 1" }] }, isError: true }) + "\n");
+assert.ok(joinChunk.includes('<span class="lg-tres" data-tc="t1" data-sum="bash failed: boom: exit 1">boom: exit 1</span>'), "a tool end whose block lives in an earlier chunk renders the joinable span, errors carrying the summary text");
+
+// sidechain subagent transcripts (.output session records): user prompt and assistant text render
+// as lines, thinking and tool calls join the same collapsible blocks, toolResults fill them
 const sidechain = [
 	JSON.stringify({ isSidechain: true, agentId: "aaaa1111", type: "user", message: { role: "user", content: "Review the diff" } }),
 	JSON.stringify({ isSidechain: true, agentId: "aaaa1111", type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "Reading the diff." }], usage: {}, model: "m", provider: "p" } }),
@@ -77,10 +99,11 @@ const sidechain = [
 const side = renderLogChunk(sidechain);
 assert.ok(side.includes("[prompt] Review the diff\n"), "a sidechain user record renders the prompt text");
 assert.ok(side.includes("Reading the diff.\n"), "sidechain text blocks render as message text");
-assert.ok(side.includes("[tool] bash: diff looks fine\n"), "a sidechain toolResult renders toolName plus its text content");
-assert.ok(side.includes("── thinking ──\n") && side.includes("Plan the fix.\n"), "sidechain thinking blocks render in the existing thinking style");
-assert.equal(side.split("[tool] read: /r/SPECS.md").length - 1, 1, "one tool line per call: the toolcall args line renders once");
-assert.ok(!side.includes("[tool] read: specs"), "a sidechain toolResult dedupes against its toolcall within the chunk");
+assert.ok(side.includes('<span class="lg-tres" data-tc="t9">diff looks fine</span>'), "a sidechain toolResult without its toolcall renders the joinable result span");
+assert.ok(side.includes('<details class="lg-think"><summary>Thinking</summary><pre>Plan the fix.</pre></details>'), "a sidechain thinking block renders as a collapsed details");
+assert.equal(side.split("<summary>read: /r/SPECS.md</summary>").length - 1, 1, "one tool block per call: the toolcall args render once");
+assert.ok(!side.includes('lg-tres" data-tc="t8'), "a sidechain toolResult dedupes against its toolcall within the chunk");
+assert.ok(side.includes('<pre class="lg-out">specs</pre>'), "the sidechain toolResult fills its tool block");
 assert.ok(!side.includes('"type"'), "sidechain records never leak raw JSON");
 assert.ok(!renderLogChunk(sidechain + "partial-without-newline").includes("partial"), "a partial trailing sidechain record is dropped too");
 
@@ -390,6 +413,13 @@ assert.ok(page.includes("render(true); // no FLIP across boards"), "a tab switch
 assert.ok(page.includes("Promise.all(projects.map(t => fetch(url(t))"), "every tab polls each cycle");
 assert.ok(page.includes("setInterval(refresh, 5000)"), "the poll keeps the 5 s cadence");
 assert.ok(page.includes('(active ? "&project=" + encodeURIComponent(active) : "")'), "agent-log polls carry the active tab's project");
+// 000122: the live auto-scroll glides smoothly, reduced motion falls back to an instant auto;
+// the client post-processes every insert, joining cross-chunk tool results and thinking deltas
+assert.ok(page.includes('const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";'), "reduced motion falls back to an instant auto scroll");
+assert.ok(page.includes("p.scrollTo({ top: p.scrollHeight, behavior: behavior });"), "the live auto-scroll glides smoothly to the bottom");
+assert.ok(page.includes('details.lg-tool[data-tc]'), "the client dedupes tool blocks across poll windows by toolCallId");
+assert.ok(page.includes('".lg-tres"'), "the client joins later tool results into their block");
+assert.ok(page.includes('".lg-cont"'), "the client joins thinking deltas that continue the previous chunk's block");
 
 // per-project payloads map to their own tab; a null payload keeps that tab's previous data
 const boards = {};
@@ -438,7 +468,12 @@ assert.ok(page.includes(".agent-card-active"), "the shown agent card gets an act
 // bit larger card in one wrapping row of columns, the live run last, its subs stacked below it
 const agentCardCss = page.match(/\.agent-card \{[^}]*\}/)![0];
 assert.ok(agentCardCss.includes("font-size: 12px") && agentCardCss.includes("padding: 6px 10px"), ".agent-card is a bit larger than the old button");
-assert.ok(page.match(/#m-log pre \{[^}]*\}/)![0].includes("font-size: 10px"), "the agent log text drops to 10px");
+// 000122: the log text renders in the page's sans serif stack, blocks are collapsed details
+const logCss = page.match(/#m-log-text \{[^}]*\}/)![0];
+assert.ok(logCss.includes("font-size: 10px"), "the agent log text keeps its 10px size");
+assert.ok(logCss.includes("system-ui") && !logCss.includes("monospace"), "the agent log text renders in the page's sans serif stack");
+assert.ok(page.includes("#m-log-text pre { font: inherit;"), "log block bodies inherit the sans serif font");
+assert.ok(page.includes("#m-log-text summary { cursor: pointer;"), "collapsed log summaries read as clickable");
 assert.ok(/display: flex; flex-wrap: wrap/.test(page.match(/#m-agent-btns \{[^}]*\}/)![0]), "the run columns render as one wrapping flex row");
 assert.ok(!page.includes(".agent-past {") && !page.includes(".agent-live {"), "no per-card block row styles remain");
 assert.ok(page.includes('"agent-past"') && page.includes('"agent-live"'), "past and live cards carry their state class");
@@ -460,7 +495,7 @@ const upd = page.match(/function updateOpenTask\(t\) \{[\s\S]*?\n\}/)![0];
 assert.ok(page.includes("if (t) updateOpenTask(t); else closeModal();"), "the refresh updates the open card in place and closes it when its task is gone");
 assert.ok(upd.includes("writeHead(t)") && upd.includes("renderAgent(t, true)") && upd.includes("setBody(t)"), "the refresh re-derives title, attrs, agent row and body from the fresh payload");
 assert.ok(!upd.includes("closeLog") && !upd.includes("logState"), "the refresh path never touches the log pane, logState or the log timer");
-assert.ok(page.includes('<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><pre id="m-log-text"></pre></div></div>'), "the log pane is static markup split from the buttons row, so a run-card rebuild never clears it");
+assert.ok(page.includes('<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>'), "the log pane is static markup split from the buttons row, so a run-card rebuild never clears it");
 assert.ok(!page.includes(`+ '</div><div id="m-log"`), "renderAgent no longer rebuilds the log pane with the run cards");
 const setBodySrc = page.match(/function setBody\(t\) \{[\s\S]*?\n\}/)![0];
 assert.ok(setBodySrc.includes("if (el.__html === html) return;"), "the body rewrite is html-gated: an unchanged body keeps its node and the reader's scroll");
@@ -549,8 +584,8 @@ const jsonlLog = [
 ].join("\n") + "\n";
 writeFileSync(logFile, jsonlLog);
 const servedLog = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
-assert.ok(servedLog.text.includes("Checking the board.\n"), "endpoint renders the thinking line");
-assert.ok(servedLog.text.includes("[tool] read: src/webui.ts\n"), "endpoint renders the tool line");
+assert.ok(servedLog.text.includes('<span class="lg-cont">Checking the board.</span>'), "endpoint renders continuing thinking deltas as the joinable span");
+assert.ok(servedLog.text.includes('<details class="lg-tool" data-tc="t1"><summary>read: src/webui.ts</summary>'), "endpoint renders the collapsed tool block");
 assert.ok(servedLog.text.includes("not json at all\n"), "endpoint passes non-JSON lines through");
 
 // a record split at the chunk head (init fetch of a log bigger than LOG_CHUNK) drops its partial
