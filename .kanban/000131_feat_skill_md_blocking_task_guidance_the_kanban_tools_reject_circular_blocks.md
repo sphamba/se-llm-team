@@ -1,8 +1,8 @@
 ---
 name: "feat: SKILL.md blocking-task guidance; the kanban tools reject circular blocks"
 priority: "medium"
-state: "to-merge"
-worktree: "feat/131-skill-md-blocking"
+state: "done"
+worktree: ""
 complexity: "moderate"
 ---
 
@@ -43,3 +43,4 @@ moderate. Files: skills/se-llm-team/SKILL.md, src/kanban.ts, src/kanban.test.ts,
   - Cycle guard through the real kanban tools, all confirmed. A 2-cycle set with kanban_update rejects with the message "cannot set blockedBy: #2 is already blocked by #3 - #3 blocks #2 and #2 blocks #3 is not allowed" and the file stays unchanged. Self-reference rejects with "#1 blocks itself". A one-directional pair, clearing (empty string) and the a->b->c chain pass. A ref written as "2" (no #) rejects the same as "#2". A multi-ref list with one self ref rejects and keeps the old list. A 3-cycle passes, as specified (only the direct 2-cycle rejects). A create whose blocker names the new task's number rejects and writes no file. A create whose own next number is in its blockedBy rejects ("#3 blocks itself"). A stale ref to another missing task passes.
   - SKILL.md guidance through the real PM skill: in a backlog of #1 (high) and #2 (low), the new medium task #3 got blockedBy "#1" and the follower #2 gained blockedBy "#3". The PM first called kanban_update with a guessed file name (000002_fix_q.md) instead of the real 000002_q.md, then recovered with kanban_list. The shortName "q" does not appear in the task name, so the file name cannot be derived from the name alone. Minor and self-corrected, no fix proposed.
   - Pre-existing, not caused by this change: kanban_get returns specs "" when the Specs body contains a markdown "# " heading. This task's own Specs uses "# 1.", "# 2." and "# Complexity" headings, so kanban_get shows empty specs. Reproduced in a scratch project: a later kanban_update of specs writes the new text below "# Specs" and leaves the old content stranded under the stray headings. Reported to the Project manager as a separate finding.
+- Merged by the Merger agent. Step 1: base branch resolved as main (root checkout at merge start); merged main into feat/131-skill-md-blocking in the worktree, clean merge, no conflicts (main-only commits 653f41e, 9677607, 7c90128 touch README.md, package.json, src/orchestrator.ts, src/orchestrator.test.ts - no overlap with this branch's SKILL.md, src/kanban.ts, src/kanban.test.ts); merge commit 71f1275. No conflicts, so the test suites were skipped per the merge procedure. Step 2: base branch re-resolved as main (unchanged); merged feat/131-skill-md-blocking into main in the project root, fast-forward 7c90128 -> 71f1275. Verified on main: src/kanban.ts carries blockedNums + assertNoBlockCycle wired into updateTask and createTask, SKILL.md step 4 carries the blockedBy guidance with step 6 wording untouched. Worktree left clean on feat/131-skill-md-blocking. No open questions.
