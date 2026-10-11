@@ -1,7 +1,7 @@
 ---
 name: "feat: compact agent logs; write-time pipe, slim envelopes, retro sweep"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "feat/105-compact-agent-logs"
 ---
 
@@ -37,3 +37,11 @@ Constraints:
 - HOLD: behind #101 (double-spawn guard, same file src/orchestrator.ts + its test).
 
 # Notes
+
+2026-10-11 (developer):
+- Implemented in src/orchestrator.ts only (no new module): compactLogLine (one JSONL line -> compacted line or null), logCompactor (line-buffered Transform reassembling lines at byte level so chunk splits cannot corrupt multibyte characters), and compactFinishedLogs (retro rewrite in place via .compact-tmp sibling + rename). spawnAgent now pipes pi stdout AND stderr through the compactor into the append-only log (stdio ["ignore","pipe","pipe"], end:false on both sources, compactor ended on child close; error handlers swallow stream errors so a dead sink loses lines, never the daemon; compactor.end() also on spawn error because ENOENT never fires close).
+- Retro sweep exposed via --compact-logs (usage string updated); run once against production: node src/orchestrator.ts --root <repo> --compact-logs. Not wired into daemon operation.
+- Retro sweep result: 131 agent log(s) rewritten, 928,437,025 -> 509,467,437 bytes (45% smaller). The 57.5 MB target log: 57,556,233 -> 52,059,872 bytes (its bulk is kept content: thinking/text deltas and full tool results). .logs total 1,068,601,222 -> 653,756,315 bytes; logs with an existing pidfile (in-flight tasks, merger logs while merger.pid exists) were skipped per the conservative skip rule.
+- Post-sweep verification on the compacted 57 MB log: "sections" gone, message_update carries bare assistantMessageEvent (usage stripped), tool_execution_end full results intact (subagent-log matching safe), one JSONL record per line preserved. Remaining "usage" strings live inside kept records (assistant message_start/message_end), which the spec keeps verbatim.
+- Tests added to src/orchestrator.test.ts: part-A pipeline stub now emits a system message_start/end with sections, a message_update with usage, a toolResult pair, an agent_end with a messages array and a stderr line; new part AB feeds a fixture JSONL through the compactor (asserts every drop/keep/slim rule, chunk boundary mid-line and 1 byte into a multibyte e-acute, trailing newline, stderr passthrough); new part AC asserts the retro sweep rewrites only a finished log, leaves running/merger logs byte-identical, skips orchestrator.log/armed/counter files, and is idempotent on a second pass.
+- All three suites green: kanban.test.ts, webui.test.ts, orchestrator.test.ts (20 parts). Two early suite runs hit a transient "orchestrator lock was missing, re-acquired" stall in spawn-loop-heavy parts; not reproducible after the test-fixture fix (5 subsequent runs green) and the lock file is only removed by releaseLock (own pid), so it reads as pre-existing suite flakiness under load, not a compactor regression.

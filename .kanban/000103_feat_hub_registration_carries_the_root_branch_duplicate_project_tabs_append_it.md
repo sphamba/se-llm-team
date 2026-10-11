@@ -1,7 +1,7 @@
 ---
 name: "feat: hub registration carries the root branch; duplicate project tabs append it"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "feat/103-hub-registration-carries"
 ---
 
@@ -35,3 +35,4 @@ Constraints:
 - Full suite green: node src/kanban.test.ts, node src/webui.test.ts, node src/orchestrator.test.ts.
 - Review (commit f941365): verified the hub payload, root-keyed registry, resolveEntry fallback, live branch per heartbeat, webui id/label split and the tests against the specs; all match. Two fixes: startHub's close() still cleaned up by the old name key while entries now key by root, so the hub's own entry survived close in the registry (other hubs would seed the lingering fresh entry for up to staleMs) - now deletes by opts.root, regression-asserted in part U after hubU.close(); tabNames counted duplicates on a plain {} so a repo basename like "constructor" or "toString" never got the branch suffix - now Object.create(null) (the PAGE boards pattern), asserted in webui.test.ts. Suite re-run green on all three test files. Files touched beyond the constraint list: src/orchestrator.test.ts only (hub fixtures, as the specs' item 4 required).
 - Review 2 (commit 9f8279e): re-verified the whole diff (hub.ts, webui.ts, webui.test.ts, orchestrator.test.ts) against the specs; all match, including the two f941365 fixes and their regression asserts. One fix: the new resolveEntry comment carried an em dash; main's src/ has none, so it is now a period (docs-only change, hub.ts imports re-checked, suite green on all three test files).
+- Review 3 (no commit): re-read the full hub.ts, the webui tab region and its consumers (renderTabs/switchTab/projectParam/boardOf/mergeBoards), and both test files against the specs; all match. currentBranch sends "" on detached HEAD or git failure; register and heartbeat carry the branch; /api/projects spreads it; resolveEntry serves bare names when unique and 404s duplicated ones; the client keys boards, polls and the agent-log project param by the root id. The f941365 fixes hold in the code (close deletes by opts.root; tabNames counts on Object.create(null)). No em dashes in the changed files. Suite green on all three test files. No fixes made; ready for live test.

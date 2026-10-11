@@ -1,8 +1,8 @@
 ---
 name: "fix: merging step takes minutes per task and tasks get stuck in merging"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/113-merging-step-takes"
 ---
 
 # Summary

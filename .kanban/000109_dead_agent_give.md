@@ -1,7 +1,7 @@
 ---
 name: "fix: dead-agent give-up log fires only on exact equality - a second death streak stays silent"
 priority: "low"
-state: "live-testing"
+state: "to-merge"
 worktree: "fix/109-dead-agent-give"
 issuer: "#65"
 ---
@@ -34,5 +34,19 @@ Review (no fixes needed):
 - Verified `agentPid` returns 0 for a missing pidfile, so the test's pidfile removal cleanly starts the second streak.
 - Verified the test's `/giving up/g` count is unambiguous: that phrase appears only in the dead-agent give-up log. The exact-2 assertion also proves no over-logging within a streak.
 - Re-ran `node src/orchestrator.test.ts` in the worktree: all parts pass, including the new second-streak assertions.
+
+## Live test (2026-10-11)
+
+Result: PASS. No issues found.
+
+What was exercised (worktree fix/109-dead-agent-give, commit 6127996):
+
+- `node src/orchestrator.test.ts`: exit 0, all smoke parts pass, including the new second-streak assertions in part B.
+- `node src/kanban.test.ts`: exit 0, all assertions pass.
+- Independent end-to-end run (not the project test): a temp git project with the real daemon, a dead stub agent, and a task parked in `doing`. The harness confirmed the user flow:
+  1. First death streak reaches the cap and logs exactly one "giving up".
+  2. The user revives the agent (a live pid appears in the task pidfile): the poll resets `${slug}.dead` to 0 and logs nothing extra.
+  3. The revived agent dies again: the second streak reaches the cap and logs its own "giving up", exactly one line, so two in total. No over-logging within a streak.
+- Same harness against the pre-fix code (main checkout, no alive-sighting reset): the counter never resets, so the revive step times out. This confirms the fix is what makes the second give-up work.
 
 # Open questions
