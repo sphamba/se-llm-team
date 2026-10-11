@@ -357,6 +357,33 @@ writeFileSync(logFile, JSON.stringify({ type: "session", id: "s" }) + "\n" + big
 const splitLog = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
 assert.equal(splitLog.text, "[prompt] tail\n", "a record split at the chunk head drops its partial line, later records still render");
 
+// 000084: a JSONL record split across two poll windows renders exactly once, when its newline
+// arrives. The first poll's tail sits on the last record boundary, so the next poll re-reads the
+// partial record from its start instead of stripping it as a mid-record head line.
+const splitRecord = JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "splittable record" } });
+const splitPrefix = "legacy line\n";
+for (const at of [1, 20, splitRecord.length >> 1, splitRecord.length - 1]) {
+	writeFileSync(logFile, splitPrefix + splitRecord.slice(0, at));
+	const first = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+	assert.equal(first.text, splitPrefix, `split at ${at}: the terminated line renders, the partial record does not`);
+	assert.equal(first.tail, splitPrefix.length, `split at ${at}: the tail sits on the last record boundary`);
+	writeFileSync(logFile, splitPrefix + splitRecord + "\n");
+	const second = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${first.tail}`)).json();
+	assert.equal(second.text, "splittable record\n", `split at ${at}: the record renders once its newline arrives`);
+	assert.equal(second.tail, (splitPrefix + splitRecord + "\n").length, `split at ${at}: the tail advances past the completed record`);
+	const third = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${second.tail}`)).json();
+	assert.equal(third.text, "", `split at ${at}: the already-served prefix is not rendered twice`);
+}
+// the split can land inside a multi-byte character: the boundary stays before the record and the
+// second poll re-reads the completed record whole, without a replacement glyph
+const uniRecord = Buffer.from(splitPrefix + JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "→ done" } }) + "\n", "utf8");
+writeFileSync(logFile, uniRecord.subarray(0, uniRecord.indexOf(Buffer.from("→")) + 1));
+const uniFirst = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.equal(uniFirst.text, splitPrefix, "a mid-multibyte split serves only the terminated line");
+assert.equal(uniFirst.tail, splitPrefix.length, "a mid-multibyte split still reports the boundary before the record");
+writeFileSync(logFile, uniRecord);
+assert.equal((await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${uniFirst.tail}`)).json()).text, "→ done\n", "a record split mid-multibyte renders whole once its newline arrives");
+
 // a finished log: the tail is terminal records (assistant message_end, turn_end, agent_end,
 // agent_settled) that render to nothing, so an unrenderable tail chunk walks back instead of
 // serving an empty pane

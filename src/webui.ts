@@ -194,14 +194,16 @@ export function renderLogChunk(text: string): string {
 	return out.join("");
 }
 
-function readRange(path: string, start: number, end: number): string {
-	if (end <= start) return "";
+// [decoded text, byte offset just past the window's last newline-terminated record]
+function readRange(path: string, start: number, end: number): [string, number] {
+	if (end <= start) return ["", start];
 	const buf = Buffer.alloc(end - start);
 	const fh = openSync(path, "r");
 	try {
 		const n = readSync(fh, buf, 0, buf.length, start);
+		const nl = buf.subarray(0, n).lastIndexOf(0x0a);
 		// lenient decode: a multi-byte char split at the chunk edge becomes one replacement glyph
-		return buf.subarray(0, n).toString("utf8");
+		return [buf.subarray(0, n).toString("utf8"), nl === -1 ? start : start + nl + 1];
 	} finally {
 		closeSync(fh);
 	}
@@ -245,6 +247,7 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 		tail = size;
 	}
 	let text = "";
+	let next = tail;
 	try {
 		// a finished log's tail is terminal records that render to nothing (assistant
 		// message_end, turn_end, agent_end, agent_settled): walk the window back until a
@@ -253,8 +256,13 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 		// offset and walking back would re-serve it (live watching stays delta-streamed)
 		const walk = off == null || q.get("before") === "1";
 		for (;;) {
-			text = readRange(log, head, tail);
-			if (head > 0 && readRange(log, head - 1, head) !== "\n") {
+			const [raw, boundary] = readRange(log, head, tail);
+			// a forward poll reports a tail on a record boundary: the client's next offset then
+			// starts at a whole record, so a record split across two windows is re-read from its
+			// start and renders once when its newline arrives, never just as a stripped head line
+			if (q.get("before") !== "1") next = boundary;
+			text = raw;
+			if (head > 0 && readRange(log, head - 1, head)[0] !== "\n") {
 				// head lands mid-record: drop the partial head line, only whole records render
 				const nl = text.indexOf("\n");
 				text = nl === -1 ? "" : text.slice(nl + 1);
@@ -263,6 +271,7 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 			if (text || head === 0 || !walk) break;
 			head = Math.max(0, head - LOG_CHUNK);
 		}
+		tail = next;
 	} catch {
 		// log vanished mid-request
 	}
