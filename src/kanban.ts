@@ -21,6 +21,7 @@ export interface Task {
 	priority: string;
 	state: TaskState;
 	worktree: string;
+	issuer: string;
 	summary: string;
 	specs: string;
 	notes: string;
@@ -34,6 +35,7 @@ export interface TaskRef {
 	name: string;
 	priority: string;
 	state: TaskState;
+	issuer: string;
 	summary: string;
 	openQuestions: string;
 }
@@ -99,6 +101,7 @@ export function parseTask(root: string, file: string): Task {
 		priority: attrs.priority ?? "medium",
 		state: (STATES as readonly string[]).includes(attrs.state) ? (attrs.state as TaskState) : "backlog",
 		worktree: attrs.worktree ?? "",
+		issuer: attrs.issuer ?? "user",
 		summary: trim(sections["summary"]),
 		specs: trim(sections["specs"]),
 		notes: trim(sections["notes"]),
@@ -119,7 +122,7 @@ export function listTasks(root: string, scope: Scope, priority?: Priority | stri
 			scope === "backlog" ? t.state === "backlog" : scope === "done" ? t.state === "done" : IN_PROGRESS.has(t.state),
 		)
 		.filter((t) => priority === undefined || t.priority === priority)
-		.map(({ file, name, priority, state, summary, openQuestions }) => ({ file, num: taskNum(file), name, priority, state, summary, openQuestions }));
+		.map(({ file, name, priority, state, issuer, summary, openQuestions }) => ({ file, num: taskNum(file), name, priority, state, issuer, summary, openQuestions }));
 }
 
 export function getTask(root: string, file: string): Task | undefined {
@@ -258,14 +261,16 @@ export function appendNote(root: string, task: Task, note: string): void {
 
 export function createTask(
 	root: string,
-	input: { name: string; priority?: Priority | string; summary: string; specs?: string; openQuestions?: string },
+	input: { name: string; priority?: Priority | string; summary: string; specs?: string; openQuestions?: string; issuer?: string },
 ): Task {
 	const priority = (["low", "medium", "high", "critical"] as const).includes(input.priority as Priority)
 		? input.priority
 		: "medium";
+	// issuer is set at creation only and never changed afterwards; anything but "user" or "#<num>" falls back to "user"
+	const issuer = input.issuer !== undefined && (input.issuer === "user" || /^#\d+$/.test(input.issuer)) ? input.issuer : "user";
 	const open = (input.openQuestions ?? "").trim();
 	const content =
-		`${serializeFrontmatter({ name: input.name, priority, state: "backlog", worktree: "" })}\n` +
+		`${serializeFrontmatter({ name: input.name, priority, state: "backlog", worktree: "", issuer })}\n` +
 		`# Summary\n${input.summary.trim()}\n\n# Specs\n${(input.specs ?? "").trim()}\n\n# Notes\n` +
 		(open ? `\n# Open questions\n${open}\n` : "");
 	mkdirSync(kanbanDir(root), { recursive: true });

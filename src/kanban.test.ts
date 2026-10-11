@@ -187,10 +187,10 @@ assert.equal(tq.openQuestions, "- [user] Which colour?");
 assert.match(readFileSync(join(qRoot, ".kanban", tq.file), "utf8"), /# Notes\n\n# Open questions\n- \[user\] Which colour\?\n$/);
 const tn = createTask(qRoot, { name: "feat: no questions", summary: "s" });
 assert.equal(tn.openQuestions, "");
-// without openQuestions the body is byte-identical to the pre-change format
+// without openQuestions the body is byte-identical to the pre-change format plus the issuer line
 assert.equal(
 	readFileSync(join(qRoot, ".kanban", tn.file), "utf8"),
-	`---\nname: "feat: no questions"\npriority: "medium"\nstate: "backlog"\nworktree: ""\n---\n\n# Summary\ns\n\n# Specs\n\n\n# Notes\n`,
+	`---\nname: "feat: no questions"\npriority: "medium"\nstate: "backlog"\nworktree: ""\nissuer: "user"\n---\n\n# Summary\ns\n\n# Specs\n\n\n# Notes\n`,
 );
 // an empty/whitespace openQuestions reads as absent: no section
 const te = createTask(qRoot, { name: "feat: empty questions", summary: "s", openQuestions: "  " });
@@ -217,6 +217,25 @@ assert.equal(parseTask(qRoot, tn.file).openQuestions, "- [user] Fresh question?"
 assert.equal(listTasks(qRoot, "backlog").find((t) => t.file === tn.file)?.openQuestions, "- [user] Fresh question?");
 assert.equal(listTasks(root, "in-progress").find((t) => t.file === t4.file)?.openQuestions, "");
 rmSync(qRoot, { recursive: true, force: true });
+
+// issuer: "user" by default, "#<num>" when passed, quoted in the frontmatter so it is not a YAML comment
+const ti = createTask(root, { name: "feat: issued", summary: "s", issuer: "#42" });
+assert.equal(ti.issuer, "#42");
+assert.match(readFileSync(join(root, ".kanban", ti.file), "utf8"), /^issuer: "#42"$/m);
+assert.equal(parseTask(root, ti.file).issuer, "#42"); // the quoted value round-trips
+const tui = createTask(root, { name: "feat: user issued", summary: "s" });
+assert.equal(tui.issuer, "user");
+assert.match(readFileSync(join(root, ".kanban", tui.file), "utf8"), /^issuer: "user"$/m);
+assert.equal(createTask(root, { name: "feat: bad issuer", summary: "s", issuer: "#x" }).issuer, "user"); // invalid value falls back to "user"
+// absent attribute (hand-written or pre-change files) reads as "user"
+writeFileSync(join(root, ".kanban", "000090_legacy.md"), '---\nname: "legacy"\n---\n# Summary\nx\n');
+assert.equal(getTask(root, "000090_legacy.md")?.issuer, "user");
+// issuer is creation-only: state transitions and section rewrites never touch it
+setState(root, ti, "to-do");
+updateTask(root, ti, { summary: "s2" });
+assert.equal(parseTask(root, ti.file).issuer, "#42");
+// kanban_list refs carry the field
+assert.equal(listTasks(root, "in-progress").find((t) => t.file === ti.file)?.issuer, "#42");
 
 rmSync(root, { recursive: true, force: true });
 console.log("kanban.test.ts: all assertions passed");
