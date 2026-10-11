@@ -3,7 +3,7 @@ import { execSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendNote, createTask, getTask, listAll, listTasks, parseTask, setState, setWorktree, slugFile, slugWorktree, updateTask } from "./kanban.ts";
+import { appendNote, createTask, getTask, listAll, listTasks, parseTask, setState, setWorktree, slugFile, slugWorktree, taskNum, updateTask } from "./kanban.ts";
 
 const root = mkdtempSync(join(tmpdir(), "kanban-test-"));
 const fail = (msg: string) => {
@@ -16,6 +16,11 @@ const fail = (msg: string) => {
 assert.equal(slugFile("feat: nice thing"), "feat_nice_thing");
 assert.equal(slugWorktree("feat: nice thing"), "feat/nice-thing");
 assert.equal(slugWorktree("nice thing"), "nice-thing");
+
+// taskNum: leading digits, safe fallback for non-numbered names
+assert.equal(taskNum("000042_fix_thing.md"), 42);
+assert.equal(taskNum("000001_feat_nice_thing.md"), 1);
+assert.equal(taskNum("other.md"), 0);
 
 // create + numbering + frontmatter roundtrip
 const t1 = createTask(root, { name: "feat: nice thing", priority: "high", summary: "Do a thing", specs: "Do it well" });
@@ -38,6 +43,12 @@ assert.equal(listTasks(root, "done").length, 0);
 assert.deepEqual(listTasks(root, "backlog").map((t) => ({ file: t.file, priority: t.priority, state: t.state })), [
 	{ file: t1.file, priority: "high", state: "backlog" },
 	{ file: t2.file, priority: "medium", state: "backlog" },
+]);
+
+// listTasks entries carry num
+assert.deepEqual(listTasks(root, "backlog").map((t) => ({ file: t.file, num: t.num })), [
+	{ file: t1.file, num: 1 },
+	{ file: t2.file, num: 2 },
 ]);
 
 // priority filter, alone and combined with scope

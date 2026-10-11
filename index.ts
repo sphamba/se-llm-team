@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { createTask, getTask, kanbanDir, listAll, listTasks, setState, updateTask, STATES, type TaskState } from "./src/kanban.ts";
+import { createTask, getTask, kanbanDir, listAll, listTasks, setState, taskNum, updateTask, STATES, type TaskState } from "./src/kanban.ts";
 import { waitForBoardCommits } from "./src/orchestrator.ts";
 
 function text(s: string) {
@@ -22,7 +22,7 @@ export default function (pi: ExtensionAPI) {
 		name: "kanban_list",
 		label: "Kanban list",
 		description:
-			"List kanban tasks of this project. scope=backlog: tasks to prioritize. scope=in-progress: tasks being worked on. scope=done: completed tasks. Optional priority filter (low/medium/high/critical). Returns file, name, priority, state and summary per task.",
+			"List kanban tasks of this project. scope=backlog: tasks to prioritize. scope=in-progress: tasks being worked on. scope=done: completed tasks. Optional priority filter (low/medium/high/critical). Returns file, num (#NN), name, priority, state and summary per task.",
 		parameters: Type.Object({
 			scope: StringEnum(["backlog", "in-progress", "done"] as const),
 			priority: Type.Optional(StringEnum(["low", "medium", "high", "critical"] as const)),
@@ -67,7 +67,7 @@ export default function (pi: ExtensionAPI) {
 			ensureBoardWatcher(ctx);
 			const task = createTask(ctx.cwd, params);
 			return {
-				content: [{ type: "text", text: `Created ${task.file}` }],
+				content: [{ type: "text", text: `Created ${task.file} (#${taskNum(task.file)})` }],
 				details: task,
 			};
 		},
@@ -90,7 +90,7 @@ export default function (pi: ExtensionAPI) {
 			const task = getTask(ctx.cwd, params.file);
 			if (!task) return text(`No task ${params.file}`);
 			updateTask(ctx.cwd, task, params);
-			return text(`Updated ${task.file}`);
+			return text(`Updated ${task.file} (#${taskNum(task.file)})`);
 		},
 	});
 
@@ -107,7 +107,7 @@ export default function (pi: ExtensionAPI) {
 			const task = getTask(ctx.cwd, params.file);
 			if (!task) return text(`No task ${params.file}`);
 			setState(ctx.cwd, task, params.state as TaskState);
-			return text(`${task.file}: state -> ${params.state}`);
+			return text(`${task.file} (#${taskNum(task.file)}): state -> ${params.state}`);
 		},
 	});
 
@@ -124,7 +124,7 @@ export default function (pi: ExtensionAPI) {
 			const task = getTask(ctx.cwd, params.file);
 			if (!task) return text(`No task ${params.file}`);
 			setWorktree(ctx.cwd, task, params.worktree);
-			return text(`${task.file}: worktree -> ${params.worktree}`);
+			return text(`${task.file} (#${taskNum(task.file)}): worktree -> ${params.worktree}`);
 		},
 	});
 
