@@ -1,8 +1,8 @@
 ---
 name: "feat: webui agent log pane; mark the shown agent, smaller buttons, 5x chunk size"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/webui-agent-log-pane-mark-the-shown-agent-smaller-buttons-5x-chunk-size"
 ---
 
 # Summary
