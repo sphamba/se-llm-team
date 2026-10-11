@@ -83,6 +83,103 @@ function agentLogPath(root: string, handle: string): string | null {
 	return join(kanbanDir(root), ".logs", `${m[1]}.${m[2]}.log`);
 }
 
+// pi --mode json writes JSONL event records (docs/json.md); everything else in the log file is
+// non-JSON: stderr diagnostics and legacy print-mode final text. One tool line per call: the
+// streamed toolcall_end and the execution start both carry name + args, so dedupe by id within
+// the chunk. An assistant message_end repeats its streamed text deltas, so only the user prompt
+// (the run's opening message) renders from message_end.
+const ARG_KEYS = ["command", "path", "file_path", "pattern", "url", "query"];
+const cap = (s: string, max = 160) => (s.length > max ? s.slice(0, max - 3) + "..." : s);
+
+function argSummary(args: unknown): string {
+	if (!args || typeof args !== "object") return "";
+	const rec = args as Record<string, unknown>;
+	let value: unknown;
+	for (const key of ARG_KEYS) {
+		if (typeof rec[key] === "string" && rec[key]) {
+			value = rec[key];
+			break;
+		}
+	}
+	value ??= Object.values(rec).find((v) => typeof v === "string" && v);
+	return typeof value === "string" ? cap(value.replace(/\s+/g, " ").trim()) : "";
+}
+
+function textOf(result: unknown): string {
+	const content = (result as { content?: { type?: string; text?: string }[] } | undefined)?.content;
+	const text = Array.isArray(content) ? content.find((c) => c?.type === "text")?.text : undefined;
+	return typeof text === "string" ? cap(text.replace(/\s+/g, " ").trim(), 200) : "";
+}
+
+export function renderLogChunk(text: string): string {
+	const out: string[] = [];
+	let pending = "";
+	const flush = () => {
+		if (pending) {
+			out.push(pending + "\n");
+			pending = "";
+		}
+	};
+	const lines = text.split("\n");
+	if (lines[lines.length - 1] !== "") lines.pop(); // the byte boundary split a record: drop the partial
+	const seenTools = new Set<string>();
+	for (const line of lines) {
+		if (!line) continue;
+		let rec: Record<string, any>;
+		try {
+			rec = JSON.parse(line);
+		} catch {
+			flush();
+			out.push(line + "\n");
+			continue;
+		}
+		if (!rec || typeof rec !== "object") {
+			flush();
+			out.push(line + "\n");
+			continue;
+		}
+		if (rec.type === "message_update") {
+			const ev = rec.assistantMessageEvent;
+			if (!ev || typeof ev !== "object") continue;
+			if (ev.type === "thinking_start") {
+				flush();
+				out.push("── thinking ──\n");
+			} else if (ev.type === "thinking_delta" || ev.type === "text_delta") {
+				pending += ev.delta ?? "";
+			} else if (ev.type === "text_start") {
+				flush();
+			} else if (ev.type === "toolcall_end") {
+				const id = ev.toolCall?.id;
+				if (typeof id === "string" && !seenTools.has(id)) {
+					seenTools.add(id);
+					flush();
+					const summary = argSummary(ev.toolCall.arguments);
+					out.push("[tool] " + (ev.toolCall.name ?? "?") + (summary ? ": " + summary : "") + "\n");
+				}
+			}
+		} else if (rec.type === "tool_execution_start") {
+			if (typeof rec.toolCallId === "string" && !seenTools.has(rec.toolCallId)) {
+				seenTools.add(rec.toolCallId);
+				flush();
+				const summary = argSummary(rec.args);
+				out.push("[tool] " + (rec.toolName ?? "?") + (summary ? ": " + summary : "") + "\n");
+			}
+		} else if (rec.type === "tool_execution_end" && rec.isError === true) {
+			flush();
+			const err = textOf(rec.result);
+			out.push("[tool] " + (rec.toolName ?? "?") + " failed" + (err ? ": " + err : "") + "\n");
+		} else if (rec.type === "message_end") {
+			const msg = rec.message;
+			if (msg?.role === "user" && typeof msg.content === "string" && msg.content.trim()) {
+				flush();
+				out.push("[prompt] " + cap(msg.content.replace(/\s+/g, " ").trim()) + "\n");
+			}
+		}
+	}
+	flush();
+	return out.join("");
+}
+
 function readRange(path: string, start: number, end: number): string {
 	if (end <= start) return "";
 	const buf = Buffer.alloc(end - start);
@@ -143,7 +240,7 @@ function serve(root: string, req: IncomingMessage, res: ServerResponse): void {
 			}
 			let text = "";
 			try {
-				text = readRange(log, head, tail);
+				text = renderLogChunk(readRange(log, head, tail));
 			} catch {
 				// log vanished mid-request
 			}
