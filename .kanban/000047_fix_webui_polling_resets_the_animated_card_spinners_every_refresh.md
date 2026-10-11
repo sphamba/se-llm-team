@@ -1,7 +1,7 @@
 ---
 name: "feat: webui stacked column pairs; animation-preserving refresh"
 priority: "high"
-state: "live-testing"
+state: "done"
 worktree: "feat/47-webui-stacked-column"
 ---
 
