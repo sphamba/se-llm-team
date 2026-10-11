@@ -1,7 +1,7 @@
 ---
 name: "feat: configure LLM provider, model, and reasoning level; overrides per agent type"
 priority: "critical"
-state: "live-testing"
+state: "done"
 worktree: "feat/71-configure-llm-provider"
 ---
 
@@ -53,3 +53,25 @@ Constraints:
 - Strict tsc (from an installed typescript, flags --strict --target es2022 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions): no error in src/orchestrator.ts or the new test code. The reported errors are pre-existing in hub.ts, kanban.ts, webui.ts, and old test lines.
 - Existing roleStub argv parsing is untouched, so the old assertions stay valid. The role names in the four agent prompts are unique, so the test stub classifies every spawn correctly.
 - The HOLD constraint is satisfied: 000038 is done and merged into main, and this branch sits on that merge.
+
+Live test (worktree feat/71-configure-llm-provider, commit f28f0de). Result: PASS.
+
+What ran:
+- node src/kanban.test.ts, node src/orchestrator.test.ts (all parts, parts X and Y included), node src/webui.test.ts. All pass.
+- Strict tsc --noEmit on src/orchestrator.ts. No error.
+- Live daemon runs from this worktree against scratch project roots. Each root had its own .kanban/se-llm-team.json and a stub agent executable. The stub records its argv and drives the task through the pipeline.
+
+Results:
+- Global provider/model/thinking plus four role overrides: every spawn carries the right flags and the pipeline reaches done. Developer: --provider gprov --model devmodel --thinking low. Reviewer: --provider rprov --model revmodel --thinking high. Live-tester: --provider gprov --model gmodel --thinking off.
+- No LLM config: the argv is unchanged, that is --approve --mode json -p. No extra flag.
+- Bad values (thinking "banana", role thinking "wild", role entry as a string, provider without a model): the daemon logs a warning for each bad value, adds no flag, stays alive, and the pipeline reaches done.
+- A role provider with a global model resolves to --provider roleprov --model gmodel. This is the intended per-field precedence.
+- A real merge conflict spawns the merger with --provider mprov --model mergemodel --thinking high.
+- Real pi CLI: the generated flags parse. The session event shows thinkingLevel equal to the --thinking value (high, off, medium). A model pattern with the :thinking suffix still works without a --thinking flag.
+- Only spawnAgent spawns agents, and all four call sites pass the resolved flags.
+
+Observations (no task needed):
+- The provider-without-model warning comes from llmFlags and repeats at each spawn. The thinking warnings come from loadConfig at daemon start. The earlier note that says all warnings come from loadConfig is true only for the thinking warnings. The behaviour matches the Specs.
+- The two-file merge is shallow for roles. A project-level roles object replaces the user-level roles object. This matches the merge rule of every other key and the Specs, but a user may expect a per-role merge.
+
+Conclusion: the change meets the acceptance criteria. No blocking or non-blocking defect found. No new task needed.
