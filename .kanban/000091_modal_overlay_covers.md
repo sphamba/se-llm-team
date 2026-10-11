@@ -1,7 +1,7 @@
 ---
 name: "fix: modal overlay covers the hub repo tab bar; a tab click only closes the modal"
 priority: "low"
-state: "to-merge"
+state: "merging"
 worktree: "fix/91-modal-overlay-covers"
 ---
 

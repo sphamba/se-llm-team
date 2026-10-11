@@ -1,7 +1,7 @@
 ---
 name: "fix: webui agent run labels start from 1, not 0"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/108-webui-agent-run"
 ---
 
@@ -30,3 +30,9 @@ Constraints:
 - Files: src/webui.ts, src/webui.test.ts only. No orchestrator changes.
 
 # Notes
+
+# Notes
+
+- Extracted the run-label lambda from renderAgent as exported client helper agentLabel(a, count), interpolated into PAGE like the other tested client helpers, and made it 1-based: " " + (a.run + 1) when count[a.role] > 1 and a.run != null. The local capitalize cap in renderAgent folded into agentLabel; the count > 1 rule and a.run == null unnumbered path are unchanged. Log names, handles and nextRunIndex untouched.
+- src/webui.test.ts: agentLabel asserted over the served 000088 payload (developer run 0 -> "Developer 1", run 1 -> "Developer 2", legacy run null -> "Developer", solo run -> "Reviewer") plus the page-ships-the-tested-source check.
+- node src/webui.test.ts, node src/kanban.test.ts pass; node src/orchestrator.test.ts failed once on the timing-sensitive respawn-cap smoke, passed on re-run (it imports hub.ts, not webui.ts, so unrelated to this change). Committed 38f7e75 on fix/108-webui-agent-run.

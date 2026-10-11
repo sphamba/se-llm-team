@@ -1,7 +1,7 @@
 ---
 name: "feat: blockedBy task attribute; failsafe skips blocked tasks; PM honors holds"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "feat/80-blockedby-task-attribute"
 ---
 
@@ -42,3 +42,11 @@ Constraints:
 - No webui changes in this task (the webui task renders blockedBy and the id links).
 
 # Notes
+
+- [2026-10-11 17:11] Implemented on feat/80-blockedby-task-attribute, commit 37a8cc7, branched from the main tip d93e444 (000074 and 000078 are merged there; only the 000075 hold was still live - its branch changes one backlog-filter line, my filter sits at the promotion pick ~10 lines below, so the #75 merge stays conflict-free).
+  - src/kanban.ts: Task, TaskRef and parseTask carry blockedBy (absent reads as ""); listTasks returns it; updateTask patches it via updateAttrs with replace semantics (the value replaces the whole list, "" clears, omitted stays unchanged); createTask writes it only when provided, so the frontmatter byte-format is unchanged otherwise.
+  - src/orchestrator.ts: new blockedByUndone helper. An entry blocks while its task exists and is not done; a ghost ref is ignored; an all-blocked backlog keeps the idle window armed, so the promotion fires as soon as the blocker reaches done.
+  - index.ts: kanban_create and kanban_update gained the optional blockedBy param; the kanban_list and kanban_get descriptions mention it.
+  - skills/se-llm-team/SKILL.md step 6: never promote a task whose blockers are not done; prune done blocker refs with kanban_update at scheduling time (the PM maintains the list, no auto-clear).
+  - Tests: src/kanban.test.ts gained a blockedBy roundtrip section (parse, create with, update replace, clear, list/get inclusion, byte-format without blockedBy). src/orchestrator.test.ts gained part AB, a daemon smoke: a critical task held despite priority, a ghost-only ref promoted (ghost ignored), an unblocked medium task promoted, and the blocked task promoted after its blocker settled done. Full suite green: kanban.test.ts, orchestrator.test.ts (all parts), webui.test.ts. Part AB awaits the daemon's full exit before removing its fixture (a sweep mid-flight still writes into it).
+  - Typecheck: no local tsc (the project checks run with node directly). A one-off strict tsc run reports the same two pre-existing errors as main, only at shifted line numbers - no new type errors.
