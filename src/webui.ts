@@ -705,7 +705,7 @@ h1 { font-size: 16px; margin: 0; }
 #theme { margin-left: auto; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 #theme:hover { background: var(--hover); }
 #updated { font-size: 12px; color: var(--muted); }
-/* 000091: #modal is position:fixed at z-index auto, so a relative #tabs at z-index 1 keeps the bar above the overlay and clickable while a modal is open */
+/* 000091: a relative #tabs at z-index 1 keeps the bar above the overlay and clickable while a modal is open; 000119: #modal must sit above #tabs and #relations (both z-index 1) or the relation lines paint over it */
 #tabs { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; }
 #tabs:empty { display: none; }
 .tab { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px 6px 0 0; padding: 4px 12px; font-size: 12px; cursor: pointer; }
@@ -757,7 +757,7 @@ the cards, pointer-events none so their clicks pass through */
 #m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 300px; overflow: auto; }
 #m-log.hidden { display: none; }
 #m-log pre { margin: 0; padding: 8px 10px; font-size: 10px; line-height: 1.45; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: break-word; }
-#modal { position: fixed; inset: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
+#modal { position: fixed; inset: 0; z-index: 2; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
 #modal.hidden { display: none; }
 #m-box { background: var(--panel); border-radius: 10px; padding: 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
 #m-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
