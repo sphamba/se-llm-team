@@ -65,6 +65,25 @@ assert.equal(renderLogChunk(legacy), legacy, "blank paragraph lines in non-JSON 
 const mixed = JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "paragraph" } }) + "\n\nlegacy line\n";
 assert.equal(renderLogChunk(mixed), "paragraph\n\nlegacy line\n", "a blank line flushes pending text and passes through");
 
+// sidechain subagent transcripts (.output session records): user prompt, assistant text and
+// thinking, and toolResult all render; toolResults join the one-line-per-call dedupe
+const sidechain = [
+	JSON.stringify({ isSidechain: true, agentId: "aaaa1111", type: "user", message: { role: "user", content: "Review the diff" } }),
+	JSON.stringify({ isSidechain: true, agentId: "aaaa1111", type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "Reading the diff." }], usage: {}, model: "m", provider: "p" } }),
+	JSON.stringify({ isSidechain: true, agentId: "aaaa1111", type: "toolResult", message: { role: "toolResult", toolCallId: "t9", toolName: "bash", content: [{ type: "text", text: "diff looks fine" }], isError: false, durationMs: 7 } }),
+	JSON.stringify({ isSidechain: true, agentId: "aaaa1111", type: "assistant", message: { role: "assistant", content: [{ type: "thinking", thinking: "Plan the fix." }, { type: "toolCall", id: "t8", name: "read", arguments: { path: "/r/SPECS.md" } }] } }),
+	JSON.stringify({ isSidechain: true, agentId: "aaaa1111", type: "toolResult", message: { role: "toolResult", toolCallId: "t8", toolName: "read", content: [{ type: "text", text: "specs" }], isError: false } }),
+].join("\n") + "\n";
+const side = renderLogChunk(sidechain);
+assert.ok(side.includes("[prompt] Review the diff\n"), "a sidechain user record renders the prompt text");
+assert.ok(side.includes("Reading the diff.\n"), "sidechain text blocks render as message text");
+assert.ok(side.includes("[tool] bash: diff looks fine\n"), "a sidechain toolResult renders toolName plus its text content");
+assert.ok(side.includes("── thinking ──\n") && side.includes("Plan the fix.\n"), "sidechain thinking blocks render in the existing thinking style");
+assert.equal(side.split("[tool] read: /r/SPECS.md").length - 1, 1, "one tool line per call: the toolcall args line renders once");
+assert.ok(!side.includes("[tool] read: specs"), "a sidechain toolResult dedupes against its toolcall within the chunk");
+assert.ok(!side.includes('"type"'), "sidechain records never leak raw JSON");
+assert.ok(!renderLogChunk(sidechain + "partial-without-newline").includes("partial"), "a partial trailing sidechain record is dropped too");
+
 // the hub serves the dashboard endpoints; HOME at the temp home keeps the hub registry and
 // lock out of the real pi agent dir
 const task = createTask(root, { name: "feat: webui smoke", summary: "Dashboard smoke", specs: "Render the board" });
@@ -103,6 +122,7 @@ rmSync(join(root, ".kanban", held.file)); // the daemon section below expects a 
 
 // GET / mentions all 10 state names; other paths and methods are 404
 const page = await (await fetch(`${base}/`)).text();
+assert.doesNotThrow(() => new Function(page.match(/<script>([\s\S]*?)<\/script>/)![1]), "the served client script parses");
 assert.ok(page.includes("Software Engineering LLM Team"), "page shows the new title");
 assert.ok(page.includes('id="theme"'), "page has the theme toggle");
 for (const st of STATE_NAMES) assert.ok(page.includes(st), `page mentions state ${st}`);
@@ -434,6 +454,18 @@ assert.ok(!page.includes('id="m-sub-btns"'), "the single sub row is gone; subs s
 assert.match(page, /\.agent-col \{ display: flex; flex-direction: column/, "each column stacks its run card over its sub cards");
 assert.match(page, /\.agent-subs \{ display: flex; flex-direction: column/, "sub cards stack vertically below their caller");
 assert.ok(page.includes('if (gen !== agentGen || !box) return;'), "a superseded open's sub fetches never write into the new view");
+// 000121: the 5 s refresh re-derives the open detail card in place: title and attrs freely, the
+// body html-gated, the run cards re-rendered without touching the log pane or its state
+const upd = page.match(/function updateOpenTask\(t\) \{[\s\S]*?\n\}/)![0];
+assert.ok(page.includes("if (t) updateOpenTask(t); else closeModal();"), "the refresh updates the open card in place and closes it when its task is gone");
+assert.ok(upd.includes("writeHead(t)") && upd.includes("renderAgent(t, true)") && upd.includes("setBody(t)"), "the refresh re-derives title, attrs, agent row and body from the fresh payload");
+assert.ok(!upd.includes("closeLog") && !upd.includes("logState"), "the refresh path never touches the log pane, logState or the log timer");
+assert.ok(page.includes('<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><pre id="m-log-text"></pre></div></div>'), "the log pane is static markup split from the buttons row, so a run-card rebuild never clears it");
+assert.ok(!page.includes(`+ '</div><div id="m-log"`), "renderAgent no longer rebuilds the log pane with the run cards");
+const setBodySrc = page.match(/function setBody\(t\) \{[\s\S]*?\n\}/)![0];
+assert.ok(setBodySrc.includes("if (el.__html === html) return;"), "the body rewrite is html-gated: an unchanged body keeps its node and the reader's scroll");
+const ra = page.match(/function renderAgent\(t, keep\) \{[\s\S]*?\n\}/)![0];
+assert.ok(ra.includes('.agent-subs").replaceWith(box)') && ra.includes("if (keep) return;"), "a refresh carries the fetched sub boxes over by handle and fetches sub lists on open only");
 setState(root, getTask(root, task.file)!, "doing");
 const slug = task.file.replace(/\.md$/, "");
 mkdirSync(join(root, ".kanban", ".pids"), { recursive: true });
@@ -734,7 +766,7 @@ assert.deepEqual(
 const subZero = await (await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=0`)).json();
 assert.equal(subZero.text, "SUB ZERO\n", "sub=0 serves the first subagent transcript through the chunked payload");
 const subOne = await (await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=1`)).json();
-assert.equal(subOne.text, "plain fallback\n", "a sidechain record renders to nothing through renderLogChunk, its non-JSON line passes through (no special casing)");
+assert.equal(subOne.text, "[prompt] do the thing\nplain fallback\n", "a sidechain user record renders the prompt, its non-JSON line still passes through");
 assert.equal((await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=9`)).status, 404, "an out-of-range subagent index is rejected");
 assert.equal((await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=x`)).status, 404, "a non-numeric subagent index is rejected");
 assert.equal((await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=1abc`)).status, 404, "a partially numeric subagent index is rejected too");
@@ -745,6 +777,18 @@ writeFileSync(out2, "SUB TWO\n");
 appendFileSync(rv0, subPath("ffffffff-0000-0000-0000-000000000000", out2) + "\n");
 const grown = await (await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=list`)).json();
 assert.deepEqual(grown.map(s => s.id), ["aaaaaaaa-0000-0000-0000-000000000000", "bbbbbbbb-0000-0000-0000-000000000000", "ffffffff-0000-0000-0000-000000000000"], "a parent log that grew invalidates the memoized sub list");
+
+// 000118 sidechain walk-back: a subagent tail that renders nothing walks back to the head chunk,
+// which now renders the prompt, so a fresh open never lands on an empty pane
+const out3 = join(subDir, "11111111-0000-0000-0000-000000000000.output");
+writeFileSync(out3, [
+	JSON.stringify({ isSidechain: true, agentId: "11111111", type: "user", message: { role: "user", content: "walk back to me" } }),
+	JSON.stringify({ isSidechain: true, agentId: "11111111", type: "system", message: { role: "system", content: "x".repeat(LOG_CHUNK) } }),
+	JSON.stringify({ type: "session", version: 3, id: "s", timestamp: "now", cwd: "/r" }),
+].join("\n") + "\n");
+appendFileSync(rv0, subPath("11111111-0000-0000-0000-000000000000", out3) + "\n");
+const subTwo = await (await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=3`)).json();
+assert.ok(subTwo.text.includes("[prompt] walk back to me\n") && subTwo.head === 0, "a subagent tail that renders nothing walks back to the prompt, never an empty pane");
 
 // restore the board for the daemon section below
 rmSync(join(root, ".kanban", ".pids", `${slug}.pid`));
