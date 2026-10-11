@@ -1,7 +1,7 @@
 ---
 name: "docs: README Checks section lists only one of three test files"
 priority: "low"
-state: "live-testing"
+state: "to-merge"
 worktree: "docs/90-readme-checks-section"
 ---
 
@@ -33,3 +33,4 @@ Constraints:
 - Ran all three listed commands: kanban.test.ts all assertions passed, orchestrator.test.ts all smoke parts passed, webui.test.ts all assertions passed.
 - Commit 92da32a on branch docs/90-readme-checks-section.
 - Reviewer: diff main...HEAD is README.md only, +2 lines inside the "## Checks" code block; no other section touched. Order matches the Specs (kanban, orchestrator, webui). Re-ran all three files independently: exit 0 each (kanban all assertions passed, orchestrator smoke suite passed, webui all assertions passed). Line 49's "see [Checks](#checks)" anchor still resolves to the updated block, so no second edit needed. No findings, change accepted as-is.
+- Live-tester: ran the README "## Checks" block as a user would, from the worktree. All three listed commands exist and pass with exit 0: `node src/kanban.test.ts` (all assertions passed), `node src/orchestrator.test.ts` (all smoke parts passed), `node src/webui.test.ts` (all assertions passed). README shows all three commands in order; diff main...HEAD is README.md only, +2 lines inside the Checks block. Acceptance met. No issues found, no follow-up tasks.

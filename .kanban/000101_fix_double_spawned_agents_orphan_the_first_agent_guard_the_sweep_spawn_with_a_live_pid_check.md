@@ -1,8 +1,8 @@
 ---
 name: "fix: double-spawned agents orphan the first agent; guard the sweep spawn with a live-pid check"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/101-double-spawned-agents"
 ---
 
 # Summary

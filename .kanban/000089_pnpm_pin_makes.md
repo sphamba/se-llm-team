@@ -1,7 +1,7 @@
 ---
 name: "fix: pnpm pin makes every pnpm invocation write an untracked pnpm-lock.yaml"
 priority: "low"
-state: "live-testing"
+state: "to-merge"
 worktree: "fix/89-pnpm-pin-makes"
 ---
 
@@ -43,3 +43,12 @@ Reviewer run (fix/89), reviewed cd6c16c:
 - README line 49 no longer claims there is no lockfile; the other "lockfile" mention (line 59) is the orchestrator lock, unrelated.
 - `node src/kanban.test.ts`, `node src/orchestrator.test.ts`, `node src/webui.test.ts` all pass.
 - No fixes made; no open questions.
+
+Live-tester run (fix/89), tested cd6c16c:
+- Removed the generated `pnpm-lock.yaml` to start clean; `git status --porcelain` was empty before.
+- Ran `corepack pnpm --version` -> 12.11.2, and it created `pnpm-lock.yaml` (4606 bytes, contains `packageManagerDependencies: pnpm 12.11.2`, i.e. the pnpm env lockfile). `git status --porcelain` was empty afterwards.
+- Ran `corepack pnpm pkg get packageManager` -> `pnpm@12.11.2`; `git status --porcelain` still empty.
+- `git check-ignore -v pnpm-lock.yaml` -> `.gitignore:3:pnpm-lock.yaml`. `git ls-files pnpm-lock.yaml` empty (not tracked). `.gitignore` line order intact (`.worktrees`, `node_modules/`, `pnpm-lock.yaml`, `.kanban/`).
+- README line 49 now reads "There are no dependencies and no committed lockfile (pnpm writes an env lockfile that is gitignored)." The only other "lockfile" mention is the orchestrator lock (`.kanban/.orchestrator.lock`), unrelated. Statement is accurate.
+- `node src/kanban.test.ts`, `node src/orchestrator.test.ts`, `node src/webui.test.ts` all pass.
+- All acceptance criteria met. No issues found. No open questions.

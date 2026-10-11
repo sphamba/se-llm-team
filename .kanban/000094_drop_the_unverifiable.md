@@ -1,7 +1,7 @@
 ---
 name: "chore: drop the unverifiable typecheck acceptance line; name the runnable checks"
 priority: "low"
-state: "live-testing"
+state: "to-merge"
 worktree: "chore/94-drop-the-unverifiable"
 ---
 
@@ -38,3 +38,10 @@ Constraints:
 - No other file changed; README untouched (belongs to #90). No tsconfig, package.json scripts, dependencies, lockfile or TypeScript tooling added.
 - Ran all three suites on the branch: `node src/kanban.test.ts` (all assertions passed), `node src/orchestrator.test.ts` (all smoke parts passed), `node src/webui.test.ts` (all assertions passed).
 - Review: acceptance met. The diff against main is two bullets under step 5 of `skills/se-llm-team/SKILL.md` and no other tracked or untracked file. The first bullet names `node src/kanban.test.ts`, `node src/orchestrator.test.ts` and `node src/webui.test.ts` as the acceptance baseline, plus task-specific browser or CLI checks. The second bullet states that the repo has no tsconfig and no typecheck command, bans the typecheck acceptance line, and allows an ad hoc strict `tsc` comparison in # Notes as evidence only. The skill was not restructured. No tsconfig, package.json scripts, dependencies, lockfile or TypeScript tooling added. README untouched. Ran the three suites on the branch: all pass, exit 0. A dry-run merge of main into the branch is clean, and main did not touch `skills/se-llm-team/SKILL.md` since the merge base. No fixes made.
+- Live test (2026-10-11, branch b31fae3):
+  - Read the changed section as a user of the skill: `skills/se-llm-team/SKILL.md` step 5 now carries exactly two added bullets. The first names `node src/kanban.test.ts`, `node src/orchestrator.test.ts`, `node src/webui.test.ts` as the acceptance baseline plus task-specific browser or CLI checks. The second states the repo has no tsconfig and no typecheck command, bans "Typecheck and the full test suite pass" as acceptance, and allows an ad hoc strict tsc comparison in # Notes as evidence only. Step 5 was not restructured.
+  - Grep for "typecheck" outside `.kanban/` and `.worktrees/`: only the two new lines in `skills/se-llm-team/SKILL.md`. README untouched.
+  - Ran the three runnable suites: `node src/kanban.test.ts` (all assertions passed, exit 0), `node src/orchestrator.test.ts` (all smoke parts passed, exit 0), `node src/webui.test.ts` (all assertions passed, exit 0).
+  - Confirmed no tsconfig (`ls tsconfig*` empty), package.json has no scripts, no dependencies and no devDependencies.
+  - `git diff main...HEAD --name-only` lists only `skills/se-llm-team/SKILL.md`; `git status --porcelain` is empty. No tsconfig, package.json scripts, dependencies, lockfile or TypeScript tooling added.
+  - Result: all acceptance criteria met. No issues found.
