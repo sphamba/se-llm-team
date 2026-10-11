@@ -28,7 +28,7 @@ ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
 
 ## Kanban board
 
-`.kanban/` in the project repo holds one markdown file per task, named `000001_feat_nice_thing.md`. Flat YAML frontmatter (name, priority, state, worktree) plus # Summary, # Specs, # Notes sections. The library writes files only; the orchestrator daemon is the sole git committer for `.kanban/` paths, at two points only: creation in backlog, and done. Edits in between stay uncommitted and land in the one done commit.
+`.kanban/` in the project repo holds one markdown file per task, named `000001_nice_thing.md` (zero-padded number, slug capped at 4 words with the type word dropped). Flat YAML frontmatter (name, priority, state, worktree) plus # Summary, # Specs, # Notes sections. The library writes files only; the orchestrator daemon is the sole git committer for `.kanban/` paths, at two points only: creation in backlog, and done. Edits in between stay uncommitted and land in the one done commit.
 
 States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing, done.
 
@@ -37,7 +37,7 @@ States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing,
 `src/orchestrator.ts` is a non-LLM daemon. Start it with the `orchestrator_start` tool (or `node src/orchestrator.ts --root <project>`). One daemon per project: the lockfile is `.kanban/.orchestrator.lock`.
 
 - Watches `.kanban/` (fs.watch) and rescans every 10 s. The `orchestrator_poke` tool touches `.kanban/.poke` for an immediate scan and agent scheduling.
-- to-do: creates `.worktrees/<slug>` from the task name, sets the worktree attribute, spawns a Developer, moves to doing. Unlimited lanes; the PM throttles by how many tasks it promotes to to-do.
+- to-do: creates `.worktrees/<type>/<num>-<short-slug>` (e.g. feat/1-nice-thing) from the task, sets the worktree attribute, spawns a Developer, moves to doing. Unlimited lanes; the PM throttles by how many tasks it promotes to to-do.
 - to-review: spawns a Reviewer, moves to reviewing.
 - to-live-test: spawns a Live-tester, moves to live-testing.
 - Liveness poll: an agent dead without a state update moves the task on (a dead Developer goes back to to-do for a fresh run, reviewing to to-review, live-testing to done). Capped at 5 respawns per task.
