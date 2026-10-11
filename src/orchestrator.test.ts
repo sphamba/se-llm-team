@@ -751,3 +751,22 @@ assert.equal(r.output().split("promoting ").length - 1, 1, "exactly one promotio
 r.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: ... + failsafe auto-schedule smoke passed");
+
+// --- part S: 3 consecutive failed pushes log the warning once ---
+const rootS = fixture();
+cleaned.push(rootS);
+// origin points at a non-repo path: every push fails fast, no SSH involved
+execSync("git remote add origin /nonexistent/se-llm-team.git", { cwd: rootS, shell: "/bin/bash" });
+mkdirSync(kanbanDir(rootS), { recursive: true });
+writeFileSync(join(kanbanDir(rootS), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootS), pollMinutes: 0.05 }));
+// a task per sweep: one create mirror commit (and one failed push) each, four in a row
+const s = await runDaemon(rootS);
+for (let i = 0; i < 4; i++) {
+	const t = createTask(rootS, { name: `fix: push warn ${i}`, summary: "Push warning smoke", specs: "n/a" });
+	await waitFor(() => mirrorSubjects(rootS).includes(`kanban: create ${t.file}`), 30000, `create mirror commit ${i}`, s.output);
+}
+await waitFor(() => s.output().includes("WARNING: auto-push of refs/heads/meta/kanban"), 10000, "warning after 3 consecutive failed pushes", s.output);
+assert.equal(s.output().split("WARNING: auto-push").length - 1, 1, "push warning logged exactly once per failure streak");
+s.daemon.kill("SIGTERM");
+
+console.log("orchestrator.test.ts: ... + push warning smoke passed");
