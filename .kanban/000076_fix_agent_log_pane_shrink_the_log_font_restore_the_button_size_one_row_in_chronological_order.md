@@ -1,8 +1,8 @@
 ---
 name: "fix: agent log pane; shrink the log font, restore the button size, one row in chronological order"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/76-agent-log-pane"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -54,3 +54,12 @@ Constraints:
 - Merge check: 76 merges clean into current main b50da8a (includes the hub frontend merge db15b73), and the three test files pass on the merged tree. The merge with feat/47-webui-stacked-column conflicts on the .col min-width rule, but that conflict exists when 47 merges into main alone (main's bdfced0 changed .col after 47 branched). It is not caused by 76. After 47 resolves its own conflict, 76 merges cleanly on top (both orders verified in temp clones).
 - Sequencing note: 000047 was still in live-testing when 000076 ran, against the task Constraints. The changed regions do not overlap, so the code merge is safe in either order.
 - Verdict: acceptance met, no fixes.
+
+## Live test (Live-tester, commit aa6da02)
+- Setup: the worktree src/webui.ts served by startWebUi against a copy of the real board, with task #70 in doing, a live developer pid, real developer JSONL logs, a 500 kB reviewer log and real live-tester logs. Headless Chromium at 1280x800 and 320x700, fixture port 44111. The production webui on port 4242 was not touched.
+- Full suite green: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts.
+- Buttons: three agent buttons render at 12px font and 3px 10px padding. At 1280px they share one row (same y=248, x=278 -> 371 -> 470) in the order Reviewer, Live-tester, Developer, so the live agent is rightmost. At 320px the row wraps and does not overflow the modal.
+- Log: pre#m-log-text computes 10px with line-height 14.5px, pre-wrap and break-word. The pane starts 6px under the row (computed margin-top 6px). A scroll to the top of a 500 kB log loaded older bytes (81900 -> 163800 chars). A line appended to the live log appeared in the pane in less than 1 second. A task with past agents only still renders its buttons in one row and its log opens.
+- Active marking: a past log marks that button alone, a switch moves the mark, and a second click closes the pane and clears the mark. No JavaScript errors in the console. Screenshot /tmp/fix76-live/buttons-log.png.
+- Finding (low): the row order is the fixed pipeline role order, not the log age. On a reopened task (done, then fixed again) a later reviewer run can be newer than the live-tester run, and the row then shows Reviewer left of Live-tester, which is not chronological. In the ordinary pipeline the two orders agree.
+- Verdict: acceptance met. The ordering deviation above is the only finding.
