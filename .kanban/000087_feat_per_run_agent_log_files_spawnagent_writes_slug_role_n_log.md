@@ -1,7 +1,7 @@
 ---
 name: "feat: per-run agent log files; spawnAgent writes slug.role.N.log"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "feat/87-per-run-agent"
 ---
 
@@ -25,3 +25,19 @@ Acceptance: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/web
 HOLD: behind #69 (doing on fix/69, dirtying src/orchestrator.ts + src/orchestrator.test.ts).
 
 # Notes
+- Implemented per-run agent logs. spawnAgent now writes `<slug>.<role>.<n>.log`. n = 1 + the max existing index in `.kanban/.logs/`. A legacy unsuffixed file never counts toward the index, so the first indexed run is 0. Legacy files stay untouched. argv, llmFlags, detached, stdio, child.unref(), and writePid(pidName) are unchanged.
+- Added the reviewer successful-run cap at 3 (REVIEWER_RUN_CAP). Successful runs count in `.kanban/.logs/<slug>.reviewer-runs.count`. A marker file `<slug>.reviewer-armed` holds the spawned reviewer pid. The orchestrator consumes the marker when it sees the task back in to-review, or in to-live-test after an approval. A pid match counts one run. A mismatch (died run, or a later developer spawn overwrote the pidfile) counts nothing. At a count of 3 or more the reviewer spawn is refused: the orchestrator re-reads the task with getTask, and when the state is still to-review, it moves the task to to-live-test, clears the counter, and logs "reviewer succeeded 3+ times, moving to to-live-test".
+- Known behavior: an approval bump stays in the counter until a forced advance clears it. A later rework cycle can thus start with the old count. This follows the spec ("per task", "an approval counts toward the cap").
+- The naming contract stays exactly as specified for the webui task #88. The current webui still reads legacy names, so its history pane shows no new runs until #88 lands. webui.test.ts passes (it hand-writes fixture logs).
+- Tests: part A asserts indexed log names, an untouched legacy log, and the approval count. Part B asserts the developer rerun log 1. Part E asserts six indexed reviewer logs and no count for died runs. Part K asserts indexed merger logs. New part AA covers the cap refusal, the counter clear, and the pipeline after the refusal. Parts X and Y now spawn with a temp HOME, so the ambient user-level config cannot leak into the exact-flag assertions (loadConfig merges user-level first; the real global config changed mid-session and broke them).
+- The HOLD behind #69 was stale: fix/69-daemon-restart-reverts is already merged into this worktree's base.
+- Reviewer pass (subagent) found no blockers. The per-run index scan, the counting interleavings, the failed-spawn path, and the cap gate were verified clean.
+- Acceptance: node src/kanban.test.ts, node src/orchestrator.test.ts, and node src/webui.test.ts all pass.
+- The task state moved on to reviewing while I finished (a reviewer is on it). I aborted my own to-review transition per the transition guard. Work is committed at 35ba118 on feat/87-per-run-agent.
+- Reviewer pass on the final head 35ba118 (feature 6bd3aab + test-infra fix 35ba118): the diff matches the specs point by point. nextRunIndex scans .kanban/.logs/ for the max `<slug>.<role>.<n>.log` index and the legacy unsuffixed file is excluded by the digit check (the slice yields a non-numeric remainder), so the first indexed run is 0 (spec 1, 2). spawnAgent is otherwise unchanged (spec 3). The armed-marker pid match counts a run only when the spawned reviewer's pid still owns the pidfile; a died run (the poll clears the pidfile first) and a later developer spawn both read as mismatches; the forced advance re-reads with getTask, moves to-live-test when still to-review, clears the counter, and logs the spec line (spec 4). The `<slug>.reviewer-armed` name cannot collide with the index scan (hyphen, no .log suffix) or the webui agentLogPath regex (spec 5).
+- Acceptance verified on 35ba118: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts all pass. The orchestrator suite ran end to end and includes part AA (exactly 3 reviewer spawns, the 4th refused, forced to-live-test, counter cleared, pipeline completes to done), the part B developer rerun log 1, the part E six indexed reviewer logs with no count for died runs, and the part K three indexed merger logs.
+- Reviewed 35ba118 (landed mid-review): it adds the part A legacy-log assertion (spec 2 coverage) and isolates parts X and Y from the ambient user-level config. Correct; no further action.
+- Known latent, pre-existing and not this task: fixture() runs `git init -q` and parts K/X then `git checkout -q main`, so the suite depends on the machine's global git init.defaultBranch=main (this machine has it). One-word fix when it bites: `git init -qb main`.
+
+# Open questions
+- An approval bump stays in the reviewer-runs counter until a forced advance clears it. Shall the counter also clear when the task completes (reaches done), so every rework cycle starts at zero? The current code follows the spec test list ("an approval counts toward the cap").

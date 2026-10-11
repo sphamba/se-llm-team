@@ -1,7 +1,7 @@
 ---
 name: "feat: issuer attribute on tasks; webui differentiates task-issued from user-issued"
 priority: "high"
-state: "doing"
+state: "reviewing"
 worktree: "feat/72-issuer-attribute-on"
 ---
 
@@ -37,3 +37,12 @@ Constraints:
 - Note: 000047 and 000058 (backlog) also touch src/webui.ts, and 000064 touches src/index.ts/src/kanban.ts - promote them after this task merges, in priority order.
 
 # Notes
+
+- Rebased the branch onto main before starting: the hold 000070 is done and merged, and main had moved (000047's stacked webui columns, fix/69), so the webui changes sit on the merged code. No conflicts.
+- src/kanban.ts: Task and TaskRef carry issuer. parseTask reads it, absent -> "user" (existing files are never rewritten). createTask writes it at creation only: values "user" or "#<num>", anything else (including absent) falls back to "user". serializeFrontmatter quotes every value, so issuer: "#42" stays a string and cannot start a YAML comment. kanban_update/setState/setWorktree never touch issuer.
+- index.ts (kanban tools, file is at the repo root, not src/): kanban_create gained the optional issuer param with the rule in its description; kanban_list/kanban_get descriptions now name issuer. kanban_create passes params straight to createTask, so the tool accepts "user" or "#<num>".
+- src/webui.ts: taskPayload carries issuer (the hub's per-project variant inherits it, no hub.ts change). Cards show an issuer chip after the priority chip: user-issued cards render a plain "user" chip and keep full-contrast styling; task-issued cards render the "#<num>" badge and a dimmed name (.issued). The detail card gained an issuer row in #m-attrs. The css uses var(--muted) and var(--code-bg), defined in both the light and dark palettes, so the differentiation is consistent across themes.
+- Tests: kanban.test.ts covers the default, "#42" write and quoted round-trip, invalid-value fallback, absent -> "user" on a hand-written pre-change file, creation-only (state + section rewrites leave it), and list refs. webui.test.ts covers the payload issuer ("user" default, "#42" for the issued task), the card markup classes, the shipped css and the detail row. All three suites pass (node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts) and strict tsc --noEmit (flags per 000071's notes) reports no error in the touched files.
+- Pre-existing env-dependent failure fixed in src/orchestrator.test.ts (outside the listed files, needed for the full-suite-green acceptance): parts X and Y failed on pristine main on this machine because runDaemon inherits HOME and this machine's ~/.pi/agent/se-llm-team.json sets provider/model/thinking, leaking --provider RCP into the expected spawn flags (verified on a clean main clone before touching anything). Fix: runDaemon gained an extraEnv param and parts X and Y run with HOME at an empty temp dir, so the board config is the whole config surface. Part Y never ran before because part X failed first; it has the same leak (the user-level model fills the provider-without-model warning case).
+- The real board's existing task files are untouched: all tests and the smoke run used temp dirs.
+- Commit b5e8466 in the worktree feat/72-issuer-attribute-on, based on main 4d79759.

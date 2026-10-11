@@ -1,6 +1,6 @@
 ---
 name: "feat: webui columns for to-merge and merging"
-priority: "medium"
+priority: "high"
 state: "backlog"
 worktree: ""
 ---
