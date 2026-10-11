@@ -1,8 +1,9 @@
 ---
 name: "feat: SKILL.md blocking-task guidance; the kanban tools reject circular blocks"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/131-skill-md-blocking"
+complexity: "moderate"
 ---
 
 # Summary

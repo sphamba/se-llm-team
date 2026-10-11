@@ -1,8 +1,8 @@
 ---
 name: "fix: restarting the orchestrator must not kill the running agents"
 priority: "high"
-state: "live-testing"
-worktree: "fix/125-restarting-the-orchestrator"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -43,3 +43,16 @@ src/orchestrator.test.ts: start the daemon, let it spawn a fake long-running age
   - Verified the fd redirect end to end. openSync(path, "a") + stdio ["ignore", fd, fd]; uv_spawn dups the fd into the child during the synchronous spawn() call, so closeSync(fd) in the parent cannot race the child's dup. The O_APPEND flag rides the shared open-file-description, so stdout and stderr writes stay atomic.
   - Verified the retro compaction cannot race a live writer. compactFinishedLogs rewrites a log only when its guard pid reads dead in /proc (discriminator-checked), and a dead process cannot write. While the writer lives, poll's live-pid branch defers, and the guard skips the log. A stalled agent SIGTERMed by bounceDead reads dead only through its cleared pidfile: an agent that survives its SIGTERM past the rename writes to the unlinked inode and its post-SIGTERM lines drop. This window is bounded to the SIGTERM-death time of an agent the poll just killed as hung, and the lines are the diagnostics tail of a hung run. Accepted, no code change.
   - Spec checks pass: diff touches src/orchestrator.ts and src/orchestrator.test.ts only; log path/naming unchanged; webui read path untouched; no new dependencies; --compact-logs intact. Part AQ covers the spec test (survives SIGTERM, log grows, restart picks the agent up as alive, no twin, state doing intact).
+
+- 2026-10-11 (live test, commit 653f41e, sandbox /tmp/lt0125-0tgcGa):
+  - Setup: one sandbox git repo with a per-root .kanban/se-llm-team.json (agent -> a fake long-running writer, pollMinutes 0.05, webUi -> the shared hub). The daemon ran the way the extension starts it: node src/orchestrator.ts --root <sandbox> --rescan-seconds 1. The fake agent wrote one JSONL delta line every 100 ms, plus system and stderr records. No unit suite ran.
+  - Restart survival: SIGTERM to the daemon left the developer agent alive three times. The log kept growing after every daemon death (for example 195901 -> 222420 bytes in five seconds). The agent process and its command line stayed intact.
+  - Restart pickup: the second daemon logged no second spawn, the task stayed in doing, the pid file still named the same live pid, and the log kept growing. The restart landed while the agent wrote, and no record was torn.
+  - Webui: the sandbox daemon joined the running hub. /api/tasks reported the agent as alive with its run handle. /api/agent-log served the live raw log, rendered the text deltas and the stderr passthrough, and the before=1 history page rendered the early records. An unknown handle returned 404. GET / returned the page. The production board and hub were not disturbed.
+  - Retro compaction: the poll compacted the finished run after the agent died (779641 -> 146488 bytes). The first poll after a restart compacted a raw log that a daemon death left behind (36618 -> 5053 bytes). --compact-logs compacted a finished log and printed the summary (317463 -> 58364 bytes). The compacted logs dropped the system and usage records, kept the stderr passthrough and the deltas, and every kept line was valid JSON.
+  - Compacted logs stayed readable in the webui: the text rendered, and the {text,head,tail,atStart} contract held for all three runs.
+  - Result: no user-facing issue found. No follow-up task.
+
+- 2026-10-11 (merge, commit 9677607):
+  - Step 1: merged main (b5e2342) into fix/125-restarting-the-orchestrator in the worktree. Clean, no conflicts (ort strategy; main had moved webui.ts/webui.test.ts, no overlap with orchestrator.ts/orchestrator.test.ts). Tests skipped per merge policy for a clean merge.
+  - Step 2: merged fix/125-restarting-the-orchestrator into main in the project root. Fast-forward b5e2342..9677607, no conflicts. Both merges complete, main carries the fix.
