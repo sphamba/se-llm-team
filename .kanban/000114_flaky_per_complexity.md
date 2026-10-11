@@ -1,8 +1,8 @@
 ---
 name: "fix: flaky per-complexity reviewer cap test part AB"
 priority: "low"
-state: "reviewing"
-worktree: "fix/114-flaky-per-complexity"
+state: "done"
+worktree: ""
 issuer: "#98"
 ---
 
@@ -22,3 +22,7 @@ Acceptance: node src/orchestrator.test.ts passes reliably across repeated runs (
 - Fix (test-only, orchestrator.ts untouched): the loopStub reviewer now waits for the post-spawn armed marker (<slug>.reviewer-armed) before writing its state, and stays alive (pid keeps the pidfile matched) until the next sweep consumes that marker, so the poll can never clear the pidfile while a run is uncounted. Waits are bounded (10s) sync Atomics.wait loops; live-tester stubs are unchanged (no armed marker, and done has no dead transition). Commit ccb7b2e in the worktree.
 - Verified: 3 consecutive green full-suite runs under CPU load (yes x3 hogs), plus 10/10 green focused runs at the 6x-faster poll interval; part AA (reviewer successful-run cap) still green in every full-suite run.
 - Left no open questions.
+- Review (pass 2, no fixes): diff main...HEAD is only src/orchestrator.test.ts (+15/-1), orchestrator.ts untouched. Checked the fix against the daemon: armedPath matches the stub's reconstruction of <kanbanDir>/.logs/<slug>.reviewer-armed from the prompt's absolute {{TASK_FILE}}; DEAD_TRANSITIONS has no to-review entry, so a dead pid at to-review only clears the pidfile; the stub's second wait keeps the pid alive through the consuming sweep's pidAlive check, so no double spawn; live-tester and merger stub paths unchanged (isReviewer false). Part AJ and part AA assertions read unchanged in strength (1/1/3 spawns, fallback to default 3, counter cleared on forced advance).
+- Reviewer re-verification: 8 green full-suite runs (3 unloaded, 5 under CPU load) plus a fresh 10/10 green focused stress at the 600ms poll with exactly 3 spawns per run; negative control: the same stress harness with the waits stripped fails 10/10 (4-6 spawns instead of 3), so the harness exercises the race and the fix is what holds it. One environment hiccup during re-verification: one run was OOM-killed by the host (exit 137, empty log, heavy swap), not a test failure.
+- Review found no mistakes; no fixes committed. Set to-live-test.
+- Live test (worktree fix/114-flaky-per-complexity, HEAD ccb7b2e, test-only change: src/orchestrator.test.ts +15/-1, orchestrator.ts untouched). No unit suite run. User-level check: two temp git projects, each with a real daemon from this worktree (node src/orchestrator.ts --root <tmp> --rescan-seconds 1 --poll-minutes 0.05) and a realistic reviewer stub that waits for the post-spawn armed marker, writes its state, then stays alive until the next sweep consumes the marker (simulating a real multi-second reviewer). Flow 1 (default caps): a complex task in to-review spawned exactly 3 reviewers, logged "reviewer succeeded 3+ times, moving to to-live-test", and advanced; a simple task in the same board spawned exactly 1 reviewer and advanced. Flow 2 (invalid config): reviewerCap.complex = 0 warned "invalid reviewerCap.complex 0, ignored (expected an integer >= 1)" and fell back to the default 3 (exactly 3 reviewer spawns, then advance). No daemon errors in either run. All three acceptance behaviors (complex cap 3, simple cap 1, invalid value falls back to 3) hold through real daemon usage. No issues found.
