@@ -1,4 +1,4 @@
-import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { kanbanDir, listAll, STATES, taskFiles, type Task } from "./kanban.ts";
@@ -8,6 +8,8 @@ const DEFAULT_PORT = 4242;
 const LOG_CHUNK = 16384;
 // working state -> the agent role the orchestrator spawns for it (spawnAgent, src/orchestrator.ts)
 const AGENT_ROLE = { doing: "developer", reviewing: "reviewer", "live-testing": "live-tester" };
+// the roles the orchestrator writes per task log, in pipeline order
+const PIPELINE_ROLES = Object.values(AGENT_ROLE);
 
 export interface WebUiConfig {
 	enabled: boolean;
@@ -60,19 +62,31 @@ function pidAlive(pid: number): boolean {
 	}
 }
 
+// the orchestrator's pid file (.kanban/.pids/{slug}.pid) holds the current agent's pid
+function currentPid(root: string, slug: string): number {
+	try {
+		return parseInt(readFileSync(join(kanbanDir(root), ".pids", `${slug}.pid`), "utf8").trim(), 10) || 0;
+	} catch {
+		return 0; // no agent spawned yet, or the pid file was already cleared
+	}
+}
+
 // role + liveness from the working state and the orchestrator's pid file (.kanban/.pids/{slug}.pid);
 // log is only a handle for the client, the real path is rebuilt server-side in agentLogPath
 function agentInfo(root: string, t: Task): { role: string; alive: boolean; log: string } | null {
 	const role = AGENT_ROLE[t.state];
 	if (!role) return null;
 	const slug = t.file.replace(/\.md$/, "");
-	let pid = 0;
-	try {
-		pid = parseInt(readFileSync(join(kanbanDir(root), ".pids", `${slug}.pid`), "utf8").trim(), 10) || 0;
-	} catch {
-		// no agent spawned yet, or the pid file was already cleared
-	}
-	return { role, alive: pidAlive(pid), log: `${slug}.${role}` };
+	return { role, alive: pidAlive(currentPid(root, slug)), log: `${slug}.${role}` };
+}
+
+// one entry per existing role log file: only the state-mapped role with a live pid is alive,
+// every other existing role is a past agent
+function agentHistory(root: string, t: Task): { role: string; alive: boolean }[] {
+	const slug = t.file.replace(/\.md$/, "");
+	const liveRole = AGENT_ROLE[t.state];
+	return PIPELINE_ROLES.filter((role) => existsSync(join(kanbanDir(root), ".logs", `${slug}.${role}.log`)))
+		.map((role) => ({ role, alive: role === liveRole && pidAlive(currentPid(root, slug)) }));
 }
 
 // rebuild the log path from the handle: the task must exist on the board and the suffix must be a
@@ -115,6 +129,7 @@ function serve(root: string, req: IncomingMessage, res: ServerResponse): void {
 					worktree: t.worktree,
 					updated: taskUpdated(root, t.file),
 					body: taskBody(root, t.file),
+					agents: agentHistory(root, t),
 					agent: agentInfo(root, t),
 				})),
 			),
@@ -218,6 +233,8 @@ h1 { font-size: 16px; margin: 0; }
 .toggle:hover { background: var(--hover); }
 .agent-btn { display: inline-flex; align-items: center; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 .agent-btn:hover { background: var(--hover); }
+.agent-past { display: flex; width: fit-content; margin-top: 6px; }
+.check { color: var(--low-fg); margin-right: 5px; }
 #m-agent { margin-bottom: 12px; }
 #m-agent:empty { display: none; }
 #m-log { border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 300px; overflow: auto; }
@@ -376,22 +393,30 @@ const atBottom = () => { const p = logPane(); return p.scrollTop + p.clientHeigh
 function renderAgent(t) {
 	const el = document.getElementById("m-agent");
 	el.innerHTML = "";
-	if (!t.agent || !t.agent.alive) return;
-	const label = t.agent.role[0].toUpperCase() + t.agent.role.slice(1);
-	el.innerHTML = '<button class="agent-btn" onclick="toggleLog()"><span class="spin"></span>' + esc(label) + '</button><div id="m-log" class="hidden"><pre id="m-log-text"></pre></div>';
+	const cap = s => s[0].toUpperCase() + s.slice(1);
+	const btns = [];
+	if (t.agent && t.agent.alive) btns.push('<button class="agent-btn" onclick="openAgentLog(\\'' + esc(t.agent.role) + '\\')"><span class="spin"></span>' + esc(cap(t.agent.role)) + "</button>");
+	for (const a of (t.agents || []).filter(a => !a.alive)) btns.push('<button class="agent-btn agent-past" onclick="openAgentLog(\\'' + esc(a.role) + '\\')"><span class="check">\u2713</span>' + esc(cap(a.role)) + "</button>");
+	if (!btns.length) return;
+	el.innerHTML = btns.join("") + '<div id="m-log" class="hidden"><pre id="m-log-text"></pre></div>';
 	const p = logPane();
 	p.onscroll = () => {
 		if (!logState || logState.busy || logState.atStart || p.scrollTop > 0) return;
 		pullLog("?file=" + encodeURIComponent(logState.handle) + "&offset=" + logState.head + "&before=1", "history");
 	};
 }
-function openLog() {
+function openAgentLog(role) {
+	if (logState && logState.role === role && !logPane().classList.contains("hidden")) { closeLog(); return; }
+	openLog(role);
+}
+function openLog(role) {
 	const t = tasks.find(x => x.file === modalFile);
 	const p = logPane();
-	if (!t || !t.agent || !p) return;
+	if (!t || !p) return;
 	p.classList.remove("hidden");
-	logState = { handle: t.agent.log, head: 0, tail: 0, atStart: false, busy: false };
-	pullLog("?file=" + encodeURIComponent(t.agent.log), "init");
+	logState = { handle: t.file.replace(/\\.md$/, "") + "." + role, role, head: 0, tail: 0, atStart: false, busy: false, idle: false };
+	pullLog("?file=" + encodeURIComponent(logState.handle), "init");
+	if (logTimer) clearInterval(logTimer);
 	logTimer = setInterval(pollLog, 1000);
 }
 function closeLog() {
@@ -400,15 +425,15 @@ function closeLog() {
 	const p = logPane();
 	if (p) p.classList.add("hidden");
 }
-function toggleLog() {
-	const p = logPane();
-	if (!p) return;
-	if (p.classList.contains("hidden")) openLog(); else closeLog();
-}
 function pollLog() {
 	if (!logState || logState.busy) return;
 	const t = tasks.find(x => x.file === modalFile);
-	if (!t || !t.agent || !t.agent.alive) { if (logTimer) { clearInterval(logTimer); logTimer = null; } return; }
+	const live = !!(t && t.agent && t.agent.alive && t.agent.role === logState.role);
+	// past agents write no lines: one empty poll is proof, stop the timer
+	if (!live && logState.idle) {
+		if (logTimer) { clearInterval(logTimer); logTimer = null; }
+		return;
+	}
 	const p = logPane();
 	// a scroll-to-top can land in a busy poll window and never re-fire; the tick retries history
 	if (p && p.scrollTop === 0 && !logState.atStart) {
@@ -418,24 +443,28 @@ function pollLog() {
 	pullLog("?file=" + encodeURIComponent(logState.handle) + "&offset=" + logState.tail, "poll");
 }
 function pullLog(qs, mode) {
-	logState.busy = true;
+	const st = logState;
+	if (!st) return;
+	st.busy = true;
 	const p = logPane();
 	fetch("/api/agent-log" + qs).then(r => r.ok ? r.json() : null).then(d => {
-		if (!d || !logState || !p || p.classList.contains("hidden")) return;
+		// a superseded open must not write into the new view
+		if (!d || logState !== st || !p || p.classList.contains("hidden")) return;
 		const el = document.getElementById("m-log-text");
 		if (mode === "history") {
-			logState.head = d.head;
-			logState.atStart = d.atStart;
+			st.head = d.head;
+			st.atStart = d.atStart;
 			if (d.text) {
 				const before = p.scrollHeight;
 				el.textContent = d.text + el.textContent;
 				p.scrollTop += p.scrollHeight - before;
 			}
 		} else {
-			logState.tail = d.tail;
+			st.tail = d.tail;
+			if (mode === "poll") st.idle = !d.text;
 			if (mode === "init") {
-				logState.head = d.head;
-				logState.atStart = d.atStart;
+				st.head = d.head;
+				st.atStart = d.atStart;
 				el.textContent = d.text;
 				p.scrollTop = p.scrollHeight;
 			} else if (d.text) {
@@ -444,7 +473,7 @@ function pullLog(qs, mode) {
 				if (stick) p.scrollTop = p.scrollHeight;
 			}
 		}
-	}).catch(() => {}).finally(() => { if (logState) logState.busy = false; });
+	}).catch(() => {}).finally(() => { if (logState === st) st.busy = false; });
 }
 document.getElementById("modal").onclick = e => { if (e.target.id === "modal") closeModal(); };
 function refresh() {

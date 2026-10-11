@@ -76,9 +76,11 @@ assert.ok(page.includes('transition = "transform .4s ease"'), "sibling shifts re
 
 // agent info: null for a backlog task; populated for a working task with a live pid
 assert.equal(listed[0].agent, null);
+assert.deepEqual(listed[0].agents, [], "no role logs yet, empty agent history");
 assert.ok(page.includes('id="m-agent"'), "modal has the agent area");
 assert.ok(page.includes("#m-log.hidden { display: none; }"), "log pane hides");
 assert.ok(page.includes("/api/agent-log"), "page uses the agent log endpoint");
+assert.ok(page.includes('<span class="check">✓</span>'), "past agent buttons render a green checkmark");
 setState(root, getTask(root, task.file)!, "doing");
 const slug = task.file.replace(/\.md$/, "");
 mkdirSync(join(root, ".kanban", ".pids"), { recursive: true });
@@ -89,6 +91,7 @@ const logText = "H".repeat(40000) + "\nEND\n";
 writeFileSync(logFile, logText);
 const working = (await (await fetch(`${base}/api/tasks`)).json())[0];
 assert.deepEqual(working.agent, { role: "developer", alive: true, log: `${slug}.developer` });
+assert.deepEqual(working.agents, [{ role: "developer", alive: true }], "single role log, live agent only");
 
 // tail: no offset returns only the last chunk, with cursors for poll and history
 const enc = encodeURIComponent(`${slug}.developer`);
@@ -120,13 +123,22 @@ assert.equal((await fetch(`${base}/api/agent-log?file=nope.developer`)).status, 
 assert.equal((await fetch(`${base}/api/agent-log?file=${encodeURIComponent(slug + ".merger")}`)).status, 404);
 assert.equal((await fetch(`${base}/api/agent-log`)).status, 404);
 
+// a past role log lists as a dead agent and streams through the same endpoint
+writeFileSync(join(root, ".kanban", ".logs", `${slug}.reviewer.log`), "REVIEW\n");
+const past = (await (await fetch(`${base}/api/tasks`)).json())[0];
+assert.deepEqual(past.agents, [{ role: "developer", alive: true }, { role: "reviewer", alive: false }], "past reviewer after the live developer, pipeline order");
+const reviewerLog = await (await fetch(`${base}/api/agent-log?file=${encodeURIComponent(slug + ".reviewer")}`)).json();
+assert.equal(reviewerLog.text, "REVIEW\n");
+
 // a stale pid file reports the agent as not alive
 writeFileSync(join(root, ".kanban", ".pids", `${slug}.pid`), "999999999");
 const stale = (await (await fetch(`${base}/api/tasks`)).json())[0];
 assert.equal(stale.agent.alive, false);
+assert.deepEqual(stale.agents, [{ role: "developer", alive: false }, { role: "reviewer", alive: false }], "a dead state-mapped agent is past too");
 
 // leave the board as the daemon section expects it
 rmSync(join(root, ".kanban", ".pids", `${slug}.pid`));
+rmSync(join(root, ".kanban", ".logs", `${slug}.reviewer.log`));
 setState(root, getTask(root, task.file)!, "backlog");
 
 // a second startWebUi on the taken port reports failure instead of throwing
