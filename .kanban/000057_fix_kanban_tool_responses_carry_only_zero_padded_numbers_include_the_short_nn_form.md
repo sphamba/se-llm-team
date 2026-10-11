@@ -24,6 +24,7 @@ Constraints:
 - Files: src/kanban.ts, index.ts, src/kanban.test.ts. Disjoint from all active lanes (#54, #50, #49, #56, #36).
 
 # Notes
+- [2026-10-11 07:18] Merge conflict for branch fix/kanban-tool-responses-carry-only-zero-padded-numbers-include-the-short-nn-form, merger spawned (attempt 1).
 
 - [2026-10-11 09:17] Live test passed with one finding (pre-existing, not from this change). Ran the worktree extension (commit 24d3719) like a user: pi -p (RCP/GLM 5.3 Flash) in a scratch git repo, only kanban tools enabled via -e <worktree>/index.ts -t 'kanban_*'. kanban_create returned "Created 000001_fix_raw_capture.md (#1)"; second create numbered 000002 (#2) (max+1 numbering intact); kanban_list entries carry num: 1 and the tool description reads "Returns file, num (#NN), name, priority, state and summary"; kanban_update returned "Updated ... (#1)"; kanban_set_state returned "000001_... (#1): state -> to-do"; kanban_get kept the full detail with file present. kanban_set_worktree errored with ReferenceError "setWorktree is not defined" whenever called: index.ts:126 calls setWorktree but never imports it from src/kanban.ts. Verified pre-existing: main checkout index.ts has the identical missing import, so the tool has been broken on main too and the failure is unrelated to the #NN change (the branch's diff only touched the response text). All other acceptance points met; state -> done, one finding reported to the PM.
 
