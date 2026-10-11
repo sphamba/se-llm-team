@@ -14,12 +14,16 @@ const LOG_ROLES = [...Object.values(AGENT_ROLE), "merger"];
 // tool result text; both are emergent pi behavior, the parser keys on the text (see subagentLogs)
 const SUB_ROOT = "/tmp/pi-subagents-1000/";
 
-// one agent run: run is the index in `<slug>.<role>.<n>.log`, null for a legacy unsuffixed file
+// one agent run: run is the index in `<slug>.<role>.<n>.log`, null for a legacy unsuffixed file;
+// tokens sums the run's turn_end totals, duration is the last record timestamp minus the first,
+// both null when the log carries none
 interface AgentEntry {
 	role: string;
 	run: number | null;
 	alive: boolean;
 	handle: string;
+	tokens: number | null;
+	duration: number | null;
 }
 
 export interface WebUiConfig {
@@ -108,16 +112,18 @@ function agentHistory(root: string, t: Task, files: string[]): AgentEntry[] {
 		if (!runs.length) continue;
 		const newest = runs[runs.length - 1].handle;
 		for (const r of runs) {
+			const path = join(kanbanDir(root), ".logs", `${r.handle}.log`);
 			let mtime = 0;
 			try {
-				mtime = statSync(join(kanbanDir(root), ".logs", `${r.handle}.log`)).mtimeMs;
+				mtime = statSync(path).mtimeMs;
 			} catch {
 				/* raced away between readdir and stat */
 			}
-			entries.push({ role, run: r.run, alive: live && role === liveRole && r.handle === newest, handle: r.handle, mtime });
+			const stats = logStats(path);
+			entries.push({ role, run: r.run, alive: live && role === liveRole && r.handle === newest, handle: r.handle, tokens: stats.tokens, duration: stats.duration, mtime });
 		}
 	}
-	return entries.sort((a, b) => a.mtime - b.mtime).map(({ role, run, alive, handle }) => ({ role, run, alive, handle }));
+	return entries.sort((a, b) => a.mtime - b.mtime).map(({ role, run, alive, handle, tokens, duration }) => ({ role, run, alive, handle, tokens, duration }));
 }
 
 // rebuild the log path from the handle: the task must exist on the board and the handle must be
@@ -166,6 +172,62 @@ function subagentLogs(log: string): { id: string; path: string }[] {
 	}
 	subsCache.set(log, { size, subs });
 	return subs;
+}
+
+// record timestamps arrive as ISO strings (session, subagent user/assistant) or epoch-ms numbers
+// (turn_end and the message records carry it at message level)
+function tsMs(v: unknown): number | null {
+	if (typeof v === "number" && Number.isFinite(v)) return v;
+	if (typeof v === "string") {
+		const t = Date.parse(v);
+		return Number.isNaN(t) ? null : t;
+	}
+	return null;
+}
+
+// per-file usage stats, memoized by size like subsCache: tokens sums the provider-reported
+// message.usage.totalTokens over the usage-bearing records (turn_end in a run log, assistant in a
+// subagent transcript, cache reads included), duration is the last record timestamp minus the
+// first. A log only ever grows, so a size match means the parse is current; a live log re-parses
+// per poll. Ceiling: a full re-read per growth, split-line the incremental scan when a live log
+// passes tens of MB
+const statsCache = new Map<string, { size: number; tokens: number | null; duration: number | null }>();
+function logStats(path: string): { tokens: number | null; duration: number | null } {
+	let size = 0;
+	try {
+		size = statSync(path).size;
+		const hit = statsCache.get(path);
+		if (hit && hit.size === size) return hit;
+	} catch {
+		return { tokens: null, duration: null }; // log gone or not written yet
+	}
+	let tokens: number | null = null;
+	let first: number | null = null;
+	let last: number | null = null;
+	try {
+		for (const line of readFileSync(path, "utf8").split("\n")) {
+			if (!line.includes('"timestamp"') && !line.includes('"totalTokens"')) continue; // cheap filter before JSON.parse
+			let rec: any;
+			try {
+				rec = JSON.parse(line);
+			} catch {
+				continue;
+			}
+			if ((rec?.type === "turn_end" || rec?.type === "assistant") && typeof rec?.message?.usage?.totalTokens === "number" && Number.isFinite(rec.message.usage.totalTokens)) {
+				tokens = (tokens ?? 0) + rec.message.usage.totalTokens;
+			}
+			const ts = tsMs(rec?.timestamp) ?? tsMs(rec?.message?.timestamp);
+			if (ts != null) {
+				first ??= ts;
+				last = ts;
+			}
+		}
+	} catch {
+		return { tokens: null, duration: null }; // log vanished mid-read
+	}
+	const stats = { tokens, duration: first != null && last != null ? Math.max(0, last - first) : null };
+	statsCache.set(path, { size, ...stats });
+	return stats;
 }
 
 // pi --mode json writes JSONL event records (docs/json.md); everything else in the log file is
@@ -350,7 +412,7 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 	const log = agentLogPath(root, q.get("file") ?? "");
 	if (!log) return null;
 	const sub = q.get("sub");
-	if (sub === "list") return JSON.stringify(subagentLogs(log).map((s, index) => ({ id: s.id, index })));
+	if (sub === "list") return JSON.stringify(subagentLogs(log).map((s, index) => ({ id: s.id, index, ...logStats(s.path) })));
 	let target = log;
 	if (sub !== null) {
 		const subIndex = /^\d+$/.test(sub) ? parseInt(sub, 10) : -1;
@@ -472,6 +534,23 @@ export function mergeBoards(boards, rows) {
 // (payload run 0 reads "1"), unnumbered for a solo run or a legacy unsuffixed log (a.run == null)
 export function agentLabel(a, count) {
 	return a.role[0].toUpperCase() + a.role.slice(1) + (count[a.role] > 1 && a.run != null ? " " + (a.run + 1) : "");
+}
+
+// tokens on an agent card, in kilo (42k), raw below 1000; empty when the log carries no usage
+export function fmtTokens(total) {
+	if (typeof total !== "number" || !Number.isFinite(total) || total < 0) return "";
+	if (total < 1000) return String(total);
+	return Math.round(total / 1000) + "k";
+}
+
+// duration on an agent card: one decimal below 10s, then whole seconds, then minutes
+export function fmtDur(ms) {
+	if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "";
+	const s = ms / 1000;
+	if (s < 10) return s.toFixed(1) + "s";
+	const sec = Math.round(s);
+	if (sec < 60) return sec + "s";
+	return Math.floor(sec / 60) + "m" + (sec % 60 ? " " + (sec % 60) + "s" : "");
 }
 
 // board layout, left to right: a string is a single column, an array is a stacked pair with the
@@ -694,15 +773,16 @@ h1 { font-size: 16px; margin: 0; }
 #theme { margin-left: auto; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 #theme:hover { background: var(--hover); }
 #updated { font-size: 12px; color: var(--muted); }
-/* 000091: a relative #tabs at z-index 1 keeps the bar above the overlay and clickable while a modal is open; 000119: #modal must sit above #tabs and #relations (both z-index 1) or the relation lines paint over it */
+/* 000091: a relative #tabs at z-index 1 keeps the bar above the overlay and clickable while a modal is open; 000119: #modal must sit above #tabs and #relations (both z-index 1) or the relation lines paint over it; 000124: the task cards stack at z-index 2, so #modal bumps to 3 */
 #tabs { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; }
 #tabs:empty { display: none; }
 .tab { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px 6px 0 0; padding: 4px 12px; font-size: 12px; cursor: pointer; }
 .tab:hover { background: var(--hover); }
 .tab.active { border-color: var(--link); color: var(--link); }
 #board { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; padding: 10px 18px 18px; overflow-x: auto; align-items: flex-start; position: relative; }
-/* relation lines: absolute in the relative board, so the overlay scrolls with the content; above
-the cards, pointer-events none so their clicks pass through */
+/* relation lines: absolute in the relative board, so the overlay scrolls with the content; z-index 1
+paints them above the static .col/.pair containers and below the z-index-2 task cards, pointer-events
+none so the card clicks pass through */
 #relations { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; }
 #relations path { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 6 4; animation: dashflow 1s linear infinite; }
 @keyframes dashflow { to { stroke-dashoffset: -10; } }
@@ -713,8 +793,9 @@ the cards, pointer-events none so their clicks pass through */
 .pair .col { flex: 0 0 auto; }
 .col h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin: 0 0 10px; color: var(--heading); }
 .count { color: var(--faint); }
-.card { border: 1px solid var(--border); border-left: 3px solid var(--ac); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
-.card:hover { background: var(--hover); }
+/* 000124: positioned above the z-index-1 relation lines; the semi-transparent background lets a line passing under the card show through faintly (no --card var, --panel is the card's base color in both themes) */
+.card { position: relative; z-index: 2; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--border); border-left: 3px solid var(--ac); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
+.card:hover { background: color-mix(in srgb, var(--hover) 85%, transparent); }
 .name { font-size: 13px; line-height: 1.35; margin-bottom: 6px; }
 .num { color: var(--faint); margin-right: 4px; }
 .num-link { color: var(--link); cursor: pointer; }
@@ -733,20 +814,21 @@ the cards, pointer-events none so their clicks pass through */
 .empty { font-size: 12px; color: var(--faint); }
 .toggle { display: block; width: 100%; margin-top: 2px; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 .toggle:hover { background: var(--hover); }
-.agent-btn { display: inline-flex; align-items: center; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
-.agent-btn:hover { background: var(--hover); }
-.agent-btn-active { border-color: var(--link); }
-.agent-btn.agent-btn-active { background: var(--medium-bg); }
-#m-sub-btns { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 6px; }
-#m-sub-btns:empty { display: none; }
-#m-agent-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 000120: each run as a card, its subagent cards stacked below it in the same column */
+.agent-card { display: block; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 12px; text-align: left; }
+.agent-card:hover { background: var(--hover); }
+.agent-card-active { border-color: var(--link); background: var(--medium-bg); }
+.agent-stats { display: block; font-size: 10px; color: var(--muted); margin-top: 2px; }
+.agent-col { display: flex; flex-direction: column; gap: 4px; }
+.agent-subs { display: flex; flex-direction: column; gap: 4px; margin-left: 10px; }
+.agent-subs:empty { display: none; }
+#m-agent-btns { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
 .check { color: var(--low-fg); margin-right: 5px; }
 #m-agent { margin-bottom: 12px; }
-#m-agent:empty { display: none; }
 #m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 300px; overflow: auto; }
 #m-log.hidden { display: none; }
 #m-log pre { margin: 0; padding: 8px 10px; font-size: 10px; line-height: 1.45; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: break-word; }
-#modal { position: fixed; inset: 0; z-index: 2; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
+#modal { position: fixed; inset: 0; z-index: 3; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
 #modal.hidden { display: none; }
 #m-box { background: var(--panel); border-radius: 10px; padding: 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
 #m-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
@@ -783,7 +865,7 @@ the cards, pointer-events none so their clicks pass through */
 <div id="modal" class="hidden"><div id="m-box">
 <div id="m-head"><h2 id="m-title"></h2><button id="m-close" onclick="closeModal()">Close</button></div>
 <div id="m-attrs"></div>
-<div id="m-agent"></div>
+<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><pre id="m-log-text"></pre></div></div>
 <div id="m-body"></div>
 </div></div>
 <script>
@@ -847,6 +929,8 @@ ${tabsHtml}
 ${boardOf}
 ${mergeBoards}
 ${agentLabel}
+${fmtTokens}
+${fmtDur}
 // tabs: one per registered project, the active one renders that project's board
 function renderTabs() {
 	const el = document.getElementById("tabs");
@@ -939,14 +1023,15 @@ function render(skipFlip) {
 		el.ontransitionend = () => { el.style.transition = ""; el.ontransitionend = null; drawRelations(); };
 	}
 }
-function openTask(file) {
-	const t = activeBoard().tasks.find(x => x.file === file);
-	if (!t) return;
-	closeLog();
-	modalFile = file;
+// the title and attrs block: stateless markup, rewritten freely on open and on every refresh
+function writeHead(t) {
 	document.getElementById("m-title").textContent = t.name;
-	document.getElementById("m-attrs").innerHTML =
-		"<div><span>number</span>" + numLinkHtml(t.file) + "</div>" +
+	document.getElementById("m-attrs").innerHTML = attrsHtml(t);
+	for (const a of document.querySelectorAll("#m-attrs .num-link")) a.onclick = () => openTask(a.dataset.task);
+}
+// the attrs rows, shared by openTask and the 5 s refresh of the open card
+function attrsHtml(t) {
+	return "<div><span>number</span>" + numLinkHtml(t.file) + "</div>" +
 		"<div><span>file</span>" + esc(t.file) + "</div>" +
 		"<div><span>priority</span><span class='chip p-" + esc(t.priority) + "'>" + esc(t.priority) + "</span></div>" +
 		"<div><span>complexity</span><span class='chip cx'>" + esc(t.complexity || "moderate") + "</span></div>" +
@@ -954,10 +1039,32 @@ function openTask(file) {
 		"<div><span>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>" +
 		"<div><span>issuer</span>" + esc(t.issuer || "user") + "</div>" +
 		blockedRow(t);
-	for (const a of document.querySelectorAll("#m-attrs .num-link")) a.onclick = () => openTask(a.dataset.task);
+}
+// the body block, html-gated like syncBoard's cards: an unchanged body keeps its DOM node and
+// with it the reader's scroll position
+function setBody(t) {
+	const el = document.getElementById("m-body");
+	const html = md(t.body || "");
+	if (el.__html === html) return;
+	el.innerHTML = html;
+	el.__html = html;
+}
+function openTask(file) {
+	const t = activeBoard().tasks.find(x => x.file === file);
+	if (!t) return;
+	closeLog();
+	modalFile = file;
+	writeHead(t);
 	renderAgent(t);
-	document.getElementById("m-body").innerHTML = md(t.body || "");
+	setBody(t);
 	document.getElementById("modal").classList.remove("hidden");
+}
+// the 5 s refresh of the open detail card: every block re-derives from the fresh payload with no
+// close/reopen; renderAgent's keep mode re-renders the run cards and leaves the log pane alone
+function updateOpenTask(t) {
+	writeHead(t);
+	renderAgent(t, true);
+	setBody(t);
 }
 function closeModal() { closeLog(); document.getElementById("modal").classList.add("hidden"); }
 // the blockedBy row: each stored ref links to its task's card when that task is on the board, and
@@ -971,9 +1078,10 @@ function blockedRow(t) {
 	});
 	return "<div><span>blockedBy</span>" + items.join(", ") + "</div>";
 }
-// live agent log pane: each run button carries only its handle, the server resolves the real
-// path; a run's subagent transcripts load through the same endpoint with sub=list / sub=n
+// live agent log pane: each run card carries only its handle, the server resolves the real
+// path; each run's subagent transcripts load through the same endpoint with sub=list / sub=n
 let modalFile = null;
+let agentGen = 0; // bumped per renderAgent: a superseded open's sub fetches must not write
 let logTimer = null;
 let logState = null;
 const logPane = () => document.getElementById("m-log");
@@ -982,63 +1090,70 @@ const logUrl = extra => "?file=" + encodeURIComponent(logState.handle) + (logSta
 function markActiveAgent() {
 	const p = logPane();
 	const st = logState && p && !p.classList.contains("hidden") ? logState : null;
-	for (const b of document.querySelectorAll("#m-agent .agent-btn")) {
+	for (const b of document.querySelectorAll("#m-agent .agent-card")) {
 		const active = !!st && b.dataset.handle === st.handle && (b.dataset.sub || null) === (st.sub == null ? null : String(st.sub));
-		b.classList.toggle("agent-btn-active", active);
+		b.classList.toggle("agent-card-active", active);
 	}
 }
 const atBottom = () => { const p = logPane(); return p.scrollTop + p.clientHeight >= p.scrollHeight - 4; };
-// every run as one button, oldest leftmost (payload order is log mtime order), the live run
-// rightmost; a role with several runs labels them 1-based, so two reviewer runs never read alike
-function renderAgent(t) {
-	const el = document.getElementById("m-agent");
-	el.innerHTML = "";
+// one agent card: the role label, then a tokens/duration stats line (42k · 5m 12s); mark is the
+// live spinner or the past check, empty on a sub card
+function agentCardHtml(extraCls, attrs, label, tokens, duration, mark) {
+	const stats = [fmtTokens(tokens), fmtDur(duration)].filter(Boolean).join(" · ");
+	return '<button class="agent-card' + (extraCls ? " " + extraCls : "") + '" ' + attrs + ">" + mark + esc(label) + (stats ? '<span class="agent-stats">' + esc(stats) + "</span>" : "") + "</button>";
+}
+// the agent history as one horizontal row of columns: every run a card with its subagent cards
+// stacked below, always visible (fetched for every run on open), oldest leftmost (payload order
+// is log mtime order), the live run rightmost; a role with several runs labels them 1-based.
+// keep=true is the 5 s refresh of the open card: the run cards re-render, each run's fetched sub
+// box is carried over by handle with no re-fetch, and the log pane beside the row is untouched
+function renderAgent(t, keep) {
+	const el = document.getElementById("m-agent-btns");
 	const runs = (t.agents || []).slice();
 	const live = runs.find(a => a.alive);
 	if (live) { runs.splice(runs.indexOf(live), 1); runs.push(live); }
-	if (!runs.length) return;
+	const oldSubs = keep ? new Map() : null;
+	if (oldSubs) for (const c of el.querySelectorAll(".agent-col > .agent-card")) oldSubs.set(c.dataset.handle, c.parentElement.querySelector(".agent-subs"));
+	if (!runs.length) { el.innerHTML = ""; return; }
 	const count = {};
 	for (const a of runs) count[a.role] = (count[a.role] || 0) + 1;
-	const label = a => agentLabel(a, count);
-	const btns = runs.map(a => !a.alive
-		? '<button class="agent-btn agent-past" data-handle="' + esc(a.handle) + '"><span class="check">\u2713</span>' + esc(label(a)) + "</button>"
-		: '<button class="agent-btn agent-live" data-handle="' + esc(a.handle) + '"><span class="spin"></span>' + esc(label(a)) + "</button>");
-	el.innerHTML = '<div id="m-agent-btns">' + btns.join("") + '</div><div id="m-sub-btns"></div><div id="m-log" class="hidden"><pre id="m-log-text"></pre></div>';
+	el.innerHTML = runs.map(a =>
+		'<div class="agent-col">' +
+		agentCardHtml(a.alive ? "agent-live" : "agent-past", 'data-handle="' + esc(a.handle) + '"', agentLabel(a, count), a.tokens, a.duration, a.alive ? '<span class="spin"></span>' : '<span class="check">✓</span>') +
+		'<div class="agent-subs"></div></div>').join("");
 	// bind by dataset: a hand-written task file name can hold quotes or backslashes, which no
 	// amount of HTML escaping makes safe inside inline JS
-	for (const b of el.querySelectorAll("#m-agent-btns .agent-btn")) b.onclick = () => openAgentLog(b.dataset.handle);
+	for (const b of el.querySelectorAll(".agent-col > .agent-card")) b.onclick = () => openAgentLog(b.dataset.handle);
+	if (oldSubs) for (const c of el.querySelectorAll(".agent-col")) {
+		const box = oldSubs.get(c.querySelector(".agent-col > .agent-card").dataset.handle);
+		if (box) c.querySelector(".agent-subs").replaceWith(box);
+	}
 	markActiveAgent();
-	const p = logPane();
-	p.onscroll = () => {
-		if (!logState || logState.busy || logState.atStart || p.scrollTop > 0) return;
-		pullLog(logUrl("&offset=" + logState.head + "&before=1"), "history");
-	};
+	if (keep) return;
+	// every run's subs on open, in parallel: one sub=list fetch per run handle, each list rendered
+	// under its caller column
+	const gen = ++agentGen;
+	const boxes = el.querySelectorAll(".agent-subs");
+	runs.forEach((a, i) => fetchSubs(gen, a, boxes[i]));
 }
-// the selected run's subagents: one button per background Agent call, stacked vertically below
-// the run row in log order
-function renderSubs(list) {
-	const el = document.getElementById("m-sub-btns");
-	if (!el || !logState) return;
-	el.innerHTML = list.map(s => '<button class="agent-btn agent-sub" data-handle="' + esc(logState.handle) + '" data-sub="' + s.index + '">' + esc(s.id) + "</button>").join("");
-	for (const b of el.querySelectorAll(".agent-btn")) b.onclick = () => openSubLog(Number(b.dataset.sub));
-	markActiveAgent();
-}
-function fetchSubs() {
-	const handle = logState && logState.handle;
-	if (!handle) return;
-	fetch("/api/agent-log?file=" + encodeURIComponent(handle) + "&sub=list" + projectParam()).then(r => r.ok ? r.json() : []).then(list => {
+// one run's subagent cards, labeled Sub-<caller role> without the id string, one per background
+// Agent call in log order
+function fetchSubs(gen, a, box) {
+	fetch("/api/agent-log?file=" + encodeURIComponent(a.handle) + "&sub=list" + projectParam()).then(r => r.ok ? r.json() : []).then(list => {
 		// a superseded open must not write into the new view
-		if (!logState || logState.handle !== handle) return;
-		renderSubs(Array.isArray(list) ? list : []);
+		if (gen !== agentGen || !box) return;
+		box.innerHTML = (Array.isArray(list) ? list : []).map(s =>
+			agentCardHtml("agent-sub", 'data-handle="' + esc(a.handle) + '" data-sub="' + s.index + '"', "Sub-" + a.role, s.tokens, s.duration, "")).join("");
+		for (const b of box.querySelectorAll(".agent-card")) b.onclick = () => openSubLog(b.dataset.handle, Number(b.dataset.sub));
+		markActiveAgent();
 	}).catch(() => {});
 }
 function openAgentLog(handle) {
 	if (logState && logState.handle === handle && logState.sub == null && !logPane().classList.contains("hidden")) { closeLog(); return; }
 	openLog(handle, null);
 }
-function openSubLog(n) {
-	if (logState && logState.sub === n && !logPane().classList.contains("hidden")) { closeLog(); return; }
-	const handle = logState && logState.handle;
+function openSubLog(handle, n) {
+	if (logState && logState.handle === handle && logState.sub === n && !logPane().classList.contains("hidden")) { closeLog(); return; }
 	if (handle) openLog(handle, n);
 }
 function openLog(handle, sub) {
@@ -1047,7 +1162,6 @@ function openLog(handle, sub) {
 	if (!t || !p) return;
 	p.classList.remove("hidden");
 	logState = { handle, sub: sub == null ? null : sub, head: 0, tail: 0, atStart: false, busy: false, idle: false };
-	if (sub == null) fetchSubs(); // the sub list belongs to the run, a sub click keeps it
 	markActiveAgent();
 	pullLog(logUrl(""), "init");
 	if (logTimer) clearInterval(logTimer);
@@ -1058,8 +1172,6 @@ function closeLog() {
 	logState = null;
 	const p = logPane();
 	if (p) p.classList.add("hidden");
-	const subs = document.getElementById("m-sub-btns");
-	if (subs) subs.innerHTML = "";
 	markActiveAgent();
 }
 function pollLog() {
@@ -1115,6 +1227,12 @@ function pullLog(qs, mode) {
 	}).catch(() => {}).finally(() => { if (logState === st) st.busy = false; });
 }
 document.getElementById("modal").onclick = e => { if (e.target.id === "modal") closeModal(); };
+// the log pane is static markup: the scroll handler binds once and reads the live logState
+const pane = logPane();
+pane.onscroll = () => {
+	if (!logState || logState.busy || logState.atStart || pane.scrollTop > 0) return;
+	pullLog(logUrl("&offset=" + logState.head + "&before=1"), "history");
+};
 function refresh() {
 	fetch("/api/projects").then(r => r.ok ? r.json() : null).catch(() => null).then(list => {
 		// the single-project server 404s here, and a transient hub failure keeps the last known
@@ -1131,6 +1249,12 @@ function refresh() {
 	}).then(rows => {
 		mergeBoards(boards, rows);
 		render();
+		// the open detail card re-derives from the fresh payload: a state change or a new agent run
+		// shows in place, and a task gone from the board closes the card
+		if (modalFile && !document.getElementById("modal").classList.contains("hidden")) {
+			const t = activeBoard().tasks.find(x => x.file === modalFile);
+			if (t) updateOpenTask(t); else closeModal();
+		}
 		// stamp only a served board: during a hub outage the old stamp stays visible
 		const current = rows.find(([id]) => id === active);
 		if (current && current[1]) document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
