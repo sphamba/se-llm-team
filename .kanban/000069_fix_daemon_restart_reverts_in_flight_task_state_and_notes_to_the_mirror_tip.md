@@ -1,8 +1,8 @@
 ---
 name: "fix: daemon restart reverts in-flight task state and notes to the mirror tip"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/69-daemon-restart-reverts"
 ---
 
 # Summary
