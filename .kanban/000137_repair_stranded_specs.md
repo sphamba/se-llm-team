@@ -6,7 +6,7 @@ worktree: ""
 issuer: "#136"
 complexity: "simple"
 shortName: "repair-stranded-specs"
-blockedBy: "#136"
+blockedBy: "#136, #134"
 ---
 
 # Summary
