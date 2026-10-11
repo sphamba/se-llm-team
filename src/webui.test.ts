@@ -250,6 +250,7 @@ assert.ok(
 assert.ok(page.includes('<nav id="tabs"></nav>'), "page has the tab bar");
 assert.ok(page.includes("switchTab(b.dataset.project)"), "each tab button switches the active board");
 assert.match(page, /function switchTab\(name\) \{[\s\S]*?closeModal\(\);[\s\S]*?\}/, "a tab switch closes the open modal");
+assert.match(page, /#tabs \{ position: relative; z-index: 1;/, "the tab bar stacks above the #modal overlay (000091)");
 assert.ok(page.includes("render(true); // no FLIP across boards"), "a tab switch never flips from the other board's layout");
 assert.ok(page.includes("Promise.all(projects.map(name => fetch(url(name))"), "every tab polls each cycle");
 assert.ok(page.includes("setInterval(refresh, 5000)"), "the poll keeps the 5 s cadence");
