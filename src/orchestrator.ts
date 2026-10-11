@@ -298,7 +298,8 @@ function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: st
 	child.stderr?.pipe(feeders[1], { end: false });
 	child.on("close", () => feeders.forEach((f) => f.end()));
 	child.on("error", (err) => {
-		// ENOENT never fires close: the feed would leak the sink and both pipes per failed spawn
+		// a failed spawn also fires close (verified on this Node), so this end is an idempotent belt
+		// against runtimes where it does not - the leak would be the sink and both pipes
 		feeders.forEach((f) => f.end());
 		log(root, `agent ${role} for ${task.file} failed to start: ${err.message}`);
 	});
