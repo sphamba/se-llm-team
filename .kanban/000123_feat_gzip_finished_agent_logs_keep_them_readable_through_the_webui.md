@@ -1,9 +1,9 @@
 ---
 name: "feat: gzip finished agent logs; keep them readable through the webui"
 priority: "medium"
-state: "backlog"
-worktree: ""
-blockedBy: "#122"
+state: "doing"
+worktree: "feat/123-gzip-finished-agent"
+blockedBy: ""
 ---
 
 # Summary
