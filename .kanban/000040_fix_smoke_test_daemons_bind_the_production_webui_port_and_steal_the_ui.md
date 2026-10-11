@@ -1,8 +1,8 @@
 ---
 name: "fix: smoke test daemons bind the production webui port and steal the UI"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/smoke-test-daemons-bind-the-production-webui-port-and-steal-the-ui"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -40,3 +40,12 @@ Constraints:
 - One fix committed (aae03f6): part S never pushed `homeS` into `cleaned`, so a failed assert or timeout in part S leaked the temp home dir in /tmp. Now pushed; suite re-run passes.
 - Re-review (2026-10-11): no new issues. Verified end to end: `--no-webui` flag + `SE_LLM_TEAM_NO_WEBUI` ("1"/"true", case-insensitive) skip the webui start with the "web ui disabled (no-webui)" log; bind failure names host:port with the taken-port hint; the usage line mentions the flag; agents/developer.md tells smoke daemons to use the override; runDaemon and the second-start spawn in orchestrator.test.ts are hermetic; part S covers both paths against a global-config-shaped HOME (webui enabled on 4277) and cleans up both temp dirs (aae03f6 verified). webui.test.ts's daemon spawn keeps no override on purpose (it tests webui startup on port 0).
 - Re-review live checks: flag path with the real global config logs "web ui disabled (no-webui)" and touches nothing on 4242; port 4242 is held only by the production daemon (extensions install, main repo root). Suite passes: kanban.test.ts, webui.test.ts, orchestrator.test.ts (part S included). HOLD check: 000034 done, 000038 still in backlog, so a future merge may conflict in src/orchestrator.ts as already noted.
+- Live test (2026-10-11, worktree at aae03f6): all flows pass, no issues found. Smoke daemons ran from the worktree against temp roots.
+  - `--no-webui` with the real global config: logs "web ui disabled (no-webui)"; 4242 stayed bound by the production daemon only; the production webui served 200 before and after.
+  - `SE_LLM_TEAM_NO_WEBUI=1` and `True` (case-insensitive): same result, no listener on 4242.
+  - No override while 4242 is taken: logs "web ui failed to start on 0.0.0.0:4242 (port taken by another webui?), continuing without it" (the new diagnosable message) and does not steal the port.
+  - Normal bind path with the new code (temp HOME, webui on free port 4288, no override): logs "web ui on http://127.0.0.1:4288", serves 200 while alive, and a SIGTERM stop exits cleanly and releases the port. The production daemon's path still binds normally.
+  - Usage line shows `[--no-webui]`; agents/developer.md tells smoke daemons to use the override.
+  - Suite passes: kanban.test.ts, webui.test.ts, orchestrator.test.ts (part S included).
+  - Note: an early check showed port 4288 still bound after a stop, but the kill had targeted the wrong pid (test-harness artifact, not a product bug). A correct SIGTERM exits cleanly and releases the port.
+  - Two smoke daemons from other agents' orchestrator.test.ts runs ran in parallel and did not touch 4242: the hermetic fix works in practice.

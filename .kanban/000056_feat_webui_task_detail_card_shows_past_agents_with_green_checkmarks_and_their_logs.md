@@ -1,8 +1,8 @@
 ---
 name: "feat: webui task detail card shows past agents with green checkmarks and their logs"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/webui-task-detail-card-shows-past-agents-with-green-checkmarks-and-their-logs"
 ---
 
 # Summary
