@@ -1,7 +1,7 @@
 ---
 name: "fix: subagent output transcripts render empty in the detail card"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/118-subagent-output-transcripts"
 blockedBy: "#52"
 ---
@@ -28,3 +28,11 @@ Reviewer notes (2026-10-11). Worktree fix/118-subagent-output-transcripts, 03ee4
 - Requirements check: sidechain user/assistant/toolResult rendering, cap 160/200, thinking style, toolCallId-keyed dedupe, partial-record drop and walk-back all implemented as specced; the walk-back is pinned by the new sub fixture (user + LOG_CHUNK system pad + session header) asserting head 0 and the prompt. Non-sidechain branches untouched (doc comment only), byte-identical rendering.
 - One fix (03ee4fe): the dedupe assertion counted occurrences of "[tool] read: /r/SPECS.md" (the toolcall args line), which stays 1 even if the toolResult rendered - a dedupe regression would have passed unnoticed. Added a negative assertion !side.includes("[tool] read: specs") and verified it catches the regression by temporarily dropping the seenTools check from the toolResult branch (test failed on the new assertion, restored file passes).
 - Acceptance rerun with the fix: kanban.test.ts, orchestrator.test.ts (exit 0), webui.test.ts and extension.test.ts all pass. No open questions.
+
+Reviewer notes (2026-10-11, second round). Worktree fix/118-subagent-output-transcripts, HEAD 03ee4fe, clean tree. No fixes made.
+
+- Re-review of 7fdf7ec + 03ee4fe against the Specs, all points pass. Sidechain user renders prompt text capped 160 like the message_end branch; assistant walks content blocks (text to message text, thinking in the existing style, toolCall blocks keyed by block.id into seenTools); toolResult renders toolName plus text via textOf (cap 200, "failed" on isError) keyed by msg.toolCallId. Dispatch is rec.isSidechain === true && rec.message on message.role; non-rendering roles (system, session) stay silent so the walk-back stays meaningful.
+- Independent real-transcript spot-check: rendered the last 30KB of a real 652-record watcher transcript (isSidechain:true on every record; toolCall blocks camelCase with id/name/arguments; toolResult with toolCallId/toolName/content) through renderLogChunk: 2130 bytes of prompt, text, thinking and [tool] lines, no raw JSON in the rendered body (the head partial line my raw harness shows is dropped by agentLogPayload before rendering in the serving path).
+- renderLogChunk has one caller (agentLogPayload), which is unchanged; the walk-back break condition (text || head === 0 || !walk) is intact and the new sub=3 fixture pins head 0 with the prompt. Non-sidechain branches are byte-identical (diff is the new else-if branch plus a doc comment only).
+- Main moved 4 commits ahead (blockedBy lines, agent cards) touching the same two files; merge-tree shows both files changed in both branches with zero conflict markers, the merge stays clean.
+- Acceptance rerun: webui.test.ts, kanban.test.ts, orchestrator.test.ts (exit 0, needs several minutes on a loaded machine) and extension.test.ts all pass.
