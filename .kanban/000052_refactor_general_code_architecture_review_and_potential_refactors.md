@@ -3,6 +3,7 @@ name: "refactor: general code architecture review and potential refactors"
 priority: "low"
 state: "backlog"
 worktree: ""
+blockedBy: "#115"
 ---
 
 # Summary
