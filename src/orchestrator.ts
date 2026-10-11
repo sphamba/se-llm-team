@@ -131,8 +131,9 @@ function spawnAgent(root: string, agent: string, role: string, task: Task, cwd: 
 	const slug = task.file.replace(/\.md$/, "");
 	mkdirSync(join(kanbanDir(root), ".logs"), { recursive: true });
 	const out = openSync(logPath(root, `${slug}.${role}`), "a");
-	// --approve trusts the project-local files of the worktree, so the headless session never waits for a trust prompt
-	const child = spawn(agent, ["--approve", "-p", renderPrompt(root, role, task, cwd === root ? undefined : cwd)], {
+	// --approve trusts the project-local files of the worktree, so the headless session never waits for a trust prompt;
+	// --mode json streams the full JSONL event log (thinking, tool calls, text) instead of print mode's final text only
+	const child = spawn(agent, ["--approve", "--mode", "json", "-p", renderPrompt(root, role, task, cwd === root ? undefined : cwd)], {
 		cwd,
 		detached: true,
 		stdio: ["ignore", out, out],
