@@ -1,7 +1,7 @@
 ---
 name: "feat: to-merge and merging states; orchestrator spawns mergers from to-merge, one at a time"
 priority: "critical"
-state: "live-testing"
+state: "done"
 worktree: "feat/78-to-merge-and"
 ---
 
@@ -72,3 +72,15 @@ Constraints:
 - SPECS.md and skills/se-llm-team/SKILL.md still list the 8 states. Both are outside the task constraints (README.md only), so they stay stale, as in round one.
 - src/webui.ts is untouched, per the constraint. A task in merging shows no agent log button (AGENT_ROLE has no merging entry); #79 owns that.
 - No fixes made in this round.
+
+## Live test (live-tester)
+
+- Suites on 50b42de in the worktree: node src/kanban.test.ts, node src/webui.test.ts and SE_LLM_TEAM_NO_WEBUI=1 node src/orchestrator.test.ts all exit 0.
+- Independent end-to-end run of the real daemon (node src/orchestrator.ts --no-webui --rescan-seconds 1) against throwaway git projects with a stub merger agent, not the test harness:
+  - Happy path: task in to-merge with a branch worktree -> "spawned merger"/"merging" -> worktree merged into main -> state done -> "merged feat/e2e-flow" -> worktree and branch removed. main carries the branch content; the board file lands in the meta/kanban done commit.
+  - Failed merge: conflicting branch -> merger aborts in the worktree, sets to-merge, appends a Note; respawns only after the idle cooldown (3 spawns at 13:54:11, 13:54:19, 13:54:27 with autoScheduleMinutes 0.12 = 7.2s). main stays clean, no merge in progress, no dirty conflict markers.
+  - Single merger: two to-merge tasks with a 3s stub -> exactly two spawns 3.7s apart, never overlapping; both tasks done, both worktrees cleaned.
+- kanban_set_state accepts to-merge and merging; parseTask round-trips both; listTasks scope=in-progress returns a merging task.
+- Verdict: all five acceptance criteria met. No functional defect found.
+
+## Open questions
