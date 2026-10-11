@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -278,6 +278,7 @@ assert.ok(!page.includes(".agent-past {") && !page.includes(".agent-live {"), "n
 const pastAt = page.indexOf('class="agent-btn agent-past"');
 const liveAt = page.indexOf('class="agent-btn agent-live"');
 assert.ok(pastAt >= 0 && liveAt > pastAt, "buttons render chronologically: oldest first, live agent last");
+assert.ok(!page.includes("openAgentLog(&quot;"), "no run handle reaches inline JS: quotes and backslashes would break the onclick");
 setState(root, getTask(root, task.file)!, "doing");
 const slug = task.file.replace(/\.md$/, "");
 mkdirSync(join(root, ".kanban", ".pids"), { recursive: true });
@@ -517,7 +518,14 @@ const subOne = await (await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=1`)).
 assert.equal(subOne.text, "plain fallback\n", "a sidechain record renders to nothing through renderLogChunk, its non-JSON line passes through (no special casing)");
 assert.equal((await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=9`)).status, 404, "an out-of-range subagent index is rejected");
 assert.equal((await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=x`)).status, 404, "a non-numeric subagent index is rejected");
+assert.equal((await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=1abc`)).status, 404, "a partially numeric subagent index is rejected too");
 assert.deepEqual(await (await fetch(`${base}/api/agent-log?file=${encodeURIComponent(`${slug}.live-tester.0`)}&sub=list`)).json(), [], "a log without spawn records yields an empty subagent list, never an error");
+// the memoized sub list must refresh when the parent log grows
+const out2 = join(subDir, "ffffffff-0000-0000-0000-000000000000.output");
+writeFileSync(out2, "SUB TWO\n");
+appendFileSync(rv0, subPath("ffffffff-0000-0000-0000-000000000000", out2) + "\n");
+const grown = await (await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=list`)).json();
+assert.deepEqual(grown.map(s => s.id), ["aaaaaaaa-0000-0000-0000-000000000000", "bbbbbbbb-0000-0000-0000-000000000000", "ffffffff-0000-0000-0000-000000000000"], "a parent log that grew invalidates the memoized sub list");
 
 // restore the board for the daemon section below
 rmSync(join(root, ".kanban", ".pids", `${slug}.pid`));

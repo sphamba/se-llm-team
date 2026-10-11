@@ -160,15 +160,23 @@ function agentLogPath(root: string, handle: string): string | null {
 // the Agent tool's tool result names the background agent and its .output transcript; ids are in
 // log order, so a subagent's number is its index here. Paths come from the log, never the client:
 // resolve first, then only pi's own subagent dir and .output transcripts pass
+// parsing a parent log is not free (a live-tester log can pass 50 MB), and every panel open asks
+// for the list: memoize per path until the file size changes. A log only ever grows
+const subsCache = new Map<string, { size: number; subs: { id: string; path: string }[] }>();
 function subagentLogs(log: string): { id: string; path: string }[] {
 	let text = "";
+	let size = 0;
 	try {
+		size = statSync(log).size;
+		const hit = subsCache.get(log);
+		if (hit && hit.size === size) return hit.subs;
 		text = readFileSync(log, "utf8");
 	} catch {
 		return []; // parent log gone or not written yet
 	}
 	const subs: { id: string; path: string }[] = [];
 	for (const line of text.split("\n")) {
+		if (!line.includes('"tool_execution_end"')) continue; // cheap filter before JSON.parse
 		let rec: any;
 		try {
 			rec = JSON.parse(line);
@@ -184,6 +192,7 @@ function subagentLogs(log: string): { id: string; path: string }[] {
 		if (!id || !resolved.startsWith(SUB_ROOT) || !resolved.endsWith(".output")) continue;
 		subs.push({ id, path: resolved });
 	}
+	subsCache.set(log, { size, subs });
 	return subs;
 }
 
@@ -327,8 +336,8 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 	if (sub === "list") return JSON.stringify(subagentLogs(log).map((s, index) => ({ id: s.id, index })));
 	let target = log;
 	if (sub !== null) {
-		const subIndex = parseInt(sub, 10);
-		const found = Number.isInteger(subIndex) && subIndex >= 0 ? subagentLogs(log)[subIndex] : undefined;
+		const subIndex = /^\d+$/.test(sub) ? parseInt(sub, 10) : -1;
+		const found = subIndex >= 0 ? subagentLogs(log)[subIndex] : undefined;
 		if (!found) return null; // no such subagent in this run
 		target = found.path;
 	}
@@ -854,9 +863,12 @@ function renderAgent(t) {
 	for (const a of runs) count[a.role] = (count[a.role] || 0) + 1;
 	const label = a => cap(a.role) + (count[a.role] > 1 && a.run != null ? " " + a.run : "");
 	const btns = runs.map(a => !a.alive
-		? '<button class="agent-btn agent-past" data-handle="' + esc(a.handle) + '" onclick="openAgentLog(&quot;' + esc(a.handle) + '&quot;)"><span class="check">\u2713</span>' + esc(label(a)) + "</button>"
-		: '<button class="agent-btn agent-live" data-handle="' + esc(a.handle) + '" onclick="openAgentLog(&quot;' + esc(a.handle) + '&quot;)"><span class="spin"></span>' + esc(label(a)) + "</button>");
+		? '<button class="agent-btn agent-past" data-handle="' + esc(a.handle) + '"><span class="check">\u2713</span>' + esc(label(a)) + "</button>"
+		: '<button class="agent-btn agent-live" data-handle="' + esc(a.handle) + '"><span class="spin"></span>' + esc(label(a)) + "</button>");
 	el.innerHTML = '<div id="m-agent-btns">' + btns.join("") + '</div><div id="m-sub-btns"></div><div id="m-log" class="hidden"><pre id="m-log-text"></pre></div>';
+	// bind by dataset: a hand-written task file name can hold quotes or backslashes, which no
+	// amount of HTML escaping makes safe inside inline JS
+	for (const b of el.querySelectorAll("#m-agent-btns .agent-btn")) b.onclick = () => openAgentLog(b.dataset.handle);
 	markActiveAgent();
 	const p = logPane();
 	p.onscroll = () => {
@@ -869,7 +881,8 @@ function renderAgent(t) {
 function renderSubs(list) {
 	const el = document.getElementById("m-sub-btns");
 	if (!el || !logState) return;
-	el.innerHTML = list.map(s => '<button class="agent-btn agent-sub" data-handle="' + esc(logState.handle) + '" data-sub="' + s.index + '" onclick="openSubLog(' + s.index + ')">' + esc(s.id) + "</button>").join("");
+	el.innerHTML = list.map(s => '<button class="agent-btn agent-sub" data-handle="' + esc(logState.handle) + '" data-sub="' + s.index + '">' + esc(s.id) + "</button>").join("");
+	for (const b of el.querySelectorAll(".agent-btn")) b.onclick = () => openSubLog(Number(b.dataset.sub));
 	markActiveAgent();
 }
 function fetchSubs() {
