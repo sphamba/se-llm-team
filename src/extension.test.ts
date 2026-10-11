@@ -55,6 +55,34 @@ assert.equal(validator.Check({ file: "000001_x.md", notes: "anything" }), false,
 assert.ok([...validator.Errors({ file: "000001_x.md", notes: "anything" })].some((e: any) => e.keyword === "additionalProperties"));
 assert.equal(validator.Check({ file: "000001_x.md", summary: "s", notes: "anything" }), false, "mixed call must fail validation too");
 
+// kanban_set_state and kanban_set_worktree are strict too, an unrecognized
+// field errors before execute instead of a dropped, silently-ignored param
+const strict = (name: string) => {
+	const tool = tools[name];
+	if (!tool) fail(`${name} not registered`);
+	assert.equal(tool.parameters.additionalProperties, false, `${name} must reject unknown fields`);
+	const v = Compile(tool.parameters);
+	const bad = { file: "000001_x.md", notes: "anything" } as any;
+	assert.equal(v.Check(bad), false, `${name} unknown field must fail validation`);
+	assert.ok([...v.Errors(bad)].some((e: any) => e.keyword === "additionalProperties"), `${name} must name the offending field`);
+	return v;
+};
+const stateValidator = strict("kanban_set_state");
+const worktreeValidator = strict("kanban_set_worktree");
+
+// valid calls keep the current behavior and response, including the empty-string worktree clear
+const t2 = createTask(root, { name: "feat: strict setters", summary: "before" });
+assert.equal(stateValidator.Check({ file: t2.file, state: "doing" }), true);
+assert.equal(worktreeValidator.Check({ file: t2.file, worktree: "" }), true);
+const setStateTool = tools["kanban_set_state"];
+const setWorktreeTool = tools["kanban_set_worktree"];
+assert.equal((await run(setStateTool, { file: t2.file, state: "doing" })).content[0].text, `${t2.file} (#${taskNum(t2.file)}): state -> doing`);
+assert.equal(getTask(root, t2.file)?.state, "doing");
+assert.equal((await run(setWorktreeTool, { file: t2.file, worktree: "feat/1-x" })).content[0].text, `${t2.file} (#${taskNum(t2.file)}): worktree -> feat/1-x`);
+assert.equal(getTask(root, t2.file)?.worktree, "feat/1-x");
+await run(setWorktreeTool, { file: t2.file, worktree: "" });
+assert.equal(getTask(root, t2.file)?.worktree ?? "", "", "empty worktree must clear the attribute");
+
 // a call with only file updates nothing and says so instead of claiming an update
 const t1 = createTask(root, { name: "feat: update guard", summary: "before" });
 const before = readFileSync(taskFile(t1.file), "utf8");

@@ -109,10 +109,12 @@ export default function (pi: ExtensionAPI) {
 		name: "kanban_set_state",
 		label: "Kanban set state",
 		description: `Move a task to a new state. States: ${STATES.join(", ")}.`,
+		// additionalProperties: false so pi rejects an unrecognized field (e.g. notes)
+		// with a validation error instead of dropping it and reporting a false success
 		parameters: Type.Object({
 			file: Type.String({ description: "Task file name" }),
 			state: StringEnum([...STATES] as unknown as [string, ...string[]]),
-		}),
+		}, { additionalProperties: false }),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
 			const task = getTask(ctx.cwd, params.file);
@@ -126,10 +128,12 @@ export default function (pi: ExtensionAPI) {
 		name: "kanban_set_worktree",
 		label: "Kanban set worktree",
 		description: "Set or clear (empty string) the worktree attribute of a task.",
+		// additionalProperties: false so pi rejects an unrecognized field (e.g. notes)
+		// with a validation error instead of dropping it and reporting a false success
 		parameters: Type.Object({
 			file: Type.String({ description: "Task file name" }),
 			worktree: Type.String({ description: "Worktree name under .worktrees/, e.g. feat/1-nice-thing" }),
-		}),
+		}, { additionalProperties: false }),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
 			const task = getTask(ctx.cwd, params.file);
