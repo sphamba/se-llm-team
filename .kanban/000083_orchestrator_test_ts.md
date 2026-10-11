@@ -1,8 +1,8 @@
 ---
 name: "test: orchestrator.test.ts late task-create commit wait is flaky"
 priority: "low"
-state: "to-merge"
-worktree: "test/83-orchestrator-test-ts"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -36,3 +36,9 @@ Suggested direction:
 - Main flows exercised: all smoke parts reached the end, including the target parts: "settled done task create-event smoke" (part O late task-create wait), "mirror reconcile smoke" (parts P/Q external add, deletion and branch-only materialization), plus pipeline, liveness, lock lifecycle, mirror board, bootstrap, hub failover, restart and respawn cap.
 - No "timeout waiting for ..." message, no crash, no assertion failure in any run. No leaked fixtures left by the suite.
 - Result: PASS. No issues found, so no follow-up tasks to report to the Project manager.
+
+## Merge report
+- Step 1: root checkout was on main. Merged main into test/83-orchestrator-test-ts in the worktree (merge commit 2b6de16); git auto-merged src/orchestrator.test.ts with no conflicts. Verified the auto-merge kept this branch's intent: exactly the seven scan-dependent waits in parts O, P, Q at 30000ms with the reason comment, and main's new parts/tests untouched (the remaining 10000ms waits are start/lock/flag-dependent, per the review scope).
+- Tests in the worktree after the merge: extension.test.ts PASS (1.2s), kanban.test.ts PASS (0.5s), webui.test.ts PASS (6.8s), orchestrator.test.ts PASS (235s). No fixes needed, so step 1 added no extra commits.
+- Step 2: root checkout still on main. Merged test/83-orchestrator-test-ts into main in the project root: fast-forward 9e9f0ae to 2b6de16, clean, only src/orchestrator.test.ts changed (9 insertions, 7 deletions), matching the branch diff. No conflicts.
+- Result: both merges complete, both repos clean. Task done.
