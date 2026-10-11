@@ -494,7 +494,7 @@ export function num(t: Task) {
 // markup, so its animation starts or stops with the state, and prefers-reduced-motion turns the CSS
 // animation off underneath
 export function spinnerHtml(st: string) {
-	return st === "doing" || st === "reviewing" || st === "live-testing" ? '<span class="spin"></span>' : "";
+	return st === "doing" || st === "reviewing" || st === "live-testing" || st === "merging" ? '<span class="spin"></span>' : "";
 }
 
 // one card's markup; this string is the card's identity across a refresh, see syncBoard.
@@ -630,13 +630,14 @@ h1 { font-size: 16px; margin: 0; }
 #theme { margin-left: auto; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 #theme:hover { background: var(--hover); }
 #updated { font-size: 12px; color: var(--muted); }
-#tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; }
+/* 000091: #modal is position:fixed at z-index auto, so a relative #tabs at z-index 1 keeps the bar above the overlay and clickable while a modal is open */
+#tabs { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; }
 #tabs:empty { display: none; }
 .tab { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px 6px 0 0; padding: 4px 12px; font-size: 12px; cursor: pointer; }
 .tab:hover { background: var(--hover); }
 .tab.active { border-color: var(--link); color: var(--link); }
 #board { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; padding: 10px 18px 18px; overflow-x: auto; align-items: flex-start; }
-/* 000047: six middle columns stack as three pairs, sized and gapped like the single columns */
+/* 000047: the middle columns stack as pairs, sized and gapped like the single columns */
 .pair { display: flex; flex-direction: column; gap: 10px; min-width: 300px; flex: 1 0 300px; }
 .col { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; border-top: 3px solid var(--ac); padding: 10px; min-width: 300px; flex: 1 0 300px; }
 /* 000096: as a .pair child the .col basis would act on the height axis and floor it at 300px */
@@ -698,6 +699,8 @@ h1 { font-size: 16px; margin: 0; }
 .c-reviewing { --ac: #d97706; }
 .c-to-live-test { --ac: #14b8a6; }
 .c-live-testing { --ac: #0d9488; }
+.c-to-merge { --ac: #d946ef; }
+.c-merging { --ac: #c026d3; }
 .c-done { --ac: #22c55e; }
 </style>
 </head>

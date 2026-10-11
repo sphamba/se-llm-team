@@ -113,8 +113,9 @@ assert.deepEqual(flipDiff(stacked, stacked), {}, "an unchanged refresh animates 
 assert.ok(page.includes(String(flipDiff)), "the page ships the tested flipDiff source");
 assert.ok(page.includes('transition = "transform .4s ease"'), "sibling shifts reuse the moved-card timing");
 
-// 000047 stacked pairs: the six middle states render as three .pair wrappers (to-do over doing,
-// to-review over reviewing, to-live-test over live-testing), backlog and done stay single columns.
+// 000047 stacked pairs: the eight middle states render as four .pair wrappers (to-do over doing,
+// to-review over reviewing, to-live-test over live-testing, to-merge over merging), backlog and done
+// stay single columns.
 // El is a minimal element stub: buildShell and syncBoard only touch this DOM surface.
 class El {
 	tag: string;
@@ -155,9 +156,17 @@ assert.ok(LAYOUT.every((part) => (typeof part === "string" ? cols[part] : part.e
 assert.ok(page.includes(JSON.stringify(LAYOUT)), "the page ships the tested layout");
 assert.ok(page.includes(String(buildShell)) && page.includes(String(syncBoard)), "the page runs the tested shell and card pass");
 
+// accents: one --ac per column, declared in pipeline order in the shared style block (not inside
+// the dark palette or its media query), so both themes render the same accent pair
+const accentAt = (st: string) => page.indexOf(`.c-${st} { --ac:`);
+assert.ok(STATE_NAMES.every((st) => accentAt(st) >= 0), "every state has its own accent class");
+assert.ok(STATE_NAMES.every((st, i) => i === 0 || accentAt(st) > accentAt(STATE_NAMES[i - 1])), "the accent classes are declared in pipeline order");
+const accentColors = STATE_NAMES.map((st) => page.match(new RegExp(`\\.c-${st} \\{ --ac: (#[0-9a-f]{6}); \\}`))![1]);
+assert.equal(new Set(accentColors).size, STATE_NAMES.length, "each column has a distinct accent color");
+
 // the state picks the animation: only the states the orchestrator works on carry the spinner
-assert.ok(spinnerHtml("doing").includes('<span class="spin">') && spinnerHtml("live-testing").includes('<span class="spin">'), "working states render the spinner");
-assert.equal(spinnerHtml("to-do") + spinnerHtml("to-review") + spinnerHtml("done"), "", "waiting and finished states render no spinner");
+assert.ok(spinnerHtml("doing").includes('<span class="spin">') && spinnerHtml("live-testing").includes('<span class="spin">') && spinnerHtml("merging").includes('<span class="spin">'), "working states render the spinner");
+assert.equal(spinnerHtml("to-do") + spinnerHtml("to-review") + spinnerHtml("to-merge") + spinnerHtml("done"), "", "waiting and finished states render no spinner");
 assert.ok(cardHtml({ file: "000047_fix_x.md", name: "a & b", priority: "high" }, "doing").includes('<span class="num">#47</span>a &amp; b'), "a card carries its short number and escaped name");
 // issuer on cards: user-issued keeps full contrast with a plain user chip, task-issued dims the
 // name and carries a small #<num> badge
@@ -250,6 +259,7 @@ assert.ok(
 assert.ok(page.includes('<nav id="tabs"></nav>'), "page has the tab bar");
 assert.ok(page.includes("switchTab(b.dataset.project)"), "each tab button switches the active board");
 assert.match(page, /function switchTab\(name\) \{[\s\S]*?closeModal\(\);[\s\S]*?\}/, "a tab switch closes the open modal");
+assert.match(page, /#tabs \{ position: relative; z-index: 1;/, "the tab bar stacks above the #modal overlay (000091)");
 assert.ok(page.includes("render(true); // no FLIP across boards"), "a tab switch never flips from the other board's layout");
 assert.ok(page.includes("Promise.all(projects.map(name => fetch(url(name))"), "every tab polls each cycle");
 assert.ok(page.includes("setInterval(refresh, 5000)"), "the poll keeps the 5 s cadence");
