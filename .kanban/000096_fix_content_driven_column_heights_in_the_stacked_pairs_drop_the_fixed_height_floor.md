@@ -1,7 +1,7 @@
 ---
 name: "fix: content-driven column heights in the stacked pairs; drop the fixed height floor"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/96-content-driven-column"
 ---
 
@@ -25,3 +25,11 @@ Constraints:
 - HOLD behind #72 (doing on feat/72-issuer-attribute-on, rewrites src/webui.ts + test): one webui rewrite at a time.
 
 # Notes
+
+## Developer notes
+- Commit c1ab268 on fix/96-content-driven-column (base main 4d79759, unchanged during the work); file src/webui.ts only, two added lines.
+- Change: `.pair .col { flex: 0 0 auto; }` directly after the `.col` rule (line 491), with a short comment. Inside a `.pair` (column flex) the basis now acts on the block axis and sizes the column to its content. The direct child `.col` rule keeps `flex: 1 0 300px`, so backlog/done stay 300px wide side columns. No markup, LAYOUT, count, empty-marker or cap change.
+- #72 hold: #72 was in reviewing when this work started (commit b5e8466 on feat/72-issuer-attribute-on, one commit on the same base). Its diff does not touch the `.pair` or `.col` CSS rules, so the HOLD condition (one webui rewrite at a time) is met and no conflict is expected in either merge order.
+- Suite: node src/kanban.test.ts, node src/orchestrator.test.ts and node src/webui.test.ts all green. No test change was needed.
+- Environment note: without an isolated HOME, the orchestrator llm-config-flags smoke fails on the unmodified base too (actual developer flags include `--provider RCP`, which comes from the machine-global ~/.pi/agent/se-llm-team.json; the test fixture declares no provider). This is pre-existing and not caused by this change. The run with a temp HOME makes all three suites green.
+- Browser check (headless Chrome over CDP against startWebUi on a temp board, ephemeral port, production webui untouched): with 5 cards in to-do and 1 in doing, the fixed CSS gives to-do 413px, doing 117px, all empty stacked columns 62px, side columns 62px high and 300px wide. Re-injecting the old `flex: 1 0 300px` gives 300px for doing and for every empty stacked column, the reported floor. So stacked columns grow with content and shrink to the header when empty, and the side columns are unchanged.
