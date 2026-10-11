@@ -1,7 +1,7 @@
 ---
 name: "fix: smoke test daemons bind the production webui port and steal the UI"
 priority: "medium"
-state: "to-live-test"
+state: "live-testing"
 worktree: "fix/smoke-test-daemons-bind-the-production-webui-port-and-steal-the-ui"
 ---
 

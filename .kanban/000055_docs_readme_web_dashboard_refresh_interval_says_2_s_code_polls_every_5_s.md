@@ -1,8 +1,8 @@
 ---
 name: "docs: README web dashboard refresh interval says 2 s, code polls every 5 s"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "docs/readme-web-dashboard-refresh-interval-says-2-s-code-polls-every-5-s"
 ---
 
 # Summary
