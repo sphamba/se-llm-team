@@ -1,8 +1,8 @@
 ---
 name: "fix: complexity chip gets its own row in the detail card"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/116-complexity-chip-gets"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -15,3 +15,7 @@ In the task detail popup (openTask), the complexity chip currently renders insid
 Split the priority row in openTask (src/webui.ts): the priority div keeps only the priority chip, the complexity chip moved to its own div with a "complexity" label span, same 'chip cx' class and esc(t.complexity || "moderate") fallback, placed between priority and state. cardHtml untouched. Replaced the stale webui.test.ts source assert with two: complexity renders in its own div with a complexity label, and the priority row holds only the priority chip. node src/webui.test.ts and node index.test.ts both pass. Committed as 0ac94ce.
 
 Review: no fixes needed. Verified against the Specs: openTask (src/webui.ts:960-961) gives the complexity chip its own div with a "complexity" label span, same 'chip cx' class and esc(t.complexity || "moderate") fallback; the priority row holds only the priority chip. cardHtml (src/webui.ts:529-530) keeps the complexity chip next to priority, untouched. The diff touches only src/webui.ts and src/webui.test.ts. Both source asserts present in webui.test.ts and both test files pass on the worktree. No open questions.
+
+Live test (real usage, no unit suite run): served the worktree webui on 127.0.0.1:4299 and opened the dashboard in headless Chromium. On the real board the detail popup for task #117 rendered the priority row with only the priority chip (chip p-medium) and a separate complexity row with a "complexity" label and the chip cx chip (moderate). Board cards were unchanged: the card still shows the priority chip followed by the chip cx complexity chip in one row. Rendering the openTask path with complexity values complex, simple, and absent/undefined produced a single complexity div, chip cx class, value complex/simple and the moderate fallback for absent/undefined. No page errors. No issues found.
+
+No user/client open questions.
