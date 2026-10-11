@@ -1,7 +1,7 @@
 ---
 name: "fix: kanban_create silently drops an unsupported field and reports a false success"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/111-kanban-create-silently"
 issuer: "#85"
 ---
@@ -31,5 +31,8 @@ Acceptance:
 - The existing node suites stay green (extension, kanban, webui, orchestrator).
 
 # Notes
+
+- 2026-10-11: Applied the #85 pattern to kanban_create: index.ts kanban_create registration now passes { additionalProperties: false } to Type.Object, so pi rejects an unsupported field with a validation error before execute. src/kanban.ts untouched. Extended src/extension.test.ts with the kanban_create cases: schema carries additionalProperties:false, pi's validator (typebox Compile) fails a call with an unsupported "notes" field (keyword additionalProperties), and a call with all supported fields still passes. All node suites green (extension, kanban, webui, orchestrator; orchestrator needs >180s, passes with a longer timeout). Committed as 97721c1 on fix/111-kanban-create-silently.
+- 2026-10-11 review: 97721c1 matches the #85 pattern (bf0621d) exactly, including comment style; src/kanban.ts untouched as spec'd. One gap found: the acceptance item "all supported calls keep the current behavior and response" was only covered at the validator level, the create execute path never ran (unlike the update cases in #85). Fixed with commit 8b291f8: extension.test.ts now runs kanban_create execute with all supported fields and asserts the exact `Created <file> (#N)` response plus the written issuer. All four node suites re-run green after the fix. No open questions.
 
 # Open questions

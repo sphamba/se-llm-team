@@ -1,7 +1,7 @@
 ---
 name: "feat: webui complexity badge on cards and the detail card"
 priority: "medium"
-state: "live-testing"
+state: "to-merge"
 worktree: "feat/99-webui-complexity-badge"
 ---
 
@@ -30,3 +30,11 @@ Constraints:
 - src/webui.test.ts: payload asserts for complexity on the default and the #42-issued task; card asserts for badge placement next to priority, escaping, and the absent-complexity moderate default; page asserts for the CSS class and the detail-card source line.
 - `node src/webui.test.ts` green; committed ae3a9ed in the worktree.
 - Review (no fixes): verified #98's `complexity` field is on the Task type in src/kanban.ts and validated against COMPLEXITIES at read time, so the payload and chips always carry a legal value; hub.ts reuses taskPayload and PAGE, so the hub serves complexity unchanged. Diff checked against the Specs: payload whitelist entry, `<span class="chip cx">` directly after the priority chip, the detail modal's priority row chip, `.chip.cx` quiet in both themes via `var(--code-bg)`/`var(--muted)`, esc() on every complexity render, and the `|| "moderate"` fallback. `node src/webui.test.ts` green in the worktree. No open questions.
+- Live test (browser, real usage): started the worktree webui with `startWebUi` against the worktree board and against a fixture kanban root. Playwright with system Chrome exercised the board and the detail card. No code was changed.
+- `/api/tasks` includes `complexity` for every task. A fixture task with `complexity: simple` returns simple. A fixture task with `complex` returns complex. A fixture task with no complexity key returns moderate.
+- Board cards: the `.chip.cx` badge shows after the priority chip and before the issuer chip. Values render simple, complex and the moderate default. The real board card for #99 shows `moderate` after `medium`.
+- Detail card: the priority row in `#m-attrs` shows the complexity chip next to the priority chip.
+- Both themes: the chip uses `--code-bg` for the background and `--muted` for the color in dark and light. The computed values match the CSS variables.
+- Note: `esc()` and the `|| "moderate"` fallback are not reachable at runtime because `kanban.ts` clamps complexity to a legal value at read time. The unit tests cover these two paths. This is not a defect.
+- Note: the running hub on port 4242 serves the pre-branch code, so its `/api/tasks` has no complexity. `hub.ts` calls the same `taskPayload`, so a restarted daemon serves it. This is not a defect of this change.
+- Result: no live-test findings. All checks pass. No open questions.
