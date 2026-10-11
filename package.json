@@ -5,5 +5,14 @@
 	"packageManager": "pnpm@12.11.2",
 	"engines": {
 		"pnpm": ">=12.11.2"
+	},
+	"pi": {
+		"extensions": ["./index.ts"],
+		"skills": ["./skills"]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "*",
+		"@earendil-works/pi-coding-agent": "*",
+		"typebox": "*"
 	}
 }
