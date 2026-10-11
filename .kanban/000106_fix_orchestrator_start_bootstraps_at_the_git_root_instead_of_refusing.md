@@ -1,8 +1,8 @@
 ---
 name: "fix: orchestrator_start bootstraps at the git root instead of refusing"
 priority: "critical"
-state: "to-merge"
-worktree: "fix/106-orchestrator-start-bootstraps"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -62,3 +62,9 @@ Constraints:
 - Flow 3 (non-git refuses): orchestrator_start in a plain temp dir returned exactly "Not a git repository: agents cannot run without git (worktrees, branches, board commits). No orchestrator started." and created no .kanban.
 - Unit suites green: node index.test.ts, node src/kanban.test.ts, node src/webui.test.ts, and SE_LLM_TEAM_NO_WEBUI=1 node src/orchestrator.test.ts (exit 0).
 - Residual risk, no task raised because the Specs scope it and the reviewer already accepted it: a session in a subdirectory now boots the orchestrator on the root board, but kanban_create still writes to ctx.cwd/.kanban, so tasks created from that subdirectory go to a different board than the daemon watches. The old refusal at least made the mismatch visible. Same shape as the linked-worktree limit: --show-toplevel in a linked worktree resolves the worktree root, not the main checkout.
+
+## 2026-10-11, merger
+- Step 1: resolved base branch main from the root checkout, merged main into fix/106-orchestrator-start-bootstraps in the worktree (git merge main --no-edit). Auto-merge, no conflicts; merge commit b7b9407. index.ts auto-merged cleanly: main had not changed index.ts since the merge base, so the fix branch's version (resolveRoot and the four root-resolving tools) is intact.
+- Tests in the worktree after the merge, all green, no fixes needed: node index.test.ts, node src/kanban.test.ts, node src/extension.test.ts (new on main), SE_LLM_TEAM_NO_WEBUI=1 node src/orchestrator.test.ts, node src/webui.test.ts, and node src/orchestrator.test.ts plain (exit 0).
+- Step 2: re-resolved base branch (still main), merged fix/106-orchestrator-start-bootstraps into main from the root checkout. Fast-forward 34e5ebc..b7b9407, no conflicts (index.ts, index.test.ts).
+- Both merges complete. Task set to done. No open questions.
