@@ -412,12 +412,13 @@ function everOnMirror(root: string, file: string): boolean {
 	}
 }
 
-// branch wins for mirrored files: materialize refs/heads/meta/kanban into the working-tree
-// .kanban. Writes files missing from or differing from the tip, deletes local files the tip
-// lacks that the last known mirror tree had (external deletions propagate) and keeps files
-// the mirror never carried (in-flight PM writes between file write and mirror commit).
-// Never touches the index. Trigger: only when the branch head moved past the head this
-// process last materialized or wrote; our own mirror commits never re-trigger it.
+// materialize refs/heads/meta/kanban into the working-tree .kanban. Files the working tree
+// lacks are written from the tip; local files the tip lacks that the last known mirror tree
+// had are deleted (external deletions propagate). A local file that exists wins over the
+// tip: agents write state and notes into the working tree while only creates and dones
+// reach the mirror, so a differing local file is an in-flight write (the mirror cannot tell
+// it from a stale copy). Never touches the index. Trigger: only when the branch head moved
+// past the head this process last materialized or wrote; our own commits never re-trigger.
 function reconcileBoard(root: string): boolean {
 	const head = git(root, ["rev-parse", "--verify", KANBAN_REF], true);
 	if (!head || head === lastMirrorHash) return false;
@@ -457,8 +458,14 @@ function reconcileBoard(root: string): boolean {
 	}
 	mkdirSync(kanbanDir(root), { recursive: true });
 	let updated = 0;
+	let kept = 0;
 	for (const [name, blob] of tip) {
-		if (local.get(name) === blob) continue;
+		// an existing local file is either equal to the tip or a newer in-flight write:
+		// keep it, or a daemon restart reverts the state and notes written since the mirror
+		if (local.has(name)) {
+			if (local.get(name) !== blob) kept++;
+			continue;
+		}
 		try {
 			writeFileSync(
 				join(kanbanDir(root), name),
@@ -496,7 +503,7 @@ function reconcileBoard(root: string): boolean {
 		}
 	}
 	lastMirrorHash = head;
-	log(root, `reconciled .kanban to ${head}: ${updated} file(s) updated, ${deleted} deleted`);
+	log(root, `reconciled .kanban to ${head}: ${updated} file(s) updated, ${deleted} deleted${kept ? `, ${kept} in-flight kept` : ""}`);
 	return true;
 }
 
