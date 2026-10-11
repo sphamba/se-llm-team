@@ -1319,3 +1319,60 @@ await waitFor(() => parseTask(rootAA, taskAA.file).state === "done" && parseTask
 assert.equal(runsAA(), 0, "counter still cleared after the pipeline completed");
 aa.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + reviewer successful-run cap smoke passed");
+
+// --- part AB: a live agent pid defers the sweep spawn, so a to-do rewrite cannot twin it ---
+// the bug: the liveness poll requeued a doing task to to-do, the sweep spawned a developer,
+// then a second trigger let the next sweep spawn a twin whose writePid overwrote the first
+// pid file and orphaned the first agent. The live pid is the guard, the state alone is not.
+const rootAB = fixture();
+cleaned.push(rootAB);
+mkdirSync(kanbanDir(rootAB), { recursive: true });
+// developer stub that records the state it reads at startup (the set-before-spawn proof) and
+// then lingers alive, so several sweeps run while its pid file is the only live-agent guard
+const guardStub = join(rootAB, "guard-agent.cjs");
+writeFileSync(
+	guardStub,
+	`#!/usr/bin/env node
+const { readFileSync, appendFileSync } = require("node:fs");
+const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
+const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
+if (!prompt.includes("Developer agent") || !file) process.exit(0);
+const state = (readFileSync(file, "utf8").match(/^state: "(.*)"$/m) ?? [])[1] ?? "";
+appendFileSync(${JSON.stringify(join(rootAB, "guard.log"))}, JSON.stringify({ pid: process.pid, state }) + "\\n");
+setTimeout(() => process.exit(0), 8000);
+`,
+	{ mode: 0o755 },
+);
+writeFileSync(join(kanbanDir(rootAB), "se-llm-team.json"), JSON.stringify({ agent: guardStub, pollMinutes: 0.05 }));
+const taskAB = createTask(rootAB, { name: "fix: no double spawn", summary: "Double-spawn guard smoke", specs: "n/a" });
+setState(rootAB, taskAB, "to-do");
+const slugAB = taskAB.file.replace(/\.md$/, "");
+const pidFileAB = join(kanbanDir(rootAB), ".pids", `${slugAB}.pid`);
+const guardRunsAB = () => {
+	try {
+		return readFileSync(join(rootAB, "guard.log"), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as { pid: number; state: string });
+	} catch {
+		return [];
+	}
+};
+
+const ab = await runDaemon(rootAB);
+const spawnedAB = () => ab.output().split("spawned developer").length - 1;
+await waitFor(() => guardRunsAB().length === 1, 30000, "first developer spawned", ab.output);
+assert.equal(guardRunsAB()[0].state, "doing", "the state attribute was already set when the agent started");
+assert.equal(Number(readFileSync(pidFileAB, "utf8").trim()), guardRunsAB()[0].pid, "pid file names the first agent");
+// the to-do rewrite that used to twin the agent: several sweeps and a liveness poll later,
+// the pid check, not the state, must still keep the second spawn away
+writeFileSync(join(kanbanDir(rootAB), taskAB.file), readFileSync(join(kanbanDir(rootAB), taskAB.file), "utf8").replace(/^state: .*/m, 'state: "to-do"'));
+await new Promise((r) => setTimeout(r, 3000));
+assert.equal(spawnedAB(), 1, "no second developer while the first agent pid is alive");
+assert.equal(guardRunsAB().length, 1, "the stub never ran a second time");
+assert.equal(Number(readFileSync(pidFileAB, "utf8").trim()), guardRunsAB()[0].pid, "pid file still names the first agent");
+assert.equal(parseTask(rootAB, taskAB.file).state, "to-do", "the to-do rewrite is left alone while the agent lives");
+// the agent exits: the next sweep spawns exactly one replacement and rewrites the pid file
+await waitFor(() => spawnedAB() === 2, 30000, "single replacement after the first agent died", ab.output);
+assert.equal(guardRunsAB().length, 2, "exactly one replacement agent");
+assert.notEqual(guardRunsAB()[1].pid, guardRunsAB()[0].pid, "the replacement is a new process");
+assert.equal(Number(readFileSync(pidFileAB, "utf8").trim()), guardRunsAB()[1].pid, "pid file names the single live agent");
+ab.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + double-spawn live-pid guard smoke passed");

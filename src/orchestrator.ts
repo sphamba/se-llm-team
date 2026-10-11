@@ -582,10 +582,15 @@ function bootstrapBoard(root: string): void {
 }
 
 function startTodo(root: string, cfg: Config, task: Task): void {
+	const slug = task.file.replace(/\.md$/, "");
+	// a manual to-do rewrite can land while the spawned agent still runs: the live pid is the
+	// guard, the state alone is not, or a second sweep spawns a twin that overwrites the pid file
+	if (pidAlive(agentPid(root, slug))) return;
 	const ensured = ensureWorktree(root, task);
 	if (!ensured) return;
-	spawnAgent(root, cfg, "developer", { ...task, worktree: ensured.wt }, ensured.wtDir);
+	// state before spawn: the next sweep reads doing and defers, with the pid check as the belt
 	setState(root, task, "doing");
+	spawnAgent(root, cfg, "developer", { ...task, worktree: ensured.wt }, ensured.wtDir);
 }
 
 // one failed-merge marker per task: written when the sweep spawns a merger, it survives the
@@ -718,9 +723,11 @@ function rescan(root: string, cfg: Config): void {
 							writeFileSync(counterPath(root, `${slug}.reviewer-runs`), "0");
 							log(root, "reviewer succeeded 3+ times, moving to to-live-test");
 						}
-					} else {
-						spawnAgent(root, cfg, "reviewer", task, ensured.wtDir);
+					} else if (!pidAlive(agentPid(root, slug))) {
+						// the previous agent for this task (usually the developer writing its report) may
+						// still be alive: defer the spawn to a later sweep instead of double-spawning
 						setState(root, task, "reviewing");
+						spawnAgent(root, cfg, "reviewer", task, ensured.wtDir);
 						const pid = agentPid(root, slug);
 						if (pid) writeFileSync(armedPath(root, slug), String(pid));
 					}
@@ -731,9 +738,13 @@ function rescan(root: string, cfg: Config): void {
 				else {
 					// a reviewer approval is a successful run too; the forced advance arrives with the
 					// marker already consumed at the to-review branch, so it never re-counts
-					consumeReviewerRun(root, task.file.replace(/\.md$/, ""));
-					spawnAgent(root, cfg, "live-tester", task, ensured.wtDir);
-					setState(root, task, "live-testing");
+					const slug = task.file.replace(/\.md$/, "");
+					consumeReviewerRun(root, slug);
+					if (!pidAlive(agentPid(root, slug))) {
+						// the reviewer that approved it may still be alive: defer the spawn to a later sweep
+						setState(root, task, "live-testing");
+						spawnAgent(root, cfg, "live-tester", task, ensured.wtDir);
+					}
 				}
 			} else if (task.state === "to-merge") {
 				sweepToMerge(root, cfg, task);
