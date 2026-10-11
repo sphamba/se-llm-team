@@ -2,7 +2,7 @@
 name: "feat: to-merge and merging states; orchestrator spawns mergers from to-merge, one at a time"
 priority: "critical"
 state: "done"
-worktree: "feat/78-to-merge-and"
+worktree: ""
 ---
 
 # Summary
