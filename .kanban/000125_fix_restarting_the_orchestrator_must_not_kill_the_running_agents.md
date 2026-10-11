@@ -1,8 +1,8 @@
 ---
 name: "fix: restarting the orchestrator must not kill the running agents"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/125-restarting-the-orchestrator"
 ---
 
 # Summary
