@@ -1,8 +1,8 @@
 ---
 name: "fix: content-driven column heights in the stacked pairs; drop the fixed height floor"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/96-content-driven-column"
+state: "done"
+worktree: ""
 ---
 
 # Summary
