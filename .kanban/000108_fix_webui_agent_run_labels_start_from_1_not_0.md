@@ -1,7 +1,7 @@
 ---
 name: "fix: webui agent run labels start from 1, not 0"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/108-webui-agent-run"
 ---
 
@@ -36,3 +36,4 @@ Constraints:
 - Extracted the run-label lambda from renderAgent as exported client helper agentLabel(a, count), interpolated into PAGE like the other tested client helpers, and made it 1-based: " " + (a.run + 1) when count[a.role] > 1 and a.run != null. The local capitalize cap in renderAgent folded into agentLabel; the count > 1 rule and a.run == null unnumbered path are unchanged. Log names, handles and nextRunIndex untouched.
 - src/webui.test.ts: agentLabel asserted over the served 000088 payload (developer run 0 -> "Developer 1", run 1 -> "Developer 2", legacy run null -> "Developer", solo run -> "Reviewer") plus the page-ships-the-tested-source check.
 - node src/webui.test.ts, node src/kanban.test.ts pass; node src/orchestrator.test.ts failed once on the timing-sensitive respawn-cap smoke, passed on re-run (it imports hub.ts, not webui.ts, so unrelated to this change). Committed 38f7e75 on fix/108-webui-agent-run.
+- Review (2026-10-11): verified 38f7e75 against the specs, no fixes needed. agentLabel renders " " + (a.run + 1) under the count > 1 && run != null rule; legacy run-null and solo runs stay unnumbered; diff touches only src/webui.ts and src/webui.test.ts (no renames, no orchestrator changes, data-handle unchanged). Test assertions checked against the served payload (devRuns[1] = run 0 -> "Developer 1", devRuns[2] = run 1 -> "Developer 2", devRuns[0] = legacy null -> "Developer", solo reviewer count 1 -> "Reviewer"); page-ships-source check confirmed inside the <script> block. All three suites pass on this worktree (orchestrator incl. the timing-sensitive respawn-cap smoke). The removed renderAgent-local cap lambda had no other callers; the module-level cap truncate helper is separate.

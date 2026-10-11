@@ -1,8 +1,8 @@
 ---
 name: "fix: dead-agent give-up log fires only on exact equality - a second death streak stays silent"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/109-dead-agent-give"
 issuer: "#65"
 ---
 

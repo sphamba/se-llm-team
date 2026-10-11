@@ -1,7 +1,7 @@
 ---
 name: "feat: blockedBy task attribute; failsafe skips blocked tasks; PM honors holds"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "feat/80-blockedby-task-attribute"
 ---
 
@@ -50,3 +50,10 @@ Constraints:
   - skills/se-llm-team/SKILL.md step 6: never promote a task whose blockers are not done; prune done blocker refs with kanban_update at scheduling time (the PM maintains the list, no auto-clear).
   - Tests: src/kanban.test.ts gained a blockedBy roundtrip section (parse, create with, update replace, clear, list/get inclusion, byte-format without blockedBy). src/orchestrator.test.ts gained part AB, a daemon smoke: a critical task held despite priority, a ghost-only ref promoted (ghost ignored), an unblocked medium task promoted, and the blocked task promoted after its blocker settled done. Full suite green: kanban.test.ts, orchestrator.test.ts (all parts), webui.test.ts. Part AB awaits the daemon's full exit before removing its fixture (a sweep mid-flight still writes into it).
   - Typecheck: no local tsc (the project checks run with node directly). A one-off strict tsc run reports the same two pre-existing errors as main, only at shifted line numbers - no new type errors.
+
+- [2026-10-11 17:40] Reviewed commit 37a8cc7 against the Specs. No defects, no fixes.
+  - All six change items match the Specs: Task/TaskRef/parseTask/listTasks carry blockedBy (absent reads as ""), updateTask replaces the whole list via updateAttrs (omitted unchanged, "" clears), createTask writes it only when provided (byte-format unchanged otherwise), kanban_create/kanban_update expose the param, kanban_list/kanban_get descriptions mention it, SKILL.md step 6 never promotes blocked tasks and prunes done refs with kanban_update (no auto-clear).
+  - blockedByUndone semantics verified: a ref blocks while its task exists and is not done; ghost, non-numeric and #0 refs are ignored; the `if (!next) return` keeps the idle window armed on an all-blocked backlog, so promotion fires as soon as the blocker reaches done. Combines cleanly with the #75 open-questions skip.
+  - Full suite green in this worktree: kanban.test.ts, orchestrator.test.ts (all 20 parts incl. the new blockedBy failsafe smoke), webui.test.ts. The roundtrip asserts byte-identical output without blockedBy.
+  - Holds resolved: 000074 and 000078 are merged into the branch base d93e444; 000075 has since merged on main and git merge-tree reports 0 conflicts (the #75 change edits the backlog filter line, this change edits the promotion pick ~10 lines below). No remaining hold.
+  - Note: the global tsc on this machine is a stub shim, so the typecheck claim is not locally reproducible; the project's declared checks (the three node suites) pass. Acceptance met -> to-live-test.

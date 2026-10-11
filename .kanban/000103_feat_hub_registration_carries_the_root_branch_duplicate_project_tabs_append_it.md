@@ -1,7 +1,7 @@
 ---
 name: "feat: hub registration carries the root branch; duplicate project tabs append it"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "feat/103-hub-registration-carries"
 ---
 
@@ -26,3 +26,10 @@ Constraints:
 - The tab region (tabNames/tabsHtml) is disjoint from the in-flight #88 (agent history) and #84 (agentLogPayload) webui work; coordinate in the merger if the regions drift.
 
 # Notes
+- Implemented in worktree feat/103-hub-registration-carries, commit 08f2f15.
+- src/hub.ts: HubEntry gains branch; new exported currentBranch(root) runs `git branch --show-current` in the root (stdio piped, "" on a detached HEAD, non-git root, or any git failure). joinHub sends {name, root, branch} at register and at every heartbeat; the heartbeat handler updates lastHeartbeat and branch on the entry, so the label tracks the checkout as it moves. startHub seeds self with the live branch too.
+- Registry identity switched from name to root: /register keys entries by root (two checkouts of one repo keep their own entries), seeding and failover inherit that. /api/tasks and /api/agent-log select by root; a bare project name still resolves when unique (backward compatible) and answers 404 when duplicated (ambiguous). /api/projects serves the branch via the entry spread.
+- src/webui.ts: tabNames returns {id, label} descriptors - id is the entry root (unique identity), label is "name (branch)" only for names registered more than once, plain name otherwise; an empty branch (detached HEAD) keeps the plain name. tabsHtml renders data-project from the id and the visible label from the label. The client keys boards, polls and active-tab tracking by id; the single-project fallback [{id:"",label:""}] keeps the old bare /api/tasks ui.
+- Tests: webui.test.ts covers branch-append only for duplicated names, detached-HEAD fallback, id/label escaping and identity disambiguation through tabsHtml; page-source assertions updated. orchestrator.test.ts part U fixtures extended (entry shape with branch, register stores branch, heartbeat re-resolves it, name-only heartbeat still works, two same-named checkouts keep own entries and root selects each board); part V asserts the registry entries carry a non-empty branch. Spec item 4 asked for these hub fixtures; they live in orchestrator.test.ts, so that file is touched beyond the constraint list.
+- Live two-checkout acceptance smoke (temp HOME, free port, both daemons on one repo's two branches) passed: two tabs' data ("repo (branch-a)" / "repo (branch-b)" via the tested tabNames), each root serving its own board, heartbeat picking up a branch move. Single-daemon case verified unchanged. Two bugs found and fixed by the smoke: execFileSync leaked git's stderr into the daemon log every heartbeat (fixed with stdio pipe), and the heartbeat name fallback matched a same-named entry of the OTHER checkout, returning 200 to an unregistered daemon so it never registered (fixed: root-gated lookup, name fallback only without a root in the body).
+- Full suite green: node src/kanban.test.ts, node src/webui.test.ts, node src/orchestrator.test.ts.
