@@ -792,8 +792,10 @@ function md(src) {
 ${flipDiff}
 ${curve}
 ${relationPaths}
-// board layout and the card pass, interpolated as source so the client runs the tested code
+// board layout and the card pass, interpolated as source so the client runs the tested code;
+// constants go in as values, the functions as source
 const LAYOUT = ${JSON.stringify(LAYOUT)};
+const PRIORITY_RANK = ${JSON.stringify(PRIORITY_RANK)};
 ${spinnerHtml}
 ${numLinkHtml}
 ${cardHtml}

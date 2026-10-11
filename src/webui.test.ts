@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, w
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createTask, getTask, setState } from "./kanban.ts";
+import { createTask, getTask, PRIORITY_RANK, setState } from "./kanban.ts";
 import { startHub } from "./hub.ts";
 import { agentLabel, boardOf, buildShell, cardHtml, curve, flipDiff, LAYOUT, loadWebUiConfig, LOG_CHUNK, mergeBoards, numLinkHtml, pairLayout, relationPaths, renderLogChunk, spinnerHtml, syncBoard, tabNames, tabsHtml } from "./webui.ts";
 
@@ -167,6 +167,9 @@ assert.deepEqual(pairLayout(STATE_NAMES), LAYOUT, "the pairs derive from the sta
 assert.ok(LAYOUT.every((part) => (typeof part === "string" ? cols[part] : part.every((st) => cols[st]))), "every layout state gets a column");
 assert.ok(page.includes(JSON.stringify(LAYOUT)), "the page ships the tested layout");
 assert.ok(page.includes(String(buildShell)) && page.includes(String(syncBoard)), "the page runs the tested shell and card pass");
+// syncBoard is interpolated as source, so every identifier it references must exist in the
+// client scope: the page ships the rank map as a value, or the backlog sort throws on refresh
+assert.ok(page.includes(`const PRIORITY_RANK = ${JSON.stringify(PRIORITY_RANK)}`), "the client defines the rank map syncBoard references");
 
 // accents: one --ac per column, declared in pipeline order in the shared style block (not inside
 // the dark palette or its media query), so both themes render the same accent pair
