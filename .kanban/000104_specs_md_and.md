@@ -35,3 +35,18 @@ Dedup held: #79 (webui columns), #95 (poll rewrite), #102 (merger hardcoded main
 Review (no fixes): all spec items verified against the worktree code and agent prompts. 10-state list matches README.md line 55; live-testing -> to-merge fallback matches DEAD_TRANSITIONS ("live-testing": "to-merge", merging: "to-merge") in src/orchestrator.ts; the to-merge bullet matches sweepToMerge (global merger pid check, spawn then setState merging); the Merger section matches agents/merger.md (two-step merge, main wins unless Specs say otherwise, failed merge requeues with git merge --abort); the Live-tester section matches agents/live-tester.md; SKILL.md states line plus the Merger-ownership sentence are accurate (merger.md has the merger set to-merge -> merging and merging -> done itself). No other stale state/flow wording in SKILL.md.
 
 Observation for a follow-up, outside this task's spec: the SPECS.md liveness bullet ("If dead, kill the agent, and respawn at same state") still describes the old respawn-in-place behavior; poll() now bounces dead-agent tasks via DEAD_TRANSITIONS (doing -> to-do, reviewing -> to-review, live-testing -> to-merge, merging -> to-merge) and the sweep respawns for the new state, so the bullet contradicts the live-testing fallback documented two bullets above. Not fixed here: #95 (doing, critical) rewrites exactly that poll machinery and rebases first.
+
+## Live test (developer/104-specs-md-and, commit a77b013)
+Result: PASS. Docs-only change, so the live test compared every claim in the changed docs against the running code and agent prompts.
+
+Exercised flows:
+- State list: SPECS.md line 19 and skills/se-llm-team/SKILL.md line 17 both list all 10 states (backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing, to-merge, merging, done), in the same order as README.md line 55 and the kanban_set_state tool enum (all 10 states present).
+- to-merge sweep: SPECS.md "spawn at most one Merger agent at a time for the whole project" matches sweepToMerge (src/orchestrator.ts): returns while a merger pid is alive, writes the per-task merge-attempt marker, spawns, then setState merging. The idle-cooldown retry after a failed merge is documented in README.md, not in SPECS.md, which is correct for SPECS.md's scope.
+- Failed-merge requeue: SPECS.md "sets the task back to to-merge and aborts any merge left dirty" matches agents/merger.md (git merge --abort in root or worktree) and DEAD_TRANSITIONS merging -> to-merge.
+- Merger agent section: SPECS.md two-step merge, "main wins unless the task Specs say otherwise", run tests in worktree, then merge branch into main and set done matches agents/merger.md exactly.
+- Live-tester section: SPECS.md "Moves the task to to-merge, whatever the test result" matches agents/live-tester.md step 3.
+- PM skill: SKILL.md states line plus the Merger-ownership sentence are accurate; merger.md moves to-merge -> merging and merging -> done itself, so the PM never needs to. No other SKILL.md sentence contradicts the 10-state board.
+
+No regressions. Dedup held: #79, #95, #102 all untouched by this diff.
+
+Follow-up handed to the Project manager: the SPECS.md liveness bullet (line 47, "If dead, kill the agent, and respawn at same state") is stale against src/orchestrator.ts (poll bounces via DEAD_TRANSITIONS and the sweep respawns for the bounced-to state). It is pre-existing and outside this task's spec; #95 rewrites that machinery but its file list (src/orchestrator.ts, src/orchestrator.test.ts) does not include SPECS.md.

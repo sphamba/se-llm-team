@@ -1,7 +1,7 @@
 ---
 name: "fix: orchestrator_start bootstraps at the git root instead of refusing"
 priority: "critical"
-state: "live-testing"
+state: "to-merge"
 worktree: "fix/106-orchestrator-start-bootstraps"
 ---
 
@@ -54,3 +54,11 @@ Constraints:
 - The non-git assertion in index.test.ts assumes that the temp dir is not inside a git repo (true on a normal tmpdir). Not a product defect.
 - index.test.ts is absent from README Checks, but that matches the existing staleness (orchestrator.test.ts and webui.test.ts are also absent). The Specs constrain the change to index.ts plus its test, so no README edit was made.
 - Known limits already noted above stand and do not block: kanban_* tools stay on ctx.cwd (spec-scoped), and linked worktrees resolve to the worktree root.
+
+## 2026-10-11, live-tester
+- No fixes made. Result: PASS. Live test exercised the real spawned daemon (no spawn stub), from the worktree /home/phamba/repos/se-llm-team/.worktrees/fix/106-orchestrator-start-bootstraps at commit e763866.
+- Flow 1 (bootstrap): throwaway git repo with no .kanban, orchestrator_start called from sub/dir. Returned "Orchestrator starting (pid N), log: <repo>/.kanban/.logs/orchestrator.log". The daemon created .kanban at the repo root (lock, .logs, .pids); no .kanban appeared in sub/dir. A createTask at the root made refs/heads/meta/kanban appear, so the board is empty and usable.
+- Flow 2 (subdirectory resolves the root board and lock): orchestrator_status from sub/dir returned running (pid N); board: {} against the root lock, then the root board after the task. orchestrator_poke from sub/dir wrote <repo>/.kanban/.poke. orchestrator_stop from sub/dir sent SIGTERM to the root pid and the daemon exited. A restart at the repo root spawned a fresh daemon and status from the root returned board: {"backlog":1}, matching the pre-change normal case.
+- Flow 3 (non-git refuses): orchestrator_start in a plain temp dir returned exactly "Not a git repository: agents cannot run without git (worktrees, branches, board commits). No orchestrator started." and created no .kanban.
+- Unit suites green: node index.test.ts, node src/kanban.test.ts, node src/webui.test.ts, and SE_LLM_TEAM_NO_WEBUI=1 node src/orchestrator.test.ts (exit 0).
+- Residual risk, no task raised because the Specs scope it and the reviewer already accepted it: a session in a subdirectory now boots the orchestrator on the root board, but kanban_create still writes to ctx.cwd/.kanban, so tasks created from that subdirectory go to a different board than the daemon watches. The old refusal at least made the mismatch visible. Same shape as the linked-worktree limit: --show-toplevel in a linked worktree resolves the worktree root, not the main checkout.
