@@ -1,8 +1,8 @@
 ---
 name: "feat: installable as a pi package with pi install from git"
 priority: "medium"
-state: "live-testing"
-worktree: "feat/135-installable-as-a"
+state: "done"
+worktree: ""
 complexity: "simple"
 ---
 
@@ -44,3 +44,4 @@ simple. package.json manifest + README section, no logic.
 - Left agents/*.md out of the manifest (not a pi resource type; the orchestrator reads them at runtime) and did not add a dependencies field. Local symlinks untouched.
 - Checks: node index.test.ts, src/extension.test.ts, src/kanban.test.ts, src/orchestrator.test.ts, src/webui.test.ts all pass. No tests assert on package.json.
 - Review (no fixes): diff main...HEAD touches only package.json and README.md. Verified against pi docs/packages.md and docs/skills.md: git: source and https URL form are correct; the `pi` manifest carries explicit paths relative to the package root (index.ts at root, skills/ at root, both exist); skills are discovered recursively from a declared dir, so `./skills` finds skills/se-llm-team/SKILL.md; peerDependencies list exactly the three host-provided packages with "*" and none are in dependencies; index.ts imports match (@earendil-works/pi-ai StringEnum and typebox Type as runtime values, @earendil-works/pi-coding-agent types only). Kept name, private, type: module, pnpm pin. Re-ran index.test.ts and src/extension.test.ts, all pass. agents/*.md correctly left out of the manifest.
+- Merge: base branch resolved as main at both steps. Step 1 (main into feat/135-installable-as-a in the worktree): already up to date, no conflicts, test suites skipped per the clean-merge rule. Step 2 (feat/135-installable-as-a into main in the root): fast-forward 9677607..7c90128, README.md +11/-2 and package.json +9, clean. Root checkout was on main, never detached.

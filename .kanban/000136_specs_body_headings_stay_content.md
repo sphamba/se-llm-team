@@ -6,7 +6,7 @@ worktree: ""
 issuer: "#131"
 complexity: "moderate"
 shortName: "specs-body-headings-stay-content"
-blockedBy: "#131"
+blockedBy: "#131, #135"
 ---
 
 # Summary
