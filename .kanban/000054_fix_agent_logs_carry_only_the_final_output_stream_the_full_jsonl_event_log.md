@@ -2,7 +2,7 @@
 name: "fix: agent logs carry only the final output - stream the full JSONL event log"
 priority: "high"
 state: "done"
-worktree: "fix/agent-logs-carry-only-the-final-output-stream-the-full-jsonl-event-log"
+worktree: ""
 ---
 
 # Summary
@@ -27,6 +27,7 @@ Tests:
 Schedule note: queues behind 000051 (src/orchestrator.ts) and 000036 (src/webui.ts) - both own one of this task's files.
 
 # Notes
+- [2026-10-11 07:35] Merge conflict for branch fix/agent-logs-carry-only-the-final-output-stream-the-full-jsonl-event-log, merger spawned (attempt 1).
 
 - Implemented in 4 commits on fix/agent-logs-carry-only-the-final-output-stream-the-full-jsonl-event-log (1687aec spawn --mode json, d8741db webui JSONL parser, 0ef6476 tests, 539c08b README).
 - src/orchestrator.ts spawnAgent: spawn args are now [agent, "--approve", "--mode", "json", "-p", prompt]; detached spawn, direct fd write and pid tracking unchanged, stderr still appends to the same log.
@@ -47,3 +48,5 @@ Schedule note: queues behind 000051 (src/orchestrator.ts) and 000036 (src/webui.
 - Issue 1 (UX, medium): the tail chunk of a finished agent log renders empty (textLen 0). Terminal records (assistant message_end, turn_end, agent_end, agent_settled, usage-only message_update) are 68-83 KB each, dominate the last 16 KB and none render; the assistant message_end (the final output, array content) is skipped - only the user-role message_end renders as [prompt]. Observed on all four completed sandbox logs; ~38% of history chunks empty (12/32) paging back a 514 KB log. Live watching is unaffected (the pane keeps prior content); the empty pane shows when opening the log of a dead in-flight agent.
 - Issue 2 (cosmetic): renderLogChunk skips empty lines before the JSON.parse passthrough, so a legacy final text loses its blank paragraph lines (2 of 7 lines in the fixture).
 - Side finding, not this change (belongs to the merged reconcile feature): a daemon restart mid-pipeline reverted the in-flight task state and notes to the mirror tip - mirror commits only happen at create/done and reconcileBoard on start materializes the tip over the working tree; the reviewer's to-live-test state and notes were wiped and the task re-ran from to-do (self-healed). Sandbox daemon stopped after the test; board left at /tmp/lt-000054-root.
+
+- [2026-10-11 09:37] Orchestrator merge failed, merger resolved in the main checkout (commit 2da84da). The only conflict was the webui.test.ts import block: main (HEAD) imports flipDiff, the branch imports renderLogChunk. Resolution keeps both: import { flipDiff, loadWebUiConfig, renderLogChunk, startWebUi } from "./webui.ts". No spec conflict - the two sides add separate tests in the same file (main's flipDiff tests, branch's renderLogChunk and /api/agent-log tests), so no test content needed choosing. Verified both symbols are used by the tests and exported by the merged webui.ts, then re-ran all suites on the merge result: orchestrator.test.ts, webui.test.ts and kanban.test.ts all pass.
