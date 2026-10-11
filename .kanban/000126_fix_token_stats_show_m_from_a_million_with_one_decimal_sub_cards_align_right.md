@@ -3,7 +3,7 @@ name: "fix: token stats show M from a million with one decimal; sub cards align 
 priority: "medium"
 state: "backlog"
 worktree: ""
-blockedBy: "#118, #123"
+blockedBy: "#123"
 ---
 
 # Summary

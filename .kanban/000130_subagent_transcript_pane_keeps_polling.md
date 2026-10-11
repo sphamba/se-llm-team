@@ -6,7 +6,7 @@ worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "subagent-transcript-pane-keeps-polling"
-blockedBy: "#118, #129"
+blockedBy: "#129"
 ---
 
 # Summary

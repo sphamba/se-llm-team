@@ -1,12 +1,12 @@
 ---
 name: "fix: Specs hidden by level-1 body headings; kanban_update strands old spec text"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/136-specs-body-headings-stay-content"
 issuer: "#131"
 complexity: "moderate"
 shortName: "specs-body-headings-stay-content"
-blockedBy: "#131, #135"
+blockedBy: ""
 ---
 
 # Summary

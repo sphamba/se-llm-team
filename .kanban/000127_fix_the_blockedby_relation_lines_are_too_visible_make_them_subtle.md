@@ -4,7 +4,7 @@ priority: "medium"
 state: "backlog"
 worktree: ""
 complexity: simple
-blockedBy: "#118, #126"
+blockedBy: "#126"
 ---
 
 # Summary
