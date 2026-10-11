@@ -1,7 +1,7 @@
 ---
 name: "feat: kanban task removal path (delete file + mirror snapshot in one operation)"
 priority: "low"
-state: "doing"
+state: "reviewing"
 worktree: "feat/64-kanban-task-removal"
 ---
 
@@ -23,3 +23,5 @@ Suggested fix (either):
 Priority low, type feat.
 
 # Notes
+
+- [2026-10-11 17:03] Implemented the removal path (worktree feat/64-kanban-task-removal, commit 1299c21): removeTask in src/orchestrator.ts deletes the task file and commits a whole-board mirror snapshot in one operation, so reconcileBoard cannot restore the file. commitKanban gained allowEmpty so removing the last task commits an empty-board snapshot. While a daemon runs, the mirror tip is checked after a 1s settle delay and the removal retries (3 attempts) when a racing sweep re-added the file with a stale pre-removal snapshot. Non-git boards: deleting the file is the whole removal. New kanban_delete tool in index.ts exposes it to the PM session (worktree/branch of a started task are left in place). README.md and skills/se-llm-team/SKILL.md document the tool and the never-delete-by-hand rule. New orchestrator.test.ts part AB covers removal with the daemon running, non-restore across sweeps and a restart, last-task removal and unknown-file reporting. node src/kanban.test.ts and node src/orchestrator.test.ts pass.

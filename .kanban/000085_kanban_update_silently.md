@@ -1,7 +1,7 @@
 ---
 name: "fix: kanban_update silently ignores an unsupported parameter and reports success"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/85-kanban-update-silently"
 ---
 
@@ -38,3 +38,7 @@ Acceptance:
 Provenance: surfaced by the live test of task 000071 (which PASSED; this is a separate pre-existing issue, not caused by that feature).
 
 # Notes
+- [2026-10-11 17:20] Root cause confirmed at the runtime level: pi validates tool arguments with `Convert` then `Compile(schema).Check` (typebox, agent loop bundle). With the old schema, Convert keeps unknown keys and Check passes them (JSON Schema allows additional properties), so `notes` reached execute, updateTask ignored it, and the tool claimed an update.
+- [2026-10-11 17:20] Fix (index.ts, commit bf0621d in the worktree): (1) kanban_update parameters now carry `additionalProperties: false`, so pi rejects an unrecognized field with "Validation failed for tool \"kanban_update\": - notes: must not have additional properties" before execute runs; (2) execute returns "Nothing to update in <file>" when the patch has no recognized field (only file given), instead of a false "Updated". updateTask's empty-patch no-op in src/kanban.ts is untouched per the specs.
+- [2026-10-11 17:20] New src/extension.test.ts loads the real index.ts with plain node by registering a resolve hook that mirrors pi's own loader aliases (typebox and @earendil-works/pi-ai resolve inside pi's install), captures the registered tools through a fake pi object, and asserts: the schema carries additionalProperties false, the validator pi runs before execute (typebox Compile) fails unknown-field and mixed calls, an empty patch does not touch the file and says so, and a recognized field keeps the "Updated <file> (#NN)" response. Skips with a message when pi's install is absent (extension-loading convention, 000015).
+- [2026-10-11 17:20] Checks: node src/extension.test.ts, node src/kanban.test.ts, node src/webui.test.ts and the full node src/orchestrator.test.ts (all parts) pass. Ad hoc strict tsc (TypeScript 5.9.3 from another checkout, @types/node, nodenext): the error profile of index.ts is identical to the base commit d93e444; the new test file adds exactly one TS2307 for the dynamic import of typebox/compile, the same unavoidable no-node_modules class as index.ts's three pre-existing TS2307s (deps resolve at runtime via pi).

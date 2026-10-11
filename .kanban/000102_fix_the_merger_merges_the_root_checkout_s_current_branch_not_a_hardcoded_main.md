@@ -1,7 +1,7 @@
 ---
 name: "fix: the merger merges the root checkout's current branch, not a hardcoded main"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/102-the-merger-merges"
 ---
 
@@ -35,3 +35,6 @@ Constraints:
 - README.md: the merging-state line now says the merger resolves the project root's current branch at the start of each merge (both merge steps) and notes the detached-HEAD refusal.
 - Tests: node src/kanban.test.ts (all assertions passed), node src/orchestrator.test.ts (16 smokes passed, includes #78's to-merge coverage), node src/webui.test.ts (all assertions passed). First webui run failed because it was launched with SE_LLM_TEAM_NO_WEBUI=1, which the webui test does not expect; rerun without it passed. The merger prompt change itself is verified by the live test per the specs.
 - Commit bd37fb2 on fix/102-the-merger-merges (2 files, +7/−4).
+- Review pass: diff main...HEAD touches only agents/merger.md and README.md, as the constraints require. Both merge steps now resolve the base with `git -C {{ROOT}} branch --show-current` (step 2 re-resolves, since the root may have moved), the detached-HEAD path refuses, leaves a Note, and requeues to to-merge, and the `git merge --abort` requeue path is unchanged. README merging-state wording matches. Diff vs main for src/ is empty, as spec item 4 requires. Reran all three suites in the worktree: kanban.test.ts, orchestrator.test.ts, webui.test.ts (without SE_LLM_TEAM_NO_WEBUI) all green.
+- Review finding (cosmetic, left out of scope): src/orchestrator.ts comments at :606, :641, :661 still say the merger merges main ("merges main into the branch worktree and then the branch into main", "merged the branch into main before setting", "content is already in main"). Constraints limit this task to agents/merger.md and README.md and spec item 4 forbids an orchestrator.ts change, so these prose comments stay; they describe behavior that is now branch-agnostic and should be reworded in a future docs pass.
+- Review verdict: no fixes needed, ready for live test.

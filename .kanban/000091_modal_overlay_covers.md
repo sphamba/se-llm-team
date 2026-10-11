@@ -1,7 +1,7 @@
 ---
 name: "fix: modal overlay covers the hub repo tab bar; a tab click only closes the modal"
 priority: "low"
-state: "live-testing"
+state: "to-merge"
 worktree: "fix/91-modal-overlay-covers"
 ---
 
@@ -34,3 +34,20 @@ Provenance: surfaced by the live test of task #39, which PASSED every spec point
 - Did not change the header/theme button stacking (spec only covers the tab bar); those stay under the overlay as before.
 - Review of commit 7b52dc0 against the Specs: no issues found, no fixes made. Verified in code: #modal is the only other positioned element (position: fixed, z-index auto), so #tabs at position: relative; z-index: 1 paints and hit-tests above the overlay; switchTab already calls closeModal(), so one tab click switches and closes; #modal.hidden { display: none } keeps no-modal behavior unchanged (relative without offsets moves nothing). Re-ran all suites in the worktree: webui.test.ts, kanban.test.ts, orchestrator.test.ts all green. Worktree clean at 7b52dc0.
 - Non-blocking observation: a very tall #m-box (max-height: 82vh) could visually reach the tab-bar zone on short viewports and the bar would paint above it, but the modal box stays scrollable and the overlay still covers everything else; acceptable for this fix.
+
+- Live test report. The live test ran the change like a user. It used the hub served from worktree fix/91-modal-overlay-covers at commit 7b52dc0. Two projects were registered (worktree-91 and main-checkout), so the repo-name tab bar was visible. The browser was Chromium through Playwright at a viewport of 1280x800. The test used real pointer clicks (page.mouse.click at the tab center), plus hit tests with document.elementFromPoint.
+
+Results (all PASS):
+- Two repo tabs render.
+- Without a modal, one click switches the active tab, and switching back works. The behavior is unchanged.
+- A card click opens the task modal.
+- With the modal open, the tab center hit-tests to the tab button, not to #modal.
+- With the modal open, ONE real pointer click on the other repo tab switches the tab AND closes the modal.
+- The tab bar carries its own stacking context: #tabs is position: relative and z-index: 1, while #modal is position: fixed and z-index: auto.
+- With the modal open, the inactive tab stays visible and keeps opacity 1. The bar is not dimmed and not unreachable.
+
+Control run (pre-fix, parent commit d93e444): the same hit test returned #modal at the tab center. A single real pointer click closed the modal but did NOT switch the tab. This confirms that the test detects the original bug, and that commit 7b52dc0 removes it.
+
+Suites in the worktree: webui.test.ts, kanban.test.ts and orchestrator.test.ts all pass. Worktree is clean at 7b52dc0.
+
+No issues found. No open questions for the user or client.
