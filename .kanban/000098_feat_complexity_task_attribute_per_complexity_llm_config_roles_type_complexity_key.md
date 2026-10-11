@@ -1,0 +1,32 @@
+---
+name: "feat: complexity task attribute; per-complexity LLM config roles.<type>.<complexity>.<key>"
+priority: "medium"
+state: "backlog"
+worktree: ""
+---
+
+# Summary
+Tasks gain a complexity attribute (simple/moderate/complex, default moderate, updatable later), and the LLM config gains per-complexity overrides: roles.<type>.<complexity>.<key> beats the role default (roles.<type>.<key>), which beats the global value.
+
+# Specs
+User decisions settled: "moderate" default written on every new task (attribute-less existing files resolve as "moderate"); updatable later via kanban_update; the webui badge is a separate task.
+
+Facts (main 35ba118, verified): llmFlags src/orchestrator.ts:89-105 signature (root, cfg, role): roleCfg = cfg.roles[role] ?? {}, per-field roleCfg.X ?? cfg.llm.X, provider-without-model warns and is ignored, flags [--provider,p,--model,m] / [--model,m] / [--thinking,level]; cleanLlm :53-62 validates thinking against THINKING_LEVELS :23; loadConfig :64-87 shallow-spread merges ~/.pi/agent/se-llm-team.json then <root>/.kanban/se-llm-team.json, roles entries each through cleanLlm; Config :43-51 (roles: Record<string, LlmConfig>), LlmConfig :37-41. spawnAgent :200-219 has the full Task, llmFlags call at :207; call sites developer :589, merger :627, reviewer :685, live-tester :698. Task :18-29 and TaskRef :31-39 lack complexity; parseTask :69-112 picks fixed fields (priority validated else "medium" :96-98 pattern); createTask :259-284 writes 4 fixed attrs via serializeFrontmatter and validates priority else "medium"; updateTask patch type :226-249. index.ts kanban_create :55-75 and kanban_update :77-97 pass params verbatim (structural match). README config section :15-37 (example :17-25, roles.<type>.<key> row :35). Tests: orchestrator.test.ts part X :1023-1102 (argvStub records role+argv; config with roles; per-role asserts) and part Y :1105-1122 (bad values -> warnings + empty flags); kanban.test.ts createTask roundtrip :31-40, frontmatter asserts :69-70, lossless-rewrite precedent :171-178.
+
+Changes:
+1. Task and TaskRef gain complexity: string. parseTask picks the complexity frontmatter attribute, validated against simple/moderate/complex with the same fallback pattern as priority/state (unknown value -> "moderate"; silent coercion, deterministic). createTask gains an optional complexity, default "moderate", written via serializeFrontmatter (double-quoted). Existing task files are never rewritten.
+2. updateTask gains complexity with replace semantics (the same path as priority), written only when provided. kanban_create gains optional complexity (TypeScript StringEnum simple/moderate/complex); kanban_update gains optional complexity; both pass through verbatim as today.
+3. Config: a roles.<type> entry may hold, next to the existing provider/model/thinking fields, nested complexity sub-objects keyed simple/moderate/complex, each an LlmConfig (provider/model/thinking). loadConfig/cleanLlm: when cleaning a roles entry, treat simple/moderate/complex keys as nested sub-objects (each through cleanLlm; a non-object value under those keys warns and is ignored, like the non-object role warning in part Y); unknown keys keep today's drop behavior.
+4. llmFlags resolution (user-specified): per field X of provider/model/thinking, roles.<role>.<complexity>.X ?? roles.<role>.X ?? cfg.llm.X (role+complexity > role default > global > unset). Signature gains the complexity (llmFlags(root, cfg, role, complexity)); spawnAgent passes task.complexity ?? "moderate". A role+complexity entry consults only the keys it sets - unset fields keep the role default, unset role fields keep the global value (per-field, like roles.<type>.<key> today).
+5. README.md: extend the config table with a roles.<type>.<complexity>.<key> row and add a nested example (e.g. "roles": { "developer": { "thinking": "xhigh", "complex": { "model": "big-model" } } }); state that the complexity attribute defaults to moderate and drives which nested entry applies.
+
+Tests: orchestrator.test.ts part X extended (a roles.developer.complex.model applies for a complexity: complex task while a moderate task keeps the role default; per-field fallback preserved for unset nested keys); part Y extended (a non-object complexity value warns and is ignored); kanban.test.ts (createTask writes "moderate" by default and the passed value; complexity round-trips quoted; updateTask replaces it; unknown value coerces to moderate at parse; the lossless-rewrite test still passes).
+
+Acceptance: a task with complexity "complex" spawns its developer/reviewer/live-tester/merger with the nested model/provider/thinking flags; a "simple"/"moderate" task uses the role default; kanban_create/kanban_update/kanban_list/kanban_get all carry complexity; full suite green: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts.
+
+Constraints:
+- Files: src/kanban.ts, src/index.ts, src/orchestrator.ts, README.md, src/kanban.test.ts, src/orchestrator.test.ts.
+- No webui changes here: the badge is the webui task (its /api/tasks inclusion happens there).
+- HOLD behind #78 (doing on feat/78-to-merge-and, dirtying src/kanban.ts, src/orchestrator.ts, src/orchestrator.test.ts, agents/) and behind #72 (reviewing, src/kanban.ts + index.ts + kanban.test.ts pending merge). Rebase on the merged code.
+
+# Notes
