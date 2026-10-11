@@ -1,7 +1,7 @@
 ---
 name: "feat: webui agent log pane; mark the shown agent, smaller buttons, 5x chunk size"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "feat/webui-agent-log-pane-mark-the-shown-agent-smaller-buttons-5x-chunk-size"
 ---
 
@@ -41,3 +41,11 @@ Constraints:
 - Note: branch fix/webui-task-detail-card-shows-the-name-twice (task 000058, backlog) carries a committed one-line deletion to src/webui.ts; expect a minor sequential merge when 000058 runs later.
 
 # Notes
+- Implemented on feat/webui-agent-log-pane-mark-the-shown-agent-smaller-buttons-5x-chunk-size (commit 96bf334), after 000067 was done, so the hold is cleared. Files: src/webui.ts, src/webui.test.ts only.
+- Mark the shown agent: new markActiveAgent() toggles "agent-btn-active" on the button whose data-role matches the open logState role; openLog sets it, closeLog clears it, renderAgent re-applies it on re-render. CSS: orange border (.agent-btn-active) + orange tint (.agent-btn.agent-btn-active, var(--medium-bg)); verified visible in Ayu Light and Ayu Dark by Playwright screenshots.
+- Chronological order: renderAgent now pushes past agents first (t.agents order) and the live agent button last, so the row reads oldest to newest, live rightmost.
+- Buttons smaller: .agent-btn font-size 12px -> 10px, padding 3px 10px -> 2px 8px; new .agent-live keeps the 6px top margin that .agent-past carried.
+- Gap: #m-log got margin-top: 6px.
+- Chunk size: LOG_CHUNK 16384 -> 81920, now exported; webui.test.ts imports it for the tail/head assertions. Fixtures resized because the old ones sat below the new chunk: logText 626 -> 2600 lines (166400 bytes, 2+ history pages), bigRecord and pad z-runs 20000/40000 -> 100000 so the split-record and walk-back paths stay exercised.
+- Checks: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts all pass; tsc --noEmit clean for src/webui.ts + src/webui.test.ts. Playwright browser check (subagent): button order [reviewer, developer], active mark moves and clears, font-size 10px, #m-log margin-top 6px, 128000-byte log serves text of 81920 with head 46080, history page reaches head 0 with atStart true. Screenshots: /tmp/webui-check-light.png, /tmp/webui-check-dark.png.
+- Expect a minor sequential merge with 000058 (one-line deletion in src/webui.ts) when it runs later, per the task Constraints.
