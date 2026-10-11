@@ -2,7 +2,7 @@
 name: "feat: configure LLM provider, model, and reasoning level; overrides per agent type"
 priority: "critical"
 state: "done"
-worktree: "feat/71-configure-llm-provider"
+worktree: ""
 ---
 
 # Summary
