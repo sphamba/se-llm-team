@@ -1,8 +1,8 @@
 ---
 name: "fix: agent log drops a JSONL record split across two poll windows"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/84-agent-log-drops"
 ---
 
 # Summary

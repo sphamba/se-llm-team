@@ -1,7 +1,7 @@
 ---
 name: "feat: to-merge and merging states; orchestrator spawns mergers from to-merge, one at a time"
 priority: "critical"
-state: "doing"
+state: "reviewing"
 worktree: "feat/78-to-merge-and"
 ---
 
@@ -42,3 +42,11 @@ Constraints:
 - No src/webui.ts changes in this task: columns render from STATES automatically; accents and spinner are the webui task's.
 
 # Notes
+
+- Implemented Specs items 1-8. STATES gains to-merge and merging (IN_PROGRESS too, so scope=in-progress and orchestrator_status count them). The to-merge sweep spawns at most one Merger project-wide (global "merger" pid file), defers while the task's own agent pid lives, writes a per-task .pids/<slug>.merge-attempted marker, spawns the merger and sets merging. A task requeued by a failed merge is retried only after it sat idle in to-merge for cfg.autoScheduleMinutes, checked before any write that bumps the task file mtime. DEAD_TRANSITIONS maps live-testing and merging to to-merge; the sweep clears a dead global merger pid. doneCleanup removes the worktree and deletes the branch only when git merge-base --is-ancestor confirms the branch is merged, so a manual done with unmerged work keeps both. The old 3-attempt cap, the merge-attempts counter and the give-up message are removed. agents/live-tester.md sets to-merge; agents/merger.md is the two-step merge (main into branch in the worktree with conflict resolution and tests, then branch into main from the root) and on failure sets to-merge and aborts a dirty merge in whichever repo. README states, merge flow and liveness updated.
+- The per-task marker replaced the earlier single .pids/merger.task marker: with one marker a later merger spawn for another task overwrote the failed task's flag and skipped its cooldown. The work already on disk had the per-task fix; it is kept.
+- Merge with main: the branch was based on 4d79759; main was brought in and is now d56b833 (includes #87 per-run agent logs, #72 issuer, #96 layout). The feature commit 5432cb6 sits on d56b833. The uncommitted feature changes were reapplied on top and the two conflicting files (src/orchestrator.ts, src/orchestrator.test.ts) were resolved; main's nextRunIndex/REVIEWER_RUN_CAP paths survive.
+- src/webui.test.ts was updated (STATE_NAMES, LAYOUT and the 8 -> 10 states comment): its old 8-state expectations fail once STATES has 10 states. No src/webui.ts change, per the task constraint.
+- Evidence at 5432cb6: node src/kanban.test.ts, node src/webui.test.ts and SE_LLM_TEAM_NO_WEBUI=1 node src/orchestrator.test.ts all pass, including part K (cooldown requeue, no merge-attempts counter file) and part K2 (two to-merge tasks, one merger at a time). The K2 assert now waits for the done-cleanup sweep, which removes the second worktree one rescan after the task reaches done.
+- Concurrency: two Developer agents were spawned for this task. The other one (pid 3742272) brought main in, resolved the conflicts, wrote README.md, src/kanban.test.ts and src/webui.test.ts, then died at 15:07 without committing. This run took over, fixed the K2 timing, verified the rest and made the single commit 5432cb6.
+- #95 (unconditional dead-agent bounce, idle-cooldown respawn past the cap) is still in backlog. This branch does not contain #95's poll rewrite; its DEAD_TRANSITIONS mapping (live-testing/merging -> to-merge) and global merger pid handling work on the current poll, so #95 can rebase on this mapping.
