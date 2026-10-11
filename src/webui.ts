@@ -489,6 +489,8 @@ h1 { font-size: 16px; margin: 0; }
 /* 000047: six middle columns stack as three pairs, sized and gapped like the single columns */
 .pair { display: flex; flex-direction: column; gap: 10px; min-width: 300px; flex: 1 0 300px; }
 .col { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; border-top: 3px solid var(--ac); padding: 10px; min-width: 300px; flex: 1 0 300px; }
+/* 000096: as a .pair child the .col basis would act on the height axis and floor it at 300px */
+.pair .col { flex: 0 0 auto; }
 .col h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin: 0 0 10px; color: var(--heading); }
 .count { color: var(--faint); }
 .card { border: 1px solid var(--border); border-left: 3px solid var(--ac); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
