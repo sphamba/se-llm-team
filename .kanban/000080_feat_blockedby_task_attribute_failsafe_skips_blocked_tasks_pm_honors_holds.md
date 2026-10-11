@@ -1,7 +1,7 @@
 ---
 name: "feat: blockedBy task attribute; failsafe skips blocked tasks; PM honors holds"
 priority: "medium"
-state: "to-merge"
+state: "merging"
 worktree: "feat/80-blockedby-task-attribute"
 ---
 
