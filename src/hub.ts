@@ -131,7 +131,7 @@ const readBody = (req: IncomingMessage): Promise<string> =>
 	});
 
 // project selects by root (the tab identity); a bare name still finds its entry when unique, so
-// name-only clients keep working — with duplicate names a bare name is ambiguous and answers none
+// name-only clients keep working. With duplicate names a bare name is ambiguous and answers none
 function resolveEntry(entries: Map<string, HubEntry>, project: string): HubEntry | undefined {
 	const direct = entries.get(project);
 	if (direct) return direct;
