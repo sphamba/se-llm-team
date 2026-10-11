@@ -1,7 +1,7 @@
 ---
 name: "fix: agent log pane; shrink the log font, restore the button size, one row in chronological order"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/76-agent-log-pane"
 ---
 
@@ -43,3 +43,14 @@ Constraints:
 - Verified: node src/kanban.test.ts, node src/orchestrator.test.ts and node src/webui.test.ts all green. Typecheck: the repo has no tsconfig, so an ad hoc strict tsc run (typescript + @types/node from another checkout) was compared against HEAD: identical pre-existing 10-error set, no new type errors.
 - Headless Chromium against startWebUi(root, {port: 0}) on a temp board (task in doing, developer pid alive, developer/reviewer/live-tester logs): buttons on one row (same y=429.25, x 278.0 -> 371.1 -> 470.2), order Reviewer, Live-tester, Developer (live last), all computed 12px; pre#m-log-text 10px; clicking Developer sets agent-btn-active on it alone; long lines still wrap; screenshot /tmp/fix76-agent-buttons.png. Port 4242 and the production webui were never touched.
 - 000047 note: at the time of writing, feat/47-webui-stacked-column (000047) is still in reviewing and unmerged. Its diff does not touch the .agent-btn CSS, the #m-agent area or renderAgent, so the sequential merge is clean (the CSS lives in the PAGE string in both).
+
+## Review (Reviewer, worktree aa6da02)
+- No fixes made. The diff touches only src/webui.ts and src/webui.test.ts, as the Constraints require.
+- Spec 1: .agent-btn has font-size 12px and padding 3px 10px. The border, background, color, radius, hover rule and active rules are unchanged.
+- Spec 2: #m-log pre has font-size 10px. This rule targets pre#m-log-text. The padding, line-height 1.45, pre-wrap and break-word are unchanged.
+- Spec 3: #m-agent-btns is display: flex with flex-wrap: wrap and gap: 6px. The .agent-past and .agent-live block rules are removed. #m-log keeps margin-top 6px. renderAgent pushes the past agents first and the live agent last. The role order cannot invert in this pipeline, because the only loop is to-review/reviewing for the same role. The button order is therefore chronological.
+- Spec 4: the new assertions match the only base CSS rules (the regexes were checked against the page string). All three test files pass in the worktree. The strict tsc error set is identical to the base c33fd7a set (10 errors, all pre-existing, none in the changed lines). The repo has no tsconfig.
+- Independent Playwright check (subagent, temp board: task in doing, developer pid alive, developer/reviewer/live-tester logs, viewport 1280x800): 3 .agent-btn at computed 12px and padding 3px 10px. One row, same y, x increasing: Reviewer, Live-tester, Developer (live last). The active class appears on the clicked button only, moves on a switch and clears on the second click. #m-log-text is 10px. #m-log margin-top is 6px and the geometric gap is 6.00px.
+- Merge check: 76 merges clean into current main b50da8a (includes the hub frontend merge db15b73), and the three test files pass on the merged tree. The merge with feat/47-webui-stacked-column conflicts on the .col min-width rule, but that conflict exists when 47 merges into main alone (main's bdfced0 changed .col after 47 branched). It is not caused by 76. After 47 resolves its own conflict, 76 merges cleanly on top (both orders verified in temp clones).
+- Sequencing note: 000047 was still in live-testing when 000076 ran, against the task Constraints. The changed regions do not overlap, so the code merge is safe in either order.
+- Verdict: acceptance met, no fixes.

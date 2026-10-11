@@ -1,7 +1,7 @@
 ---
 name: "feat: agents list open questions in the task body; PM asks them to the user"
 priority: "medium"
-state: "live-testing"
+state: "done"
 worktree: "feat/74-agents-list-open"
 ---
 
@@ -59,3 +59,12 @@ Constraints:
 - [2026-10-11 12:15] Checks: node src/kanban.test.ts and node src/webui.test.ts pass. node src/orchestrator.test.ts failed twice on part T ("timeout waiting for create mirror commit 3") and passed on the third run. A clean 401d398 archive passed the same suite. The race is pre-existing and main fixes it in e53e4dd ("snapshot the board per sweep"). The merge brings that fix in because this branch does not touch orchestrator.ts. Not a regression.
 - [2026-10-11 12:15] Merged-state check in /tmp/merged74 (main plus the 8 branch files): kanban, webui and the full orchestrator suite (hub parts included) pass. Typecheck with TypeScript 5.9.3 strict plus @types/node gives an error set identical to the branch base and to main, line numbers aside, so no new type errors.
 - [2026-10-11 12:15] No fixes made. State set to to-live-test.
+- [2026-10-11 12:35] Live test at 5fd4e45 in feat/74-agents-list-open, clean tree. Verdict: no functional defect. All acceptance points hold.
+- [2026-10-11 12:35] Library, in /tmp scratch roots: createTask writes the section only for a non-empty trimmed value, and without it the created bytes equal the 401d398 base output exactly. parseTask reads absent, empty and filled sections. setState, appendNote and an updateTask summary/specs patch leave an agent-appended section intact. updateTask replaces a section in the middle of the body, appends a missing one at the end and clears it to one empty header. listTasks carries openQuestions for backlog and in-progress refs.
+- [2026-10-11 12:35] Tool layer, a real pi session in a scratch project with the worktree extension: kanban_create with openQuestions wrote the section and returned the field in details. kanban_list returned openQuestions in the backlog entries. kanban_get returned the field. kanban_update with specs plus openQuestions "" folded the answer into the Specs and emptied the section. A second kanban_create carried a follow-up question, the live-tester to PM flow.
+- [2026-10-11 12:35] PM discovery, a pi session with the worktree skill: it read the backlog, saw the open questions in the kanban_list payload and put them to the user, and answered none itself. The interactive question dialogs were not exercised (no interactive session in this test).
+- [2026-10-11 12:35] Orchestrator, on a scratch project: the create and done mirror commits carried the section. An agent edit after the mirror commit survived two rescans with no clobber. An external mirror-head move was materialized over the working tree with the section intact.
+- [2026-10-11 12:35] Prompts and SKILL: all four prompts carry the user/client-only rule and the answer-removal rule, the live-tester step 5 passes the finding's questions as openQuestions, SKILL step 2 asks backlog open questions in the interview style, and SKILL step 3 carries them into follow-up tasks.
+- [2026-10-11 12:35] Checks: node src/kanban.test.ts and node src/webui.test.ts pass. node src/orchestrator.test.ts was fail, pass, fail on three runs, all on the known part T flake "timeout waiting for create mirror commit 3". Task #83 covers that flake and main fixes the race in e53e4dd, so no action here. Typecheck of src/kanban.ts with TypeScript 5.9.3 strict plus @types/node gives an error set identical to the 401d398 base, no new type errors. No webui change.
+- [2026-10-11 12:35] Minor finding, docs only: the kanban_list and kanban_get tool descriptions in index.ts do not mention the openQuestions field that they now return. The PM flow still works because the SKILL names the field and the JSON carries it. Reported to the PM for an optional low-priority docs follow-up.
+- [2026-10-11 12:35] State set to done.
