@@ -319,7 +319,9 @@ export function taskPayload(root: string) {
 			priority: t.priority,
 			state: t.state,
 			worktree: t.worktree,
+			blockedBy: t.blockedBy,
 			issuer: t.issuer,
+			complexity: t.complexity,
 			updated: taskUpdated(root, t.file),
 			body: taskBody(root, t.file),
 			agents,
@@ -440,18 +442,27 @@ export function flipDiff(oldPos, newPos) {
 // html escape, shipped to the client and shared with the tab renderer
 export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-// tab labels from the hub's /api/projects entries: one tab per registered project, and none for a
+// tab descriptors from the hub's /api/projects entries: one tab per registered project, and none for a
 // single project, so a single-project setup (or the single-project server, whose /api/projects is
-// a 404) keeps the old single-board ui
+// a 404) keeps the old single-board ui. The identity is the entry's root, unique per checkout, so
+// two same-named checkouts select their own boards; a name registered more than once appends the
+// branch to the label ("" on a detached HEAD keeps the plain name)
 export function tabNames(projects) {
-	return projects.length > 1 ? projects.map((p) => p.name) : [];
+	if (projects.length < 2) return [];
+	const seen = Object.create(null); // a repo basename can collide with Object.prototype keys
+	for (const p of projects) seen[p.name] = (seen[p.name] ?? 0) + 1;
+	return projects.map((p) => ({
+		id: p.root,
+		label: seen[p.name] > 1 && p.branch ? p.name + " (" + p.branch + ")" : p.name,
+	}));
 }
 
-// tab bar html: one button per project, the active one marked; a single project renders no bar
-export function tabsHtml(names, active) {
-	if (names.length < 2) return "";
-	return names
-		.map((n) => '<button class="tab' + (n === active ? " active" : "") + '" data-project="' + esc(n) + '">' + esc(n) + "</button>")
+// tab bar html: one button per tab, data-project carries the root identity, the active one
+// marked; a single project renders no bar
+export function tabsHtml(tabs, active) {
+	if (tabs.length < 2) return "";
+	return tabs
+		.map((t) => '<button class="tab' + (t.id === active ? " active" : "") + '" data-project="' + esc(t.id) + '">' + esc(t.label) + "</button>")
 		.join("");
 }
 
@@ -465,6 +476,12 @@ export function boardOf(boards, name) {
 // null payload (project vanished or its fetch failed) keeps that tab's previous data
 export function mergeBoards(boards, rows) {
 	for (const [name, tasks] of rows) if (tasks) boardOf(boards, name).tasks = tasks;
+}
+
+// a run label on the detail card: the role capitalized, 1-based when the role has several runs
+// (payload run 0 reads "1"), unnumbered for a solo run or a legacy unsuffixed log (a.run == null)
+export function agentLabel(a, count) {
+	return a.role[0].toUpperCase() + a.role.slice(1) + (count[a.role] > 1 && a.run != null ? " " + (a.run + 1) : "");
 }
 
 // board layout, left to right: a string is a single column, an array is a stacked pair with the
@@ -485,11 +502,6 @@ export function pairLayout(states: readonly string[]): (string | string[])[] {
 // interpolated into PAGE as JSON, so the client renders this exact layout
 export const LAYOUT = pairLayout(STATES);
 
-// 000047_fix_x.md -> #47; parseInt stops at the first non-digit and drops leading zeros
-export function num(t: Task) {
-	return "#" + parseInt(t.file, 10);
-}
-
 // the spinner marks a task the orchestrator is working on; a task that changes column changes this
 // markup, so its animation starts or stops with the state, and prefers-reduced-motion turns the CSS
 // animation off underneath
@@ -499,7 +511,8 @@ export function spinnerHtml(st: string) {
 
 // one card's markup; this string is the card's identity across a refresh, see syncBoard.
 // user-issued cards stay full contrast, task-issued ones (issuer "#<num>") dim the name and
-// carry a small #<num> badge instead of the plain user chip
+// carry a small #<num> badge instead of the plain user chip; the complexity chip renders quiet
+// next to the priority chip
 export function cardHtml(t: Task, st: string) {
 	const issued = !!t.issuer && t.issuer !== "user";
 	return (
@@ -507,20 +520,82 @@ export function cardHtml(t: Task, st: string) {
 		(issued ? " issued" : "") +
 		'">' +
 		spinnerHtml(st) +
-		'<span class="num">' +
-		num(t) +
-		"</span>" +
+		numLinkHtml(t.file, "num") +
 		esc(t.name) +
 		'</div><span class="chip p-' +
 		esc(t.priority) +
 		'">' +
 		esc(t.priority) +
+		'</span><span class="chip cx">' +
+		esc(t.complexity || "moderate") +
 		'</span><span class="chip' +
 		(issued ? " issuer" : "") +
 		'">' +
 		(issued ? esc(t.issuer) : "user") +
 		"</span>"
 	);
+}
+
+// a task id as a link: clicking opens that task's card in place of the shown one; data-task carries
+// the file for the post-render binding, never an inline onclick (file names can hold quotes); the
+// card's own id opens its own card, a blockedBy ref opens the referenced task's card
+export function numLinkHtml(file: string, cls = "") {
+	return '<span class="num-link' + (cls ? " " + cls : "") + '" data-task="' + esc(file) + '">#' + parseInt(file, 10) + "</span>";
+}
+
+// the bezier between two rendered cards, running blocked -> blocker so the dash animation flows
+// towards the blocker: a loop out of the right sides within one column, otherwise the side pair
+// that minimizes the line (blocker left of blocked: blocked's left edge to the blocker's right
+// edge, reversed when the blocker sits to the right)
+export function curve(from, to, same) {
+	const mid = (r) => r.y + r.h / 2;
+	const bow = 40;
+	let x1, y1, x2, y2, c1x, c2x;
+	if (same) {
+		x1 = from.x + from.w;
+		y1 = mid(from);
+		x2 = to.x + to.w;
+		y2 = mid(to);
+		c1x = x1 + bow;
+		c2x = x2 + bow;
+	} else if (to.x < from.x) {
+		x1 = from.x;
+		y1 = mid(from);
+		x2 = to.x + to.w;
+		y2 = mid(to);
+		c1x = x1 - bow;
+		c2x = x2 + bow;
+	} else {
+		x1 = from.x + from.w;
+		y1 = mid(from);
+		x2 = to.x;
+		y2 = mid(to);
+		c1x = x1 + bow;
+		c2x = x2 - bow;
+	}
+	return "M " + x1 + " " + y1 + " C " + c1x + " " + y1 + ", " + c2x + " " + y2 + ", " + x2 + " " + y2;
+}
+
+// one curve per stored relation the board can draw: the blocked task's card to each blocking
+// task's card, both currently rendered. A "#<num>" ref maps to its task via parseInt(file); a ref
+// without a rendered card is skipped, and a done blocker draws nothing. Stacked pair columns
+// share one x, which counts as the same column (the right-side loop, never a line through the cards).
+export function relationPaths(tasks, rectOf) {
+	const out = [];
+	for (const t of tasks) {
+		const from = rectOf(t.file);
+		if (!from) continue;
+		for (const raw of String(t.blockedBy || "").split(",")) {
+			const ref = raw.trim();
+			if (!ref) continue;
+			const blocker = tasks.find((x) => parseInt(x.file, 10) === parseInt(ref.replace(/^#/, ""), 10));
+			if (!blocker || blocker.state === "done") continue;
+			const to = rectOf(blocker.file);
+			if (!to) continue;
+			out.push(curve(from, to, t.state === blocker.state || Math.abs(to.x - from.x) < 1));
+		}
+	}
+	return out;
 }
 
 // the board shell, built once: a single column per layout string, one .pair wrapper per stacked
@@ -610,7 +685,7 @@ export function syncBoard(cols, tasks, expanded, els, make, visible) {
 }
 
 // served by the single-project server and by the hub for every registered project; the tab bar
-// comes from the hub's /api/projects and each tab polls /api/tasks?project=NAME
+// comes from the hub's /api/projects and each tab polls /api/tasks?project=<root id>
 export const PAGE = `<!doctype html>
 <html lang="en">
 <head>
@@ -636,7 +711,12 @@ h1 { font-size: 16px; margin: 0; }
 .tab { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px 6px 0 0; padding: 4px 12px; font-size: 12px; cursor: pointer; }
 .tab:hover { background: var(--hover); }
 .tab.active { border-color: var(--link); color: var(--link); }
-#board { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; padding: 10px 18px 18px; overflow-x: auto; align-items: flex-start; }
+#board { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; padding: 10px 18px 18px; overflow-x: auto; align-items: flex-start; position: relative; }
+/* relation lines: absolute in the relative board, so the overlay scrolls with the content; above
+the cards, pointer-events none so their clicks pass through */
+#relations { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; }
+#relations path { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 6 4; animation: dashflow 1s linear infinite; }
+@keyframes dashflow { to { stroke-dashoffset: -10; } }
 /* 000047: the middle columns stack as pairs, sized and gapped like the single columns */
 .pair { display: flex; flex-direction: column; gap: 10px; min-width: 300px; flex: 1 0 300px; }
 .col { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; border-top: 3px solid var(--ac); padding: 10px; min-width: 300px; flex: 1 0 300px; }
@@ -648,11 +728,14 @@ h1 { font-size: 16px; margin: 0; }
 .card:hover { background: var(--hover); }
 .name { font-size: 13px; line-height: 1.35; margin-bottom: 6px; }
 .num { color: var(--faint); margin-right: 4px; }
+.num-link { color: var(--link); cursor: pointer; }
+.num-link:hover { text-decoration: underline; }
 .spin { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border: 2px solid var(--border); border-top-color: var(--fg); border-radius: 50%; vertical-align: -1px; animation: spin .9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } #relations path { animation: none; } }
 .chip { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: var(--border); color: var(--soft); }
 .chip.issuer { background: var(--code-bg); color: var(--muted); }
+.chip.cx { background: var(--code-bg); color: var(--muted); }
 .issued { color: var(--muted); }
 .p-low { background: var(--low-bg); color: var(--low-fg); }
 .p-medium { background: var(--medium-bg); color: var(--medium-fg); }
@@ -683,7 +766,7 @@ h1 { font-size: 16px; margin: 0; }
 #m-close:hover { background: var(--hover); }
 #m-attrs { font-size: 12px; color: var(--soft); margin-bottom: 12px; }
 #m-attrs div { padding: 3px 0; }
-#m-attrs span:not(.chip) { display: inline-block; min-width: 80px; color: var(--faint); }
+#m-attrs span:not(.chip):not(.num-link) { display: inline-block; min-width: 80px; color: var(--faint); }
 #m-body { font-size: 13px; line-height: 1.5; }
 #m-body h1, #m-body h2, #m-body h3 { font-size: 13px; margin: 12px 0 4px; }
 #m-body ul { margin: 4px 0; padding-left: 20px; }
@@ -717,12 +800,10 @@ h1 { font-size: 16px; margin: 0; }
 <script>
 "use strict";
 const VISIBLE = 5;
-let projects = [""]; // one tab per registered project; [""] is the single-project server, no tabs
-let active = "";
+let projects = [{ id: "", label: "" }]; // one tab per registered project; id "" is the single-project ui, one board, no tabs
+let active = ""; // the active tab's id: a registry root, or "" for the single-project board
 const boards = Object.create(null);
 const esc = ${esc};
-// 000042_fix_x.md -> #42; parseInt stops at the first non-digit and drops leading zeros
-const num = t => "#" + parseInt(t.file, 10);
 const rootEl = document.documentElement;
 const storeTheme = t => { try { localStorage.setItem("theme", t); } catch {} };
 function syncThemeBtn() { document.getElementById("theme").textContent = (rootEl.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark" ? "Light" : "Dark"; }
@@ -761,9 +842,12 @@ function md(src) {
 // board-content position changed moves, the siblings shifting when a card enters or leaves a
 // column included; positions are board-content relative, so a scrolled refresh animates nothing.
 ${flipDiff}
+${curve}
+${relationPaths}
 // board layout and the card pass, interpolated as source so the client runs the tested code
 const LAYOUT = ${JSON.stringify(LAYOUT)};
 ${spinnerHtml}
+${numLinkHtml}
 ${cardHtml}
 ${buildShell}
 ${syncBoard}
@@ -771,6 +855,7 @@ ${tabNames}
 ${tabsHtml}
 ${boardOf}
 ${mergeBoards}
+${agentLabel}
 // tabs: one per registered project, the active one renders that project's board
 function renderTabs() {
 	const el = document.getElementById("tabs");
@@ -798,29 +883,60 @@ function makeCard(file) {
 	el.onclick = () => openTask(file);
 	return el;
 }
+// board-content relative: page scroll cancels, board scroll is added back, so a refresh after
+// scrolling measures identical positions and animates nothing; w/h feed the relation geometry
+function cardBox(el) {
+	const board = document.getElementById("board");
+	const boardRect = board.getBoundingClientRect();
+	const r = el.getBoundingClientRect();
+	return { x: r.left - boardRect.left + board.scrollLeft, y: r.top - boardRect.top + board.scrollTop, w: r.width, h: r.height };
+}
+// one dashed curve per drawn relation, sized to the rendered card extent (+ the loop bulge);
+// rewritten only on change, so the dash animation keeps running across refreshes
+function drawRelations() {
+	const board = document.getElementById("board");
+	const svg = document.getElementById("relations");
+	if (!svg || !cols) return;
+	let w = 0, h = 0;
+	const rectOf = file => {
+		const el = cardEls.get(file);
+		if (!el) return null;
+		const r = cardBox(el);
+		w = Math.max(w, r.x + r.w);
+		h = Math.max(h, r.y + r.h);
+		return r;
+	};
+	const paths = relationPaths(activeBoard().tasks, rectOf);
+	svg.setAttribute("width", w + 40);
+	svg.setAttribute("height", h);
+	const html = paths.map(d => '<path d="' + d + '"/>').join("");
+	if (svg.__html !== html) { svg.innerHTML = html; svg.__html = html; }
+}
 function render(skipFlip) {
 	renderTabs();
 	const tab = activeBoard();
 	const board = document.getElementById("board");
 	if (!cols) {
 		cols = buildShell(board, document);
+		const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		svg.id = "relations";
+		svg.setAttribute("pointer-events", "none");
+		board.insertBefore(svg, board.firstChild);
 		for (const st in cols) cols[st].toggle.onclick = () => toggleCol(st);
+		window.addEventListener("resize", drawRelations);
 	}
 	const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-	// board-content relative: page scroll cancels, board scroll is added back, so a refresh after
-	// scrolling measures identical positions and animates nothing
-	const boardRect = board.getBoundingClientRect();
-	const pos = el => { const r = el.getBoundingClientRect(); return { x: r.left - boardRect.left + board.scrollLeft, y: r.top - boardRect.top + board.scrollTop }; };
 	const old = {};
 	if (!skipFlip) for (const el of cardEls.values()) {
 		el.style.transition = "none";
 		el.style.transform = "";
-		old[el.dataset.file] = pos(el);
+		old[el.dataset.file] = cardBox(el);
 	}
 	syncBoard(cols, tab.tasks, tab.expanded, cardEls, makeCard, VISIBLE);
 	const now = {};
-	for (const el of cardEls.values()) now[el.dataset.file] = pos(el);
+	for (const el of cardEls.values()) now[el.dataset.file] = cardBox(el);
 	const diff = flipDiff(old, now);
+	drawRelations(); // settled positions; transitionend redraws after a FLIP settles
 	for (const el of cardEls.values()) {
 		const d = diff[el.dataset.file];
 		if (!d || reduced) continue;
@@ -829,7 +945,7 @@ function render(skipFlip) {
 		el.getBoundingClientRect();
 		el.style.transition = "transform .4s ease";
 		el.style.transform = "";
-		el.ontransitionend = () => { el.style.transition = ""; el.ontransitionend = null; };
+		el.ontransitionend = () => { el.style.transition = ""; el.ontransitionend = null; drawRelations(); };
 	}
 }
 function openTask(file) {
@@ -839,17 +955,30 @@ function openTask(file) {
 	modalFile = file;
 	document.getElementById("m-title").textContent = t.name;
 	document.getElementById("m-attrs").innerHTML =
-		"<div><span>number</span>" + num(t) + "</div>" +
+		"<div><span>number</span>" + numLinkHtml(t.file) + "</div>" +
 		"<div><span>file</span>" + esc(t.file) + "</div>" +
-		"<div><span>priority</span><span class='chip p-" + esc(t.priority) + "'>" + esc(t.priority) + "</span></div>" +
+		"<div><span>priority</span><span class='chip p-" + esc(t.priority) + "'>" + esc(t.priority) + "</span><span class='chip cx'>" + esc(t.complexity || "moderate") + "</span></div>" +
 		"<div><span>state</span>" + esc(t.state) + "</div>" +
 		"<div><span>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>" +
-		"<div><span>issuer</span>" + esc(t.issuer || "user") + "</div>";
+		"<div><span>issuer</span>" + esc(t.issuer || "user") + "</div>" +
+		blockedRow(t);
+	for (const a of document.querySelectorAll("#m-attrs .num-link")) a.onclick = () => openTask(a.dataset.task);
 	renderAgent(t);
 	document.getElementById("m-body").innerHTML = md(t.body || "");
 	document.getElementById("modal").classList.remove("hidden");
 }
 function closeModal() { closeLog(); document.getElementById("modal").classList.add("hidden"); }
+// the blockedBy row: each stored ref links to its task's card when that task is on the board, and
+// the row is dropped when the attribute is absent or empty
+function blockedRow(t) {
+	const refs = String(t.blockedBy || "").split(",").map(s => s.trim()).filter(Boolean);
+	if (!refs.length) return "";
+	const items = refs.map(ref => {
+		const target = activeBoard().tasks.find(x => parseInt(x.file, 10) === parseInt(ref.replace(/^#/, ""), 10));
+		return target ? numLinkHtml(target.file) : esc(ref);
+	});
+	return "<div><span>blockedBy</span>" + items.join(", ") + "</div>";
+}
 // live agent log pane: each run button carries only its handle, the server resolves the real
 // path; a run's subagent transcripts load through the same endpoint with sub=list / sub=n
 let modalFile = null;
@@ -868,18 +997,17 @@ function markActiveAgent() {
 }
 const atBottom = () => { const p = logPane(); return p.scrollTop + p.clientHeight >= p.scrollHeight - 4; };
 // every run as one button, oldest leftmost (payload order is log mtime order), the live run
-// rightmost; a role with several runs labels them by index, so two reviewer runs never read alike
+// rightmost; a role with several runs labels them 1-based, so two reviewer runs never read alike
 function renderAgent(t) {
 	const el = document.getElementById("m-agent");
 	el.innerHTML = "";
-	const cap = s => s[0].toUpperCase() + s.slice(1);
 	const runs = (t.agents || []).slice();
 	const live = runs.find(a => a.alive);
 	if (live) { runs.splice(runs.indexOf(live), 1); runs.push(live); }
 	if (!runs.length) return;
 	const count = {};
 	for (const a of runs) count[a.role] = (count[a.role] || 0) + 1;
-	const label = a => cap(a.role) + (count[a.role] > 1 && a.run != null ? " " + a.run : "");
+	const label = a => agentLabel(a, count);
 	const btns = runs.map(a => !a.alive
 		? '<button class="agent-btn agent-past" data-handle="' + esc(a.handle) + '"><span class="check">\u2713</span>' + esc(label(a)) + "</button>"
 		: '<button class="agent-btn agent-live" data-handle="' + esc(a.handle) + '"><span class="spin"></span>' + esc(label(a)) + "</button>");
@@ -1000,19 +1128,19 @@ function refresh() {
 		// the single-project server 404s here, and a transient hub failure keeps the last known
 		// tabs: only a real projects list replaces them
 		if (Array.isArray(list)) {
-			const names = tabNames(list);
-			projects = names.length ? names : [""]; // single project: the old ui, one board, no tabs
+			const tabs = tabNames(list);
+			projects = tabs.length ? tabs : [{ id: "", label: "" }]; // single project: the old ui, one board, no tabs
 		}
 		// a project that vanished from the registry closes the modal its task lived in
-		if (!projects.includes(active)) { active = projects[0]; closeModal(); }
-		const url = name => name ? "/api/tasks?project=" + encodeURIComponent(name) : "/api/tasks";
+		if (!projects.some(t => t.id === active)) { active = projects[0].id; closeModal(); }
+		const url = t => t.id ? "/api/tasks?project=" + encodeURIComponent(t.id) : "/api/tasks";
 		// every tab polls every cycle, only the active one renders
-		return Promise.all(projects.map(name => fetch(url(name)).then(r => r.ok ? r.json() : null).catch(() => null).then(t => [name, t])));
+		return Promise.all(projects.map(t => fetch(url(t)).then(r => r.ok ? r.json() : null).catch(() => null).then(tasks => [t.id, tasks])));
 	}).then(rows => {
 		mergeBoards(boards, rows);
 		render();
 		// stamp only a served board: during a hub outage the old stamp stays visible
-		const current = rows.find(([name]) => name === active);
+		const current = rows.find(([id]) => id === active);
 		if (current && current[1]) document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
 	}).catch(() => {});
 }
