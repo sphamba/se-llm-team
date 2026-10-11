@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, setState } from "./kanban.ts";
-import { flipDiff, loadWebUiConfig, LOG_CHUNK, renderLogChunk, startWebUi } from "./webui.ts";
+import { boardOf, flipDiff, loadWebUiConfig, LOG_CHUNK, mergeBoards, renderLogChunk, startWebUi, tabNames, tabsHtml } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing", "done"];
@@ -105,6 +105,56 @@ assert.deepEqual(
 assert.deepEqual(flipDiff(stacked, stacked), {}, "an unchanged refresh animates nothing");
 assert.ok(page.includes(String(flipDiff)), "the page ships the tested flipDiff source");
 assert.ok(page.includes('transition = "transform .4s ease"'), "sibling shifts reuse the moved-card timing");
+
+// tabs: one per registered project; a single project keeps the old ui, no tab bar
+assert.deepEqual(tabNames([{ name: "alpha" }, { name: "beta" }]), ["alpha", "beta"], "one tab per registered project");
+assert.deepEqual(tabNames([{ name: "solo" }]), [], "a single project renders no tab bar");
+assert.deepEqual(tabNames([]), [], "an empty registry renders no tab bar");
+assert.equal(
+	tabsHtml(["alpha", "beta"], "beta"),
+	'<button class="tab" data-project="alpha">alpha</button><button class="tab active" data-project="beta">beta</button>',
+	"the projects list renders one tab per project, the active one marked",
+);
+assert.equal(tabsHtml(["solo"], "solo"), "", "a single project renders no tab bar html");
+assert.equal(
+	tabsHtml(["a<b>", "b"], "b"),
+	'<button class="tab" data-project="a&lt;b&gt;">a&lt;b&gt;</button><button class="tab active" data-project="b">b</button>',
+	"tab labels are escaped",
+);
+assert.ok(
+	[tabNames, tabsHtml, boardOf, mergeBoards].every((fn) => page.includes(String(fn))),
+	"the page ships the tested tab helpers",
+);
+assert.ok(page.includes('<nav id="tabs"></nav>'), "page has the tab bar");
+assert.ok(page.includes("switchTab(b.dataset.project)"), "each tab button switches the active board");
+assert.match(page, /function switchTab\(name\) \{[\s\S]*?closeModal\(\);[\s\S]*?\}/, "a tab switch closes the open modal");
+assert.ok(page.includes("render(true); // no FLIP across boards"), "a tab switch never flips from the other board's layout");
+assert.ok(page.includes("Promise.all(projects.map(name => fetch(url(name))"), "every tab polls each cycle");
+assert.ok(page.includes("setInterval(refresh, 5000)"), "the poll keeps the 5 s cadence");
+assert.ok(page.includes('(active ? "&project=" + encodeURIComponent(active) : "")'), "agent-log polls carry the active tab's project");
+
+// per-project payloads map to their own tab; a null payload keeps that tab's previous data
+const boards = {};
+mergeBoards(boards, [["alpha", [{ file: "000001_a.md" }]], ["beta", [{ file: "000002_b.md" }]]]);
+assert.equal(boardOf(boards, "alpha").tasks[0].file, "000001_a.md", "each payload lands under its own project");
+assert.equal(boardOf(boards, "beta").tasks[0].file, "000002_b.md");
+
+// a tab switch keeps per-project state: fold choices and payloads survive a switch and a poll
+boardOf(boards, "alpha").expanded.add("backlog");
+mergeBoards(boards, [["alpha", [{ file: "000003_c.md" }]], ["beta", null]]);
+assert.ok(boardOf(boards, "alpha").expanded.has("backlog"), "fold choices stay with their project");
+assert.equal(boardOf(boards, "beta").tasks[0].file, "000002_b.md", "a failed project fetch keeps that tab's previous data");
+assert.deepEqual(boardOf(boards, "gamma").tasks, [], "an unvisited tab starts as an empty board");
+assert.deepEqual(boardOf(Object.create(null), "__proto__").tasks, [], "a project named like an object key gets its own board");
+assert.ok(page.includes("Object.create(null)"), "the page keys per-project state without inherited keys");
+
+// single-project mode is unchanged: no registry, one bare board, no project param
+assert.equal((await fetch(`${base}/api/projects`)).status, 404, "the single-project server has no registry");
+assert.ok(page.includes('projects = names.length ? names : [""]'), "the page falls back to one unnamed tab");
+assert.ok(
+	page.includes('name ? "/api/tasks?project=" + encodeURIComponent(name) : "/api/tasks"'),
+	"the single-project fallback polls /api/tasks bare",
+);
 
 // agent info: null for a backlog task; populated for a working task with a live pid
 assert.equal(listed[0].agent, null);

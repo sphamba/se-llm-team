@@ -314,7 +314,38 @@ export function flipDiff(oldPos, newPos) {
 	return diff;
 }
 
-// served by the single-project server and by the hub for every registered project (000039 makes it tabbed)
+// html escape, shipped to the client and shared with the tab renderer
+export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// tab labels from the hub's /api/projects entries: one tab per registered project, and none for a
+// single project, so a single-project setup (or the single-project server, whose /api/projects is
+// a 404) keeps the old single-board ui
+export function tabNames(projects) {
+	return projects.length > 1 ? projects.map((p) => p.name) : [];
+}
+
+// tab bar html: one button per project, the active one marked; a single project renders no bar
+export function tabsHtml(names, active) {
+	if (names.length < 2) return "";
+	return names
+		.map((n) => '<button class="tab' + (n === active ? " active" : "") + '" data-project="' + esc(n) + '">' + esc(n) + "</button>")
+		.join("");
+}
+
+// per-project client state: each tab keeps its payload and its fold choices, so a tab switch
+// renders cached data with no flash and a poll of one project never clobbers another
+export function boardOf(boards, name) {
+	return (boards[name] ??= { tasks: [], expanded: new Set() });
+}
+
+// one poll cycle into the per-project state: each payload lands under its own project name, and a
+// null payload (project vanished or its fetch failed) keeps that tab's previous data
+export function mergeBoards(boards, rows) {
+	for (const [name, tasks] of rows) if (tasks) boardOf(boards, name).tasks = tasks;
+}
+
+// served by the single-project server and by the hub for every registered project; the tab bar
+// comes from the hub's /api/projects and each tab polls /api/tasks?project=NAME
 export const PAGE = `<!doctype html>
 <html lang="en">
 <head>
@@ -334,6 +365,11 @@ h1 { font-size: 16px; margin: 0; }
 #theme { margin-left: auto; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 #theme:hover { background: var(--hover); }
 #updated { font-size: 12px; color: var(--muted); }
+#tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; }
+#tabs:empty { display: none; }
+.tab { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px 6px 0 0; padding: 4px 12px; font-size: 12px; cursor: pointer; }
+.tab:hover { background: var(--hover); }
+.tab.active { border-color: var(--link); color: var(--link); }
 #board { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; padding: 10px 18px 18px; overflow-x: auto; align-items: flex-start; }
 .col { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; border-top: 3px solid var(--ac); padding: 10px; min-width: 300px; flex: 1 0 300px; }
 .col h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin: 0 0 10px; color: var(--heading); }
@@ -395,6 +431,7 @@ h1 { font-size: 16px; margin: 0; }
 </head>
 <body>
 <header><h1>Software Engineering LLM Team</h1><span id="updated"></span><button id="theme" onclick="toggleTheme()">Dark</button></header>
+<nav id="tabs"></nav>
 <main id="board"></main>
 <div id="modal" class="hidden"><div id="m-box">
 <div id="m-head"><h2 id="m-title"></h2><button id="m-close" onclick="closeModal()">Close</button></div>
@@ -407,8 +444,10 @@ h1 { font-size: 16px; margin: 0; }
 const STATES = ${JSON.stringify(STATES)};
 const WORKING = ["doing", "reviewing", "live-testing"];
 const VISIBLE = 5;
-let tasks = [];
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+let projects = [""]; // one tab per registered project; [""] is the single-project server, no tabs
+let active = "";
+const boards = Object.create(null);
+const esc = ${esc};
 // 000042_fix_x.md -> #42; parseInt stops at the first non-digit and drops leading zeros
 const num = t => "#" + parseInt(t.file, 10);
 const rootEl = document.documentElement;
@@ -449,10 +488,29 @@ function md(src) {
 // board-content position changed moves, the siblings shifting when a card enters or leaves a
 // column included; positions are board-content relative, so a scrolled refresh animates nothing.
 ${flipDiff}
+${tabNames}
+${tabsHtml}
+${boardOf}
+${mergeBoards}
+// tabs: one per registered project, the active one renders that project's board
+function renderTabs() {
+	const el = document.getElementById("tabs");
+	const html = tabsHtml(projects, active);
+	if (el.innerHTML !== html) el.innerHTML = html;
+	for (const b of el.querySelectorAll(".tab")) b.onclick = () => switchTab(b.dataset.project);
+}
+function switchTab(name) {
+	if (name === active) return;
+	active = name;
+	closeModal();
+	render(true); // no FLIP across boards: positions belong to the project just left
+}
+function activeBoard() { return boardOf(boards, active); }
 // fold choice keyed by state name, so the 5 s refresh keeps it
-const expanded = new Set();
-function toggleCol(st) { if (expanded.has(st)) expanded.delete(st); else expanded.add(st); render(); }
-function render() {
+function toggleCol(st) { const b = activeBoard(); if (b.expanded.has(st)) b.expanded.delete(st); else b.expanded.add(st); render(); }
+function render(skipFlip) {
+	renderTabs();
+	const tab = activeBoard();
 	const board = document.getElementById("board");
 	const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 	// board-content relative: page scroll cancels, board scroll is added back, so a refresh after
@@ -460,18 +518,18 @@ function render() {
 	const boardRect = board.getBoundingClientRect();
 	const pos = el => { const r = el.getBoundingClientRect(); return { x: r.left - boardRect.left + board.scrollLeft, y: r.top - boardRect.top + board.scrollTop }; };
 	const old = {};
-	for (const el of board.querySelectorAll(".card")) {
+	if (!skipFlip) for (const el of board.querySelectorAll(".card")) {
 		el.style.transition = "none";
 		el.style.transform = "";
 		old[el.dataset.file] = pos(el);
 	}
 	board.innerHTML = STATES.map(st => {
-		const inState = tasks.filter(t => t.state === st).sort((a, b) => b.updated - a.updated);
-		const shown = expanded.has(st) ? inState : inState.slice(0, VISIBLE);
+		const inState = tab.tasks.filter(t => t.state === st).sort((a, b) => b.updated - a.updated);
+		const shown = tab.expanded.has(st) ? inState : inState.slice(0, VISIBLE);
 		const cards = shown.map(t =>
 			'<div class="card" data-file="' + esc(t.file) + '"><div class="name">' + (WORKING.includes(st) ? '<span class="spin"></span>' : "") + '<span class="num">' + num(t) + "</span>" + esc(t.name) + '</div><span class="chip p-' + esc(t.priority) + '">' + esc(t.priority) + "</span></div>"
 		).join("");
-		const toggle = inState.length > VISIBLE ? '<button class="toggle" onclick="toggleCol(\\'' + esc(st) + '\\')">' + (expanded.has(st) ? "show less" : "show all (" + inState.length + ")") + "</button>" : "";
+		const toggle = inState.length > VISIBLE ? '<button class="toggle" onclick="toggleCol(\\'' + esc(st) + '\\')">' + (tab.expanded.has(st) ? "show less" : "show all (" + inState.length + ")") + "</button>" : "";
 		return '<section class="col c-' + st + '"><h2>' + esc(st) + ' <span class="count">' + inState.length + "</span></h2>" + (cards || '<div class="empty">&mdash;</div>') + toggle + "</section>";
 	}).join("");
 	const now = {};
@@ -492,7 +550,7 @@ function render() {
 	}
 }
 function openTask(file) {
-	const t = tasks.find(x => x.file === file);
+	const t = activeBoard().tasks.find(x => x.file === file);
 	if (!t) return;
 	closeLog();
 	modalFile = file;
@@ -540,7 +598,7 @@ function openAgentLog(role) {
 	openLog(role);
 }
 function openLog(role) {
-	const t = tasks.find(x => x.file === modalFile);
+	const t = activeBoard().tasks.find(x => x.file === modalFile);
 	const p = logPane();
 	if (!t || !p) return;
 	p.classList.remove("hidden");
@@ -559,7 +617,7 @@ function closeLog() {
 }
 function pollLog() {
 	if (!logState || logState.busy) return;
-	const t = tasks.find(x => x.file === modalFile);
+	const t = activeBoard().tasks.find(x => x.file === modalFile);
 	const live = !!(t && t.agent && t.agent.alive && t.agent.role === logState.role);
 	// past agents write no lines: one empty poll is proof, stop the timer
 	if (!live && logState.idle) {
@@ -579,7 +637,7 @@ function pullLog(qs, mode) {
 	if (!st) return;
 	st.busy = true;
 	const p = logPane();
-	fetch("/api/agent-log" + qs).then(r => r.ok ? r.json() : null).then(d => {
+	fetch("/api/agent-log" + qs + (active ? "&project=" + encodeURIComponent(active) : "")).then(r => r.ok ? r.json() : null).then(d => {
 		// a superseded open must not write into the new view
 		if (!d || logState !== st || !p || p.classList.contains("hidden")) return;
 		const el = document.getElementById("m-log-text");
@@ -609,11 +667,24 @@ function pullLog(qs, mode) {
 }
 document.getElementById("modal").onclick = e => { if (e.target.id === "modal") closeModal(); };
 function refresh() {
-	fetch("/api/tasks").then(r => r.ok ? r.json() : null).then(data => {
-		if (!data) return;
-		tasks = data;
+	fetch("/api/projects").then(r => r.ok ? r.json() : null).catch(() => null).then(list => {
+		// the single-project server 404s here, and a transient hub failure keeps the last known
+		// tabs: only a real projects list replaces them
+		if (Array.isArray(list)) {
+			const names = tabNames(list);
+			projects = names.length ? names : [""]; // single project: the old ui, one board, no tabs
+		}
+		// a project that vanished from the registry closes the modal its task lived in
+		if (!projects.includes(active)) { active = projects[0]; closeModal(); }
+		const url = name => name ? "/api/tasks?project=" + encodeURIComponent(name) : "/api/tasks";
+		// every tab polls every cycle, only the active one renders
+		return Promise.all(projects.map(name => fetch(url(name)).then(r => r.ok ? r.json() : null).catch(() => null).then(t => [name, t])));
+	}).then(rows => {
+		mergeBoards(boards, rows);
 		render();
-		document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
+		// stamp only a served board: during a hub outage the old stamp stays visible
+		const current = rows.find(([name]) => name === active);
+		if (current && current[1]) document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
 	}).catch(() => {});
 }
 refresh();
