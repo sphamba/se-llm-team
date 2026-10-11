@@ -266,5 +266,36 @@ assert.equal(getTask(root, "000090_legacy.md")?.complexity, "moderate");
 // kanban_list refs carry complexity
 assert.equal(listTasks(root, "in-progress").find((t) => t.file === tcx.file)?.complexity, "simple");
 
+// blockedBy: parsed, created, replaced, cleared and listed; absent reads as empty
+assert.equal(t1.blockedBy, ""); // absent attribute reads as empty
+const bRoot = mkdtempSync(join(tmpdir(), "kanban-blocked-"));
+const tb = createTask(bRoot, { name: "feat: blocked task", summary: "s", blockedBy: "#42, #43" });
+assert.equal(tb.blockedBy, "#42, #43");
+// quoted in the frontmatter so the refs are not read as YAML comments
+assert.match(readFileSync(join(bRoot, ".kanban", tb.file), "utf8"), /^blockedBy: "#42, #43"$/m);
+const tnb = createTask(bRoot, { name: "feat: unblocked task", summary: "s" });
+assert.equal(tnb.blockedBy, "");
+// without blockedBy the file matches the default format: the complexity attribute is
+// always written, blockedBy only when provided
+assert.equal(
+	readFileSync(join(bRoot, ".kanban", tnb.file), "utf8"),
+	`---\nname: "feat: unblocked task"\npriority: "medium"\nstate: "backlog"\nworktree: ""\nissuer: "user"\ncomplexity: "moderate"\n---\n\n# Summary\ns\n\n# Specs\n\n\n# Notes\n`,
+);
+// updateTask replaces the whole list; omitted stays unchanged
+updateTask(bRoot, tb, { blockedBy: "#44" });
+assert.equal(parseTask(bRoot, tb.file).blockedBy, "#44");
+setState(bRoot, tb, "to-do"); // attribute rewrite keeps the list
+assert.equal(parseTask(bRoot, tb.file).blockedBy, "#44");
+updateTask(bRoot, tb, { summary: "s2" }); // section rewrite keeps the list
+assert.equal(parseTask(bRoot, tb.file).blockedBy, "#44");
+updateTask(bRoot, tb, { blockedBy: "" });
+assert.equal(parseTask(bRoot, tb.file).blockedBy, "");
+// kanban_list refs and kanban_get carry the field
+const tb2 = createTask(bRoot, { name: "feat: blocked again", summary: "s", blockedBy: "#42" });
+assert.equal(listTasks(bRoot, "backlog").find((t) => t.file === tb2.file)?.blockedBy, "#42");
+assert.equal(getTask(bRoot, tb2.file)?.blockedBy, "#42");
+assert.equal(getTask(bRoot, tb.file)?.blockedBy, "");
+rmSync(bRoot, { recursive: true, force: true });
+
 rmSync(root, { recursive: true, force: true });
 console.log("kanban.test.ts: all assertions passed");

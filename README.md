@@ -49,7 +49,7 @@ corepack enable
 corepack prepare pnpm@12.11.2 --activate
 ```
 
-There are no dependencies and no lockfile yet. The checks still run with `node` directly, see [Checks](#checks).
+There are no dependencies and no committed lockfile (pnpm writes an env lockfile that is gitignored). The checks still run with `node` directly, see [Checks](#checks).
 
 ## Kanban board
 
@@ -89,12 +89,14 @@ Agent prompts live in `agents/`. The orchestrator runs each agent as a headless 
 
 ## Tools
 
-The PM session gets: kanban_list, kanban_get, kanban_create, kanban_update, kanban_set_state, kanban_set_worktree, orchestrator_start, orchestrator_status, orchestrator_stop, orchestrator_poke. The extension also notifies the session when a task reaches done.
+The PM session gets: kanban_list, kanban_get, kanban_create, kanban_update, kanban_set_state, kanban_set_worktree, kanban_delete, orchestrator_start, orchestrator_status, orchestrator_stop, orchestrator_poke. kanban_delete removes a mistaken task: it deletes the task file and commits a whole-board mirror snapshot in one operation, so the daemon cannot restore the task. Never delete a board file by hand. The daemon restores hand-deleted files from the mirror. The extension also notifies the session when a task reaches done.
 
 ## Checks
 
 ```sh
 node src/kanban.test.ts
+node src/orchestrator.test.ts
+node src/webui.test.ts
 ```
 
 Sidecar files (`.kanban/.logs/`, `.kanban/.pids/`, `.kanban/.orchestrator.lock`) are gitignored.
