@@ -1,8 +1,8 @@
 ---
 name: "fix: smoke test daemons bind the production webui port and steal the UI"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "fix/smoke-test-daemons-bind-the-production-webui-port-and-steal-the-ui"
 ---
 
 # Summary
@@ -28,3 +28,12 @@ Constraints:
 - HOLD behind 000034 (board mirror, doing) and 000038 (hub backend): both rewrite src/orchestrator.ts.
 
 # Notes
+
+- src/orchestrator.ts: added a `--no-webui` CLI flag and a `SE_LLM_TEAM_NO_WEBUI` env override (values "1"/"true"); when set, main() skips the webui start entirely and logs "web ui disabled (no-webui)". Usage line mentions the flag.
+- Hardening: a webui bind failure now logs "web ui failed to start on <host>:<port> (port taken by another webui?), continuing without it" so EADDRINUSE is diagnosable. startWebUi's resolve-null contract is unchanged.
+- src/orchestrator.test.ts: runDaemon and the second-start spawn now set SE_LLM_TEAM_NO_WEBUI=1, so test daemons are hermetic. New part S covers both override paths against a global-config-shaped HOME (webui enabled on a fixed port) and asserts no "web ui on"/"web ui failed" lines.
+- agents/developer.md: added a smoke-test line: start smoke daemons with `--no-webui` (or SE_LLM_TEAM_NO_WEBUI=1).
+- Verified live with the real global config: flag and env paths log "web ui disabled (no-webui)" and never touch 4242; a daemon without the override while 4242 is taken logs the new port+hint message; the production webui still serves 200. orchestrator.test.ts, webui.test.ts, kanban.test.ts all pass.
+- Note on the HOLD: 000034 is done; 000038 (hub backend) is still in backlog and rewrites src/orchestrator.ts, so the merge may conflict there. The change is small (one arg, one env check, one log line).- Review (2026-10-11): implementation matches the Specs. Flag + env override skip the webui start; the bind-failure log names host:port with the taken-port hint; the usage line mentions the flag; agents/developer.md tells smoke daemons to use `--no-webui`; runDaemon and the second-start spawn in orchestrator.test.ts are hermetic. webui.test.ts's daemon spawn deliberately tests webui startup on ephemeral port 0 and correctly does not get the override (setting it would defeat that test's own assertion), so no change there.
+- Reviewer re-verified live from the worktree: `--no-webui` with the real global config logs "web ui disabled (no-webui)", touches nothing on 4242, and the production webui still serves 200. Full suite passes (orchestrator.test.ts, webui.test.ts, kanban.test.ts).
+- One fix committed (aae03f6): part S never pushed `homeS` into `cleaned`, so a failed assert or timeout in part S leaked the temp home dir in /tmp. Now pushed; suite re-run passes.
