@@ -65,6 +65,11 @@ assert.equal(createValidator.Check({ name: "feat: x", summary: "s", notes: "anyt
 assert.ok([...createValidator.Errors({ name: "feat: x", summary: "s", notes: "anything" })].some((e: any) => e.keyword === "additionalProperties"));
 assert.equal(createValidator.Check({ name: "feat: x", summary: "s", priority: "high", complexity: "complex", issuer: "#42", specs: "s", openQuestions: "q", blockedBy: "#42" }), true, "all supported fields must pass validation");
 
+// execute with all supported fields keeps the "Created <file> (#N)" response
+const created = await run(create, { name: "feat: create guard", summary: "s", priority: "high", complexity: "complex", issuer: "#42", specs: "s", openQuestions: "q", blockedBy: "#42" });
+assert.equal(created.content[0].text, `Created ${created.details.file} (#${taskNum(created.details.file)})`, "all-supported call must keep the Created response");
+assert.equal(getTask(root, created.details.file)?.issuer, "#42", "supported fields must still be written");
+
 // a call with only file updates nothing and says so instead of claiming an update
 const t1 = createTask(root, { name: "feat: update guard", summary: "before" });
 const before = readFileSync(taskFile(t1.file), "utf8");
