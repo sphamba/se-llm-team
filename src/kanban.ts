@@ -9,6 +9,8 @@ export const STATES = [
 	"reviewing",
 	"to-live-test",
 	"live-testing",
+	"to-merge",
+	"merging",
 	"done",
 ] as const;
 export type TaskState = (typeof STATES)[number];
@@ -40,7 +42,16 @@ export interface TaskRef {
 	openQuestions: string;
 }
 
-const IN_PROGRESS = new Set<TaskState>(["to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing"]);
+const IN_PROGRESS = new Set<TaskState>([
+	"to-do",
+	"doing",
+	"to-review",
+	"reviewing",
+	"to-live-test",
+	"live-testing",
+	"to-merge",
+	"merging",
+]);
 
 export function kanbanDir(root: string): string {
 	return join(root, ".kanban");

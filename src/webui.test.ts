@@ -8,7 +8,7 @@ import { createTask, getTask, setState } from "./kanban.ts";
 import { boardOf, buildShell, cardHtml, flipDiff, LAYOUT, loadWebUiConfig, LOG_CHUNK, mergeBoards, pairLayout, renderLogChunk, spinnerHtml, startWebUi, syncBoard, tabNames, tabsHtml } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing", "done"];
+const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing", "to-merge", "merging", "done"];
 
 const root = mkdtempSync(join(tmpdir(), "webui-test-"));
 const home = mkdtempSync(join(tmpdir(), "webui-home-"));
@@ -89,7 +89,7 @@ const issuedRow = (await (await fetch(`${base}/api/tasks`)).json()).find((t) => 
 assert.equal(issuedRow.issuer, "#42");
 rmSync(join(root, ".kanban", issued.file)); // the daemon section below expects a one-task board
 
-// GET / mentions all 8 state names; other paths and methods are 404
+// GET / mentions all 10 state names; other paths and methods are 404
 const page = await (await fetch(`${base}/`)).text();
 assert.ok(page.includes("Software Engineering LLM Team"), "page shows the new title");
 assert.ok(page.includes('id="theme"'), "page has the theme toggle");
@@ -143,14 +143,14 @@ class El {
 }
 const boardEl = new El("main");
 const cols: Record<string, any> = buildShell(boardEl, { createElement: (tag: string) => new El(tag) });
-assert.deepEqual(boardEl.children.map((c) => c.className), ["col c-backlog", "pair", "pair", "pair", "col c-done"], "backlog and done stay single side columns, the six middle states sit in three pairs");
+assert.deepEqual(boardEl.children.map((c) => c.className), ["col c-backlog", "pair", "pair", "pair", "pair", "col c-done"], "backlog and done stay single side columns, the eight middle states sit in four pairs");
 assert.deepEqual(
-	boardEl.children.slice(1, 4).map((p) => p.children.map((c) => c.className)),
-	[["col c-to-do", "col c-doing"], ["col c-to-review", "col c-reviewing"], ["col c-to-live-test", "col c-live-testing"]],
-	"to-do over doing, to-review over reviewing, to-live-test over live-testing",
+	boardEl.children.slice(1, 5).map((p) => p.children.map((c) => c.className)),
+	[["col c-to-do", "col c-doing"], ["col c-to-review", "col c-reviewing"], ["col c-to-live-test", "col c-live-testing"], ["col c-to-merge", "col c-merging"]],
+	"to-do over doing, to-review over reviewing, to-live-test over live-testing, to-merge over merging",
 );
-assert.deepEqual(LAYOUT, ["backlog", ["to-do", "doing"], ["to-review", "reviewing"], ["to-live-test", "live-testing"], "done"], "the states between backlog and done pair up in pipeline order");
-assert.deepEqual(pairLayout([...STATE_NAMES.slice(0, -1), "to-merge", "merging", "done"]), ["backlog", ["to-do", "doing"], ["to-review", "reviewing"], ["to-live-test", "live-testing"], ["to-merge", "merging"], "done"], "the queued to-merge/merging states become a fourth pair with no change here");
+assert.deepEqual(LAYOUT, ["backlog", ["to-do", "doing"], ["to-review", "reviewing"], ["to-live-test", "live-testing"], ["to-merge", "merging"], "done"], "the states between backlog and done pair up in pipeline order");
+assert.deepEqual(pairLayout(STATE_NAMES), LAYOUT, "the pairs derive from the state list, with no state-specific wiring");
 assert.ok(LAYOUT.every((part) => (typeof part === "string" ? cols[part] : part.every((st) => cols[st]))), "every layout state gets a column");
 assert.ok(page.includes(JSON.stringify(LAYOUT)), "the page ships the tested layout");
 assert.ok(page.includes(String(buildShell)) && page.includes(String(syncBoard)), "the page runs the tested shell and card pass");
