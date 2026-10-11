@@ -614,6 +614,9 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	if (pidAlive(agentPid(root, slug))) return;
 	// at most one merger at a time, project-wide
 	if (pidAlive(agentPid(root, "merger"))) return;
+	// a task bounced here past the respawn cap (dead live-tester or merger) also waits for
+	// the idle cooldown before its merger spawns
+	if (deadCooldownActive(root, cfg, task)) return;
 	// an earlier attempt on this task failed and requeued it: retry only after it sat idle in
 	// to-merge for the idle interval. Read before any write: ensureWorktree/setWorktree bump the
 	// task file's mtime, which is the idle clock, so this check must come first
@@ -665,6 +668,15 @@ function doneCleanup(root: string, task: Task): void {
 	log(root, `merged ${wt} for ${task.file}`);
 }
 
+// past RESPAWN_CAP the fresh agent waits for the idle cooldown: the unconditional bounce
+// still moves the task back one step, only the respawn backs off. The task file's update
+// time is the idle clock (the bounce's setState wrote it). Read before any write:
+// ensureWorktree/setWorktree bump the mtime and would restart the clock mid-check
+function deadCooldownActive(root: string, cfg: Config, task: Task): boolean {
+	if (readCounter(root, `${task.file.replace(/\.md$/, "")}.dead`) <= RESPAWN_CAP) return false;
+	return Date.now() - statSync(join(kanbanDir(root), task.file)).mtimeMs < cfg.autoScheduleMinutes * 60_000;
+}
+
 function rescan(root: string, cfg: Config): void {
 	// root-cause fix ordering: a snapshot commit must never be built from a tree that lacks
 	// branch-only files, so an external mirror-head move is materialized before boardStatus
@@ -701,8 +713,9 @@ function rescan(root: string, cfg: Config): void {
 			// identical-tree guard keeps an already-mirrored file a no-op
 			const code = status.get(join(".kanban", task.file));
 			if (code === "??") commitKanban(root, `kanban: create ${task.file}`, files);
-			if (task.state === "to-do") startTodo(root, cfg, task);
-			else if (task.state === "to-review") {
+			// past the respawn cap the fresh developer waits for the idle cooldown (state unchanged)
+			if (task.state === "to-do" && !deadCooldownActive(root, cfg, task)) startTodo(root, cfg, task);
+			else if (task.state === "to-review" && !deadCooldownActive(root, cfg, task)) {
 				const ensured = ensureWorktree(root, task);
 				// a failed spawn would bounce or strand the task; leave the state for the next rescan to retry
 				if (!ensured) log(root, `${task.file}: worktree could not be created, reviewer not spawned (state unchanged)`);
@@ -725,7 +738,7 @@ function rescan(root: string, cfg: Config): void {
 						if (pid) writeFileSync(armedPath(root, slug), String(pid));
 					}
 				}
-			} else if (task.state === "to-live-test") {
+			} else if (task.state === "to-live-test" && !deadCooldownActive(root, cfg, task)) {
 				const ensured = ensureWorktree(root, task);
 				if (!ensured) log(root, `${task.file}: worktree could not be created, live-tester not spawned (state unchanged)`);
 				else {
@@ -820,18 +833,28 @@ function poll(root: string, cfg: Config): void {
 			const pidName = task.state === "merging" ? "merger" : slug;
 			const pid = agentPid(root, pidName);
 			if (pidAlive(pid)) continue;
+			const hadPid = pid > 0;
 			clearPid(root, pidName);
-			if (!next) continue;
-			if (bumpCounter(root, `${slug}.dead`) > RESPAWN_CAP) {
-				// counter keeps growing while the pidfile stays dead; log the give-up only once
-				if (readCounter(root, `${slug}.dead`) === RESPAWN_CAP + 1) {
-					log(root, `${slug}: agent died ${RESPAWN_CAP}+ times, giving up (state ${task.state})`);
+			if (!next) {
+				// a completed run leaves its stale pidfile behind, a bounce clears it first, so a
+				// stale pidfile here means the agent advanced the task out of the mapped state by
+				// its own action: the death streak is over. Clearing on a missing pidfile too would
+				// wipe the counter of a past-cap task still waiting out its respawn cooldown
+				if (hadPid && readCounter(root, `${slug}.dead`) > 0) {
+					writeFileSync(counterPath(root, `${slug}.dead`), "0");
+					log(root, `${slug}: run completed, cleared the dead-agent counter`);
 				}
 				continue;
 			}
+			// the bounce is unconditional: a frozen mid-flight task is worse than a bounced one
 			log(root, `${slug}: agent pid=${pid} dead without state update, ${task.state} -> ${next}`);
 			const fresh = getTask(root, task.file);
 			if (fresh) setState(root, fresh, next);
+			// past the cap the fresh spawn waits for the idle cooldown (the sweep defers it);
+			// logged once at cap+1, like the old give-up line
+			if (bumpCounter(root, `${slug}.dead`) === RESPAWN_CAP + 1) {
+				log(root, `${slug}: agent died ${RESPAWN_CAP}+ times; respawn waits for the idle cooldown (state ${next})`);
+			}
 		} catch (err) {
 			log(root, `error polling ${task.file} (${task.state}): ${err instanceof Error ? err.message : err}`);
 		}
