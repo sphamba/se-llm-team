@@ -1,8 +1,8 @@
 ---
 name: "fix: pnpm pin makes every pnpm invocation write an untracked pnpm-lock.yaml"
 priority: "low"
-state: "merging"
-worktree: "fix/89-pnpm-pin-makes"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -52,3 +52,7 @@ Live-tester run (fix/89), tested cd6c16c:
 - README line 49 now reads "There are no dependencies and no committed lockfile (pnpm writes an env lockfile that is gitignored)." The only other "lockfile" mention is the orchestrator lock (`.kanban/.orchestrator.lock`), unrelated. Statement is accurate.
 - `node src/kanban.test.ts`, `node src/orchestrator.test.ts`, `node src/webui.test.ts` all pass.
 - All acceptance criteria met. No issues found. No open questions.
+
+Merger run (merge fix/89-pnpm-pin-makes -> main):
+- Step 1 (worktree): merged main into the branch; git auto-resolved the only overlapping file (README.md) and both intended changes survived: .gitignore has `pnpm-lock.yaml` after `node_modules/`, and README line 49 reads "There are no dependencies and no committed lockfile (pnpm writes an env lockfile that is gitignored)." No conflicts, no manual resolutions needed. Test suites `node src/kanban.test.ts`, `node src/orchestrator.test.ts`, `node src/webui.test.ts` all pass on the merge commit (9b08473); no extra fixes required.
+- Step 2 (root): merged fix/89-pnpm-pin-makes into main as a fast-forward (b4914bf..9b08473). `git status --porcelain` clean in root and worktree after both merges. `pnpm install` left alone per the constraint.

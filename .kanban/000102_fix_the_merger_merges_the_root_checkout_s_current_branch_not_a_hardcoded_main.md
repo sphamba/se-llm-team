@@ -1,7 +1,7 @@
 ---
 name: "fix: the merger merges the root checkout's current branch, not a hardcoded main"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/102-the-merger-merges"
 ---
 
@@ -28,3 +28,10 @@ Constraints:
 - HOLD behind #78 (reviewing on feat/78-to-merge-and, which rewrites agents/merger.md - this task rebases its two merge steps on the merged #78 text).
 
 # Notes
+
+- Verified the hold is lifted: #78 (agents/merger.md rewrite) is merged (01136ea), so this task landed on the post-#78 text. Worktree HEAD matched main (d93e444) before the change.
+- Verified no orchestrator.ts change is needed on the current main: ensureWorktree creates with `worktree add -b wt` (no start-point, live HEAD base), doneCleanup uses `git merge-base --is-ancestor wt HEAD` (HEAD-relative), and grep finds zero literal "main" in merge logic.
+- agents/merger.md: replaced both hardcoded merge steps with live resolution. Both steps now resolve the base branch of the project root checkout at the start of the step (`git -C {{ROOT}} branch --show-current`); step 1 merges that base into {{WORKTREE_NAME}} in the worktree, step 2 re-resolves (the root may have moved) and merges {{WORKTREE_NAME}} into the resolved base from the project root. Added the detached-HEAD refusal: no merge, warning in the final output, a Note that the root checkout is detached, requeue to to-merge; the PM resolves manually. The abort/requeue path (`git merge --abort` in the dirty repo) is unchanged from #78.
+- README.md: the merging-state line now says the merger resolves the project root's current branch at the start of each merge (both merge steps) and notes the detached-HEAD refusal.
+- Tests: node src/kanban.test.ts (all assertions passed), node src/orchestrator.test.ts (16 smokes passed, includes #78's to-merge coverage), node src/webui.test.ts (all assertions passed). First webui run failed because it was launched with SE_LLM_TEAM_NO_WEBUI=1, which the webui test does not expect; rerun without it passed. The merger prompt change itself is verified by the live test per the specs.
+- Commit bd37fb2 on fix/102-the-merger-merges (2 files, +7/−4).

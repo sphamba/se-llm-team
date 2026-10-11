@@ -1,8 +1,8 @@
 ---
 name: "fix: webui agent run labels start from 1, not 0"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/108-webui-agent-run"
 ---
 
 # Summary
