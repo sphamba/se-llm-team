@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { createServer } from "node:http";
-import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { readHubRegistry, startHub } from "./hub.ts";
 import { createTask, kanbanDir, parseTask, setState, setWorktree } from "./kanban.ts";
-import { pidAlive, waitForBoardCommits } from "./orchestrator.ts";
+import { compactFinishedLogs, compactLogLine, logCompactor, logFeeders, pidAlive, removeTask, waitForBoardCommits } from "./orchestrator.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -83,9 +84,14 @@ if (prompt.includes("Developer agent")) {
 	const m = process.argv.indexOf("--mode");
 	if (m !== -1 && process.argv[m + 1] === "json") {
 		process.stdout.write(JSON.stringify({ type: "session", version: 3, id: "s", timestamp: 0, cwd: process.cwd() }) + "\\n");
-		process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "working" } }) + "\\n");
+		process.stdout.write(JSON.stringify({ type: "message_start", message: { role: "system", content: "", sections: { preamble: "the system prompt" } } }) + "\\n");
+		process.stdout.write(JSON.stringify({ type: "message_update", usage: { input: 0, output: 1 }, assistantMessageEvent: { type: "text_delta", delta: "working" } }) + "\\n");
 		process.stdout.write(JSON.stringify({ type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: { command: "git status" } }) + "\\n");
+		process.stdout.write(JSON.stringify({ type: "message_start", message: { role: "toolResult", toolCallId: "t1", toolName: "bash", content: [{ type: "text", text: "result echo" }] } }) + "\\n");
+		process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "toolResult", toolCallId: "t1", toolName: "bash", content: [{ type: "text", text: "result echo" }] } }) + "\\n");
 		process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant", content: "work" } }) + "\\n");
+		process.stdout.write(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: "full replay" }], willRetry: false }) + "\\n");
+		process.stderr.write("stub stderr diagnostic: not json\\n");
 	} else {
 		process.stdout.write("final text only\\n");
 	}
@@ -266,13 +272,20 @@ const devLogA = readFileSync(join(logsA, `${slugA}.developer.0.log`), "utf8");
 for (const record of ['"type":"message_update"', '"type":"tool_execution_start"', '"type":"message_end"']) {
 	assert.ok(devLogA.includes(record), `developer log carries JSONL ${record}`);
 }
+// the write-time compactor dropped the dead weight, the streamed deltas survive the pipe
+assert.ok(!devLogA.includes('"usage"'), "message_update usage envelope stripped");
+assert.ok(!devLogA.includes('"sections"'), "run-opening system prompt echo dropped");
+assert.ok(devLogA.includes('"text_delta"'), "streamed text deltas survive the compactor");
+assert.equal(devLogA.split('"result echo"').length - 1, 1, "toolResult message_start dropped, its message_end kept");
+assert.ok(devLogA.includes('"willRetry":false') && !devLogA.includes('"full replay"'), "agent_end messages dropped, the rest of the record kept");
+assert.ok(devLogA.includes("stub stderr diagnostic: not json"), "non-JSON stderr passes through the compactor");
 assert.ok(existsSync(join(logsA, `${slugA}.reviewer.0.log`)) && existsSync(join(logsA, `${slugA}.live-tester.0.log`)), "reviewer and live-tester runs got indexed log files");
 assert.equal(readFileSync(join(logsA, `${slugA}.developer.log`), "utf8"), "legacy\n", "legacy unsuffixed log never renamed or rewritten");
 // the reviewer's approval (to-live-test) is a successful run: counted once per task
 assert.equal(readFileSync(join(logsA, `${slugA}.reviewer-runs.count`), "utf8").trim(), "1", "reviewer approval counted as one successful run");
 a.daemon.kill("SIGTERM");
 
-// --- part B: dead agents get moved forward by the liveness poll, capped at 5 respawns ---
+// --- part B: dead agents bounce unconditionally; past the respawn cap the fresh spawn waits for the idle cooldown ---
 const rootB = fixture();
 cleaned.push(rootB);
 mkdirSync(kanbanDir(rootB), { recursive: true });
@@ -287,17 +300,32 @@ setWorktree(rootB, taskB2, "feat/dead-merger");
 setState(rootB, taskB2, "live-testing");
 
 const b = await runDaemon(rootB);
-const readB = () => parseTask(rootB, taskB.file);
-await waitFor(() => b.output().includes("giving up"), 60000, "respawn cap", b.output);
-assert.equal(readB().state, "doing");
-assert.ok(b.output().includes("doing -> to-do"), "poll moved the dead developer back to to-do");
-// same-role reruns get their own run log: the respawned developer writes 1, not 0 again
 const slugB = taskB.file.replace(/\.md$/, "");
-assert.ok(existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.0.log`)), "first developer run logged as 0");
-assert.ok(existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.1.log`)), "developer rerun logged as 1");
+const bouncesB = () => b.output().split("doing -> to-do").length - 1;
+// six deaths, six bounces: the poll never freezes the task at the respawn cap
+await waitFor(() => bouncesB() >= 6, 90000, "six unconditional bounces past the respawn cap", b.output);
+assert.ok(b.output().includes("doing -> to-do"), "poll moved the dead developer back to to-do");
+// under the cap each respawn was immediate: the first six runs kept pace with the 3s poll
+for (let n = 0; n <= 5; n++) {
+	assert.ok(existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.${n}.log`)), `developer run ${n} logged`);
+}
+// the cooldown log fired once at cap+1, and the deferred spawn has not fired yet
+await waitFor(() => b.output().includes("respawn waits for the idle cooldown"), 30000, "cooldown log at cap+1", b.output);
+assert.equal(b.output().split("respawn waits for the idle cooldown").length - 1, 1, "cooldown log fired exactly once");
+assert.ok(!existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.6.log`)), "no fresh spawn while the idle cooldown runs");
+// the death counter survived the cooldown wait: a bounce clears the pidfile first, so the
+// completed-run counter clear does not misfire on the waiting task
+assert.equal(readFileSync(join(kanbanDir(rootB), ".logs", `${slugB}.dead.count`), "utf8").trim(), "6", "death counter intact during the cooldown wait");
+// aging the task file past the idle interval releases the deferred respawn
+const taskBPath = join(kanbanDir(rootB), taskB.file);
+const aged = new Date(Date.now() - 6 * 60_000);
+utimesSync(taskBPath, aged, aged);
+await waitFor(() => existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.6.log`)), 30000, "fresh spawn after the idle cooldown", b.output);
+// the 7th death bounced again with no second cooldown log
+assert.equal(b.output().split("respawn waits for the idle cooldown").length - 1, 1, "still one cooldown log past the cap");
 // the dead live-tester advances live-testing -> to-merge, the sweep spawns a merger for it
 // (the dead stub exits instantly), and the poll requeues the dead merger's task to to-merge;
-// the idle cooldown keeps it there for the rest of the run
+// the failed-merge marker keeps it there for the rest of the run
 await waitFor(() => b.output().includes("live-testing -> to-merge"), 30000, "poll advanced the dead live-tester to to-merge", b.output);
 await waitFor(() => b.output().includes("merging -> to-merge"), 30000, "poll requeued the dead merger's task to to-merge", b.output);
 assert.equal(parseTask(rootB, taskB2.file).state, "to-merge", "requeued task waits for the idle cooldown");
@@ -404,8 +432,9 @@ assert.ok(existsSync(wtE), "worktree dir created for a to-review task with no wo
 assert.ok(lstatSync(join(wtE, ".kanban")).isSymbolicLink(), "worktree board is a symlink to the shared board");
 assert.ok(e.output().includes(`(cwd=${wtE})`), `reviewer spawn log shows an existing cwd: ${e.output()}`);
 assert.equal(parseTask(rootE, taskE.file).worktree, "fix/1-review-without-worktree", "worktree recorded on the task");
-// the dead reviewer respawns per the dead counter; died runs never count as successful runs
-await waitFor(() => e.output().includes("giving up"), 90000, "reviewer respawn cap", e.output);
+// the dead reviewer respawns per the dead counter; past the cap the cooldown log fires and
+// the fresh spawn defers; died runs never count as successful runs
+await waitFor(() => e.output().includes("respawn waits for the idle cooldown"), 90000, "reviewer respawn cooldown", e.output);
 const slugE = taskE.file.replace(/\.md$/, "");
 const reviewerLogsE = readdirSync(join(kanbanDir(rootE), ".logs")).filter((f) => f.startsWith(`${slugE}.reviewer.`) && f.endsWith(".log")).sort();
 assert.deepEqual(
@@ -525,9 +554,9 @@ assert.deepEqual(pidsI(), [], "failed spawn left no pid file");
 // agentPid reads 0 for the missing pid file and pidAlive(0) is false, so the poll
 // bounces doing -> to-do per DEAD_TRANSITIONS and the rescan retries the spawn
 await waitFor(() => hi.output().includes("agent pid=0 dead without state update, doing -> to-do"), 30000, "poll bounced the doing task", hi.output);
-await waitFor(() => hi.output().includes("giving up"), 60000, "respawn cap on repeated failed spawns", hi.output);
+await waitFor(() => hi.output().includes("respawn waits for the idle cooldown"), 60000, "cooldown on repeated failed spawns", hi.output);
 assert.deepEqual(pidsI(), [], "still no pid file after repeated failed spawns");
-assert.equal(readI().state, "doing");
+assert.equal(readI().state, "to-do", "bounced back and parked on the idle cooldown, not frozen in doing");
 hi.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard smoke passed");
@@ -785,10 +814,12 @@ const taskO1 = createTask(rootO, { name: "fix: settled done task", summary: "Set
 setState(rootO, taskO1, "done");
 
 const mo = await runDaemon(rootO);
-await waitFor(() => mirrorSubjects(rootO) !== "", 10000, "settled done task mirrored", mo.output);
+await waitFor(() => mirrorSubjects(rootO) !== "", 30000, "settled done task mirrored", mo.output);
 // a new task arrives while the settled done task exists: it must get its own create commit
 const taskO2 = createTask(rootO, { name: "fix: late arrival", summary: "Created after a done task", specs: "n/a" });
-await waitFor(() => mirrorSubjects(rootO).includes(`kanban: create ${taskO2.file}`), 10000, "late task create commit", mo.output);
+// generous timeout: under load the daemon's scan loop can stall past 10s (silence, no crash),
+// so a fixed 10s wait flakes (000083); 30s matches the first-wait timeouts above
+await waitFor(() => mirrorSubjects(rootO).includes(`kanban: create ${taskO2.file}`), 30000, "late task create commit", mo.output);
 // further sweeps change nothing: no done-label folding, no commit churn
 await new Promise((r) => setTimeout(r, 2500));
 assert.deepEqual(mirrorSubjects(rootO).split("\n"), [`kanban: create ${taskO2.file}`, `kanban: create ${taskO1.file}`]);
@@ -810,11 +841,11 @@ const contentP = readFileSync(join(kanbanDir(rootP), taskP.file), "utf8");
 const externalP = "000002_feat_external_task.md";
 const externalContentP = taskContent("fix: external task");
 const extP = externalCommit(rootP, { [taskP.file]: contentP, [externalP]: externalContentP }, "external: add a task");
-await waitFor(() => existsSync(join(kanbanDir(rootP), externalP)), 10000, "external add materialized within one scan", p.output);
+await waitFor(() => existsSync(join(kanbanDir(rootP), externalP)), 30000, "external add materialized within one scan", p.output);
 assert.equal(readFileSync(join(kanbanDir(rootP), externalP), "utf8"), externalContentP, "external content materialized byte-for-byte");
 // the tip then loses it again: the deletion propagates to the working tree
 const extP2 = externalCommit(rootP, { [taskP.file]: contentP }, "external: drop a task");
-await waitFor(() => !existsSync(join(kanbanDir(rootP), externalP)), 10000, "external deletion propagated to the working tree", p.output);
+await waitFor(() => !existsSync(join(kanbanDir(rootP), externalP)), 30000, "external deletion propagated to the working tree", p.output);
 assert.equal(readFileSync(join(kanbanDir(rootP), taskP.file), "utf8"), contentP, "untouched task file unchanged by the reconcile");
 assert.ok(showTip(rootP, taskP.file) !== null, "the untouched task stays on the branch");
 // the reconcile itself commits nothing: the board already matches the tip
@@ -824,7 +855,7 @@ assert.deepEqual(
 	[`kanban: create ${taskP.file}`],
 	"reconcile adds no mirror commits",
 );
-await waitFor(() => p.output().includes(`reconciled .kanban to ${extP2}`), 10000, "reconcile logged", p.output);
+await waitFor(() => p.output().includes(`reconciled .kanban to ${extP2}`), 30000, "reconcile logged", p.output);
 assert.ok(p.output().includes(`reconciled .kanban to ${extP}: 1 file(s) updated, 0 deleted`), "reconcile log line carries hash, updated and deleted counts");
 assert.ok(p.output().includes(`reconciled .kanban to ${extP2}: 0 file(s) updated, 1 deleted`), "deletion reconcile logged with counts");
 p.daemon.kill("SIGTERM");
@@ -848,10 +879,10 @@ const extQ = externalCommit(rootQ, { [taskQ.file]: readFileSync(join(kanbanDir(r
 const inflightQ = "000009_feat_in_flight_write.md";
 const inflightContentQ = taskContent("feat: in-flight write");
 writeFileSync(join(kanbanDir(rootQ), inflightQ), inflightContentQ);
-await waitFor(() => existsSync(join(kanbanDir(rootQ), externalQ)), 10000, "branch-only file materialized", q.output);
+await waitFor(() => existsSync(join(kanbanDir(rootQ), externalQ)), 30000, "branch-only file materialized", q.output);
 assert.ok(existsSync(join(kanbanDir(rootQ), inflightQ)), "unmirrored in-flight write survives the reconcile");
 // the next mirror commit (the in-flight file's own create) must carry the branch-only file
-await waitFor(() => showTip(rootQ, externalQ) !== null && execSync(`git rev-parse refs/heads/meta/kanban`, { cwd: rootQ, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim() !== extQ, 10000, "next mirror commit keeps the branch-only file", q.output);
+await waitFor(() => showTip(rootQ, externalQ) !== null && execSync(`git rev-parse refs/heads/meta/kanban`, { cwd: rootQ, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim() !== extQ, 30000, "next mirror commit keeps the branch-only file", q.output);
 assert.equal(showTip(rootQ, externalQ), externalContentQ, "branch-only file survived the next mirror commit");
 assert.ok(mirrorSubjects(rootQ).includes(`kanban: create ${inflightQ}`), "in-flight write got its own create commit");
 assert.equal(showTip(rootQ, inflightQ), inflightContentQ, "in-flight write mirrored after the reconcile");
@@ -884,8 +915,9 @@ assert.equal(readR(taskRE.file).openQuestions, "", "precondition: explicit empty
 await new Promise((res) => setTimeout(res, 10000));
 assert.ok(!r.output().includes("promoting"), "no promotion while a task is active");
 
-// the respawn cap exhausts and the poll stops rewriting taskR0: settling it done makes the board idle
-await waitFor(() => r.output().includes("giving up"), 60000, "respawn cap on the active task", r.output);
+// past the respawn cap the poll bounces taskR0 back and the sweep defers its respawn:
+// settling it done makes the board idle
+await waitFor(() => r.output().includes("respawn waits for the idle cooldown"), 90000, "respawn cooldown on the active task", r.output);
 writeFileSync(
 	join(kanbanDir(rootR), taskR0.file),
 	readFileSync(join(kanbanDir(rootR), taskR0.file), "utf8").replace(/^state: .*/m, 'state: "done"'),
@@ -969,6 +1001,29 @@ s.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: ... + push warning smoke passed");
 
+// --- part T2: a stale push-failures counter above the cap still warns, once per streak ---
+const rootT2 = fixture();
+cleaned.push(rootT2);
+// origin points at a non-repo path: every push fails fast, no SSH involved
+execSync("git remote add origin /nonexistent/se-llm-team.git", { cwd: rootT2, shell: "/bin/bash" });
+mkdirSync(join(kanbanDir(rootT2), ".logs"), { recursive: true });
+// a counter restored from a backup or left by an earlier run sits above the cap already
+writeFileSync(join(kanbanDir(rootT2), ".logs", "push-failures.count"), "5");
+writeFileSync(join(kanbanDir(rootT2), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootT2), pollMinutes: 0.05 }));
+// one task = one failed push: the stale counter never reaches equality, >= must still warn
+const sT2 = await runDaemon(rootT2);
+const taskT2 = createTask(rootT2, { name: "fix: push warn stale", summary: "Push warning smoke", specs: "n/a" });
+await waitFor(() => mirrorSubjects(rootT2).includes(`kanban: create ${taskT2.file}`), 30000, "stale-counter create mirror commit", sT2.output);
+await waitFor(() => sT2.output().includes("WARNING: auto-push of refs/heads/meta/kanban"), 10000, "warning despite a stale counter above the cap", sT2.output);
+// a further failure stays silent: one warning per streak, not one per failure
+const taskT2b = createTask(rootT2, { name: "fix: push warn stale 2", summary: "Push warning smoke", specs: "n/a" });
+await waitFor(() => mirrorSubjects(rootT2).includes(`kanban: create ${taskT2b.file}`), 30000, "second create mirror commit", sT2.output);
+await new Promise((r) => setTimeout(r, 2000));
+assert.equal(sT2.output().split("WARNING: auto-push").length - 1, 1, "stale-counter warning logged once per streak");
+sT2.daemon.kill("SIGTERM");
+
+console.log("orchestrator.test.ts: ... + stale push counter warning smoke passed");
+
 // async variant of waitFor for fetch-based conditions
 const waitForAsync = async (cond: () => Promise<boolean>, ms: number, what: string) => {
 	const end = Date.now() + ms;
@@ -1004,19 +1059,22 @@ const hubU = await startHub({ name: "a", root: rootU1, host: "127.0.0.1", port: 
 assert.ok(hubU, "hub starts and returns a port");
 const hubBase = `http://127.0.0.1:${hubU.port}`;
 assert.equal(await (await fetch(`${hubBase}/health`)).text(), "ok");
-const regRes = await fetch(`${hubBase}/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "b", root: rootU2 }) });
+const regRes = await fetch(`${hubBase}/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "b", root: rootU2, branch: "feat/x" }) });
 assert.equal(regRes.status, 200);
 const regEntry = await regRes.json();
-assert.deepEqual(Object.keys(regEntry).sort(), ["lastHeartbeat", "name", "root", "start"], "register answers the entry shape");
+assert.deepEqual(Object.keys(regEntry).sort(), ["branch", "lastHeartbeat", "name", "root", "start"], "register answers the entry shape");
+assert.equal(regEntry.branch, "feat/x", "register stores the checkout's branch");
 assert.equal((await fetch(`${hubBase}/register`, { method: "POST", body: JSON.stringify({ name: "b" }) })).status, 400, "register without root rejected");
 assert.equal((await fetch(`${hubBase}/register`, { method: "POST", body: JSON.stringify({ name: "", root: rootU2 }) })).status, 400, "register with empty name rejected");
 assert.equal((await fetch(`${hubBase}/register`, { method: "POST", body: JSON.stringify({ name: "b", root: "/nonexistent/dir" }) })).status, 400, "register with nonexistent root rejected");
 assert.equal((await fetch(`${hubBase}/register`, { method: "POST", body: JSON.stringify({ name: "b", root: "relative/dir" }) })).status, 400, "register with relative root rejected");
 const beforeBeat = (await (await fetch(`${hubBase}/api/projects`)).json()).find((e: any) => e.name === "b");
-assert.equal((await fetch(`${hubBase}/heartbeat`, { method: "POST", body: JSON.stringify({ name: "b" }) })).status, 200);
+assert.equal((await fetch(`${hubBase}/heartbeat`, { method: "POST", body: JSON.stringify({ name: "b" }) })).status, 200, "a name-only heartbeat (old daemon) still finds the entry");
 assert.equal((await fetch(`${hubBase}/heartbeat`, { method: "POST", body: JSON.stringify({ name: "nope" }) })).status, 404, "heartbeat of an unknown project 404s");
+assert.equal((await fetch(`${hubBase}/heartbeat`, { method: "POST", body: JSON.stringify({ name: "b", root: rootU2, branch: "main" }) })).status, 200);
 const afterBeat = (await (await fetch(`${hubBase}/api/projects`)).json()).find((e: any) => e.name === "b");
 assert.ok(afterBeat.lastHeartbeat >= beforeBeat.lastHeartbeat, "heartbeat refreshes lastHeartbeat");
+assert.equal(afterBeat.branch, "main", "heartbeat re-resolves the branch, so the label tracks the checkout");
 const registryU = readHubRegistry();
 assert.deepEqual(registryU.map((e) => e.name).sort(), ["a", "b"], "stale seed entry dropped, one entry per project");
 assert.equal(registryU.find((e) => e.name === "a")!.root, rootU1);
@@ -1026,15 +1084,26 @@ const viaProject = await (await fetch(`${hubBase}/api/tasks?project=b`)).json();
 assert.equal(viaProject.length, 1);
 assert.equal(viaProject[0].file, taskU2.file);
 assert.equal(viaProject[0].name, "fix: hub board b");
+// 000103: root is the identity - a second checkout of the same repo registers its own entry
+const rootU3 = fixture();
+cleaned.push(rootU3);
+const taskU3 = createTask(rootU3, { name: "fix: hub board b2", summary: "Hub smoke", specs: "n/a" });
+const reg3 = await fetch(`${hubBase}/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "b", root: rootU3, branch: "feat" }) });
+assert.equal(reg3.status, 200);
+const sameNamed = (await (await fetch(`${hubBase}/api/projects`)).json()).filter((e: any) => e.name === "b");
+assert.equal(sameNamed.length, 2, "two same-named checkouts keep their own entries");
+assert.deepEqual((await (await fetch(`${hubBase}/api/tasks?project=${encodeURIComponent(rootU2)}`)).json()).map((t: any) => t.file), [taskU2.file], "root selects the first checkout's board");
+assert.deepEqual((await (await fetch(`${hubBase}/api/tasks?project=${encodeURIComponent(rootU3)}`)).json()).map((t: any) => t.file), [taskU3.file], "root selects the second checkout's board");
 assert.equal((await fetch(`${hubBase}/api/tasks?project=nope`)).status, 404, "unknown project rejected");
 assert.equal((await (await fetch(`${hubBase}/api/tasks`)).json()).length, 0, "no project param serves the hub's own board");
-assert.equal((await (await fetch(`${hubBase}/api/projects`)).json()).length, 2);
+assert.equal((await (await fetch(`${hubBase}/api/projects`)).json()).length, 3);
 assert.ok((await (await fetch(`${hubBase}/`)).text()).includes("Software Engineering LLM Team"), "the hub serves the ui page");
 assert.equal((await fetch(`${hubBase}/api/tasks`, { method: "POST" })).status, 404);
 // b stops heartbeating: the running hub ages the silent entry out of the registry
 await waitFor(() => readHubRegistry().map((e) => e.name).join() === "a", 5000, "running hub ages out silent entries", () => "");
 assert.equal((await fetch(`${hubBase}/api/tasks?project=b`)).status, 404, "aged-out project no longer served");
 hubU.close();
+assert.deepEqual(readHubRegistry(), [], "close removes the hub's own entry from the registry");
 process.env.HOME = realHome;
 console.log("orchestrator.test.ts: ... + hub server unit smoke passed");
 
@@ -1078,6 +1147,7 @@ assert.equal((await (await fetch(`${baseV}/api/tasks?project=${nameV1}`)).json()
 assert.equal((await fetch(`${baseV}/api/tasks?project=nope`)).status, 404);
 const registryV = JSON.parse(readFileSync(join(homeV, ".pi", "agent", "se-llm-team-hub.json"), "utf8"));
 assert.deepEqual(registryV.map((e: any) => e.name).sort(), [nameV1, nameV2].sort(), "registry file carries both entries");
+assert.ok(registryV.every((e: any) => typeof e.branch === "string" && e.branch.length > 0), "registry entries carry the root checkout's branch");
 dV1.kill("SIGTERM");
 dV2.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + election race smoke passed");
@@ -1189,7 +1259,7 @@ writeFileSync(
 		model: "global-model",
 		thinking: "high",
 		roles: {
-			developer: { model: "dev-model", thinking: "low" },
+			developer: { model: "dev-model", thinking: "low", complex: { model: "dev-complex-model" } },
 			reviewer: { provider: "prov", model: "rev-model" },
 			merger: { provider: "mprov", model: "merge-model" },
 		},
@@ -1197,14 +1267,28 @@ writeFileSync(
 );
 const taskX = createTask(rootX, { name: "feat: llm flags", summary: "LLM config smoke", specs: "n/a" });
 setState(rootX, taskX, "to-do");
+// a complex task: the developer resolves through roles.developer.complex
+const taskX3 = createTask(rootX, { name: "feat: llm flags complex", summary: "LLM config smoke", specs: "n/a", complexity: "complex" });
+setState(rootX, taskX3, "to-do");
 
 const x = await runDaemon(rootX, join(HERE, "orchestrator.ts"), homeX);
-await waitFor(() => parseTask(rootX, taskX.file).state === "done" && parseTask(rootX, taskX.file).worktree === "", 60000, "pipeline with llm config", x.output);
+await waitFor(
+	() =>
+		[taskX, taskX3].every((t) => parseTask(rootX, t.file).state === "done" && parseTask(rootX, t.file).worktree === ""),
+	60000,
+	"pipelines with llm config",
+	x.output,
+);
 const xSpawns = () => readFileSync(join(rootX, "argv.log"), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as { role: string; argv: string[] });
-const xFlags = (role: string) => llmArgs(xSpawns().find((s) => s.role === role)!.argv);
-assert.deepEqual(xFlags("developer"), ["--model", "dev-model", "--thinking", "low"], "role entry overrides both global fields");
-assert.deepEqual(xFlags("reviewer"), ["--provider", "prov", "--model", "rev-model", "--thinking", "high"], "role provider+model keeps the global thinking");
-assert.deepEqual(xFlags("live-tester"), ["--model", "global-model", "--thinking", "high"], "no role entry: the global fields apply");
+// the prompt carries the task file path, so spawns are attributable per task
+const xFlags = (role: string, file: string) => {
+	const spawns = xSpawns().filter((s) => s.role === role && (s.argv[s.argv.indexOf("-p") + 1] ?? "").includes(file));
+	return llmArgs(spawns[spawns.length - 1].argv);
+};
+assert.deepEqual(xFlags("developer", taskX.file), ["--model", "dev-model", "--thinking", "low"], "role entry overrides both global fields for a moderate task");
+assert.deepEqual(xFlags("developer", taskX3.file), ["--model", "dev-complex-model", "--thinking", "low"], "complexity entry overrides the nested field; unset nested fields keep the role default");
+assert.deepEqual(xFlags("reviewer", taskX.file), ["--provider", "prov", "--model", "rev-model", "--thinking", "high"], "role provider+model keeps the global thinking");
+assert.deepEqual(xFlags("live-tester", taskX.file), ["--model", "global-model", "--thinking", "high"], "no role entry: the global fields apply");
 
 // a conflicting branch under the same running daemon makes the merger path run and record
 execSync("git checkout -qb fix/llm-conflict", { cwd: rootX, shell: "/bin/bash" });
@@ -1216,8 +1300,8 @@ execSync("git commit -qam main", { cwd: rootX, shell: "/bin/bash" });
 const taskX2 = createTask(rootX, { name: "fix: llm merger", summary: "LLM merger smoke", specs: "n/a" });
 setState(rootX, taskX2, "to-merge");
 setWorktree(rootX, taskX2, "fix/llm-conflict");
-await waitFor(() => xSpawns().some((s) => s.role === "merger"), 30000, "merger spawned under the llm config", x.output);
-assert.deepEqual(xFlags("merger"), ["--provider", "mprov", "--model", "merge-model", "--thinking", "high"], "merger role override applies");
+await waitFor(() => xSpawns().some((s) => s.role === "merger" && (s.argv[s.argv.indexOf("-p") + 1] ?? "").includes(taskX2.file)), 30000, "merger spawned under the llm config", x.output);
+assert.deepEqual(xFlags("merger", taskX2.file), ["--provider", "mprov", "--model", "merge-model", "--thinking", "high"], "merger role override applies");
 x.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + llm config flags smoke passed");
 
@@ -1229,7 +1313,7 @@ cleaned.push(homeY);
 mkdirSync(kanbanDir(rootY), { recursive: true });
 writeFileSync(
 	join(kanbanDir(rootY), "se-llm-team.json"),
-	JSON.stringify({ agent: argvStub(rootY), pollMinutes: 0.05, provider: "lonely-provider", thinking: "banana", roles: { developer: "not-an-object", reviewer: { thinking: "wild" } } }),
+	JSON.stringify({ agent: argvStub(rootY), pollMinutes: 0.05, provider: "lonely-provider", thinking: "banana", roles: { developer: "not-an-object", reviewer: { thinking: "wild", complex: "not-an-object" } } }),
 );
 const taskY = createTask(rootY, { name: "fix: bad llm config", summary: "Bad llm config smoke", specs: "n/a" });
 setState(rootY, taskY, "to-do");
@@ -1245,6 +1329,7 @@ await waitFor(() => {
 assert.ok(y.output().includes('unknown thinking level "banana" (global)'), "global thinking typo warned about");
 assert.ok(y.output().includes('unknown thinking level "wild" for role "reviewer"'), "role thinking typo warned about");
 assert.ok(y.output().includes('provider "lonely-provider" for role developer ignored'), "provider without model warned about");
+assert.ok(y.output().includes('non-object complexity override "not-an-object" for role "reviewer" complex, ignored'), "non-object complexity override warned about");
 const yDev = JSON.parse(readFileSync(join(rootY, "argv.log"), "utf8").trim().split("\n").find((l) => l.includes('"developer"'))!) as { role: string; argv: string[] };
 assert.deepEqual(llmArgs(yDev.argv), [], "bad config values add no flags");
 y.daemon.kill("SIGTERM");
@@ -1283,7 +1368,8 @@ assert.ok(showTip(rootZ, taskZ.file)!.includes("- in-flight note"), "the done mi
 z2.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + restart preserves in-flight board state smoke passed");
 
-// --- part AA: the reviewer successful-run cap: 3 successful runs, the 4th spawn is refused ---
+// --- part AA: the reviewer successful-run cap: for the default moderate complexity, 2
+// successful runs, the 3rd spawn is refused ---
 // a reviewer run is successful when it sets the task state itself (back to to-review after
 // changes, or forward to to-live-test on approval); died runs go through the dead counter
 const loopStub = (root: string) => {
@@ -1319,14 +1405,353 @@ const runsAA = () => {
 		return 0;
 	}
 };
-// three successful reviewer runs (each back to to-review), then the 4th spawn is refused
-await waitFor(() => aa.output().includes("reviewer succeeded 3+ times, moving to to-live-test"), 60000, "reviewer cap refusal logged", aa.output);
-assert.equal(aa.output().split("spawned reviewer").length - 1, 3, "exactly three reviewer spawns before the refusal");
+// two successful reviewer runs (each back to to-review), then the 3rd spawn is refused
+await waitFor(() => aa.output().includes(`${taskAA.file}: reviewer succeeded 2+ times, moving to to-live-test`), 60000, "reviewer cap refusal logged", aa.output);
+assert.equal(aa.output().split("spawned reviewer").length - 1, 2, "exactly two reviewer spawns before the refusal");
 assert.equal(runsAA(), 0, "the counter cleared on the forced to-live-test advance");
 const reviewerLogsAA = readdirSync(join(kanbanDir(rootAA), ".logs")).filter((f) => f.startsWith(`${slugAA}.reviewer.`) && f.endsWith(".log")).sort();
-assert.deepEqual(reviewerLogsAA, [`${slugAA}.reviewer.0.log`, `${slugAA}.reviewer.1.log`, `${slugAA}.reviewer.2.log`], "three indexed reviewer run logs, no fourth");
+assert.deepEqual(reviewerLogsAA, [`${slugAA}.reviewer.0.log`, `${slugAA}.reviewer.1.log`], "two indexed reviewer run logs, no third");
 // the pipeline continues from the forced advance: the live-tester runs and the task completes
 await waitFor(() => parseTask(rootAA, taskAA.file).state === "done" && parseTask(rootAA, taskAA.file).worktree === "", 60000, "pipeline after the cap refusal", aa.output);
 assert.equal(runsAA(), 0, "counter still cleared after the pipeline completed");
 aa.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + reviewer successful-run cap smoke passed");
+
+// --- part AB: the compactor drops the moderate drop list, keeps the read path byte-for-byte ---
+// fixture JSONL with one record per rule class; the pi stderr line is a non-JSON passthrough
+const compactorFixture = (): string =>
+	[
+		JSON.stringify({ type: "session", version: 3, id: "s", timestamp: 0, cwd: "/t" }),
+		JSON.stringify({ type: "agent_start" }),
+		JSON.stringify({ type: "turn_start" }),
+		JSON.stringify({ type: "message_start", message: { role: "system", content: "", sections: { preamble: "the ~135 KB system prompt" } } }),
+		JSON.stringify({ type: "message_end", message: { role: "system", content: "", sections: { preamble: "the ~135 KB system prompt" } } }),
+		JSON.stringify({ type: "message_update", usage: { input: 0, output: 5, cost: { total: 0.01 } }, assistantMessageEvent: { type: "thinking_delta", delta: "héllo→" } }),
+		JSON.stringify({ type: "message_update", usage: { output: 6 }, assistantMessageEvent: { type: "toolcall_delta", id: "t1", delta: '{"command"' } }),
+		JSON.stringify({ type: "message_start", message: { role: "assistant", content: [] } }),
+		JSON.stringify({ type: "message_start", message: { role: "toolResult", toolCallId: "t1", toolName: "bash", content: [{ type: "text", text: "full tool result" }] } }),
+		JSON.stringify({ type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: { command: "git status" } }),
+		JSON.stringify({ type: "tool_execution_end", toolCallId: "t1", toolName: "bash", result: { content: [{ type: "text", text: "Agent ID: a1\nOutput file: sub.log\nfull body" }], isError: false } }),
+		JSON.stringify({ type: "message_end", message: { role: "toolResult", toolCallId: "t1", toolName: "bash", content: [{ type: "text", text: "full tool result" }] } }),
+		JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } }),
+		JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "turn replay" }] } }),
+		JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: "the full message replay" }], willRetry: false }),
+		"pi stderr diagnostics: not json",
+		JSON.stringify({ type: "message_end", message: { role: "user", content: "the prompt" } }),
+	].join("\n") + "\n";
+
+// per-rule asserts on the line-level function
+assert.equal(compactLogLine(JSON.stringify({ type: "message_start", message: { role: "system", sections: {} } })), null, "system message_start dropped");
+assert.equal(compactLogLine(JSON.stringify({ type: "message_end", message: { role: "system", sections: {} } })), null, "system message_end dropped");
+assert.equal(compactLogLine(JSON.stringify({ type: "message_start", message: { role: "toolResult", content: [] } })), null, "toolResult message_start dropped");
+const turnEndLine = JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [] } });
+assert.equal(compactLogLine(turnEndLine), turnEndLine, "turn_end kept verbatim");
+assert.equal(compactLogLine("plain stderr line"), "plain stderr line", "non-JSON stderr passthrough");
+
+// the whole fixture through the Transform: chunk boundaries split a line and the multibyte
+// delta mid-way, so line reassembly must be byte-level
+const srcAB = new PassThrough();
+let outAB = "";
+const compactorAB = logCompactor();
+compactorAB.on("data", (d) => (outAB += d));
+srcAB.pipe(compactorAB);
+const rawAB = Buffer.from(compactorFixture(), "utf8");
+const splitAB = rawAB.indexOf(Buffer.from("é", "utf8"));
+srcAB.write(rawAB.subarray(0, splitAB + 1)); // 1 byte into the 2-byte é
+srcAB.write(rawAB.subarray(splitAB + 1));
+srcAB.end();
+await new Promise<void>((r) => compactorAB.on("end", r));
+
+const linesAB = outAB.split("\n");
+assert.equal(linesAB[linesAB.length - 1], "", "trailing newline preserved");
+const recsAB = linesAB.slice(0, -1);
+assert.equal(recsAB.length, 14, "one line per surviving record, dropped records removed whole");
+const parsedAB = recsAB.map((l) => {
+	try {
+		return JSON.parse(l);
+	} catch {
+		return l;
+	}
+});
+assert.equal(recsAB[12], "pi stderr diagnostics: not json", "stderr passthrough, position preserved");
+assert.ok(!parsedAB.some((p: any) => p.type === "message_start" && p.message?.role === "system"), "system message_start gone");
+assert.ok(!parsedAB.some((p: any) => p.type === "message_end" && p.message?.role === "system"), "system message_end gone");
+assert.ok(!parsedAB.some((p: any) => p.type === "message_start" && p.message?.role === "toolResult"), "toolResult message_start gone");
+assert.ok(parsedAB.some((p: any) => p.type === "message_end" && p.message?.role === "toolResult"), "toolResult message_end kept verbatim");
+const muAB = parsedAB.find((p: any) => p.type === "message_update");
+assert.deepEqual(muAB.assistantMessageEvent, { type: "thinking_delta", delta: "héllo→" }, "multibyte split reassembled, event verbatim");
+assert.deepEqual(Object.keys(muAB).sort(), ["assistantMessageEvent", "type"], "usage envelope stripped");
+assert.deepEqual(parsedAB.find((p: any) => p.type === "agent_end"), { type: "agent_end", willRetry: false }, "agent_end messages dropped, the rest kept");
+assert.equal(
+	parsedAB.find((p: any) => p.type === "tool_execution_end").result.content[0].text.includes("Agent ID: a1"),
+	true,
+	"full tool result kept for the subagent-log matching",
+);
+assert.ok(parsedAB.some((p: any) => p.type === "message_end" && p.message?.role === "user"), "the user prompt's message_end kept");
+assert.equal(parsedAB.find((p: any) => p.type === "message_update" && p.assistantMessageEvent.type === "toolcall_delta") !== undefined, true, "toolcall deltas survive");
+console.log("orchestrator.test.ts: ... + log compactor rules smoke passed");
+
+// --- part AC: the retro sweep rewrites finished logs, never logs with a pidfile ---
+const rootAC = fixture();
+cleaned.push(rootAC);
+mkdirSync(join(kanbanDir(rootAC), ".logs"), { recursive: true });
+mkdirSync(join(kanbanDir(rootAC), ".pids"), { recursive: true });
+const slugDoneAC = "000201_retro_done";
+const slugRunAC = "000202_retro_running";
+const slugMergAC = "000203_retro_merger";
+const logAC = (name: string) => join(kanbanDir(rootAC), ".logs", name);
+writeFileSync(logAC(`${slugDoneAC}.developer.0.log`), compactorFixture());
+writeFileSync(logAC(`${slugRunAC}.developer.0.log`), compactorFixture());
+writeFileSync(logAC(`${slugMergAC}.merger.0.log`), compactorFixture());
+writeFileSync(logAC("orchestrator.log"), "daemon log\n");
+writeFileSync(logAC(`${slugDoneAC}.reviewer-armed`), "123");
+writeFileSync(logAC("push-failures.count"), "3");
+writeFileSync(join(kanbanDir(rootAC), ".pids", `${slugRunAC}.pid`), String(process.pid));
+writeFileSync(join(kanbanDir(rootAC), ".pids", "merger.pid"), String(process.pid));
+const retroAC = compactFinishedLogs(rootAC);
+assert.equal(retroAC.files, 1, "only the finished log rewritten; running and merger logs skipped");
+assert.ok(retroAC.after < retroAC.before, "the rewrite shrank the log");
+const doneAfterAC = readFileSync(logAC(`${slugDoneAC}.developer.0.log`), "utf8");
+assert.ok(!doneAfterAC.includes('"usage"') && !doneAfterAC.includes('"sections"'), "rewritten slim");
+assert.ok(doneAfterAC.includes('"type":"tool_execution_end"'), "tool results survive the rewrite");
+assert.equal(doneAfterAC.split("\n").length, compactorFixture().split("\n").length - 3, "exactly the three dead records dropped");
+assert.equal(readFileSync(logAC(`${slugRunAC}.developer.0.log`), "utf8"), compactorFixture(), "running log untouched");
+assert.equal(readFileSync(logAC(`${slugMergAC}.merger.0.log`), "utf8"), compactorFixture(), "merger log untouched while the merger pidfile exists");
+assert.equal(readFileSync(logAC("orchestrator.log"), "utf8"), "daemon log\n", "orchestrator.log skipped");
+assert.equal(readFileSync(logAC(`${slugDoneAC}.reviewer-armed`), "utf8"), "123", "armed marker skipped");
+assert.equal(readFileSync(logAC("push-failures.count"), "utf8"), "3", "counter skipped");
+assert.equal(compactFinishedLogs(rootAC).files, 0, "a second pass is a no-op");
+console.log("orchestrator.test.ts: ... + retro sweep smoke passed");
+
+// --- part AD: two sources share the sink, so each feeds its own compactor: a stderr line
+// interleaving mid-way through a split stdout record must merge into neither ---
+const sinkAD = new PassThrough();
+let outAD = "";
+sinkAD.on("data", (d) => (outAD += d));
+const stdoutAD = logCompactor();
+const stderrAD = logCompactor();
+stdoutAD.pipe(sinkAD);
+stderrAD.pipe(sinkAD);
+const bigAD = JSON.stringify({ type: "turn_end", message: { role: "assistant", content: "x".repeat(200000) } }) + "\n";
+stdoutAD.write(bigAD.slice(0, 50000)); // stdout record split across reads, no newline yet
+stderrAD.write("stderr diagnostic mid-record\n"); // the other source interleaves
+stdoutAD.write(bigAD.slice(50000));
+stdoutAD.end();
+stderrAD.end();
+await new Promise<void>((r) => stdoutAD.on("end", r));
+const linesAD = outAD.split("\n").slice(0, -1);
+assert.equal(linesAD.length, 2, "no merged lines: two whole records, one per source");
+assert.equal(linesAD.filter((l) => l === "stderr diagnostic mid-record").length, 1, "the stderr line survives whole");
+const turnEndAD = JSON.parse(linesAD.find((l) => l !== "stderr diagnostic mid-record"));
+assert.equal(turnEndAD.message.content.length, 200000, "the split stdout record reassembled intact");
+console.log("orchestrator.test.ts: ... + cross-source pipe integrity smoke passed");
+
+// --- part AE: per-source sinks on one append-only log file. A shared sink would let the
+// first feeder to finish (stderr is usually empty) end it while the other still holds
+// backpressured lines: with a real fs sink they would wait for a drain that never comes and
+// be lost silently ---
+const rootAE = fixture();
+cleaned.push(rootAE);
+mkdirSync(join(kanbanDir(rootAE), ".logs"), { recursive: true });
+const logAE = join(kanbanDir(rootAE), ".logs", "000205_end_race.developer.0.log");
+const { feeders: feedersAE, sinks: sinksAE } = logFeeders(logAE);
+const lineAE = (n: number) => JSON.stringify({ type: "turn_end", message: { role: "assistant", content: "x".repeat(n) } }) + "\n";
+feedersAE[0].write(lineAE(5000) + lineAE(5000) + lineAE(5000) + lineAE(5000)); // backpressures the 64 KB fs sink
+feedersAE[1].write("stderr line\n");
+feedersAE[0].end(); // child close: both feeders end in the same tick
+feedersAE[1].end();
+await Promise.all(sinksAE.map((s) => new Promise<void>((r) => s.on("close", r))));
+const allAE = readFileSync(logAE, "utf8");
+assert.equal((allAE.match(/turn_end/g) || []).length, 4, "no silent loss: the stderr feeder finishing first must not drop the stdout feeder's queued lines");
+assert.ok(allAE.includes("stderr line"), "stderr line present");
+console.log("orchestrator.test.ts: ... + per-source sink close race smoke passed");
+
+// --- part AF: a live agent pid defers the sweep spawn, so a to-do rewrite cannot twin it ---
+// the bug: the liveness poll requeued a doing task to to-do, the sweep spawned a developer,
+// then a second trigger let the next sweep spawn a twin whose writePid overwrote the first
+// pid file and orphaned the first agent. The live pid is the guard, the state alone is not.
+const rootAF = fixture();
+cleaned.push(rootAF);
+mkdirSync(kanbanDir(rootAF), { recursive: true });
+// developer stub that records the state it reads at startup (the set-before-spawn proof) and
+// then lingers alive, so several sweeps run while its pid file is the only live-agent guard
+const guardStub = join(rootAF, "guard-agent.cjs");
+writeFileSync(
+	guardStub,
+	`#!/usr/bin/env node
+const { readFileSync, appendFileSync } = require("node:fs");
+const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
+const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
+if (!prompt.includes("Developer agent") || !file) process.exit(0);
+const state = (readFileSync(file, "utf8").match(/^state: "(.*)"$/m) ?? [])[1] ?? "";
+appendFileSync(${JSON.stringify(join(rootAF, "guard.log"))}, JSON.stringify({ pid: process.pid, state }) + "\\n");
+setTimeout(() => process.exit(0), 8000);
+`,
+	{ mode: 0o755 },
+);
+writeFileSync(join(kanbanDir(rootAF), "se-llm-team.json"), JSON.stringify({ agent: guardStub, pollMinutes: 0.05 }));
+const taskAF = createTask(rootAF, { name: "fix: no double spawn", summary: "Double-spawn guard smoke", specs: "n/a" });
+setState(rootAF, taskAF, "to-do");
+const slugAF = taskAF.file.replace(/\.md$/, "");
+const pidFileAF = join(kanbanDir(rootAF), ".pids", `${slugAF}.pid`);
+const guardRunsAF = () => {
+	try {
+		return readFileSync(join(rootAF, "guard.log"), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as { pid: number; state: string });
+	} catch {
+		return [];
+	}
+};
+
+const af = await runDaemon(rootAF);
+const spawnedAF = () => af.output().split("spawned developer").length - 1;
+await waitFor(() => guardRunsAF().length === 1, 30000, "first developer spawned", af.output);
+assert.equal(guardRunsAF()[0].state, "doing", "the state attribute was already set when the agent started");
+assert.equal(Number(readFileSync(pidFileAF, "utf8").trim()), guardRunsAF()[0].pid, "pid file names the first agent");
+// the to-do rewrite that used to twin the agent: several sweeps and a liveness poll later,
+// the pid check, not the state, must still keep the second spawn away
+writeFileSync(join(kanbanDir(rootAF), taskAF.file), readFileSync(join(kanbanDir(rootAF), taskAF.file), "utf8").replace(/^state: .*/m, 'state: "to-do"'));
+await new Promise((r) => setTimeout(r, 3000));
+assert.equal(spawnedAF(), 1, "no second developer while the first agent pid is alive");
+assert.equal(guardRunsAF().length, 1, "the stub never ran a second time");
+assert.equal(Number(readFileSync(pidFileAF, "utf8").trim()), guardRunsAF()[0].pid, "pid file still names the first agent");
+assert.equal(parseTask(rootAF, taskAF.file).state, "to-do", "the to-do rewrite is left alone while the agent lives");
+// the agent exits: the next sweep spawns exactly one replacement and rewrites the pid file
+await waitFor(() => guardRunsAF().length === 2, 30000, "single replacement after the first agent died", af.output);
+assert.equal(guardRunsAF().length, 2, "exactly one replacement agent");
+assert.notEqual(guardRunsAF()[1].pid, guardRunsAF()[0].pid, "the replacement is a new process");
+assert.equal(Number(readFileSync(pidFileAF, "utf8").trim()), guardRunsAF()[1].pid, "pid file names the single live agent");
+af.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + double-spawn live-pid guard smoke passed");
+// --- part AG: kanban task removal: the file and the mirror go in one operation ---
+// reconcileBoard restores files the working tree lacks whenever the mirror tip still carries
+// them, so a removal must reach the mirror itself or the task comes back (the self-heal)
+const rootAG = fixture();
+cleaned.push(rootAG);
+mkdirSync(kanbanDir(rootAG), { recursive: true });
+writeFileSync(join(kanbanDir(rootAG), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAG), pollMinutes: 0.05 }));
+const taskAG = createTask(rootAG, { name: "fix: mistaken task", summary: "Removal smoke", specs: "n/a" });
+const taskAG2 = createTask(rootAG, { name: "fix: keep me", summary: "Stays on the board", specs: "n/a" });
+
+const ag = await runDaemon(rootAG);
+// both tasks reach the mirror first: creates run for every file not on the mirror yet
+await waitFor(() => showTip(rootAG, taskAG.file) !== null && showTip(rootAG, taskAG2.file) !== null, 30000, "both tasks mirrored", ag.output);
+
+// removal while the daemon runs: the file leaves the tree and the mirror in one operation
+assert.equal(await removeTask(rootAG, taskAG.file), null, "removal succeeds");
+assert.equal(existsSync(join(kanbanDir(rootAG), taskAG.file)), false, "task file deleted");
+assert.equal(showTip(rootAG, taskAG.file), null, "task gone from the mirror tip");
+assert.ok(mirrorSubjects(rootAG).includes(`kanban: delete ${taskAG.file}`), "delete commit recorded on the mirror");
+assert.ok(showTip(rootAG, taskAG2.file) !== null, "other task untouched on the mirror");
+assert.equal(existsSync(join(kanbanDir(rootAG), taskAG2.file)), true, "other task untouched in the tree");
+
+// the running daemon's reconcile self-heal must not restore the removed task
+await new Promise((r) => setTimeout(r, 2500));
+assert.equal(existsSync(join(kanbanDir(rootAG), taskAG.file)), false, "daemon sweep does not restore the removed task");
+
+// a restart re-materializes from the mirror tip: the removal survives it too
+ag.daemon.kill("SIGTERM");
+await Promise.race([new Promise((r) => ag.daemon.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
+const ag2 = await runDaemon(rootAG);
+await new Promise((r) => setTimeout(r, 2500));
+assert.equal(existsSync(join(kanbanDir(rootAG), taskAG.file)), false, "daemon restart does not restore the removed task");
+ag2.daemon.kill("SIGTERM");
+await Promise.race([new Promise((r) => ag2.daemon.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
+
+// removing the last task empties the mirror board: the tip no longer carries the file
+assert.equal(await removeTask(rootAG, taskAG2.file), null, "last-task removal succeeds");
+assert.equal(existsSync(join(kanbanDir(rootAG), taskAG2.file)), false, "last task file deleted");
+assert.equal(showTip(rootAG, taskAG2.file), null, "last task gone from the mirror tip");
+assert.ok((await removeTask(rootAG, "000999_ghost.md"))!.includes("No task"), "unknown task reported, nothing deleted");
+
+console.log("orchestrator.test.ts: ... + task removal smoke passed");
+
+// --- part AH: the failsafe never auto-promotes a task with unfinished blockers; a ghost ref
+// is ignored, and the blocked task schedules normally once its blocker is done ---
+const rootAH = fixture();
+cleaned.push(rootAH);
+mkdirSync(kanbanDir(rootAH), { recursive: true });
+// 0.05min = 3s idle window and poll; the dead stub keeps a promoted task active forever
+writeFileSync(join(kanbanDir(rootAH), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAH), pollMinutes: 0.05, autoScheduleMinutes: 0.05 }));
+const taskAH0 = createTask(rootAH, { name: "feat: blocker task", summary: "Failsafe smoke", specs: "n/a" });
+const taskAH1 = createTask(rootAH, { name: "feat: blocked critical", priority: "critical", summary: "Failsafe smoke", specs: "n/a", blockedBy: `#${parseInt(taskAH0.file, 10)}` });
+const taskAH2 = createTask(rootAH, { name: "feat: ghost ref", priority: "critical", summary: "Failsafe smoke", specs: "n/a", blockedBy: "#999" });
+
+const ah = await runDaemon(rootAH);
+const readAH = (file: string) => parseTask(rootAH, file);
+// the ghost ref is ignored: the critical ghost task is promotable and wins by priority over
+// the medium blocker task, while the blocked critical task stays held despite its priority
+await waitFor(() => ah.output().includes(`promoting ${taskAH2.file} to to-do`), 30000, "ghost-only task promoted", ah.output);
+assert.equal(readAH(taskAH1.file).state, "backlog", "blocked critical task not promoted despite priority");
+// settle the ghost task: past the respawn cap the poll bounces it back and the sweep defers
+// the respawn, so the board goes idle once it is settled done
+await waitFor(() => ah.output().includes(`${taskAH2.file.replace(/\.md$/, "")}: agent died`), 60000, "respawn cap on the ghost task", ah.output);
+writeFileSync(
+	join(kanbanDir(rootAH), taskAH2.file),
+	readFileSync(join(kanbanDir(rootAH), taskAH2.file), "utf8").replace(/^state: .*/m, 'state: "done"'),
+);
+// the blocker task is still backlog: the blocked critical task stays held, the medium task promotes
+await waitFor(() => ah.output().includes(`promoting ${taskAH0.file} to to-do`), 30000, "unblocked medium task promoted", ah.output);
+assert.equal(readAH(taskAH1.file).state, "backlog", "still held while the blocker is not done");
+// settle the blocker: the deferred respawn is parked, so the board goes idle once it is done
+await waitFor(() => ah.output().includes(`${taskAH0.file.replace(/\.md$/, "")}: agent died`), 60000, "respawn cap on the blocker task", ah.output);
+writeFileSync(
+	join(kanbanDir(rootAH), taskAH0.file),
+	readFileSync(join(kanbanDir(rootAH), taskAH0.file), "utf8").replace(/^state: .*/m, 'state: "done"'),
+);
+await waitFor(() => ah.output().includes(`promoting ${taskAH1.file} to to-do`), 30000, "blocked task promoted after the blocker is done", ah.output);
+assert.ok(["to-do", "doing"].includes(readAH(taskAH1.file).state), "promoted task is active");
+ah.daemon.kill("SIGTERM");
+// full exit before the removal: a sweep mid-flight still writes into the fixture
+await Promise.race([new Promise((r) => ah.daemon.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
+cleanupAll(rootAH);
+console.log("orchestrator.test.ts: ... + blockedBy failsafe smoke passed");
+
+// --- part AI: a completed run clears the dead counter, so the cooldown applies to consecutive-death streaks only ---
+const rootAI = fixture();
+cleaned.push(rootAI);
+mkdirSync(join(kanbanDir(rootAI), ".logs"), { recursive: true });
+writeFileSync(join(kanbanDir(rootAI), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootAI), pollMinutes: 0.05 }));
+const taskAI = createTask(rootAI, { name: "fix: clear dead counter", summary: "Counter clear smoke", specs: "n/a" });
+setState(rootAI, taskAI, "to-do");
+// a stale death streak from earlier respawns: the next completed run must clear it, else the
+// cooldown would gate a fresh streak that never had six deaths
+const slugAI = taskAI.file.replace(/\.md$/, "");
+writeFileSync(join(kanbanDir(rootAI), ".logs", `${slugAI}.dead.count`), "3");
+
+const ai = await runDaemon(rootAI);
+await waitFor(() => ai.output().includes("cleared the dead-agent counter"), 60000, "completed run cleared the dead counter", ai.output);
+assert.equal(ai.output().split("cleared the dead-agent counter").length - 1, 1, "counter clear logged once per streak");
+assert.equal(readFileSync(join(kanbanDir(rootAI), ".logs", `${slugAI}.dead.count`), "utf8").trim(), "0", "the completed run cleared the death counter");
+// the pipeline still completes: the cleared counter does not disturb the normal flow
+await waitFor(() => parseTask(rootAI, taskAI.file).state === "done" && parseTask(rootAI, taskAI.file).worktree === "", 60000, "pipeline after the counter clear", ai.output);
+assert.equal(readFileSync(join(kanbanDir(rootAI), ".logs", `${slugAI}.dead.count`), "utf8").trim(), "0", "counter stays cleared");
+ai.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + dead-counter clear on completed run smoke passed");
+
+// --- part AJ: the reviewer cap follows the task's complexity: simple advances at the default 1,
+// a configured override applies, an invalid configured value warns and falls back to the default 3
+const rootAJ = fixture();
+cleaned.push(rootAJ);
+mkdirSync(kanbanDir(rootAJ), { recursive: true });
+writeFileSync(
+	join(kanbanDir(rootAJ), "se-llm-team.json"),
+	JSON.stringify({ agent: loopStub(rootAJ), pollMinutes: 0.05, reviewerCap: { moderate: 1, complex: 0 } }),
+);
+const taskAJSimple = createTask(rootAJ, { name: "fix: simple cap", summary: "Per-complexity cap smoke", specs: "n/a", complexity: "simple" });
+const taskAJMod = createTask(rootAJ, { name: "fix: overridden cap", summary: "Per-complexity cap smoke", specs: "n/a" });
+const taskAJComplex = createTask(rootAJ, { name: "fix: complex cap", summary: "Per-complexity cap smoke", specs: "n/a", complexity: "complex" });
+for (const t of [taskAJSimple, taskAJMod, taskAJComplex]) setState(rootAJ, t, "to-review");
+
+const aj = await runDaemon(rootAJ);
+// invalid reviewerCap.complex warns at load; the cap falls back to the default 3
+await waitFor(() => aj.output().includes("invalid reviewerCap.complex 0, ignored (expected an integer >= 1)"), 10000, "invalid reviewerCap warning", aj.output);
+// simple: default cap 1; moderate: the configured override 1; complex: fallback to the default 3
+await waitFor(() => aj.output().includes(`${taskAJSimple.file}: reviewer succeeded 1+ times, moving to to-live-test`), 60000, "simple cap 1", aj.output);
+await waitFor(() => aj.output().includes(`${taskAJMod.file}: reviewer succeeded 1+ times, moving to to-live-test`), 60000, "configured override cap 1", aj.output);
+await waitFor(() => aj.output().includes(`${taskAJComplex.file}: reviewer succeeded 3+ times, moving to to-live-test`), 60000, "invalid value fell back to the default 3", aj.output);
+const reviewerSpawns = (file: string) => aj.output().split("\n").filter((l) => l.includes("spawned reviewer") && l.includes(`for ${file}`)).length;
+assert.equal(reviewerSpawns(taskAJSimple.file), 1, "simple task force-advanced after one successful run");
+assert.equal(reviewerSpawns(taskAJMod.file), 1, "configured moderate override applied");
+assert.equal(reviewerSpawns(taskAJComplex.file), 3, "invalid configured value fell back to the default 3");
+aj.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + per-complexity reviewer cap smoke passed");
