@@ -1645,20 +1645,20 @@ const af = await runDaemon(rootAF);
 const spawnedAF = () => af.output().split("spawned developer").length - 1;
 await waitFor(() => guardRunsAF().length === 1, 30000, "first developer spawned", af.output);
 assert.equal(guardRunsAF()[0].state, "doing", "the state attribute was already set when the agent started");
-assert.equal(Number(readFileSync(pidFileAF, "utf8").trim()), guardRunsAF()[0].pid, "pid file names the first agent");
+assert.equal(parseInt(readFileSync(pidFileAF, "utf8").trim(), 10), guardRunsAF()[0].pid, "pid file names the first agent");
 // the to-do rewrite that used to twin the agent: several sweeps and a liveness poll later,
 // the pid check, not the state, must still keep the second spawn away
 writeFileSync(join(kanbanDir(rootAF), taskAF.file), readFileSync(join(kanbanDir(rootAF), taskAF.file), "utf8").replace(/^state: .*/m, 'state: "to-do"'));
 await new Promise((r) => setTimeout(r, 3000));
 assert.equal(spawnedAF(), 1, "no second developer while the first agent pid is alive");
 assert.equal(guardRunsAF().length, 1, "the stub never ran a second time");
-assert.equal(Number(readFileSync(pidFileAF, "utf8").trim()), guardRunsAF()[0].pid, "pid file still names the first agent");
+assert.equal(parseInt(readFileSync(pidFileAF, "utf8").trim(), 10), guardRunsAF()[0].pid, "pid file still names the first agent");
 assert.equal(parseTask(rootAF, taskAF.file).state, "to-do", "the to-do rewrite is left alone while the agent lives");
 // the agent exits: the next sweep spawns exactly one replacement and rewrites the pid file
 await waitFor(() => guardRunsAF().length === 2, 30000, "single replacement after the first agent died", af.output);
 assert.equal(guardRunsAF().length, 2, "exactly one replacement agent");
 assert.notEqual(guardRunsAF()[1].pid, guardRunsAF()[0].pid, "the replacement is a new process");
-assert.equal(Number(readFileSync(pidFileAF, "utf8").trim()), guardRunsAF()[1].pid, "pid file names the single live agent");
+assert.equal(parseInt(readFileSync(pidFileAF, "utf8").trim(), 10), guardRunsAF()[1].pid, "pid file names the single live agent");
 af.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + double-spawn live-pid guard smoke passed");
 // --- part AG: kanban task removal: the file and the mirror go in one operation ---
