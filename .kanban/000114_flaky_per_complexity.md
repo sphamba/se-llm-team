@@ -1,8 +1,8 @@
 ---
 name: "fix: flaky per-complexity reviewer cap test part AB"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/114-flaky-per-complexity"
 issuer: "#98"
 ---
 

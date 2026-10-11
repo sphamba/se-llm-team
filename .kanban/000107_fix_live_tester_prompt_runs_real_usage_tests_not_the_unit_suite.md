@@ -1,8 +1,8 @@
 ---
 name: "fix: live-tester prompt runs real usage tests, not the unit suite"
 priority: "medium"
-state: "to-merge"
-worktree: "fix/107-live-tester-prompt"
+state: "done"
+worktree: ""
 ---
 
 # Summary
