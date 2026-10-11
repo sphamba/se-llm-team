@@ -1,8 +1,8 @@
 ---
 name: "feat: per-run agent log files; spawnAgent writes slug.role.N.log"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "feat/87-per-run-agent"
 ---
 
 # Summary
