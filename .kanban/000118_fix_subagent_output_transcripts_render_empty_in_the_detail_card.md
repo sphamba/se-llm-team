@@ -3,6 +3,7 @@ name: "fix: subagent output transcripts render empty in the detail card"
 priority: "medium"
 state: "backlog"
 worktree: ""
+blockedBy: "#52"
 ---
 
 # Summary
