@@ -1,6 +1,7 @@
 import { spawn, execFileSync, execSync } from "node:child_process";
-import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from "node:fs";
+import { appendFileSync, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { Transform } from "node:stream";
 import { fileURLToPath } from "node:url";
 import {
 	getTask,
@@ -97,13 +98,14 @@ function llmFlags(root: string, cfg: Config, role: string): string[] {
 	return flags;
 }
 
-function parseArgs(argv: string[]): { root?: string; rescanSeconds?: number; pollMinutes?: number; noWebui?: boolean } {
-	const args: { root?: string; rescanSeconds?: number; pollMinutes?: number; noWebui?: boolean } = {};
+function parseArgs(argv: string[]): { root?: string; rescanSeconds?: number; pollMinutes?: number; noWebui?: boolean; compactLogs?: boolean } {
+	const args: { root?: string; rescanSeconds?: number; pollMinutes?: number; noWebui?: boolean; compactLogs?: boolean } = {};
 	for (let i = 0; i < argv.length; i++) {
 		if (argv[i] === "--root") args.root = resolve(argv[++i]);
 		else if (argv[i] === "--rescan-seconds") args.rescanSeconds = Number(argv[++i]);
 		else if (argv[i] === "--poll-minutes") args.pollMinutes = Number(argv[++i]);
 		else if (argv[i] === "--no-webui") args.noWebui = true;
+		else if (argv[i] === "--compact-logs") args.compactLogs = true;
 	}
 	return args;
 }
@@ -195,26 +197,146 @@ function nextRunIndex(root: string, slug: string, role: string): number {
 	return max + 1;
 }
 
+// one JSONL log line -> the compacted line, or null to drop it. The moderate drop list: the
+// run-opening system prompt echoes (message_start/end with role=system, the ~135 KB sections
+// payload), agent_end's full message replay, and the toolResult message_start (the full tool
+// result echoed a second time); message_update loses its per-record usage envelope. Everything
+// the read path renders survives byte-for-byte: message_update deltas, tool calls, full tool
+// results (the subagent-log matching needs them), turn replays, and non-system message_end
+// records (the user prompt's qualifies).
+export function compactLogLine(line: string): string | null {
+	if (!line.startsWith("{")) return line; // non-JSON stderr passes through unchanged
+	let rec: any;
+	try {
+		rec = JSON.parse(line);
+	} catch {
+		return line; // not JSON either: pass through unchanged
+	}
+	if (!rec || typeof rec.type !== "string") return line;
+	switch (rec.type) {
+		case "message_start":
+		case "message_end":
+			if (rec.message?.role === "system") return null;
+			if (rec.type === "message_start" && rec.message?.role === "toolResult") return null;
+			return line; // kept verbatim
+		case "agent_end":
+			delete rec.messages; // the full message replay; the rest of the record stays
+			return JSON.stringify(rec);
+		case "message_update":
+			if (rec.assistantMessageEvent === undefined) {
+				delete rec.usage;
+				return JSON.stringify(rec);
+			}
+			return JSON.stringify({ type: "message_update", assistantMessageEvent: rec.assistantMessageEvent });
+		default:
+			return line; // kept verbatim, byte-for-byte
+	}
+}
+
+// line-buffered Transform applying compactLogLine per line: chunk boundaries can split a line
+// or a multibyte character mid-way, so lines reassemble at the byte level (\n never occurs
+// inside a UTF-8 sequence); one JSONL record per line, no re-ordering, no merging
+export function logCompactor(): Transform {
+	let buf: Buffer = Buffer.alloc(0);
+	return new Transform({
+		transform(chunk: Buffer, _enc, cb) {
+			buf = buf.length ? Buffer.concat([buf, chunk]) : chunk;
+			for (let i = buf.indexOf(0x0a); i !== -1; i = buf.indexOf(0x0a)) {
+				const out = compactLogLine(buf.subarray(0, i).toString("utf8"));
+				buf = buf.subarray(i + 1);
+				if (out !== null) this.push(out + "\n");
+			}
+			cb();
+		},
+		flush(cb) {
+			if (buf.length) {
+				const out = compactLogLine(buf.toString("utf8"));
+				if (out !== null) this.push(out + "\n");
+			}
+			cb();
+		},
+	});
+}
+
 function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: string, pidName?: string): void {
 	const slug = task.file.replace(/\.md$/, "");
 	mkdirSync(join(kanbanDir(root), ".logs"), { recursive: true });
-	const out = openSync(logPath(root, `${slug}.${role}.${nextRunIndex(root, slug, role)}`), "a");
+	// stdout and stderr flow through the compactor into the append-only log (the write-time
+	// pipe drops the dead weight the fd redirect logged verbatim); the daemon drains the pipe
+	const sink = createWriteStream(logPath(root, `${slug}.${role}.${nextRunIndex(root, slug, role)}`), { flags: "a" });
+	const compactor = logCompactor();
+	compactor.pipe(sink);
+	// a dead sink (disk full, log removed) stops the feed instead of buffering the child's
+	// output forever; a stream error loses log lines, never the daemon
+	sink.on("error", () => compactor.destroy());
+	compactor.on("error", () => {});
 	// --approve trusts the project-local files of the worktree, so the headless session never waits for a trust prompt;
 	// --mode json streams the full JSONL event log (thinking, tool calls, text) instead of print mode's final text only;
 	// the provider/model/thinking flags come from the config, resolved per role
 	const child = spawn(cfg.agent, ["--approve", "--mode", "json", ...llmFlags(root, cfg, role), "-p", renderPrompt(root, role, task, cwd === root ? undefined : cwd)], {
 		cwd,
 		detached: true,
-		stdio: ["ignore", out, out],
+		stdio: ["ignore", "pipe", "pipe"],
 	});
-	child.on("error", (err) => log(root, `agent ${role} for ${task.file} failed to start: ${err.message}`));
-	closeSync(out);
+	// end:false on both sources: the first ending stream must not finish the shared compactor
+	// before the other drains; the child close event ends it once both pipes are done
+	child.stdout?.on("error", () => {});
+	child.stderr?.on("error", () => {});
+	child.stdout?.pipe(compactor, { end: false });
+	child.stderr?.pipe(compactor, { end: false });
+	child.on("close", () => compactor.end());
+	child.on("error", (err) => {
+		// ENOENT never fires close: the feed would leak the sink and both pipes per failed spawn
+		compactor.end();
+		log(root, `agent ${role} for ${task.file} failed to start: ${err.message}`);
+	});
 	child.unref();
 	// a failed spawn (ENOENT) reports no pid; a written 0 reads as the caller's process group
 	if (child.pid) {
 		writePid(root, pidName ?? slug, child.pid);
 		log(root, `spawned ${role} pid=${child.pid} for ${task.file} (cwd=${cwd})`);
 	}
+}
+
+// one-time retro sweep (--compact-logs, not wired into normal daemon operation): rewrite
+// finished agent logs through the same compactor, in place via temp file + rename. A log whose
+// writer may still be alive is skipped: non-merger logs while <slug>.pid exists, merger logs
+// while the project-wide merger.pid or a legacy <slug>.merger.pid exists. Non role-log names
+// (orchestrator.log, counters, armed markers) never match the pattern.
+export function compactFinishedLogs(root: string): { files: number; before: number; after: number } {
+	const result = { files: 0, before: 0, after: 0 };
+	let names: string[];
+	try {
+		names = readdirSync(join(kanbanDir(root), ".logs"));
+	} catch {
+		return result;
+	}
+	for (const name of names) {
+		// role-log name pattern: <slug>.<role>.<n>.log and the legacy unsuffixed <slug>.<role>.log
+		const m = name.match(/^(.+)\.(developer|reviewer|live-tester|merger)(\.\d+)?\.log$/);
+		if (!m) continue;
+		const guards = m[2] === "merger" ? ["merger", `${m[1]}.merger`] : [m[1]];
+		if (guards.some((g) => existsSync(pidPath(root, g)))) continue;
+		const path = join(kanbanDir(root), ".logs", name);
+		const before = readFileSync(path, "utf8");
+		const after = before.split("\n").map(compactLogLine).filter((l) => l !== null).join("\n");
+		if (after === before) continue;
+		const tmp = `${path}.compact-tmp`;
+		try {
+			writeFileSync(tmp, after);
+			renameSync(tmp, path);
+			result.files++;
+			result.before += Buffer.byteLength(before);
+			result.after += Buffer.byteLength(after);
+		} catch {
+			try {
+				rmSync(tmp, { force: true });
+			} catch {
+				/* keep the original */
+			}
+		}
+	}
+	return result;
 }
 
 // consumes the armed marker at the state the armed reviewer wrote itself (back to to-review,
@@ -877,11 +999,18 @@ function holdsLock(root: string): boolean {
 export function main(argv: string[]): void {
 	const args = parseArgs(argv);
 	if (!args.root) {
-		process.stderr.write("usage: node orchestrator.ts --root <project-dir> [--no-webui]\n");
+		process.stderr.write("usage: node orchestrator.ts --root <project-dir> [--no-webui] [--compact-logs]\n");
 		process.exitCode = 1;
 		return;
 	}
 	const root = args.root;
+	if (args.compactLogs) {
+		const r = compactFinishedLogs(root);
+		const summary = `retro-compacted ${r.files} agent log(s): ${r.before} -> ${r.after} bytes`;
+		log(root, summary);
+		process.stdout.write(summary + "\n");
+		return;
+	}
 	const cfg = loadConfig(root);
 	const pollMinutes = args.pollMinutes ?? cfg.pollMinutes;
 	const rescanSeconds = args.rescanSeconds ?? 10;
