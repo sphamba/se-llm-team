@@ -1,7 +1,7 @@
 ---
 name: "test: orchestrator.test.ts part D worktree git-status assertion is flaky"
 priority: "low"
-state: "doing"
+state: "reviewing"
 worktree: "test/orchestrator-test-ts-part-d-worktree-git-status-assertion-is-flaky"
 ---
 
@@ -18,3 +18,8 @@ Race explanation: the test polls every 250 ms for the .kanban symlink and then i
 Suggested fix direction: make the test wait for the settled state before asserting git status — for example wait until `git config --worktree core.excludesFile` is set, or until the wt-excludes file exists in the worktree git dir — instead of waiting only for the symlink.
 
 # Notes
+
+- The fix was already absorbed by commit 790722e (reconcile task, landed 27 min after this task was created). It removed the direct "worktree git status shows no .kanban entries" assertion and replaced it with a waitFor that polls `git status --porcelain` every 250 ms (10 s budget) until no .kanban entries show, before the `git ls-files` and blanket `git add -A` assertions.
+- Checked against the spec's suggested direction: polling git status itself is the settled-state wait, and a stronger one than waiting for the wt-excludes file to exist (syncBoard writes the file two steps before `git config --worktree core.excludesFile`, so file-exists alone would still race). Convergence requires the excludes config to be applied, and there is no false positive: with the symlink confirmed present, git status stays dirty until the config lands.
+- Removed one dead leftover in the same block: the symlink waitFor passed an ignored `rootD` argument (waitFor takes four params). Committed as 9a40d36 on the worktree branch.
+- Verification: node src/orchestrator.test.ts passed 4/4 runs (three against 790722e, one after the cleanup), including part D (shared board).

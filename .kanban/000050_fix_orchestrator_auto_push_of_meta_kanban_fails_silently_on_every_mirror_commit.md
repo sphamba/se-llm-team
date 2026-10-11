@@ -1,7 +1,7 @@
 ---
 name: "fix: orchestrator auto-push of meta/kanban fails silently on every mirror commit"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/orchestrator-auto-push-of-meta-kanban-fails-silently-on-every-mirror-commit"
 ---
 
@@ -23,3 +23,11 @@ Suggested scope (decide after investigation):
 Related but distinct: 000034 (the mirror feature), 000044 (branch-to-tree reconcile), 000045 (mirror commit label swallowing create events), 000046 (fresh-clone bootstrap refs + non-fast-forward push).
 
 # Notes
+
+- Investigated the environment: origin is git@github.com:sphamba/se-llm-team.git (SSH) and ~/.ssh/ held no known_hosts and no key. Host-key verification was the first failure cause; after accepting the host key, pushes still fail with "Permission denied (publickey)", because this environment has no deploy key and registering one needs user credentials. Scope option 1 (configure SSH so pushes succeed) is therefore not completable by an agent here; the user must add a deploy key to the GitHub repo for pushes to work.
+- Environment half-fix applied during investigation: github.com's host key is now in ~/.ssh/known_hosts (via StrictHostKeyChecking=accept-new), so push failures now surface the real auth error instead of "Host key verification failed".
+- Implemented option 2 (the code change): pushMirror counts consecutive failures in .kanban/.logs/push-failures.count (existing readCounter/bumpCounter helpers, survives daemon restarts). After 3 consecutive failures it logs a one-time WARNING naming the consequence (board mirror not reaching origin, fresh-clone bootstrap cannot work) and the SSH remediation (known_hosts entry, deploy key). A successful push resets the count, so a later failure streak warns again. Per-failure non-fatal logging is unchanged.
+- Implemented option 3: new README section "Board mirror to origin" documents the auto-push, its SSH requirement, and the warning.
+- Test part S added to src/orchestrator.test.ts: fixture with origin pointing at a non-repo path, four tasks created one per sweep (one create mirror commit = one failed push each, four in a row); asserts the warning fires after the 3rd failure and is logged exactly once per failure streak. First attempt with 4 tasks up front failed because the first create commit folds all new files into one whole-board commit, so the test now creates one task per sweep.
+- Checks: node src/orchestrator.test.ts all smoke parts pass (including the new "push warning smoke"); node src/kanban.test.ts passes.
+- Committed 57f3e4e in worktree fix/orchestrator-auto-push-of-meta-kanban-fails-silently-on-every-mirror-commit (README.md, src/orchestrator.ts, src/orchestrator.test.ts).
