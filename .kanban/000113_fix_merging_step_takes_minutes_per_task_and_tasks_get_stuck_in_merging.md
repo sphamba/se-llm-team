@@ -1,7 +1,7 @@
 ---
 name: "fix: merging step takes minutes per task and tasks get stuck in merging"
 priority: "high"
-state: "doing"
+state: "reviewing"
 worktree: "fix/113-merging-step-takes"
 ---
 
@@ -43,3 +43,14 @@ Constraints:
 - HOLD: none (sequential merges accepted with the in-flight agents/merger.md and orchestrator.ts lanes - #102, #105, #83, #110).
 
 # Notes
+
+Implemented in worktree fix/113-merging-step-takes, commit acfb479 (on top of main c917c6e). All three suites pass: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts.
+
+- agents/merger.md step 1 now reads: a clean (conflict-free) merge skips the test suites entirely and goes straight to the merge-back, with the stated reason (branches were already developer-reviewed and live-tested; the suites re-run doubles the merge time for the common case); suites run only when conflicts had to be resolved. The instruction is a single static conditional, because the merger only discovers conflicts during its run, so no per-scenario prompt can be rendered at spawn time.
+- Liveness is pid-reuse-proof: writePid records "<pid> <discriminator>" where the discriminator is the process start time (parsed from /proc/<pid>/stat field 22 after the last ')', since comm can contain spaces/parens) with the cmdline as fallback. pidAlive(pid, disc?) compares the discriminator when /proc is readable and otherwise falls back to today's kill(pid, 0)/EPERM check, so legacy pid files, the .orchestrator.lock check and the reviewer armed-marker comparison are unchanged; a non-Linux box (no /proc) keeps the old behavior. A new agentAlive(root, name) helper (pid + discriminator from the pid file) replaced agentPid at the merger gate in sweepToMerge, the rescan tail clearPid check and poll. parseInt still reads the first token, so consumeReviewerRun is untouched.
+- Ported the in-flight #95 semantics exactly (same helper names, log lines and behavior) so the eventual merge of #113 and #95 is trivial: poll() bounces DEAD_TRANSITIONS unconditionally (the past-cap give-up freeze is gone), bumps the <slug>.dead counter only after the bounce, a completed run clears the counter when a stale pid file existed (hadPid guard so a waiting past-cap task is not wiped), and deadCooldownActive (counter > RESPAWN_CAP AND the task file younger than the idle window) gates the four fresh-agent spawn paths (sweepToMerge, rescan to-do/to-review/to-live-test). The give-up log line is now "agent died 5+ times; respawn waits for the idle cooldown (state <next>)", fired once at cap+1. Spec B.3 answer: the pre-#95 main code did still strand past-cap tasks (no state transition after the give-up), fixed here by the port.
+- pushMirror is off the synchronous loop path: it queues doPush (module-level promise chain, so concurrent pushes keep their order and cannot report a spurious non-fast-forward), which spawns git detached+unref with a 30s SIGKILL cap; counters and the PUSH_WARN_AFTER warning are updated asynchronously from the child's close/error. New: in-flight push children are tracked and SIGKILLed on daemon exit, because a stopped daemon's kill timer dies with it and would leave an orphaned hanging git push forever (this also made the test suite hang; the old suite exits 0, verified).
+- Janitor: janitorPids removes stale .kanban/.pids/<slug>.merger.pid leftovers (old per-task merger scheme) whose process is dead, skips a task still in merging and never removes a live process's pid file. The 7 production leftovers are cleaned on the next sweep.
+- Tests added/changed: part A waits for the detached push to land before the origin ref compare; part B ported to six unconditional bounces + one cooldown log + aged-mtime release + counter intact during the wait; parts E/I/R switched from the "giving up" log to the cooldown log (part I asserts the bounced task parks in to-do); new part AC (completed run clears a stale dead counter), part AD (recycled pid: unit pidAlive assertions plus a doing task whose pid file names the live test process with a stale discriminator bounces, while the matching-discriminator control never bounces), part AE (merger prompt recorded via a recording stub asserts the clean-merge skip, the conflicted-branch suite run and rendered placeholders), part AF (a silent-TCP origin holds the push in flight while the pipeline still completes and the 30s cap still counts and logs the failure).
+
+Deliberate non-goal respected: no concurrent mergers (the global merger gate stays; revisit via a mergerConcurrency config key if the queue still drains too slowly).
