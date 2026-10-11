@@ -491,7 +491,6 @@ function openTask(file) {
 	document.getElementById("m-attrs").innerHTML =
 		"<div><span>number</span>" + num(t) + "</div>" +
 		"<div><span>file</span>" + esc(t.file) + "</div>" +
-		"<div><span>name</span>" + esc(t.name) + "</div>" +
 		"<div><span>priority</span><span class='chip p-" + esc(t.priority) + "'>" + esc(t.priority) + "</span></div>" +
 		"<div><span>state</span>" + esc(t.state) + "</div>" +
 		"<div><span>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>";
