@@ -1,8 +1,8 @@
 ---
 name: "fix: merging step takes minutes per task and tasks get stuck in merging"
 priority: "high"
-state: "to-merge"
-worktree: "fix/113-merging-step-takes"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -68,3 +68,16 @@ Live test 2026-10-11 (worktree fix/113-merging-step-takes, commit fe9a5f6). Ran 
 Acceptance suites in the worktree: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts all pass.
 
 No issues in the tested change. Two untracked follow-ups of the same pid-reuse root cause remain, both out of the task scope: the .orchestrator.lock file is pid-only (a recycled daemon pid makes acquireLock refuse to start), and the webui pidAlive mirror is not discriminator-aware (a stale live badge, cosmetic). Reported to the Project manager for new tasks.
+
+Merge 2026-10-11 (merger): two-step merge complete, task set done.
+
+Step 1 (base branch resolved as main): merged main into fix/113-merging-step-takes (commit 4fceea9). Three conflicted files, all resolved:
+- agents/merger.md: combined main's base-branch resolution wording (git -C <root> branch --show-current at the start of each step, never a hardcoded main) and the detached-HEAD paragraph with this branch's clean-merge skip; the suite-run conditional kept the fe9a5f6 ordering (merge-and-commit first, then the clean-merge skip and the conflict-only suite run) and the exact phrases the prompt test asserts.
+- src/orchestrator.ts: kept this branch's pid-reuse-proof code at all three conflicts - the merger gate in sweepToMerge (agentAlive(root, "merger") instead of main's pidAlive(agentPid(...))), the janitorPids helper (main never had it), and the poll's discriminator-aware pidEntry/pidAlive read; the #95-shared regions (deadCooldownActive, poll bounce/counter logic) were byte-identical and auto-merged.
+- src/orchestrator.test.ts: both sides added parts at the same spot, so both sides kept: main's part AH (blockedBy failsafe) and part AJ (per-complexity cap) kept as-is; this branch's four parts renumbered to AI (dead-counter clear), AK (recycled pid), AL (merger prompt), AM (push hang) with locals renamed to match, because main's compactor parts AC-AF (auto-merged earlier in the file) already used the AC/AD/AE/AF locals and would have collided at top level. Main's part AI was an exact duplicate of this branch's dead-counter part (the #95 port), so it is dropped; labels run sequentially AG through AM.
+
+Conflict-exposed test fix committed on the branch (016a975): main's double-spawn guard part (AF, auto-merged) asserted the pid file as a single number, which reads NaN against the new two-token "<pid> <discriminator>" format; the three assertions now parseInt the first token (all other pid-file readers already used parseInt).
+
+Suites after the merge, all pass: node src/kanban.test.ts, node src/orchestrator.test.ts (all 40+ parts, including the merged AH/AI/AJ/AK/AL/AM), node src/webui.test.ts.
+
+Step 2 (base branch re-resolved as main, unchanged): merged fix/113-merging-step-takes into main, clean fast-forward (603cedc -> 016a975), no conflicts.
