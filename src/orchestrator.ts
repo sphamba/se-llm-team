@@ -3,6 +3,7 @@ import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, 
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+	COMPLEXITIES,
 	getTask,
 	kanbanDir,
 	listAll,
@@ -21,7 +22,12 @@ const DEFAULT_POLL_MINUTES = 1;
 const DEFAULT_AUTO_SCHEDULE_MINUTES = 5;
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const RESPAWN_CAP = 5;
+// final fallback for the per-complexity cap when a Config carries no reviewerCap entry for
+// the task's complexity
 const REVIEWER_RUN_CAP = 3;
+// per-complexity forced-advance caps: successful reviewer runs before to-review moves on to
+// to-live-test; each overridable via the top-level reviewerCap config key
+const DEFAULT_REVIEWER_CAP: Record<string, number> = { simple: 1, moderate: 2, complex: 3 };
 // consecutive failed auto-pushes before the daemon logs its once-only warning (a success
 // resets the count); the per-failure line is easy to miss, the warning names the consequence
 const PUSH_WARN_AFTER = 3;
@@ -38,12 +44,21 @@ interface LlmConfig {
 	thinking?: string;
 }
 
+// a roles entry may also hold per-complexity sub-objects keyed simple/moderate/complex, each
+// an LlmConfig that overrides the role defaults for tasks of that complexity
+interface RoleLlmConfig extends LlmConfig {
+	simple?: LlmConfig;
+	moderate?: LlmConfig;
+	complex?: LlmConfig;
+}
+
 interface Config {
 	agent: string;
 	pollMinutes: number;
 	autoScheduleMinutes: number;
 	llm: LlmConfig;
-	roles: Record<string, LlmConfig>;
+	roles: Record<string, RoleLlmConfig>;
+	reviewerCap: Record<string, number>;
 }
 
 // the provider/model/thinking triple of one config object (global or a roles entry); values
@@ -60,7 +75,7 @@ function cleanLlm(root: string, entry: unknown, where = ""): LlmConfig {
 }
 
 function loadConfig(root: string): Config {
-	let cfg: { agent?: string; pollMinutes?: number; autoScheduleMinutes?: number; provider?: unknown; model?: unknown; thinking?: unknown; roles?: unknown } = {};
+	let cfg: { agent?: string; pollMinutes?: number; autoScheduleMinutes?: number; provider?: unknown; model?: unknown; thinking?: unknown; roles?: unknown; reviewerCap?: unknown } = {};
 	// user-level first, project .kanban/se-llm-team.json overrides it
 	for (const path of [join(process.env.HOME ?? "", ".pi", "agent", "se-llm-team.json"), join(root, ".kanban", "se-llm-team.json")]) {
 		try {
@@ -69,9 +84,33 @@ function loadConfig(root: string): Config {
 			/* optional file */
 		}
 	}
-	const roles: Record<string, LlmConfig> = {};
+	const roles: Record<string, RoleLlmConfig> = {};
 	if (cfg.roles && typeof cfg.roles === "object" && !Array.isArray(cfg.roles)) {
-		for (const [role, entry] of Object.entries(cfg.roles)) roles[role] = cleanLlm(root, entry, ` for role "${role}"`);
+		for (const [role, entry] of Object.entries(cfg.roles)) {
+			const clean: RoleLlmConfig = cleanLlm(root, entry, ` for role "${role}"`);
+			// nested complexity sub-objects are cleaned like role entries; a non-object value
+			// under those keys warns and is ignored
+			const src = (entry ?? {}) as Record<string, unknown>;
+			for (const cx of COMPLEXITIES) {
+				const v = src[cx];
+				if (v === undefined) continue;
+				if (v && typeof v === "object" && !Array.isArray(v)) clean[cx] = cleanLlm(root, v, ` for role "${role}" ${cx}`);
+				else log(root, `non-object complexity override ${JSON.stringify(v)} for role "${role}" ${cx}, ignored`);
+			}
+			roles[role] = clean;
+		}
+	}
+	const reviewerCap: Record<string, number> = { ...DEFAULT_REVIEWER_CAP };
+	if (cfg.reviewerCap && typeof cfg.reviewerCap === "object" && !Array.isArray(cfg.reviewerCap)) {
+		for (const cx of COMPLEXITIES) {
+			const v = (cfg.reviewerCap as Record<string, unknown>)[cx];
+			if (v === undefined) continue;
+			if (typeof v !== "number" || !Number.isInteger(v) || v < 1) {
+				log(root, `invalid reviewerCap.${cx} ${JSON.stringify(v)}, ignored (expected an integer >= 1)`);
+				continue;
+			}
+			reviewerCap[cx] = v;
+		}
 	}
 	return {
 		agent: cfg.agent ?? "pi",
@@ -79,16 +118,19 @@ function loadConfig(root: string): Config {
 		autoScheduleMinutes: cfg.autoScheduleMinutes ?? DEFAULT_AUTO_SCHEDULE_MINUTES,
 		llm: cleanLlm(root, cfg, " (global)"),
 		roles,
+		reviewerCap,
 	};
 }
 
-// per-field precedence: the role entry wins over the global default, an unset field adds no
-// flag. --provider is only valid together with --model, so a provider alone is ignored.
-function llmFlags(root: string, cfg: Config, role: string): string[] {
+// per-field precedence: the role's complexity entry wins over the role default, which wins
+// over the global default; an unset field adds no flag. --provider is only valid together
+// with --model, so a provider alone is ignored.
+function llmFlags(root: string, cfg: Config, role: string, complexity: string): string[] {
 	const roleCfg = cfg.roles[role] ?? {};
-	const provider = roleCfg.provider ?? cfg.llm.provider;
-	const model = roleCfg.model ?? cfg.llm.model;
-	const thinking = roleCfg.thinking ?? cfg.llm.thinking;
+	const cxCfg = (roleCfg as Record<string, LlmConfig | undefined>)[complexity] ?? {};
+	const provider = cxCfg.provider ?? roleCfg.provider ?? cfg.llm.provider;
+	const model = cxCfg.model ?? roleCfg.model ?? cfg.llm.model;
+	const thinking = cxCfg.thinking ?? roleCfg.thinking ?? cfg.llm.thinking;
 	const flags: string[] = [];
 	if (provider && !model) log(root, `provider "${provider}" for role ${role} ignored: --provider requires --model`);
 	else if (provider) flags.push("--provider", provider);
@@ -202,7 +244,7 @@ function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: st
 	// --approve trusts the project-local files of the worktree, so the headless session never waits for a trust prompt;
 	// --mode json streams the full JSONL event log (thinking, tool calls, text) instead of print mode's final text only;
 	// the provider/model/thinking flags come from the config, resolved per role
-	const child = spawn(cfg.agent, ["--approve", "--mode", "json", ...llmFlags(root, cfg, role), "-p", renderPrompt(root, role, task, cwd === root ? undefined : cwd)], {
+	const child = spawn(cfg.agent, ["--approve", "--mode", "json", ...llmFlags(root, cfg, role, task.complexity ?? "moderate"), "-p", renderPrompt(root, role, task, cwd === root ? undefined : cwd)], {
 		cwd,
 		detached: true,
 		stdio: ["ignore", out, out],
@@ -249,17 +291,20 @@ function git(root: string, args: string[], allowFailure = false): string | null 
 // Never touches the index or working tree, so main history gets no kanban commits. The tree
 // is rebuilt from the whole board, so deleted files and disk drift self-heal on the next
 // mirror commit.
-function commitKanban(root: string, message: string, files: string[]): boolean {
-	if (!files.length) return false;
+function commitKanban(root: string, message: string, files: string[], allowEmpty = false): boolean {
+	if (!files.length && !allowEmpty) return false;
 	let tree: string;
 	try {
-		const blobs = execFileSync("git", ["hash-object", "-w", "--", ...files.map((f) => join(".kanban", f))], {
-			cwd: root,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-		})
-			.trim()
-			.split("\n");
+		// empty board (removal of the last task): mktree with no entries yields the empty tree
+		const blobs = files.length
+			? execFileSync("git", ["hash-object", "-w", "--", ...files.map((f) => join(".kanban", f))], {
+					cwd: root,
+					encoding: "utf8",
+					stdio: ["ignore", "pipe", "pipe"],
+				})
+					.trim()
+					.split("\n")
+			: [];
 		const board = execFileSync("git", ["mktree"], {
 			cwd: root,
 			input: files.map((f, i) => `100644 blob ${blobs[i]}\t${f}\n`).join(""),
@@ -285,8 +330,8 @@ function commitKanban(root: string, message: string, files: string[]): boolean {
 
 // best-effort auto-push of only the board mirror ref; failures are logged, never fatal.
 // PUSH_WARN_AFTER consecutive failures log a prominent warning once (a success resets the
-// count), so a permanently unreachable origin is visible instead of silently defeating the
-// mirror and the fresh-clone bootstrap
+// count and the warned marker), so a permanently unreachable origin is visible instead of
+// silently defeating the mirror and the fresh-clone bootstrap
 function pushMirror(root: string): void {
 	if (!git(root, ["remote"], true)) return;
 	try {
@@ -297,13 +342,50 @@ function pushMirror(root: string): void {
 			timeout: 30000,
 		});
 		if (readCounter(root, "push-failures") > 0) writeFileSync(counterPath(root, "push-failures"), "0");
+		if (readCounter(root, "push-warned") > 0) writeFileSync(counterPath(root, "push-warned"), "0");
 	} catch (err) {
 		log(root, `push of ${KANBAN_REF} failed (non-fatal): ${err instanceof Error ? err.message : err}`);
-		// counter keeps growing while pushes keep failing; log the warning only once per streak
-		if (bumpCounter(root, "push-failures") === PUSH_WARN_AFTER) {
+		// >= plus a warned marker: a stale counter past PUSH_WARN_AFTER never hits equality, and
+		// >= alone would warn on every failure past the cap instead of once per streak
+		if (bumpCounter(root, "push-failures") >= PUSH_WARN_AFTER && readCounter(root, "push-warned") === 0) {
+			writeFileSync(counterPath(root, "push-warned"), "1");
 			log(root, `WARNING: auto-push of ${KANBAN_REF} to origin failed ${PUSH_WARN_AFTER} times in a row; the board mirror is not reaching origin and fresh-clone bootstrap cannot work. Check SSH access to origin for the daemon user (known_hosts entry, deploy key). This warning is logged once until a push succeeds.`);
 		}
 	}
+}
+
+// removes a task in one operation: delete the file, then commit a whole-board mirror
+// snapshot, so the removal reaches refs/heads/meta/kanban and reconcileBoard cannot restore
+// it (the tip no longer carries the file). The daemon is the only other mirror writer: a
+// sweep mid-flight with a pre-removal board snapshot can re-add the file with its commit, so
+// while a daemon runs the tip is checked after a settle delay and the removal retries when
+// the file returned. Returns null on success, else a reason string.
+export async function removeTask(root: string, file: string): Promise<string | null> {
+	const name = file.endsWith(".md") ? file : `${file}.md`;
+	if (!taskFiles(root).includes(name)) return `No task ${file}`;
+	const hasGit = git(root, ["rev-parse", "--git-dir"], true) !== null;
+	rmSync(join(kanbanDir(root), name), { force: true });
+	// no git, no mirror and no reconcile: deleting the file is the whole removal
+	if (!hasGit) return null;
+	let daemonPid = 0;
+	try {
+		daemonPid = parseInt(readFileSync(join(kanbanDir(root), ".orchestrator.lock"), "utf8").trim(), 10) || 0;
+	} catch {
+		/* no lock: no daemon runs */
+	}
+	for (let attempt = 0; attempt < 3; attempt++) {
+		if (!commitKanban(root, `kanban: delete ${name}`, taskFiles(root), true)) {
+			return `mirror commit for ${name} failed, the board may restore the file: retry`;
+		}
+		// let a racing in-flight daemon commit land before the tip check
+		if (pidAlive(daemonPid)) await new Promise((resolve) => setTimeout(resolve, 1000));
+		const onTip = git(root, ["ls-tree", "--name-only", KANBAN_REF, "--", join(".kanban", name)], true);
+		if (onTip === null) return "git unavailable, the removal may not be mirrored";
+		if (!onTip) return null;
+		// a racing sweep re-added the file: the daemon may have restored it to the tree too
+		rmSync(join(kanbanDir(root), name), { force: true });
+	}
+	return `${name} returned to the mirror (a daemon sweep raced the removal): retry`;
 }
 
 // board file status relative to the meta/kanban mirror: "??" = not on the mirror yet (new
@@ -619,6 +701,9 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	if (pidAlive(agentPid(root, slug))) return;
 	// at most one merger at a time, project-wide
 	if (pidAlive(agentPid(root, "merger"))) return;
+	// a task bounced here past the respawn cap (dead live-tester or merger) also waits for
+	// the idle cooldown before its merger spawns
+	if (deadCooldownActive(root, cfg, task)) return;
 	// an earlier attempt on this task failed and requeued it: retry only after it sat idle in
 	// to-merge for the idle interval. Read before any write: ensureWorktree/setWorktree bump the
 	// task file's mtime, which is the idle clock, so this check must come first
@@ -670,6 +755,15 @@ function doneCleanup(root: string, task: Task): void {
 	log(root, `merged ${wt} for ${task.file}`);
 }
 
+// past RESPAWN_CAP the fresh agent waits for the idle cooldown: the unconditional bounce
+// still moves the task back one step, only the respawn backs off. The task file's update
+// time is the idle clock (the bounce's setState wrote it). Read before any write:
+// ensureWorktree/setWorktree bump the mtime and would restart the clock mid-check
+function deadCooldownActive(root: string, cfg: Config, task: Task): boolean {
+	if (readCounter(root, `${task.file.replace(/\.md$/, "")}.dead`) <= RESPAWN_CAP) return false;
+	return Date.now() - statSync(join(kanbanDir(root), task.file)).mtimeMs < cfg.autoScheduleMinutes * 60_000;
+}
+
 function rescan(root: string, cfg: Config): void {
 	// root-cause fix ordering: a snapshot commit must never be built from a tree that lacks
 	// branch-only files, so an external mirror-head move is materialized before boardStatus
@@ -706,22 +800,24 @@ function rescan(root: string, cfg: Config): void {
 			// identical-tree guard keeps an already-mirrored file a no-op
 			const code = status.get(join(".kanban", task.file));
 			if (code === "??") commitKanban(root, `kanban: create ${task.file}`, files);
-			if (task.state === "to-do") startTodo(root, cfg, task);
-			else if (task.state === "to-review") {
+			// past the respawn cap the fresh developer waits for the idle cooldown (state unchanged)
+			if (task.state === "to-do" && !deadCooldownActive(root, cfg, task)) startTodo(root, cfg, task);
+			else if (task.state === "to-review" && !deadCooldownActive(root, cfg, task)) {
 				const ensured = ensureWorktree(root, task);
 				// a failed spawn would bounce or strand the task; leave the state for the next rescan to retry
 				if (!ensured) log(root, `${task.file}: worktree could not be created, reviewer not spawned (state unchanged)`);
 				else {
 					const slug = task.file.replace(/\.md$/, "");
 					consumeReviewerRun(root, slug);
-					if (readCounter(root, `${slug}.reviewer-runs`) >= REVIEWER_RUN_CAP) {
+					const cap = cfg.reviewerCap[task.complexity] ?? REVIEWER_RUN_CAP;
+					if (readCounter(root, `${slug}.reviewer-runs`) >= cap) {
 						// re-read before the forced advance: a state changed underneath (PM or user) wins
 						const fresh = getTask(root, task.file);
 						if (fresh && fresh.state === "to-review") {
 							setState(root, fresh, "to-live-test");
 							// clears the count, so a future rework cycle starts fresh
 							writeFileSync(counterPath(root, `${slug}.reviewer-runs`), "0");
-							log(root, "reviewer succeeded 3+ times, moving to to-live-test");
+							log(root, `${task.file}: reviewer succeeded ${cap}+ times, moving to to-live-test`);
 						}
 					} else if (!pidAlive(agentPid(root, slug))) {
 						// the previous agent for this task (usually the developer writing its report) may
@@ -732,7 +828,7 @@ function rescan(root: string, cfg: Config): void {
 						if (pid) writeFileSync(armedPath(root, slug), String(pid));
 					}
 				}
-			} else if (task.state === "to-live-test") {
+			} else if (task.state === "to-live-test" && !deadCooldownActive(root, cfg, task)) {
 				const ensured = ensureWorktree(root, task);
 				if (!ensured) log(root, `${task.file}: worktree could not be created, live-tester not spawned (state unchanged)`);
 				else {
@@ -793,10 +889,22 @@ const taskNum = (file: string) => {
 // continuous idle. Module state like lastMirrorHash: one locked daemon per project.
 let idleSince: number | null = null;
 
+// a blockedBy entry ("#<num>") holds the task while its blocker exists and is not done;
+// a ref resolving to no existing task is ignored
+function blockedByUndone(tasks: Task[], task: Task): boolean {
+	if (!task.blockedBy) return false;
+	const states = new Map(tasks.map((t) => [taskNum(t.file), t.state]));
+	return task.blockedBy.split(",").some((ref) => {
+		const num = parseInt(ref.trim().replace(/^#/, ""), 10);
+		return num > 0 && states.get(num) !== undefined && states.get(num) !== "done";
+	});
+}
+
 function autoSchedule(root: string, cfg: Config, tasks: Task[]): void {
 	// conflicted files parse bogus state values: neither promotable nor proof of activity
 	const candidates = tasks.filter((t) => !t.conflicted);
-	const backlog = candidates.filter((t) => t.state === "backlog");
+	// unanswered open questions mean the task waits for the user: never promote it
+	const backlog = candidates.filter((t) => t.state === "backlog" && !t.openQuestions);
 	if (!backlog.length || candidates.some((t) => t.state !== "backlog" && t.state !== "done")) {
 		idleSince = null;
 		return;
@@ -807,8 +915,12 @@ function autoSchedule(root: string, cfg: Config, tasks: Task[]): void {
 		return;
 	}
 	if (now - idleSince < cfg.autoScheduleMinutes * 60_000) return;
-	// taskFiles sorts by file name, so the stable sort keeps the oldest first within a rank
-	const next = [...backlog].sort((a, b) => rank(a.priority) - rank(b.priority) || taskNum(a.file) - taskNum(b.file))[0];
+	// taskFiles sorts by file name, so the stable sort keeps the oldest first within a rank;
+	// unfinished blockers hold the task: the failsafe never auto-promotes a blocked task
+	const next = [...backlog]
+		.filter((t) => !blockedByUndone(tasks, t))
+		.sort((a, b) => rank(a.priority) - rank(b.priority) || taskNum(a.file) - taskNum(b.file))[0];
+	if (!next) return;
 	idleSince = null;
 	log(root, `no active task for ${cfg.autoScheduleMinutes}min, promoting ${next.file} to to-do (failsafe)`);
 	try {
@@ -831,18 +943,28 @@ function poll(root: string, cfg: Config): void {
 			const pidName = task.state === "merging" ? "merger" : slug;
 			const pid = agentPid(root, pidName);
 			if (pidAlive(pid)) continue;
+			const hadPid = pid > 0;
 			clearPid(root, pidName);
-			if (!next) continue;
-			if (bumpCounter(root, `${slug}.dead`) > RESPAWN_CAP) {
-				// counter keeps growing while the pidfile stays dead; log the give-up only once
-				if (readCounter(root, `${slug}.dead`) === RESPAWN_CAP + 1) {
-					log(root, `${slug}: agent died ${RESPAWN_CAP}+ times, giving up (state ${task.state})`);
+			if (!next) {
+				// a completed run leaves its stale pidfile behind, a bounce clears it first, so a
+				// stale pidfile here means the agent advanced the task out of the mapped state by
+				// its own action: the death streak is over. Clearing on a missing pidfile too would
+				// wipe the counter of a past-cap task still waiting out its respawn cooldown
+				if (hadPid && readCounter(root, `${slug}.dead`) > 0) {
+					writeFileSync(counterPath(root, `${slug}.dead`), "0");
+					log(root, `${slug}: run completed, cleared the dead-agent counter`);
 				}
 				continue;
 			}
+			// the bounce is unconditional: a frozen mid-flight task is worse than a bounced one
 			log(root, `${slug}: agent pid=${pid} dead without state update, ${task.state} -> ${next}`);
 			const fresh = getTask(root, task.file);
 			if (fresh) setState(root, fresh, next);
+			// past the cap the fresh spawn waits for the idle cooldown (the sweep defers it);
+			// logged once at cap+1, like the old give-up line
+			if (bumpCounter(root, `${slug}.dead`) === RESPAWN_CAP + 1) {
+				log(root, `${slug}: agent died ${RESPAWN_CAP}+ times; respawn waits for the idle cooldown (state ${next})`);
+			}
 		} catch (err) {
 			log(root, `error polling ${task.file} (${task.state}): ${err instanceof Error ? err.message : err}`);
 		}
