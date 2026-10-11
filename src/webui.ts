@@ -440,18 +440,27 @@ export function flipDiff(oldPos, newPos) {
 // html escape, shipped to the client and shared with the tab renderer
 export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-// tab labels from the hub's /api/projects entries: one tab per registered project, and none for a
+// tab descriptors from the hub's /api/projects entries: one tab per registered project, and none for a
 // single project, so a single-project setup (or the single-project server, whose /api/projects is
-// a 404) keeps the old single-board ui
+// a 404) keeps the old single-board ui. The identity is the entry's root, unique per checkout, so
+// two same-named checkouts select their own boards; a name registered more than once appends the
+// branch to the label ("" on a detached HEAD keeps the plain name)
 export function tabNames(projects) {
-	return projects.length > 1 ? projects.map((p) => p.name) : [];
+	if (projects.length < 2) return [];
+	const seen = Object.create(null); // a repo basename can collide with Object.prototype keys
+	for (const p of projects) seen[p.name] = (seen[p.name] ?? 0) + 1;
+	return projects.map((p) => ({
+		id: p.root,
+		label: seen[p.name] > 1 && p.branch ? p.name + " (" + p.branch + ")" : p.name,
+	}));
 }
 
-// tab bar html: one button per project, the active one marked; a single project renders no bar
-export function tabsHtml(names, active) {
-	if (names.length < 2) return "";
-	return names
-		.map((n) => '<button class="tab' + (n === active ? " active" : "") + '" data-project="' + esc(n) + '">' + esc(n) + "</button>")
+// tab bar html: one button per tab, data-project carries the root identity, the active one
+// marked; a single project renders no bar
+export function tabsHtml(tabs, active) {
+	if (tabs.length < 2) return "";
+	return tabs
+		.map((t) => '<button class="tab' + (t.id === active ? " active" : "") + '" data-project="' + esc(t.id) + '">' + esc(t.label) + "</button>")
 		.join("");
 }
 
@@ -494,7 +503,7 @@ export function num(t: Task) {
 // markup, so its animation starts or stops with the state, and prefers-reduced-motion turns the CSS
 // animation off underneath
 export function spinnerHtml(st: string) {
-	return st === "doing" || st === "reviewing" || st === "live-testing" ? '<span class="spin"></span>' : "";
+	return st === "doing" || st === "reviewing" || st === "live-testing" || st === "merging" ? '<span class="spin"></span>' : "";
 }
 
 // one card's markup; this string is the card's identity across a refresh, see syncBoard.
@@ -610,7 +619,7 @@ export function syncBoard(cols, tasks, expanded, els, make, visible) {
 }
 
 // served by the single-project server and by the hub for every registered project; the tab bar
-// comes from the hub's /api/projects and each tab polls /api/tasks?project=NAME
+// comes from the hub's /api/projects and each tab polls /api/tasks?project=<root id>
 export const PAGE = `<!doctype html>
 <html lang="en">
 <head>
@@ -630,13 +639,14 @@ h1 { font-size: 16px; margin: 0; }
 #theme { margin-left: auto; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 #theme:hover { background: var(--hover); }
 #updated { font-size: 12px; color: var(--muted); }
-#tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; }
+/* 000091: #modal is position:fixed at z-index auto, so a relative #tabs at z-index 1 keeps the bar above the overlay and clickable while a modal is open */
+#tabs { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; }
 #tabs:empty { display: none; }
 .tab { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px 6px 0 0; padding: 4px 12px; font-size: 12px; cursor: pointer; }
 .tab:hover { background: var(--hover); }
 .tab.active { border-color: var(--link); color: var(--link); }
 #board { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; padding: 10px 18px 18px; overflow-x: auto; align-items: flex-start; }
-/* 000047: six middle columns stack as three pairs, sized and gapped like the single columns */
+/* 000047: the middle columns stack as pairs, sized and gapped like the single columns */
 .pair { display: flex; flex-direction: column; gap: 10px; min-width: 300px; flex: 1 0 300px; }
 .col { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; border-top: 3px solid var(--ac); padding: 10px; min-width: 300px; flex: 1 0 300px; }
 /* 000096: as a .pair child the .col basis would act on the height axis and floor it at 300px */
@@ -698,6 +708,8 @@ h1 { font-size: 16px; margin: 0; }
 .c-reviewing { --ac: #d97706; }
 .c-to-live-test { --ac: #14b8a6; }
 .c-live-testing { --ac: #0d9488; }
+.c-to-merge { --ac: #d946ef; }
+.c-merging { --ac: #c026d3; }
 .c-done { --ac: #22c55e; }
 </style>
 </head>
@@ -714,8 +726,8 @@ h1 { font-size: 16px; margin: 0; }
 <script>
 "use strict";
 const VISIBLE = 5;
-let projects = [""]; // one tab per registered project; [""] is the single-project server, no tabs
-let active = "";
+let projects = [{ id: "", label: "" }]; // one tab per registered project; id "" is the single-project ui, one board, no tabs
+let active = ""; // the active tab's id: a registry root, or "" for the single-project board
 const boards = Object.create(null);
 const esc = ${esc};
 // 000042_fix_x.md -> #42; parseInt stops at the first non-digit and drops leading zeros
@@ -997,19 +1009,19 @@ function refresh() {
 		// the single-project server 404s here, and a transient hub failure keeps the last known
 		// tabs: only a real projects list replaces them
 		if (Array.isArray(list)) {
-			const names = tabNames(list);
-			projects = names.length ? names : [""]; // single project: the old ui, one board, no tabs
+			const tabs = tabNames(list);
+			projects = tabs.length ? tabs : [{ id: "", label: "" }]; // single project: the old ui, one board, no tabs
 		}
 		// a project that vanished from the registry closes the modal its task lived in
-		if (!projects.includes(active)) { active = projects[0]; closeModal(); }
-		const url = name => name ? "/api/tasks?project=" + encodeURIComponent(name) : "/api/tasks";
+		if (!projects.some(t => t.id === active)) { active = projects[0].id; closeModal(); }
+		const url = t => t.id ? "/api/tasks?project=" + encodeURIComponent(t.id) : "/api/tasks";
 		// every tab polls every cycle, only the active one renders
-		return Promise.all(projects.map(name => fetch(url(name)).then(r => r.ok ? r.json() : null).catch(() => null).then(t => [name, t])));
+		return Promise.all(projects.map(t => fetch(url(t)).then(r => r.ok ? r.json() : null).catch(() => null).then(tasks => [t.id, tasks])));
 	}).then(rows => {
 		mergeBoards(boards, rows);
 		render();
 		// stamp only a served board: during a hub outage the old stamp stays visible
-		const current = rows.find(([name]) => name === active);
+		const current = rows.find(([id]) => id === active);
 		if (current && current[1]) document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
 	}).catch(() => {});
 }
