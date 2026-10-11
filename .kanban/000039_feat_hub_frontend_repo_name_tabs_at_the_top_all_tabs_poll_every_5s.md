@@ -1,7 +1,7 @@
 ---
 name: "feat: hub frontend; repo-name tabs at the top, all tabs poll every 5s"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "feat/39-hub-frontend-repo"
 ---
 
@@ -36,3 +36,13 @@ Developer run (commit db15b73, worktree feat/39-hub-frontend-repo).
 - A tab switch renders the cached project state, sets no FLIP baseline from the board just left, and closes the open modal. Agent-log polls carry `&project=<active>`. A single project, and the plain server whose /api/projects is a 404, keeps the bare /api/tasks poll and no tab bar. A failed /api/projects keeps the last known tabs. A vanished active project falls back to the first tab and closes the modal. Per-project state uses Object.create(null), so a project named `__proto__` or `constructor` cannot break it. The updated stamp advances only when the active project's payload arrived.
 - src/webui.test.ts: tests for tabNames and tabsHtml (one tab per project, active marked, escaped labels, single and empty registry render none), mergeBoards (each payload lands under its own project, a null payload keeps the previous data), boardOf (fold choices survive a poll and a switch, prototype-named project gets a real board), plus page assertions (tab bar, switch closes the modal, every tab polled each cycle, 5 s cadence, project param on agent-log, single-project fallback).
 - Checks: `node src/webui.test.ts`, `node src/kanban.test.ts` and `node src/orchestrator.test.ts` (hub smoke, election race, failover) all pass. A throwaway DOM-shim smoke against a real hub with two temp projects confirmed the tabs, the switch, the modal close, inactive-tab polling and the single-project fallback. An independent adversarial review found no spec violation on commit db15b73, and its robustness findings were applied.
+
+## Review (2026-10-11)
+
+- Reviewed commit db15b73 against the Specs. `git diff main...HEAD` touches only src/webui.ts and src/webui.test.ts, as the Constraints require.
+- Checks re-run in the worktree: `node src/webui.test.ts`, `node src/kanban.test.ts` and `node src/orchestrator.test.ts` (hub server, election race, failover smoke) all pass.
+- Merge safety: `git merge-tree --write-tree main HEAD` is clean. The merged tree keeps main's renderLogChunk blank-line fix (000068) and the 300px .col width (000082). This branch does not touch those regions.
+- Independent browser check (system Google Chrome through Playwright) against a real hub with two temporary projects and 7 tasks each: the bar shows one tab per registered project with the repo names, and the first tab is active. The active board renders that project's tasks with the 5-card cap and the priority chips. Fold state is per project, survives a switch and never bleeds into the other tab. Dark mode survives a tab switch. The modal opens on the active tab, and a tab switch closes it. Both projects polled two times in 6.5 s, so the 5 s cadence holds. No JavaScript error.
+- Single-project check in the browser against a hub with one registered project: no tab renders, `#tabs` is `display: none`, every poll is a bare `/api/tasks`, and the board renders as before.
+- Observation (not a Spec violation, no fix): the pre-existing full-screen `#modal` overlay covers the tab bar, so a pointer click on a tab lands on the overlay while a modal is open. The `closeModal()` call in `switchTab` is still correct for a programmatic switch and for the vanished-project path. A user-facing tab click with an open modal needs a stacking change on the tab bar, and that is a UX change outside this Spec.
+- No fixes made, state set to to-live-test.

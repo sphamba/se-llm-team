@@ -1,7 +1,7 @@
 ---
 name: "fix: daemon restart reverts in-flight task state and notes to the mirror tip"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/69-daemon-restart-reverts"
 ---
 
@@ -19,3 +19,7 @@ Evidence:
 Fix direction: preserve newer working-tree content for mirrored task files across reconcileBoard (e.g. commit in-flight working-tree state before materializing, stash/restore, or a diff-aware merge), or route agent kanban writes through the mirror. Keep reconcile idempotent and never re-trigger on our own mirror commits.
 
 # Notes
+- [2026-10-11 12:16] Implemented in the worktree (commit e676225). reconcileBoard now keeps every local .kanban file that already exists, equal to the tip or not, and materializes only files the working tree lacks. A differing local file is an in-flight agent write because only creates and dones reach the mirror, so the next rescan mirrors it as before and done commits still fire. External additions still materialize and external deletions still propagate. The reconcile log now reports the kept count ("N in-flight kept" when N > 0).
+- [2026-10-11 12:16] Test: orchestrator.test.ts part Z. A task is mirrored at create (state backlog), the daemon exits, the test writes state to-live-test plus a note in the working tree, and a second daemon starts. It asserts the kept log line, the live-tester spawn, the note in the file, and the later kanban: done mirror commit that carries the note.
+- [2026-10-11 12:16] Verification: node src/kanban.test.ts passes, node src/orchestrator.test.ts passes all parts A to Z. Red check: the same part Z fails against the unpatched code with "reconciled .kanban ...: 1 file(s) updated, 0 deleted" (the clobber).
+- [2026-10-11 12:16] Deliberate trade-off: on a restart the daemon cannot tell a newer in-flight write from a stale local copy, so the working tree wins for any file that exists locally. An external modification of a file the working tree already has does not propagate, and the next snapshot commit supersedes it. External additions and deletions are unaffected.

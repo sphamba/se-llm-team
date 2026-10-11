@@ -20,15 +20,15 @@ Facts (verified at HEAD e4c0358):
 Changes:
 1. WORKING gains "merging" (spinner while a merge is in progress); to-merge stays spinner-free (nothing runs while queued for the merger).
 2. Accent classes .c-to-merge and .c-merging in pipeline order, visually consistent with the existing accents in both themes.
-3. Extend the log allowlist regex with merger so past merger logs open in the task detail card.
-4. Tests: extend src/webui.test.ts STATE_NAMES to the 10 states; the column-heading loop asserts to-merge and merging served; assert the spinner for merging. Full suite green: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts.
+3. Tests: extend src/webui.test.ts STATE_NAMES to the 10 states; the column-heading loop asserts to-merge and merging served; assert the spinner for merging. Full suite green: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts.
 
 Acceptance:
-- 10 columns in pipeline order; merging shows the spinner; accents in both themes; merger logs viewable in the detail card.
+- 10 columns in pipeline order; merging shows the spinner; accents in both themes.
 - Typecheck and the full test suite pass.
 
 Constraints:
 - Files: src/webui.ts, src/webui.test.ts.
-- HOLD behind 000078 (the column-heading test loop needs the states to exist), and behind the webui queue 000047 (doing, high), 000077 (high), 000076 (medium) - one webui rewrite at a time.
+- The allowlist-regex slice (merger logs viewable) moved to task #88, which rewrites the same serve region and lands first; this task keeps only the states/WORKING/accent work.
+- HOLD behind 000078 (the column-heading test loop needs the states to exist), behind 000088 (same serve region, one webui rewrite at a time), and behind the webui queue 000047 (reviewing, high), 000077 (high), 000076 (doing, medium).
 
 # Notes

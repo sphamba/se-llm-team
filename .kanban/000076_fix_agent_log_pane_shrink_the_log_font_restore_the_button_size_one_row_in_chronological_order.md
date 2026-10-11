@@ -1,7 +1,7 @@
 ---
 name: "fix: agent log pane; shrink the log font, restore the button size, one row in chronological order"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/76-agent-log-pane"
 ---
 
@@ -34,3 +34,12 @@ Constraints:
 - Sequence on the webui lane: promote after 000047 (high, same files) is done; the two tasks cannot run in parallel.
 
 # Notes
+
+## Developer notes
+- Commit aa6da02 on fix/76-agent-log-pane (base c33fd7a); files src/webui.ts and src/webui.test.ts only.
+- CSS: .agent-btn back to font-size 12px and padding 3px 10px (border, background, color, radius and .agent-btn-active untouched); #m-log pre font-size 10px (padding, line-height and wrapping untouched).
+- Row: renderAgent now wraps the buttons in a new #m-agent-btns div; `#m-agent-btns { display: flex; flex-wrap: wrap; gap: 6px; }` replaces the removed .agent-past/.agent-live block-row rules. #m-agent's margin-bottom and #m-log's margin-top 6px are unchanged. The render order was already past-first/live-last from 000070, so no JS order change was needed.
+- Tests: webui.test.ts asserts the .agent-btn 12px / 3px 10px declaration, the #m-log pre 10px, the wrapping flex row, the removed block rules, and that the past-button template appears before the live-button template. Reverting the CSS makes the new assertion fail (mutation-checked).
+- Verified: node src/kanban.test.ts, node src/orchestrator.test.ts and node src/webui.test.ts all green. Typecheck: the repo has no tsconfig, so an ad hoc strict tsc run (typescript + @types/node from another checkout) was compared against HEAD: identical pre-existing 10-error set, no new type errors.
+- Headless Chromium against startWebUi(root, {port: 0}) on a temp board (task in doing, developer pid alive, developer/reviewer/live-tester logs): buttons on one row (same y=429.25, x 278.0 -> 371.1 -> 470.2), order Reviewer, Live-tester, Developer (live last), all computed 12px; pre#m-log-text 10px; clicking Developer sets agent-btn-active on it alone; long lines still wrap; screenshot /tmp/fix76-agent-buttons.png. Port 4242 and the production webui were never touched.
+- 000047 note: at the time of writing, feat/47-webui-stacked-column (000047) is still in reviewing and unmerged. Its diff does not touch the .agent-btn CSS, the #m-agent area or renderAgent, so the sequential merge is clean (the CSS lives in the PAGE string in both).

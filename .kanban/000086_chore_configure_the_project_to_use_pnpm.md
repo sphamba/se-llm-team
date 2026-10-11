@@ -1,7 +1,7 @@
 ---
 name: "chore: configure the project to use pnpm"
 priority: "critical"
-state: "live-testing"
+state: "done"
 worktree: "chore/86-configure-the-project"
 ---
 
@@ -47,3 +47,15 @@ Reviewer 2026-10-11: no fixes needed.
 - Worktree left clean; the pnpm-generated pnpm-lock.yaml created during review was removed.
 - Observations, not fixed (out of scope): the README Checks section predates this task and lists only node src/kanban.test.ts, while the full suite has three files; any pnpm invocation generates the pnpm 12 env lockfile (packageManagerDependencies) as a side effect of the pin.
 - Verdict: acceptance criteria met. No code change by the reviewer, state -> to-live-test.
+
+Live-tester 2026-10-11: PASS, state -> done.
+- Environment: worktree /home/phamba/repos/se-llm-team/.worktrees/chore/86-configure-the-project, Node v24.20.0, corepack 0.35.0, isolated COREPACK_HOME for every run.
+- Pin: `corepack pnpm --version` downloads and reports 12.11.2 (exit 0). `npm view pnpm version` and `npm view pnpm dist-tags.latest` return 12.11.2, so the pin is the current latest stable.
+- README flow works: `corepack enable --install-directory <tmp>` installs the pnpm and pnpx shims (exit 0). `corepack prepare pnpm@12.11.2 --activate` exits 0. The pnpm shim reports 12.11.2 inside and outside the project.
+- package.json is valid JSON: packageManager "pnpm@12.11.2", engines.pnpm ">=12.11.2". `corepack pnpm pkg get packageManager` returns "pnpm@12.11.2" (exit 0).
+- `git diff main...HEAD` touches only package.json and README.md. No dependencies, no scripts, no committed lockfile.
+- Suites: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts all pass (exit 0). The repo has no tsconfig and the global `tsc` is the npm placeholder, so Node 24 loading the TS sources is the only check.
+- Finding (minor, reported to the PM): every pnpm invocation in the project (for example `pnpm --version` or `pnpm pkg get`) writes an untracked pnpm-lock.yaml (a pnpm 12 env lockfile with packageManagerDependencies) because of the pin. The file is not gitignored, so the workspace becomes dirty after the first pnpm command. The README line "There are no dependencies and no lockfile yet" then stops being true. A control project without the pin does not get the lockfile, so the pin causes it. Suggested fix: add pnpm-lock.yaml to .gitignore or decide to commit it.
+- Note: `pnpm install` fails here with ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK (read-only file system). A control project without the pin fails the same way, so this is a sandbox mount limitation, not a defect of this change.
+- Observation (pre-existing, not caused by this change): the README Checks section lists only node src/kanban.test.ts while the full suite has three files.
+- Worktree left clean (the generated pnpm-lock.yaml was removed).
