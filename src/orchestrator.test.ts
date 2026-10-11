@@ -1319,3 +1319,43 @@ await waitFor(() => parseTask(rootAA, taskAA.file).state === "done" && parseTask
 assert.equal(runsAA(), 0, "counter still cleared after the pipeline completed");
 aa.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + reviewer successful-run cap smoke passed");
+
+// --- part AB: the failsafe never auto-promotes a task with unfinished blockers; a ghost ref
+// is ignored, and the blocked task schedules normally once its blocker is done ---
+const rootAB = fixture();
+cleaned.push(rootAB);
+mkdirSync(kanbanDir(rootAB), { recursive: true });
+// 0.05min = 3s idle window and poll; the dead stub keeps a promoted task active forever
+writeFileSync(join(kanbanDir(rootAB), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAB), pollMinutes: 0.05, autoScheduleMinutes: 0.05 }));
+const taskAB0 = createTask(rootAB, { name: "feat: blocker task", summary: "Failsafe smoke", specs: "n/a" });
+const taskAB1 = createTask(rootAB, { name: "feat: blocked critical", priority: "critical", summary: "Failsafe smoke", specs: "n/a", blockedBy: `#${parseInt(taskAB0.file, 10)}` });
+const taskAB2 = createTask(rootAB, { name: "feat: ghost ref", priority: "critical", summary: "Failsafe smoke", specs: "n/a", blockedBy: "#999" });
+
+const ab = await runDaemon(rootAB);
+const readAB = (file: string) => parseTask(rootAB, file);
+// the ghost ref is ignored: the critical ghost task is promotable and wins by priority over
+// the medium blocker task, while the blocked critical task stays held despite its priority
+await waitFor(() => ab.output().includes(`promoting ${taskAB2.file} to to-do`), 30000, "ghost-only task promoted", ab.output);
+assert.equal(readAB(taskAB1.file).state, "backlog", "blocked critical task not promoted despite priority");
+// settle the ghost task: the respawn cap exhausts and the poll stops rewriting it
+await waitFor(() => ab.output().includes(`${taskAB2.file.replace(/\.md$/, "")}: agent died`), 60000, "respawn cap on the ghost task", ab.output);
+writeFileSync(
+	join(kanbanDir(rootAB), taskAB2.file),
+	readFileSync(join(kanbanDir(rootAB), taskAB2.file), "utf8").replace(/^state: .*/m, 'state: "done"'),
+);
+// the blocker task is still backlog: the blocked critical task stays held, the medium task promotes
+await waitFor(() => ab.output().includes(`promoting ${taskAB0.file} to to-do`), 30000, "unblocked medium task promoted", ab.output);
+assert.equal(readAB(taskAB1.file).state, "backlog", "still held while the blocker is not done");
+// settle the blocker: the blocked critical task now schedules normally
+await waitFor(() => ab.output().includes(`${taskAB0.file.replace(/\.md$/, "")}: agent died`), 60000, "respawn cap on the blocker task", ab.output);
+writeFileSync(
+	join(kanbanDir(rootAB), taskAB0.file),
+	readFileSync(join(kanbanDir(rootAB), taskAB0.file), "utf8").replace(/^state: .*/m, 'state: "done"'),
+);
+await waitFor(() => ab.output().includes(`promoting ${taskAB1.file} to to-do`), 30000, "blocked task promoted after the blocker is done", ab.output);
+assert.ok(["to-do", "doing"].includes(readAB(taskAB1.file).state), "promoted task is active");
+ab.daemon.kill("SIGTERM");
+// full exit before the removal: a sweep mid-flight still writes into the fixture
+await Promise.race([new Promise((r) => ab.daemon.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
+cleanupAll(rootAB);
+console.log("orchestrator.test.ts: ... + blockedBy failsafe smoke passed");

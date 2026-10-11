@@ -782,6 +782,17 @@ const taskNum = (file: string) => {
 // continuous idle. Module state like lastMirrorHash: one locked daemon per project.
 let idleSince: number | null = null;
 
+// a blockedBy entry ("#<num>") holds the task while its blocker exists and is not done;
+// a ref resolving to no existing task is ignored
+function blockedByUndone(tasks: Task[], task: Task): boolean {
+	if (!task.blockedBy) return false;
+	const states = new Map(tasks.map((t) => [taskNum(t.file), t.state]));
+	return task.blockedBy.split(",").some((ref) => {
+		const num = parseInt(ref.trim().replace(/^#/, ""), 10);
+		return num > 0 && states.get(num) !== undefined && states.get(num) !== "done";
+	});
+}
+
 function autoSchedule(root: string, cfg: Config, tasks: Task[]): void {
 	// conflicted files parse bogus state values: neither promotable nor proof of activity
 	const candidates = tasks.filter((t) => !t.conflicted);
@@ -796,8 +807,12 @@ function autoSchedule(root: string, cfg: Config, tasks: Task[]): void {
 		return;
 	}
 	if (now - idleSince < cfg.autoScheduleMinutes * 60_000) return;
-	// taskFiles sorts by file name, so the stable sort keeps the oldest first within a rank
-	const next = [...backlog].sort((a, b) => rank(a.priority) - rank(b.priority) || taskNum(a.file) - taskNum(b.file))[0];
+	// taskFiles sorts by file name, so the stable sort keeps the oldest first within a rank;
+	// unfinished blockers hold the task: the failsafe never auto-promotes a blocked task
+	const next = [...backlog]
+		.filter((t) => !blockedByUndone(tasks, t))
+		.sort((a, b) => rank(a.priority) - rank(b.priority) || taskNum(a.file) - taskNum(b.file))[0];
+	if (!next) return;
 	idleSince = null;
 	log(root, `no active task for ${cfg.autoScheduleMinutes}min, promoting ${next.file} to to-do (failsafe)`);
 	try {
