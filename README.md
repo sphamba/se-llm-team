@@ -14,7 +14,14 @@ ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
 3. Optional config in `~/.pi/agent/se-llm-team.json` (a `.kanban/se-llm-team.json` in the project overrides it):
 
 ```json
-{ "agent": "pi", "pollMinutes": 15, "webUi": { "enabled": true, "host": "localhost", "port": 4242 } }
+{
+  "agent": "pi",
+  "pollMinutes": 15,
+  "model": "anthropic/claude-sonnet-4-5",
+  "thinking": "high",
+  "roles": { "developer": { "thinking": "xhigh" } },
+  "webUi": { "enabled": true, "host": "localhost", "port": 4242 }
+}
 ```
 
 | Key | Default | Meaning |
@@ -22,6 +29,10 @@ ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
 | `agent` | `pi` | Executable the orchestrator spawns for agents. |
 | `pollMinutes` | `1` | Agent liveness poll interval. |
 | `autoScheduleMinutes` | `5` | Failsafe: promote the oldest highest-priority backlog task to to-do after this many minutes with no active task. PM promotion stays the primary path. |
+| `provider` | unset | LLM provider to pass as `--provider`. Requires `model`; a provider without a model is ignored with a warning. |
+| `model` | unset | LLM model or pattern to pass as `--model`. A `:<thinking>` suffix in the pattern keeps working natively. |
+| `thinking` | unset | Reasoning level to pass as `--thinking`: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. An unknown value is ignored with a warning. |
+| `roles.<type>.<key>` | unset | Override `provider`, `model` or `thinking` for one agent type (`developer`, `reviewer`, `live-tester`, `merger`); per-field, so unset fields keep the global value. |
 | `webUi.enabled` | off | Serve the web dashboard with the daemon. |
 | `webUi.host` | `localhost` | Dashboard bind host. |
 | `webUi.port` | `4242` | Dashboard port. |
@@ -58,7 +69,7 @@ With `webUi.enabled: true` in `~/.pi/agent/se-llm-team.json`, the orchestrator d
 
 ## Agents
 
-Agent prompts live in `agents/`. The orchestrator runs each agent as a headless `<executable> --approve --mode json -p <prompt>` process, with the task worktree as cwd and the task file path in the prompt. The agent log (`.kanban/.logs/`) carries the full JSONL event stream; the web ui renders it readably. The orchestrator reads the role prompt from `agents/` in its own checkout at each spawn. A prompt fix on a task worktree branch applies only after that branch merges, so do not rely on a prompt change before the merge. Agents update their own task file directly (notes and state attribute). The Live-tester reports issues to a Project manager subagent that creates new tasks.
+Agent prompts live in `agents/`. The orchestrator runs each agent as a headless `<executable> --approve --mode json [<llm flags>] -p <prompt>` process, with the task worktree as cwd, the task file path in the prompt, and the optional provider/model/thinking flags from the config. The agent log (`.kanban/.logs/`) carries the full JSONL event stream; the web ui renders it readably. The orchestrator reads the role prompt from `agents/` in its own checkout at each spawn. A prompt fix on a task worktree branch applies only after that branch merges, so do not rely on a prompt change before the merge. Agents update their own task file directly (notes and state attribute). The Live-tester reports issues to a Project manager subagent that creates new tasks.
 
 ## Tools
 
