@@ -758,6 +758,7 @@ console.log("orchestrator.test.ts: ... + failsafe auto-schedule smoke passed");
 const rootS = fixture();
 cleaned.push(rootS);
 const homeS = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeS);
 mkdirSync(join(homeS, ".pi", "agent"), { recursive: true });
 writeFileSync(join(homeS, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: 4277 } }));
 
