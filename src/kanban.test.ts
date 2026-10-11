@@ -300,6 +300,48 @@ assert.equal(getTask(bRoot, tb2.file)?.blockedBy, "#42");
 assert.equal(getTask(bRoot, tb.file)?.blockedBy, "");
 rmSync(bRoot, { recursive: true, force: true });
 
+// blockedBy cycle guard on the shared write path: a direct 2-cycle or a self-block
+// rejects with a clear error; one-directional pairs, clearing, stale refs and longer
+// chains stay allowed
+const cRoot = mkdtempSync(join(tmpdir(), "kanban-cycle-"));
+const ca = createTask(cRoot, { name: "feat: cycle a", summary: "s" });
+const cb = createTask(cRoot, { name: "feat: cycle b", summary: "s" });
+const aNum = taskNum(ca.file);
+const bNum = taskNum(cb.file);
+// one-directional pair passes: b blocks a
+updateTask(cRoot, ca, { blockedBy: `#${bNum}` });
+assert.equal(parseTask(cRoot, ca.file).blockedBy, `#${bNum}`);
+// the direct 2-cycle rejects before the write: a is blocked by b already, so b cannot block a
+assert.throws(
+	() => updateTask(cRoot, cb, { blockedBy: `#${aNum}` }),
+	new RegExp(`cannot set blockedBy: #${aNum} is already blocked by #${bNum}`),
+);
+assert.equal(parseTask(cRoot, cb.file).blockedBy, ""); // the rejected write changed nothing
+// a task cannot block itself
+assert.throws(() => updateTask(cRoot, ca, { blockedBy: `#${aNum}` }), /blocks itself/);
+// clearing stays allowed
+updateTask(cRoot, ca, { blockedBy: "" });
+assert.equal(parseTask(cRoot, ca.file).blockedBy, "");
+// longer chains stay allowed: c blocks b, b blocks a (a -> b -> c, no direct 2-cycle)
+const cc = createTask(cRoot, { name: "feat: cycle c", summary: "s" });
+const cNum = taskNum(cc.file);
+updateTask(cRoot, cb, { blockedBy: `#${cNum}` });
+updateTask(cRoot, ca, { blockedBy: `#${bNum}` });
+assert.equal(parseTask(cRoot, ca.file).blockedBy, `#${bNum}`);
+assert.equal(parseTask(cRoot, cb.file).blockedBy, `#${cNum}`);
+// create path: a stale ref to the next number (a deleted task's number) turns a create
+// into a 2-cycle and rejects; the failed create writes no file
+updateTask(cRoot, cc, { blockedBy: "#4" }); // stale ref: no task #4 exists yet, allowed
+assert.throws(
+	() => createTask(cRoot, { name: "feat: cycle d", summary: "s", blockedBy: `#${cNum}` }),
+	new RegExp(`cannot set blockedBy: #${cNum} is already blocked by #4`),
+);
+assert.equal(taskFiles(cRoot).length, 3); // the rejected create wrote no file
+// create path: a new task cannot block itself (the next number is predictable)
+assert.throws(() => createTask(cRoot, { name: "feat: cycle e", summary: "s", blockedBy: "#4" }), /blocks itself/);
+assert.equal(taskFiles(cRoot).length, 3);
+rmSync(cRoot, { recursive: true, force: true });
+
 // shortName: drives the file and branch/worktree names, quoted in the frontmatter; set at creation only
 const sRoot = mkdtempSync(join(tmpdir(), "kanban-shortname-"));
 const ts = createTask(sRoot, { name: "feat: this is a short name", shortName: "this-is-a-short-name", summary: "s" });
