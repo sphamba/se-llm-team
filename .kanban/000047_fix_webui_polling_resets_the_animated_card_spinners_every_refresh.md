@@ -2,7 +2,7 @@
 name: "feat: webui stacked column pairs; animation-preserving refresh"
 priority: "high"
 state: "done"
-worktree: "feat/47-webui-stacked-column"
+worktree: ""
 ---
 
 # Summary
@@ -37,6 +37,9 @@ Constraints:
 - Note: 000058's branch carries a committed one-line deletion to src/webui.ts (backlog, dead pid); expect a minor sequential merge when it runs later.
 
 # Notes
+- [2026-10-11 10:50] Merge conflict for branch feat/47-webui-stacked-column, merger spawned (attempt 3).
+- [2026-10-11 10:50] Merge conflict for branch feat/47-webui-stacked-column, merger spawned (attempt 2).
+- [2026-10-11 10:50] Merge conflict for branch feat/47-webui-stacked-column, merger spawned (attempt 1).
 - Restored from erased task 000044_fix_webui_polling_resets_the_animated_card_spinners_every_refresh.md (refs/heads/meta/kanban history commit 6aa8dd3); renumbered because the old number is taken by an active task.
 
 ## Developer notes (2026-10-11)
