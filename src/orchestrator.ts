@@ -716,7 +716,7 @@ function rescan(root: string, cfg: Config): void {
 							setState(root, fresh, "to-live-test");
 							// clears the count, so a future rework cycle starts fresh
 							writeFileSync(counterPath(root, `${slug}.reviewer-runs`), "0");
-							log(root, "reviewer succeeded 3+ times, moving to to-live-test");
+							log(root, `reviewer succeeded 3+ times, moving ${slug} to to-live-test`);
 						}
 					} else {
 						spawnAgent(root, cfg, "reviewer", task, ensured.wtDir);
