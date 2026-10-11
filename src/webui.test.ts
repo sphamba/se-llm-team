@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, setState } from "./kanban.ts";
-import { boardOf, buildShell, cardHtml, flipDiff, LAYOUT, loadWebUiConfig, LOG_CHUNK, mergeBoards, pairLayout, renderLogChunk, spinnerHtml, startWebUi, syncBoard, tabNames, tabsHtml } from "./webui.ts";
+import { boardOf, buildShell, cardHtml, curve, flipDiff, LAYOUT, loadWebUiConfig, LOG_CHUNK, mergeBoards, numLinkHtml, pairLayout, relationPaths, renderLogChunk, spinnerHtml, startWebUi, syncBoard, tabNames, tabsHtml } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing", "to-merge", "merging", "done"];
@@ -80,6 +80,7 @@ assert.equal(listed[0].priority, "medium");
 assert.equal(listed[0].state, "backlog");
 assert.equal(listed[0].worktree, "");
 assert.equal(listed[0].issuer, "user", "absent issuer reads as user");
+assert.equal(listed[0].blockedBy, "", "absent blockedBy reads as an empty string");
 assert.equal(listed[0].updated, statSync(join(root, ".kanban", task.file)).mtimeMs);
 assert.match(listed[0].body, /# Summary\nDashboard smoke/);
 
@@ -88,6 +89,12 @@ const issued = createTask(root, { name: "feat: issued by 42", summary: "s", issu
 const issuedRow = (await (await fetch(`${base}/api/tasks`)).json()).find((t) => t.file === issued.file);
 assert.equal(issuedRow.issuer, "#42");
 rmSync(join(root, ".kanban", issued.file)); // the daemon section below expects a one-task board
+
+// blockedBy flows to /api/tasks; the detail card and the relation lines read it from here
+const held = createTask(root, { name: "fix: held by 1", summary: "s", blockedBy: `#${parseInt(task.file, 10)}` });
+const heldRow = (await (await fetch(`${base}/api/tasks`)).json()).find((t) => t.file === held.file);
+assert.equal(heldRow.blockedBy, `#${parseInt(task.file, 10)}`, "the blockedBy attribute serves with the payload");
+rmSync(join(root, ".kanban", held.file)); // the daemon section below expects a one-task board
 
 // GET / mentions all 10 state names; other paths and methods are 404
 const page = await (await fetch(`${base}/`)).text();
@@ -167,7 +174,11 @@ assert.equal(new Set(accentColors).size, STATE_NAMES.length, "each column has a 
 // the state picks the animation: only the states the orchestrator works on carry the spinner
 assert.ok(spinnerHtml("doing").includes('<span class="spin">') && spinnerHtml("live-testing").includes('<span class="spin">') && spinnerHtml("merging").includes('<span class="spin">'), "working states render the spinner");
 assert.equal(spinnerHtml("to-do") + spinnerHtml("to-review") + spinnerHtml("to-merge") + spinnerHtml("done"), "", "waiting and finished states render no spinner");
-assert.ok(cardHtml({ file: "000047_fix_x.md", name: "a & b", priority: "high" }, "doing").includes('<span class="num">#47</span>a &amp; b'), "a card carries its short number and escaped name");
+assert.ok(cardHtml({ file: "000047_fix_x.md", name: "a & b", priority: "high" }, "doing").includes('<span class="num-link num" data-task="000047_fix_x.md">#47</span>a &amp; b'), "a card carries its short number as a link and its escaped name");
+// task ids are links: numLinkHtml carries the file for the post-render binding, escaped, and the
+// card's own id keeps the num class
+assert.equal(numLinkHtml("000047_fix_x.md"), '<span class="num-link" data-task="000047_fix_x.md">#47</span>', "a task id renders as a link carrying its file");
+assert.equal(numLinkHtml('000048_quo"te.md'), '<span class="num-link" data-task="000048_quo&quot;te.md">#48</span>', "the data-task file is escaped");
 // issuer on cards: user-issued keeps full contrast with a plain user chip, task-issued dims the
 // name and carries a small #<num> badge
 const userCard = cardHtml({ file: "000001_a.md", name: "a", priority: "high" }, "doing");
@@ -177,6 +188,61 @@ const issuedCard = cardHtml({ file: "000002_b.md", name: "b", priority: "low", i
 assert.ok(issuedCard.includes('<div class="name issued">'), "a task-issued card dims its name");
 assert.ok(issuedCard.includes('<span class="chip issuer">#42</span>'), "a task-issued card carries a small #num badge");
 assert.ok(page.includes(".chip.issuer {") && page.includes(".issued {"), "the differentiation classes ship in the page css");
+
+// relation lines: one dashed curve per stored relation between rendered cards, running from the
+// blocked task's card to the blocker's card, so the dashes flow blocked -> blocker. A done
+// blocker, a ghost ref and an unrendered card draw nothing.
+const rects = {
+	"000001_a.md": { x: 0, y: 0, w: 280, h: 60 },
+	"000002_b.md": { x: 310, y: 0, w: 280, h: 60 },
+	"000003_c.md": { x: 620, y: 0, w: 280, h: 60 },
+	"000004_d.md": { x: 310, y: 70, w: 280, h: 60 },
+};
+const rectOf = (file) => rects[file] ?? null;
+const midY = (r) => r.y + r.h / 2;
+const same = relationPaths([
+	{ file: "000002_b.md", state: "to-do", blockedBy: "#4" },
+	{ file: "000004_d.md", state: "to-do", blockedBy: "" },
+], rectOf);
+assert.equal(same.length, 1, "one curve per stored relation");
+assert.ok(same[0].startsWith(`M ${310 + 280} ${midY(rects["000002_b.md"])}`), "same column: the path starts at the blocked card's right edge");
+assert.ok(same[0].endsWith(`${310 + 280} ${midY(rects["000004_d.md"])}`), "same column: both ends sprout from the right sides, the path ends at the blocker's right edge");
+// stacked pair columns share one x: different states at one x still loop out of the right sides
+assert.equal(relationPaths([
+	{ file: "000002_b.md", state: "to-do", blockedBy: "#4" },
+	{ file: "000004_d.md", state: "doing", blockedBy: "" },
+], rectOf)[0], same[0], "a different state at the same x (stacked pair) loops out of the right sides too, never through the cards");
+const cross = relationPaths([
+	{ file: "000002_b.md", state: "to-do", blockedBy: "#1, #3" },
+	{ file: "000001_a.md", state: "backlog", blockedBy: "" },
+	{ file: "000003_c.md", state: "to-review", blockedBy: "" },
+], rectOf);
+assert.equal(cross.length, 2, "multiple blockers draw one curve each");
+assert.ok(cross[0].startsWith(`M 310 ${midY(rects["000002_b.md"])}`) && cross[0].endsWith(`280 ${midY(rects["000001_a.md"])}`), "blocker left of blocked: blocked's left edge to the blocker's right edge");
+assert.ok(cross[1].startsWith(`M ${310 + 280} ${midY(rects["000002_b.md"])}`) && cross[1].endsWith(`620 ${midY(rects["000003_c.md"])}`), "blocker right of blocked: blocked's right edge to the blocker's left edge");
+assert.equal(relationPaths([
+	{ file: "000002_b.md", state: "to-do", blockedBy: "#3" },
+	{ file: "000003_c.md", state: "done", blockedBy: "" },
+], rectOf).length, 0, "a done blocker draws nothing");
+assert.equal(relationPaths([{ file: "000002_b.md", state: "to-do", blockedBy: "#9, junk, , " }], rectOf).length, 0, "ghost and unparseable refs draw nothing");
+assert.equal(relationPaths([{ file: "000002_b.md", state: "to-do", blockedBy: "#1" }], (f) => (f === "000001_a.md" ? rects["000001_a.md"] : null)).length, 0, "a ref whose card is not rendered draws nothing, and so does an unrendered blocked card");
+assert.deepEqual(relationPaths([{ file: "000002_b.md", state: "to-do" }], rectOf), [], "an older payload without blockedBy draws nothing");
+
+// the page runs the tested helpers and ships the overlay wiring
+assert.ok(page.includes(String(numLinkHtml)) && page.includes(String(curve)) && page.includes(String(relationPaths)), "the page ships the tested id-link and relation helpers");
+assert.match(page, /#board \{[^}]*position: relative/, "#board is the overlay's containing block, so the lines scroll with the content");
+assert.ok(page.includes("#relations { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; }"), "the overlay sits above the cards and never intercepts their clicks");
+assert.ok(page.includes('setAttribute("pointer-events", "none")'), "the overlay is created non-interactive");
+assert.ok(page.includes("stroke-dasharray: 6 4"), "the relation paths render dashed");
+assert.ok(page.includes("@keyframes dashflow { to { stroke-dashoffset: -10; } }"), "dashes flow along the path, from the blocked task towards the blocker");
+assert.match(page, /@media \(prefers-reduced-motion: reduce\) \{ \.spin \{ animation: none; \} #relations path \{ animation: none; \} \}/, "reduced motion renders the relation paths static");
+assert.ok(page.includes('window.addEventListener("resize", drawRelations)'), "a resize recomputes the line endpoints");
+assert.match(page, /el\.ontransitionend = \(\) => \{ el\.style\.transition = ""; el\.ontransitionend = null; drawRelations\(\); \};/, "settled FLIP transitions recompute the line endpoints");
+assert.ok(page.includes('querySelectorAll("#m-attrs .num-link")'), "the detail card binds its id links to openTask after render");
+assert.ok(page.includes('"<div><span>blockedBy</span>"'), "the detail card builds a blockedBy row");
+assert.ok(page.includes('if (!refs.length) return "";'), "no blockedBy row when the attribute is absent or empty");
+assert.ok(page.includes(".num-link { color: var(--link); cursor: pointer; }"), "link ids carry the link color and a pointer affordance in both themes");
+assert.ok(page.includes("#m-attrs span:not(.chip):not(.num-link)"), "the attrs styling exempts the id links");
 
 // refresh identity: the 5 s poll keeps the node of every card whose markup did not change, so its
 // spinner element keeps spinning; a state change rewrites that card's markup and nothing else
