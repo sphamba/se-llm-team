@@ -23,3 +23,5 @@ Live test (worktree fix/119-modal-paints-above, commit 7cef488): no issues. The 
 - Pixel check: at the line midpoint under the open overlay the fixed page renders srgb(130,133,143) against the unfixed srgb(156,159,165), the dark overlay now dimming the line.
 - User flow: clicking a card opens the detail card (blocked task modal shows blockedBy #1), the overlay covers the board, and the close button hides the modal again. No page errors (the single-project server's /api/projects 404 is the documented normal).
 Unit suites were not run in this step.
+
+Merge: base branch resolved as main (root checkout on main, not detached). Step 1 in worktree fix/119-modal-paints-above: git merge main was already up to date, no conflicts, so the test suites were skipped. Step 2 in project root: git merge --no-edit fix/119-modal-paints-above fast-forwarded main ced7e55 to 7cef488 (src/webui.ts and src/webui.test.ts), root clean afterwards. No open questions.
