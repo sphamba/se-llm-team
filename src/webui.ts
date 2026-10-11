@@ -353,18 +353,17 @@ h1 { font-size: 16px; margin: 0; }
 .empty { font-size: 12px; color: var(--faint); }
 .toggle { display: block; width: 100%; margin-top: 2px; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 .toggle:hover { background: var(--hover); }
-.agent-btn { display: inline-flex; align-items: center; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: 10px; }
+.agent-btn { display: inline-flex; align-items: center; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 .agent-btn:hover { background: var(--hover); }
 .agent-btn-active { border-color: var(--link); }
 .agent-btn.agent-btn-active { background: var(--medium-bg); }
-.agent-past { display: flex; width: fit-content; margin-top: 6px; }
-.agent-live { margin-top: 6px; }
+#m-agent-btns { display: flex; flex-wrap: wrap; gap: 6px; }
 .check { color: var(--low-fg); margin-right: 5px; }
 #m-agent { margin-bottom: 12px; }
 #m-agent:empty { display: none; }
 #m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 300px; overflow: auto; }
 #m-log.hidden { display: none; }
-#m-log pre { margin: 0; padding: 8px 10px; font-size: 12px; line-height: 1.45; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: break-word; }
+#m-log pre { margin: 0; padding: 8px 10px; font-size: 10px; line-height: 1.45; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: break-word; }
 #modal { position: fixed; inset: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
 #modal.hidden { display: none; }
 #m-box { background: var(--panel); border-radius: 10px; padding: 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
@@ -527,7 +526,7 @@ function renderAgent(t) {
 	for (const a of (t.agents || []).filter(a => !a.alive)) btns.push('<button class="agent-btn agent-past" data-role="' + esc(a.role) + '" onclick="openAgentLog(\\'' + esc(a.role) + '\\')"><span class="check">\u2713</span>' + esc(cap(a.role)) + "</button>");
 	if (t.agent && t.agent.alive) btns.push('<button class="agent-btn agent-live" data-role="' + esc(t.agent.role) + '" onclick="openAgentLog(\\'' + esc(t.agent.role) + '\\')"><span class="spin"></span>' + esc(cap(t.agent.role)) + "</button>");
 	if (!btns.length) return;
-	el.innerHTML = btns.join("") + '<div id="m-log" class="hidden"><pre id="m-log-text"></pre></div>';
+	el.innerHTML = '<div id="m-agent-btns">' + btns.join("") + '</div><div id="m-log" class="hidden"><pre id="m-log-text"></pre></div>';
 	markActiveAgent();
 	const p = logPane();
 	p.onscroll = () => {

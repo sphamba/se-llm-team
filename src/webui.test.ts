@@ -115,6 +115,16 @@ assert.ok(page.includes("#m-log.hidden { display: none; }"), "log pane hides");
 assert.ok(page.includes("/api/agent-log"), "page uses the agent log endpoint");
 assert.ok(page.includes('<span class="check">✓</span>'), "past agent buttons render a green checkmark");
 assert.ok(page.includes(".agent-btn-active"), "the shown agent button gets an active class");
+// 000076: the small font belongs to the log text, not the selector buttons, and the buttons share
+// one wrapping row, oldest leftmost, the live agent last
+const agentBtnCss = page.match(/\.agent-btn \{[^}]*\}/)![0];
+assert.ok(agentBtnCss.includes("font-size: 12px") && agentBtnCss.includes("padding: 3px 10px"), ".agent-btn keeps its original 12px size");
+assert.ok(page.match(/#m-log pre \{[^}]*\}/)![0].includes("font-size: 10px"), "the agent log text drops to 10px");
+assert.ok(/display: flex; flex-wrap: wrap/.test(page.match(/#m-agent-btns \{[^}]*\}/)![0]), "the button container is one wrapping flex row");
+assert.ok(!page.includes(".agent-past {") && !page.includes(".agent-live {"), "no per-button block row styles remain");
+const pastAt = page.indexOf('class="agent-btn agent-past"');
+const liveAt = page.indexOf('class="agent-btn agent-live"');
+assert.ok(pastAt >= 0 && liveAt > pastAt, "buttons render chronologically: oldest first, live agent last");
 setState(root, getTask(root, task.file)!, "doing");
 const slug = task.file.replace(/\.md$/, "");
 mkdirSync(join(root, ".kanban", ".pids"), { recursive: true });
