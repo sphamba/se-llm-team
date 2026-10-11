@@ -79,7 +79,8 @@ assert.ok(side.includes("[prompt] Review the diff\n"), "a sidechain user record 
 assert.ok(side.includes("Reading the diff.\n"), "sidechain text blocks render as message text");
 assert.ok(side.includes("[tool] bash: diff looks fine\n"), "a sidechain toolResult renders toolName plus its text content");
 assert.ok(side.includes("── thinking ──\n") && side.includes("Plan the fix.\n"), "sidechain thinking blocks render in the existing thinking style");
-assert.equal(side.split("[tool] read: /r/SPECS.md").length - 1, 1, "one tool line per call: a sidechain toolResult dedupes against its toolcall within the chunk");
+assert.equal(side.split("[tool] read: /r/SPECS.md").length - 1, 1, "one tool line per call: the toolcall args line renders once");
+assert.ok(!side.includes("[tool] read: specs"), "a sidechain toolResult dedupes against its toolcall within the chunk");
 assert.ok(!side.includes('"type"'), "sidechain records never leak raw JSON");
 assert.ok(!renderLogChunk(sidechain + "partial-without-newline").includes("partial"), "a partial trailing sidechain record is dropped too");
 
