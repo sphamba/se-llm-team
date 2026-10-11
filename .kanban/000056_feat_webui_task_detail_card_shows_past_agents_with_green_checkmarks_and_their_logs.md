@@ -1,7 +1,7 @@
 ---
 name: "feat: webui task detail card shows past agents with green checkmarks and their logs"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "feat/webui-task-detail-card-shows-past-agents-with-green-checkmarks-and-their-logs"
 ---
 
@@ -39,3 +39,5 @@ Constraints:
 - Modal: live agent button unchanged (spinner + name); past agents render below it as agent-past buttons with a theme-aware green checkmark (check span, var(--low-fg)), hidden with the whole agent area when a task has no role logs; every button toggles openAgentLog(role) which reuses the existing streaming pane.
 - Polling: past-agent polls stop after one empty poll (logs of dead agents are frozen); pullLog now pins the logState reference so an in-flight response from a superseded open or role switch cannot write into the new view.
 - webui.test.ts: agents[] checks added (empty for no logs, single live developer, past reviewer after live developer in pipeline order, dead state-mapped agent is past, reviewer log streams via /api/agent-log, checkmark span shipped in the page). webui/kanban/orchestrator tests all pass; served client JS syntax-verified.
+- [2026-10-11 09:33] Re-review pass (commit 358c345): same conclusion, no fixes needed. Confirmed the 09:20 findings independently: full test suites pass (webui, kanban, orchestrator), served client JS parses (node --check), live /api/tasks agents[] payload and checkmark span verified on a temp board. The 09:20 state transition to to-live-test did not persist on the board (state was still reviewing), so it is set here.
+- [2026-10-11 09:20] Review (commit 358c345, diff main...HEAD = src/webui.ts + src/webui.test.ts only): no fixes needed. Verified per spec - agentHistory adds agents[] (existsSync per pipeline role, alive only for the state-mapped role with a live pid via the shared currentPid helper); live button keeps spinner + name, past buttons render below it in pipeline order with a green theme-aware checkmark (.check uses var(--low-fg), green in both palettes #aad94c/#86b300); every button calls openAgentLog(role) which toggles or opens the existing pane and streams {slug}.{role} handles, path resolved server-side in the untouched agentLogPath; past-agent polling stops after one empty poll; empty agent area stays hidden (#m-agent:empty). Ran webui/kanban/orchestrator suites, all pass; re-verified the served client JS syntax and the live /api/tasks agents[] payload on a temp board (empty list and past reviewer entry both correct). Known ceiling, within spec: after the timer stops for a past log it will not auto-resume if the same role later becomes live again and its log grows; the user re-clicks the button to reopen. State set to to-live-test.

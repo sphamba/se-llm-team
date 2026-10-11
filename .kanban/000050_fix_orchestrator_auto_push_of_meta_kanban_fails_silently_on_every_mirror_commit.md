@@ -23,6 +23,7 @@ Suggested scope (decide after investigation):
 Related but distinct: 000034 (the mirror feature), 000044 (branch-to-tree reconcile), 000045 (mirror commit label swallowing create events), 000046 (fresh-clone bootstrap refs + non-fast-forward push).
 
 # Notes
+- [2026-10-11 07:14] Merge conflict for branch fix/orchestrator-auto-push-of-meta-kanban-fails-silently-on-every-mirror-commit, merger spawned (attempt 1).
 
 - Investigated the environment: origin is git@github.com:sphamba/se-llm-team.git (SSH) and ~/.ssh/ held no known_hosts and no key. Host-key verification was the first failure cause; after accepting the host key, pushes still fail with "Permission denied (publickey)", because this environment has no deploy key and registering one needs user credentials. Scope option 1 (configure SSH so pushes succeed) is therefore not completable by an agent here; the user must add a deploy key to the GitHub repo for pushes to work.
 - Environment half-fix applied during investigation: github.com's host key is now in ~/.ssh/known_hosts (via StrictHostKeyChecking=accept-new), so push failures now surface the real auth error instead of "Host key verification failed".
