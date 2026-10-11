@@ -1,7 +1,7 @@
 ---
 name: "feat: webui agent log pane; mark the shown agent, smaller buttons, 5x chunk size"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "feat/webui-agent-log-pane-mark-the-shown-agent-smaller-buttons-5x-chunk-size"
 ---
 
@@ -49,3 +49,4 @@ Constraints:
 - Chunk size: LOG_CHUNK 16384 -> 81920, now exported; webui.test.ts imports it for the tail/head assertions. Fixtures resized because the old ones sat below the new chunk: logText 626 -> 2600 lines (166400 bytes, 2+ history pages), bigRecord and pad z-runs 20000/40000 -> 100000 so the split-record and walk-back paths stay exercised.
 - Checks: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts all pass; tsc --noEmit clean for src/webui.ts + src/webui.test.ts. Playwright browser check (subagent): button order [reviewer, developer], active mark moves and clears, font-size 10px, #m-log margin-top 6px, 128000-byte log serves text of 81920 with head 46080, history page reaches head 0 with atStart true. Screenshots: /tmp/webui-check-light.png, /tmp/webui-check-dark.png.
 - Expect a minor sequential merge with 000058 (one-line deletion in src/webui.ts) when it runs later, per the task Constraints.
+- Review (Reviewer, worktree 96bf334): no fixes needed. Diff touches only src/webui.ts and src/webui.test.ts per the Constraints. markActiveAgent() correctly guards on pane visibility, compares b.dataset.role with logState.role (both esc-safe; esc() escapes double quotes), and re-applies the mark after renderAgent rebuilds #m-agent; openLog calls it after unhiding, closeLog after clearing logState, so no stale mark on re-open or toggle-close. Chronological order verified: past agents (t.agents order) then live last. No 16384 remains anywhere; LOG_CHUNK 81920 is used by all three server paths (tail, init, walk-back). Fixtures resized correctly: 2600x64-byte lines = 166400 bytes exercise 2 history pages; bigRecord and pad z-runs 100000 > 81920 keep the split-record and walk-back paths live. Checks re-run in the worktree: kanban.test.ts, orchestrator.test.ts, webui.test.ts all pass; tsc --noEmit (module/target es2023, nodenext) clean; strict-mode-only complaints are pre-existing in untouched code. Live Playwright check (subagent, light theme): button order past-past-live left to right, active class sets/moves/clears, font-size 10px, padding 2px 8px, #m-log margin-top 6px, active border rgb(242,151,24) + tint rgba(235,164,0,.15) vs inactive differ, 134890-byte log serves an exactly-81920-byte window with the documented partial-head-line drop. Hold behind 000067 correctly cleared: 000067 is done, worktree empty, and its commit 498c0d1 is in this branch; main's later 000042 short-name commits touch no webui files, so the merge stays clean.
