@@ -1,8 +1,8 @@
 ---
 name: "chore: drop the unverifiable typecheck acceptance line; name the runnable checks"
 priority: "low"
-state: "to-merge"
-worktree: "chore/94-drop-the-unverifiable"
+state: "done"
+worktree: ""
 ---
 
 # Summary

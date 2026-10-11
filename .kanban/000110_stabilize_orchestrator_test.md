@@ -1,7 +1,7 @@
 ---
 name: "fix: stabilize orchestrator.test.ts part G merger-defer timing"
 priority: "low"
-state: "doing"
+state: "reviewing"
 worktree: "fix/110-stabilize-orchestrator-test"
 issuer: "#64"
 ---
@@ -25,3 +25,6 @@ Acceptance:
 - Part AB executes and passes in those runs.
 
 # Notes
+
+- [2026-10-11 17:45] Root cause: the linger stub's 5s window is measured from its own start, but its node startup (spawn-to-setTimeout delay) eats into it. Under load the startup delay grew past ~4s, so the stub set to-merge and died ~1s later; the test's fixed 2s sleep then landed after the stub's death AND the whole merger chain (sweep spawns merger, merge, doneCleanup removes the worktree), so the first assertion (`worktree kept while the live-tester pid is alive`) saw the settled state and failed at src/orchestrator.test.ts:473. Fix (commit ba5b262): replaced the fixed 2s sleep with a poll that waits until the registered live-tester pid (read from .pids/<slug>.pid, cleared by the poll once dead) is actually dead, asserting the defer continuously inside the alive window (worktree kept, no spawned merger, no done mirror commit). Once the pid dies, the existing settled waitFors (worktree gone, done mirror commit) run unchanged. While the pid is alive the defer holds deterministically, so the polled assertions cannot false-fail; if a pathological startup delay kills the stub before the first poll iteration, the run still passes and the settled state is verified by the later waitFors.
+- [2026-10-11 17:45] Verification: 15 isolated part-G repro loops with the new logic (19 alive-window checks per run) and 8 more under 8 busy-loop processes all passed; 3 consecutive full `node src/orchestrator.test.ts` runs in the worktree passed (~160-170s each, no part G failure). Acceptance part AB: a throwaway branch at c917c6e (the tip carrying 1299c21/part AB) merged with ba5b262 ran the full suite 3 consecutive times, all passed with "... + task removal smoke passed" (part AB) reached and passing in every run. Throwaway worktree and branch removed; the fix branch itself carries only the part G change.
