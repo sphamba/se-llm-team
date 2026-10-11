@@ -127,11 +127,11 @@ const deadStub = (root: string) => {
 	return stub;
 };
 
-async function runDaemon(root: string, script = join(HERE, "orchestrator.ts")) {
+async function runDaemon(root: string, script = join(HERE, "orchestrator.ts"), home?: string) {
 	const daemon = spawn(
 		process.execPath,
 		[script, "--root", root, "--rescan-seconds", "1", "--poll-minutes", "0.05"],
-		{ stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, SE_LLM_TEAM_NO_WEBUI: "1" } },
+		{ stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, SE_LLM_TEAM_NO_WEBUI: "1", ...(home ? { HOME: home } : {}) } },
 	);
 	daemons.push({ daemon, root });
 	let out = "";
@@ -209,6 +209,11 @@ mkdirSync(kanbanDir(rootA), { recursive: true });
 writeFileSync(join(kanbanDir(rootA), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootA), pollMinutes: 0.05 }));
 const taskA = createTask(rootA, { name: "feat: smoke test", summary: "Pipeline smoke", specs: "Run the full pipeline" });
 setState(rootA, taskA, "to-do");
+// a legacy unsuffixed log from the old naming: never renamed or rewritten, and it never
+// counts toward the per-run index, so the first indexed run is still 0
+const slugA = taskA.file.replace(/\.md$/, "");
+mkdirSync(join(kanbanDir(rootA), ".logs"), { recursive: true });
+writeFileSync(join(kanbanDir(rootA), ".logs", `${slugA}.developer.log`), "legacy\n");
 
 const a = await runDaemon(rootA);
 const readA = () => parseTask(rootA, taskA.file);
@@ -240,13 +245,13 @@ assert.equal(
 );
 // --mode json: the agent log carries the full JSONL event stream (message, thinking, tool
 // events), not print mode's final text only; per-run naming: the first indexed run is 0
-const slugA = taskA.file.replace(/\.md$/, "");
 const logsA = join(kanbanDir(rootA), ".logs");
 const devLogA = readFileSync(join(logsA, `${slugA}.developer.0.log`), "utf8");
 for (const record of ['"type":"message_update"', '"type":"tool_execution_start"', '"type":"message_end"']) {
 	assert.ok(devLogA.includes(record), `developer log carries JSONL ${record}`);
 }
 assert.ok(existsSync(join(logsA, `${slugA}.reviewer.0.log`)) && existsSync(join(logsA, `${slugA}.live-tester.0.log`)), "reviewer and live-tester runs got indexed log files");
+assert.equal(readFileSync(join(logsA, `${slugA}.developer.log`), "utf8"), "legacy\n", "legacy unsuffixed log never renamed or rewritten");
 // the reviewer's approval (to-live-test) is a successful run: counted once per task
 assert.equal(readFileSync(join(logsA, `${slugA}.reviewer-runs.count`), "utf8").trim(), "1", "reviewer approval counted as one successful run");
 a.daemon.kill("SIGTERM");
@@ -1048,6 +1053,10 @@ if (next) writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, 
 
 const rootX = fixture();
 cleaned.push(rootX);
+// exact-flag asserts: an empty temp HOME keeps the ambient user-level config (provider, model,
+// roles) out of loadConfig, which merges user-level first
+const homeX = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeX);
 mkdirSync(kanbanDir(rootX), { recursive: true });
 writeFileSync(
 	join(kanbanDir(rootX), "se-llm-team.json"),
@@ -1066,7 +1075,7 @@ writeFileSync(
 const taskX = createTask(rootX, { name: "feat: llm flags", summary: "LLM config smoke", specs: "n/a" });
 setState(rootX, taskX, "to-do");
 
-const x = await runDaemon(rootX);
+const x = await runDaemon(rootX, join(HERE, "orchestrator.ts"), homeX);
 await waitFor(() => parseTask(rootX, taskX.file).state === "done" && parseTask(rootX, taskX.file).worktree === "", 60000, "pipeline with llm config", x.output);
 const xSpawns = () => readFileSync(join(rootX, "argv.log"), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as { role: string; argv: string[] });
 const xFlags = (role: string) => llmArgs(xSpawns().find((s) => s.role === role)!.argv);
@@ -1092,6 +1101,8 @@ console.log("orchestrator.test.ts: ... + llm config flags smoke passed");
 // --- part Y: bad llm config values warn and are dropped, the daemon keeps running ---
 const rootY = fixture();
 cleaned.push(rootY);
+const homeY = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeY);
 mkdirSync(kanbanDir(rootY), { recursive: true });
 writeFileSync(
 	join(kanbanDir(rootY), "se-llm-team.json"),
@@ -1099,7 +1110,7 @@ writeFileSync(
 );
 const taskY = createTask(rootY, { name: "fix: bad llm config", summary: "Bad llm config smoke", specs: "n/a" });
 setState(rootY, taskY, "to-do");
-const y = await runDaemon(rootY);
+const y = await runDaemon(rootY, join(HERE, "orchestrator.ts"), homeY);
 await waitFor(() => y.output().includes("spawned developer"), 30000, "developer spawned despite bad llm config", y.output);
 assert.ok(y.output().includes('unknown thinking level "banana" (global)'), "global thinking typo warned about");
 assert.ok(y.output().includes('unknown thinking level "wild" for role "reviewer"'), "role thinking typo warned about");
