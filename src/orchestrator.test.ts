@@ -1219,7 +1219,7 @@ execSync("git commit -qam main", { cwd: rootX, shell: "/bin/bash" });
 const taskX2 = createTask(rootX, { name: "fix: llm merger", summary: "LLM merger smoke", specs: "n/a" });
 setState(rootX, taskX2, "to-merge");
 setWorktree(rootX, taskX2, "fix/llm-conflict");
-await waitFor(() => xSpawns().some((s) => s.role === "merger"), 30000, "merger spawned under the llm config", x.output);
+await waitFor(() => xSpawns().some((s) => s.role === "merger" && (s.argv[s.argv.indexOf("-p") + 1] ?? "").includes(taskX2.file)), 30000, "merger spawned under the llm config", x.output);
 assert.deepEqual(xFlags("merger", taskX2.file), ["--provider", "mprov", "--model", "merge-model", "--thinking", "high"], "merger role override applies");
 x.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + llm config flags smoke passed");
