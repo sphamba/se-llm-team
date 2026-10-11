@@ -449,7 +449,7 @@ function reconcileBoard(root: string): boolean {
 // is taken), links the shared board into it and records the worktree on the task;
 // null when creation fails
 function ensureWorktree(root: string, task: Task): { wt: string; wtDir: string } | null {
-	const wt = task.worktree || slugWorktree(task.name);
+	const wt = task.worktree || slugWorktree(task.name, task.file);
 	const wtDir = join(root, ".worktrees", wt);
 	if (!existsSync(wtDir)) {
 		if (git(root, ["worktree", "add", join(".worktrees", wt), "-b", wt], true) === null) {

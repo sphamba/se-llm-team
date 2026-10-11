@@ -12,19 +12,25 @@ const fail = (msg: string) => {
 	process.exit(1);
 };
 
-// slug rules
-assert.equal(slugFile("feat: nice thing"), "feat_nice_thing");
-assert.equal(slugWorktree("feat: nice thing"), "feat/nice-thing");
-assert.equal(slugWorktree("nice thing"), "nice-thing");
+// slug rules: capped at 4 words with the type word dropped, number prefix kept
+assert.equal(slugFile("feat: nice thing"), "nice_thing");
+assert.equal(slugFile("fix: restore board state lost to stale mirror snapshots"), "restore_board_state");
+assert.equal(
+	slugWorktree("fix: restore board state lost to stale mirror snapshots", "000042_fix_restore_board_state_lost_to_stale_mirror_snapshots.md"),
+	"fix/42-restore-board-state",
+);
+assert.equal(slugWorktree("feat: nice thing", 42), "feat/42-nice-thing");
+assert.equal(slugWorktree("nice thing", "000042_nice_thing.md"), "task/42-nice-thing");
+assert.equal(slugWorktree("feat: nice thing"), "feat/nice-thing"); // no file, no number
 
 // create + numbering + frontmatter roundtrip
 const t1 = createTask(root, { name: "feat: nice thing", priority: "high", summary: "Do a thing", specs: "Do it well" });
-assert.equal(t1.file, "000001_feat_nice_thing.md");
+assert.equal(t1.file, "000001_nice_thing.md");
 assert.equal(t1.state, "backlog");
 assert.equal(t1.name, "feat: nice thing");
 assert.equal(t1.priority, "high");
 const t2 = createTask(root, { name: "fix: other thing", summary: "Fix it" });
-assert.equal(t2.file, "000002_fix_other_thing.md");
+assert.equal(t2.file, "000002_other_thing.md");
 assert.equal(t2.priority, "medium");
 // name with colon must round-trip through the quoted frontmatter
 assert.equal(parseTask(root, t1.file).name, "feat: nice thing");
@@ -95,7 +101,7 @@ assert.equal(parseTask(root, t4.file).name, 'feat: "quoted" \\ and\nnewline');
 // no git repo must not throw (mutations write files only)
 const noGit = mkdtempSync(join(tmpdir(), "kanban-nogit-"));
 const t3 = createTask(noGit, { name: "feat: no repo", summary: "s" });
-assert.equal(t3.file, "000001_feat_no_repo.md");
+assert.equal(t3.file, "000001_no_repo.md");
 assert.equal(setState(noGit, t3, "to-do"), undefined);
 rmSync(noGit, { recursive: true, force: true });
 
@@ -127,7 +133,7 @@ assert.equal(new Set(created).size, created.length);
 // a concurrent create landed between the max scan and the write: target file already exists
 writeFileSync(join(raceRoot, ".kanban", "000006_other_creator.md"), '---\nname: "other"\n---\n');
 const tr = createTask(raceRoot, { name: "feat: racer", summary: "s" });
-assert.equal(tr.file, "000007_feat_racer.md"); // bumped to the next free number
+assert.equal(tr.file, "000007_racer.md"); // bumped to the next free number
 assert.match(readFileSync(join(raceRoot, ".kanban", "000006_other_creator.md"), "utf8"), /other/); // not overwritten
 created.push(tr.file);
 assert.equal(new Set(created).size, created.length);
