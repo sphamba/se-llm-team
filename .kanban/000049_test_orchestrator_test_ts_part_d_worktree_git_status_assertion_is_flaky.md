@@ -1,7 +1,7 @@
 ---
 name: "test: orchestrator.test.ts part D worktree git-status assertion is flaky"
 priority: "low"
-state: "reviewing"
+state: "live-testing"
 worktree: "test/orchestrator-test-ts-part-d-worktree-git-status-assertion-is-flaky"
 ---
 
@@ -23,3 +23,5 @@ Suggested fix direction: make the test wait for the settled state before asserti
 - Checked against the spec's suggested direction: polling git status itself is the settled-state wait, and a stronger one than waiting for the wt-excludes file to exist (syncBoard writes the file two steps before `git config --worktree core.excludesFile`, so file-exists alone would still race). Convergence requires the excludes config to be applied, and there is no false positive: with the symlink confirmed present, git status stays dirty until the config lands.
 - Removed one dead leftover in the same block: the symlink waitFor passed an ignored `rootD` argument (waitFor takes four params). Committed as 9a40d36 on the worktree branch.
 - Verification: node src/orchestrator.test.ts passed 4/4 runs (three against 790722e, one after the cleanup), including part D (shared board).
+- Review: no fixes needed. Confirmed the race explanation against syncBoard in src/orchestrator.ts: the order is symlink, skip-worktree pass, wt-excludes write, `git config extensions.worktreeConfig`, then `git config --worktree core.excludesFile`, so the settled state requires the last config step and polling `git status --porcelain` is the only correct wait (no false positive: with the symlink confirmed present by the prior waitFor, it stays untracked until the config lands). The one-line cleanup (9a40d36) is correct: waitFor takes four params, so `rootD` was an ignored fifth argument.
+- Review verification: node src/orchestrator.test.ts passed in the worktree (all smoke parts, including part D shared board). The branch (base 87f3240, which contains main's fix 790722e) carries only the cleanup; main's newer changes touch the test file at lines 118/257/751+, so the future merge into main is clean. This is the only `git status --porcelain` in the test file, so no other part shares the race.
