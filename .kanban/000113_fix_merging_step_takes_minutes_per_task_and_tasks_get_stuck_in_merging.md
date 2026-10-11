@@ -1,7 +1,7 @@
 ---
 name: "fix: merging step takes minutes per task and tasks get stuck in merging"
 priority: "high"
-state: "live-testing"
+state: "to-merge"
 worktree: "fix/113-merging-step-takes"
 ---
 
@@ -58,3 +58,13 @@ Deliberate non-goal respected: no concurrent mergers (the global merger gate sta
 Review 2026-10-11 (worktree fix/113-merging-step-takes): implementation matches the Specs. Checked the /proc/<pid>/stat parse against a live process (starttime field read correctly, matching discriminator alive, mismatched dead, legacy pid-only file and dead pid both fall back correctly), the two-token pid file compatibility with parseInt readers (agentPid, consumeReviewerRun armed-marker compare, webui currentPid, lock readers), and that janitorPids cannot touch the global merger pid (merger.pid does not end in .merger.pid) or a current-scheme <slug>.pid. Poll counter logic re-traced: the hadPid guard protects a waiting past-cap task's counter, the bounce is unconditional and the counter bumps after the setState, single-threaded so no rescan can interleave. One fix committed on top (fe9a5f6): merger.md step 1 ordered "go straight to step 2" before "Complete the merge, stage the resolved files and commit", which read as contradictory sequencing; the merge-and-commit now comes first, then the suite-run conditional. All three suites pass after the fix (node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts). Out-of-scope notes for follow-up, not fixed here: (1) the .orchestrator.lock file is still pid-only, so a recycled daemon pid would make acquireLock refuse to start the daemon, same root cause class but a different file and reader set (acquireLock/releaseLock/holdsLock/removeTask, hub.ts); (2) the webui's pidAlive mirror is not discriminator-aware, so a recycled pid could show a stale live badge, cosmetic only since the poll bounces the task and the state change re-renders the board.
 
 Second review pass 2026-10-11 (worktree fix/113-merging-step-takes, after the fe9a5f6 fix): no further issues found, no fixes made. Verified: the /proc/<pid>/stat parse against a live process (field 22 via cut matches the index-19-after-last-paren scheme), the #95-shared regions (deadCooldownActive, poll bounce/counter logic) are byte-identical to main's landed f941365 so the merger's `git merge main` is trivial there (the branch is only behind main in untouched #98/#101/#80 regions, which auto-resolve to main), janitorPids cannot match the global merger.pid or a current-scheme <slug>.pid (slugFile sanitization strips dots, so a slug can never end in .merger), the deadCooldownActive statSync runs inside rescan's per-task try/catch so a deleted task file cannot break the sweep, part AE's recorder matches spawnAgent's `-p` prompt passing, and the new waitFor call sites match the helper signature (cond, ms, what, out). Re-ran the acceptance suites in the worktree, all pass: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts.
+
+Live test 2026-10-11 (worktree fix/113-merging-step-takes, commit fe9a5f6). Ran the real daemon (node src/orchestrator.ts --root <scratch>) against three scratch git projects. No code was edited.
+
+1. Clean merge prompt: the full pipeline (to-do to done) ran with a recording stub. The recorded merger prompt contains the clean-merge skip and the conflict-only suite-run instruction. The task reached done. PASS.
+2. Recycled pid: a doing task whose pid file named the live harness pid with a stale discriminator bounced doing -> to-do, and the gate cleared. PASS.
+3. Non-blocking push: with a silent TCP origin (git protocol, no response) the pipeline reached done in 2.6 s, and the hanging push was counted as a failure. A synchronous push would have blocked the sweep for the 30 s cap. PASS.
+
+Acceptance suites in the worktree: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts all pass.
+
+No issues in the tested change. Two untracked follow-ups of the same pid-reuse root cause remain, both out of the task scope: the .orchestrator.lock file is pid-only (a recycled daemon pid makes acquireLock refuse to start), and the webui pidAlive mirror is not discriminator-aware (a stale live badge, cosmetic). Reported to the Project manager for new tasks.

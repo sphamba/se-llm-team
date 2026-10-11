@@ -1,8 +1,8 @@
 ---
 name: "feat: compact agent logs; write-time pipe, slim envelopes, retro sweep"
 priority: "medium"
-state: "to-merge"
-worktree: "feat/105-compact-agent-logs"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -73,3 +73,9 @@ Constraints:
 - Sampled production logs read-only. The largest log (52,059,872 bytes, the compacted 57 MB target) has no "sections", no message_update with usage, 75 tool_execution_start and 75 tool_execution_end records with full results, and one user-prompt message_end. One JSONL record per line is preserved. This confirms the read-path contract on real data.
 - The 278 production logs are 736,653,006 bytes in total. Logs written after the sweep carry "sections" again (for example the 105 developer log, 20,592,777 bytes), because the production daemon still runs main's pre-compactor code. This is expected and it ends after the merge and the daemon restart.
 - No issues found.
+
+2026-10-11 (merger):
+- Step 1 merged main into feat/105-compact-agent-logs in the task worktree (commit 3434143). Conflicts only in src/orchestrator.test.ts; src/orchestrator.ts auto-merged. main carried #101 (double-spawn live-pid guard, done and in main since the HOLD note was written), so both sides had appended test parts after common part AA with colliding labels AB-AE. Resolved by keeping both sets and renumbering main's parts: #101's guard smoke kept as part AF, then removal AG, blockedBy failsafe AH, dead-counter clear AI, per-complexity reviewer cap AJ. The import conflict was unioned (compactFinishedLogs, compactLogLine, logCompactor, logFeeders, pidAlive, removeTask, waitForBoardCommits). The spawnAgent auto-merge keeps 105's compactor pipe and #101's pidAlive guards; main's pre-#105 fd-redirect body there is the old code 105 replaces, so the 105 side won. Fixed the variable-name collisions the renumbered parts exposed (rootAC/rootAE declared on both sides): main's part locals renamed to their new labels (rootAG/taskAG/ag, rootAH/taskAH0-2/ah/readAH, rootAI/taskAI/slugAI/ai, rootAJ/taskAJ*/aj), commit 34e5ebc.
+- Tests in the worktree after the merge: orchestrator.test.ts green through all parts (compactor rules, retro sweep, cross-source pipe integrity, per-source sink close race, double-spawn live-pid guard, task removal, blockedBy failsafe, dead-counter clear, per-complexity reviewer cap), kanban.test.ts and webui.test.ts green.
+- Step 2 resolved the base branch again (main, root clean) and merged feat/105-compact-agent-logs into main from the root checkout: fast-forward to 34e5ebc, no conflicts.
+- Post-merge reminders from the reviewer notes: restart the production daemon so it runs main's pipe code, then a second `--compact-logs` pass shrinks the post-sweep growth (727 MB at the last read-only observation).
