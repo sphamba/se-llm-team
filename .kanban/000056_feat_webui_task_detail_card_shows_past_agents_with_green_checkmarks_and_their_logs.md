@@ -33,3 +33,9 @@ Constraints:
 - Conflicts are minor and merger-resolvable: modal area is distinct from 000036's FLIP render and 000054's /api/agent-log parse; webui.test.ts additions overlap 000036/000054 only by file.
 
 # Notes
+
+- [2026-10-11 09:07] Implemented per specs, commit 358c345 in feat/webui-task-detail-card-shows-past-agents-with-green-checkmarks-and-their-logs. (Re-appended: an earlier notes append was lost when the to-review transition and the spawned reviewer rewrote this file.)
+- Server: /api/tasks payload adds agents[] (one {role, alive} entry per existing role log file, pipeline order developer/reviewer/live-tester, only the state-mapped role with a live pid is alive); extracted shared currentPid helper, agentInfo now uses it; log path resolution stays server-side in agentLogPath (already validated per 000054), client only sends {slug}.{role} handles.
+- Modal: live agent button unchanged (spinner + name); past agents render below it as agent-past buttons with a theme-aware green checkmark (check span, var(--low-fg)), hidden with the whole agent area when a task has no role logs; every button toggles openAgentLog(role) which reuses the existing streaming pane.
+- Polling: past-agent polls stop after one empty poll (logs of dead agents are frozen); pullLog now pins the logState reference so an in-flight response from a superseded open or role switch cannot write into the new view.
+- webui.test.ts: agents[] checks added (empty for no logs, single live developer, past reviewer after live developer in pipeline order, dead state-mapped agent is past, reviewer log streams via /api/agent-log, checkmark span shipped in the page). webui/kanban/orchestrator tests all pass; served client JS syntax-verified.
