@@ -3,6 +3,7 @@ name: "feat: gzip finished agent logs; keep them readable through the webui"
 priority: "medium"
 state: "backlog"
 worktree: ""
+blockedBy: "#118"
 ---
 
 # Summary
