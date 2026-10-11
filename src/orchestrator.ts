@@ -258,20 +258,30 @@ export function logCompactor(): Transform {
 	});
 }
 
+// one compactor-fed append-only write stream per source (stdout, stderr) on the same log
+// file: a shared sink would let the first feeder to finish (stderr is usually empty) end it
+// while the other still holds backpressured lines - they would wait for a drain that never
+// comes and be lost silently. O_APPEND keeps every line atomic; each pair ends independently.
+export function logFeeders(path: string) {
+	const feeders = [logCompactor(), logCompactor()];
+	const sinks = feeders.map((f) => {
+		const sink = createWriteStream(path, { flags: "a" });
+		// a dead sink (disk full, log removed) stops its feed instead of buffering the child's
+		// output forever; a stream error loses log lines, never the daemon
+		sink.on("error", () => f.destroy());
+		f.on("error", () => {});
+		f.pipe(sink);
+		return sink;
+	});
+	return { feeders, sinks };
+}
+
 function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: string, pidName?: string): void {
 	const slug = task.file.replace(/\.md$/, "");
 	mkdirSync(join(kanbanDir(root), ".logs"), { recursive: true });
 	// stdout and stderr flow through the compactor into the append-only log (the write-time
 	// pipe drops the dead weight the fd redirect logged verbatim); the daemon drains the pipe
-	const sink = createWriteStream(logPath(root, `${slug}.${role}.${nextRunIndex(root, slug, role)}`), { flags: "a" });
-	// one compactor per source: both streams share the sink, so a shared line buffer would
-	// reassemble stdout's partial records with interleaved stderr bytes into merged lines
-	const feeders = [logCompactor(), logCompactor()];
-	for (const f of feeders) f.pipe(sink);
-	// a dead sink (disk full, log removed) stops the feed instead of buffering the child's
-	// output forever; a stream error loses log lines, never the daemon
-	sink.on("error", () => feeders.forEach((f) => f.destroy()));
-	for (const f of feeders) f.on("error", () => {});
+	const { feeders } = logFeeders(logPath(root, `${slug}.${role}.${nextRunIndex(root, slug, role)}`));
 	// --approve trusts the project-local files of the worktree, so the headless session never waits for a trust prompt;
 	// --mode json streams the full JSONL event log (thinking, tool calls, text) instead of print mode's final text only;
 	// the provider/model/thinking flags come from the config, resolved per role
@@ -280,8 +290,8 @@ function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: st
 		detached: true,
 		stdio: ["ignore", "pipe", "pipe"],
 	});
-	// end:false on both sources: a compactor ending early would end the shared sink before
-	// the other source drains; the child close event ends both compactors together
+	// end:false on both sources: the child close event is the single end path for both
+	// compactors, so neither feeder nor sink ends before its source drains
 	child.stdout?.on("error", () => {});
 	child.stderr?.on("error", () => {});
 	child.stdout?.pipe(feeders[0], { end: false });

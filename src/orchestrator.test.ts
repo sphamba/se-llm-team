@@ -8,7 +8,7 @@ import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { readHubRegistry, startHub } from "./hub.ts";
 import { createTask, kanbanDir, parseTask, setState, setWorktree } from "./kanban.ts";
-import { compactFinishedLogs, compactLogLine, logCompactor, pidAlive, waitForBoardCommits } from "./orchestrator.ts";
+import { compactFinishedLogs, compactLogLine, logCompactor, logFeeders, pidAlive, waitForBoardCommits } from "./orchestrator.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -1461,3 +1461,23 @@ assert.equal(linesAD.filter((l) => l === "stderr diagnostic mid-record").length,
 const turnEndAD = JSON.parse(linesAD.find((l) => l !== "stderr diagnostic mid-record"));
 assert.equal(turnEndAD.message.content.length, 200000, "the split stdout record reassembled intact");
 console.log("orchestrator.test.ts: ... + cross-source pipe integrity smoke passed");
+
+// --- part AE: per-source sinks on one append-only log file. A shared sink would let the
+// first feeder to finish (stderr is usually empty) end it while the other still holds
+// backpressured lines: with a real fs sink they would wait for a drain that never comes and
+// be lost silently ---
+const rootAE = fixture();
+cleaned.push(rootAE);
+mkdirSync(join(kanbanDir(rootAE), ".logs"), { recursive: true });
+const logAE = join(kanbanDir(rootAE), ".logs", "000205_end_race.developer.0.log");
+const { feeders: feedersAE, sinks: sinksAE } = logFeeders(logAE);
+const lineAE = (n: number) => JSON.stringify({ type: "turn_end", message: { role: "assistant", content: "x".repeat(n) } }) + "\n";
+feedersAE[0].write(lineAE(5000) + lineAE(5000) + lineAE(5000) + lineAE(5000)); // backpressures the 64 KB fs sink
+feedersAE[1].write("stderr line\n");
+feedersAE[0].end(); // child close: both feeders end in the same tick
+feedersAE[1].end();
+await Promise.all(sinksAE.map((s) => new Promise<void>((r) => s.on("close", r))));
+const allAE = readFileSync(logAE, "utf8");
+assert.equal((allAE.match(/turn_end/g) || []).length, 4, "no silent loss: the stderr feeder finishing first must not drop the stdout feeder's queued lines");
+assert.ok(allAE.includes("stderr line"), "stderr line present");
+console.log("orchestrator.test.ts: ... + per-source sink close race smoke passed");
