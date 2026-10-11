@@ -958,6 +958,29 @@ s.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: ... + push warning smoke passed");
 
+// --- part T2: a stale push-failures counter above the cap still warns, once per streak ---
+const rootT2 = fixture();
+cleaned.push(rootT2);
+// origin points at a non-repo path: every push fails fast, no SSH involved
+execSync("git remote add origin /nonexistent/se-llm-team.git", { cwd: rootT2, shell: "/bin/bash" });
+mkdirSync(join(kanbanDir(rootT2), ".logs"), { recursive: true });
+// a counter restored from a backup or left by an earlier run sits above the cap already
+writeFileSync(join(kanbanDir(rootT2), ".logs", "push-failures.count"), "5");
+writeFileSync(join(kanbanDir(rootT2), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootT2), pollMinutes: 0.05 }));
+// one task = one failed push: the stale counter never reaches equality, >= must still warn
+const sT2 = await runDaemon(rootT2);
+const taskT2 = createTask(rootT2, { name: "fix: push warn stale", summary: "Push warning smoke", specs: "n/a" });
+await waitFor(() => mirrorSubjects(rootT2).includes(`kanban: create ${taskT2.file}`), 30000, "stale-counter create mirror commit", sT2.output);
+await waitFor(() => sT2.output().includes("WARNING: auto-push of refs/heads/meta/kanban"), 10000, "warning despite a stale counter above the cap", sT2.output);
+// a further failure stays silent: one warning per streak, not one per failure
+const taskT2b = createTask(rootT2, { name: "fix: push warn stale 2", summary: "Push warning smoke", specs: "n/a" });
+await waitFor(() => mirrorSubjects(rootT2).includes(`kanban: create ${taskT2b.file}`), 30000, "second create mirror commit", sT2.output);
+await new Promise((r) => setTimeout(r, 2000));
+assert.equal(sT2.output().split("WARNING: auto-push").length - 1, 1, "stale-counter warning logged once per streak");
+sT2.daemon.kill("SIGTERM");
+
+console.log("orchestrator.test.ts: ... + stale push counter warning smoke passed");
+
 // async variant of waitFor for fetch-based conditions
 const waitForAsync = async (cond: () => Promise<boolean>, ms: number, what: string) => {
 	const end = Date.now() + ms;

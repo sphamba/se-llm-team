@@ -285,8 +285,8 @@ function commitKanban(root: string, message: string, files: string[]): boolean {
 
 // best-effort auto-push of only the board mirror ref; failures are logged, never fatal.
 // PUSH_WARN_AFTER consecutive failures log a prominent warning once (a success resets the
-// count), so a permanently unreachable origin is visible instead of silently defeating the
-// mirror and the fresh-clone bootstrap
+// count and the warned marker), so a permanently unreachable origin is visible instead of
+// silently defeating the mirror and the fresh-clone bootstrap
 function pushMirror(root: string): void {
 	if (!git(root, ["remote"], true)) return;
 	try {
@@ -297,10 +297,13 @@ function pushMirror(root: string): void {
 			timeout: 30000,
 		});
 		if (readCounter(root, "push-failures") > 0) writeFileSync(counterPath(root, "push-failures"), "0");
+		if (readCounter(root, "push-warned") > 0) writeFileSync(counterPath(root, "push-warned"), "0");
 	} catch (err) {
 		log(root, `push of ${KANBAN_REF} failed (non-fatal): ${err instanceof Error ? err.message : err}`);
-		// counter keeps growing while pushes keep failing; log the warning only once per streak
-		if (bumpCounter(root, "push-failures") === PUSH_WARN_AFTER) {
+		// >= plus a warned marker: a stale counter past PUSH_WARN_AFTER never hits equality, and
+		// >= alone would warn on every failure past the cap instead of once per streak
+		if (bumpCounter(root, "push-failures") >= PUSH_WARN_AFTER && readCounter(root, "push-warned") === 0) {
+			writeFileSync(counterPath(root, "push-warned"), "1");
 			log(root, `WARNING: auto-push of ${KANBAN_REF} to origin failed ${PUSH_WARN_AFTER} times in a row; the board mirror is not reaching origin and fresh-clone bootstrap cannot work. Check SSH access to origin for the daemon user (known_hosts entry, deploy key). This warning is logged once until a push succeeds.`);
 		}
 	}
