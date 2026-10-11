@@ -87,6 +87,12 @@ assert.ok(toolChunk.includes("x".repeat(120)), "the full command stays in the bl
 const joinChunk = renderLogChunk(JSON.stringify({ type: "tool_execution_end", toolCallId: "t1", toolName: "bash", result: { content: [{ type: "text", text: "boom: exit 1" }] }, isError: true }) + "\n");
 assert.ok(joinChunk.includes('<span class="lg-tres" data-tc="t1" data-sum="bash failed: boom: exit 1">boom: exit 1</span>'), "a tool end whose block lives in an earlier chunk renders the joinable span, errors carrying the summary text");
 
+const bareErr = renderLogChunk([
+	JSON.stringify({ type: "tool_execution_start", toolCallId: "t3", toolName: "bash", args: { command: "ls" } }),
+	JSON.stringify({ type: "tool_execution_end", toolCallId: "t3", toolName: "bash", isError: true, result: { content: [] } }),
+].join("\n") + "\n");
+assert.ok(bareErr.includes("<summary>bash failed</summary>"), "an error with no text surfaces as a bare failed summary, no trailing colon");
+
 // sidechain subagent transcripts (.output session records): user prompt and assistant text render
 // as lines, thinking and tool calls join the same collapsible blocks, toolResults fill them
 const sidechain = [
@@ -418,6 +424,7 @@ assert.ok(page.includes('(active ? "&project=" + encodeURIComponent(active) : ""
 assert.ok(page.includes('const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";'), "reduced motion falls back to an instant auto scroll");
 assert.ok(page.includes("p.scrollTo({ top: p.scrollHeight, behavior: behavior });"), "the live auto-scroll glides smoothly to the bottom");
 assert.ok(page.includes('details.lg-tool[data-tc]'), "the client dedupes tool blocks across poll windows by toolCallId");
+assert.ok(page.includes('#m-log-text .lg-tres, #m-log-text .lg-cont { display: block; }'), "a joinable span left unresolved by the loaded window still renders as its own line");
 assert.ok(page.includes('".lg-tres"'), "the client joins later tool results into their block");
 assert.ok(page.includes('".lg-cont"'), "the client joins thinking deltas that continue the previous chunk's block");
 

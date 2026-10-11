@@ -301,7 +301,7 @@ export function renderLogChunk(text: string): string {
 		'<details class="lg-tool" data-tc="' +
 		esc(t.id) +
 		'"><summary>' +
-		esc(t.fail !== null ? t.name + " failed: " + t.fail : t.name + (t.one ? ": " + t.one : "")) +
+		esc(t.fail !== null ? t.name + " failed" + (t.fail ? ": " + t.fail : "") : t.name + (t.one ? ": " + t.one : "")) +
 		'</summary><pre class="lg-args">' +
 		esc(t.args) +
 		"</pre>" +
@@ -346,7 +346,7 @@ export function renderLogChunk(text: string): string {
 			'<span class="lg-tres" data-tc="' +
 				esc(id) +
 				'"' +
-				(err !== null ? ' data-sum="' + esc((typeof name === "string" && name ? name : "?") + " failed: " + err) + '"' : "") +
+				(err !== null ? ' data-sum="' + esc((typeof name === "string" && name ? name : "?") + " failed" + (err ? ": " + err : "")) + '"' : "") +
 				">" +
 				esc(text) +
 				"</span>",
@@ -911,6 +911,7 @@ none so the card clicks pass through */
 #m-log-text pre { font: inherit; margin: 0; padding: 0; }
 #m-log-text details { margin: 2px 0; }
 #m-log-text summary { cursor: pointer; }
+#m-log-text .lg-tres, #m-log-text .lg-cont { display: block; }
 #m-log-text details > pre { padding-left: 12px; }
 #modal { position: fixed; inset: 0; z-index: 3; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
 #modal.hidden { display: none; }
