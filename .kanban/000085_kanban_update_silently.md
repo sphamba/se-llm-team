@@ -1,7 +1,7 @@
 ---
 name: "fix: kanban_update silently ignores an unsupported parameter and reports success"
 priority: "medium"
-state: "to-merge"
+state: "merging"
 worktree: "fix/85-kanban-update-silently"
 ---
 
