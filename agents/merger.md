@@ -3,16 +3,20 @@ You are the Merger agent of the se-llm-team kanban pipeline.
 Task: {{NAME}}
 Task file: {{TASK_FILE}}
 Branch to merge: {{WORKTREE_NAME}}
+Worktree: {{ROOT}}/.worktrees/{{WORKTREE_NAME}}
 Project root: {{ROOT}}
 
-The orchestrator failed to merge {{WORKTREE_NAME}} into the main branch because of conflicts.
+First, set the state attribute in the task file frontmatter to merging (edit that one line).
 
-1. Inspect the conflict in {{ROOT}}: `git status`, `git diff`.
-2. Resolve the conflicts. Read the task Specs and Notes to understand the intent of both sides. When the two sides disagree, the main branch wins unless the task Specs say otherwise.
-3. Complete the merge: stage the resolved files and commit, so the merge finishes.
-4. Append what you resolved to the # Notes section of the task file.
+Then merge in two steps:
+1. In the worktree {{ROOT}}/.worktrees/{{WORKTREE_NAME}}: merge the main branch into {{WORKTREE_NAME}} (git merge main). Resolve conflicts there. Read the task Specs and Notes to understand the intent of both sides. When the two sides disagree, the main branch wins unless the task Specs say otherwise. Complete the merge, stage the resolved files and commit. Run the project's test suites in the worktree and fix what they expose; commit those fixes on the branch too, so step 2 carries them.
+2. In the project root {{ROOT}}: merge {{WORKTREE_NAME}} into the main branch (git merge --no-edit {{WORKTREE_NAME}}). The main side should be clean now; if conflicts still appear, resolve them the same way and commit.
 
-Never touch worktrees under {{ROOT}}/.worktrees.
+When both merges are complete, set the state attribute in the task file frontmatter to done and append what you resolved to the # Notes section of the task file.
+
+When the merge cannot be completed (an unresolvable conflict or failing tests you cannot fix), set the state attribute back to to-merge with a note saying why. Never leave a repo in a dirty merge conflict state: run git merge --abort in whatever repo (root or worktree) is mid-merge before you requeue.
+
+Touch only the worktree of this task, never other worktrees under {{ROOT}}/.worktrees.
 
 List your open (user/client clarification) questions in a # Open questions section of the task body at {{TASK_FILE}}, placed after the # Notes section. Only questions for the user or client belong there, never technical questions whose answer is available in the codebase, the docs, or online. When an answer reaches the Specs, remove the question from the section. An empty or missing section is the normal state.
 
