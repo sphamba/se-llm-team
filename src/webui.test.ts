@@ -79,8 +79,15 @@ assert.equal(listed[0].name, task.name);
 assert.equal(listed[0].priority, "medium");
 assert.equal(listed[0].state, "backlog");
 assert.equal(listed[0].worktree, "");
+assert.equal(listed[0].issuer, "user", "absent issuer reads as user");
 assert.equal(listed[0].updated, statSync(join(root, ".kanban", task.file)).mtimeMs);
 assert.match(listed[0].body, /# Summary\nDashboard smoke/);
+
+// issuer flows to /api/tasks: the creation value for task-issued tasks
+const issued = createTask(root, { name: "feat: issued by 42", summary: "s", issuer: "#42" });
+const issuedRow = (await (await fetch(`${base}/api/tasks`)).json()).find((t) => t.file === issued.file);
+assert.equal(issuedRow.issuer, "#42");
+rmSync(join(root, ".kanban", issued.file)); // the daemon section below expects a one-task board
 
 // GET / mentions all 8 state names; other paths and methods are 404
 const page = await (await fetch(`${base}/`)).text();
@@ -152,6 +159,15 @@ assert.ok(page.includes(String(buildShell)) && page.includes(String(syncBoard)),
 assert.ok(spinnerHtml("doing").includes('<span class="spin">') && spinnerHtml("live-testing").includes('<span class="spin">'), "working states render the spinner");
 assert.equal(spinnerHtml("to-do") + spinnerHtml("to-review") + spinnerHtml("done"), "", "waiting and finished states render no spinner");
 assert.ok(cardHtml({ file: "000047_fix_x.md", name: "a & b", priority: "high" }, "doing").includes('<span class="num">#47</span>a &amp; b'), "a card carries its short number and escaped name");
+// issuer on cards: user-issued keeps full contrast with a plain user chip, task-issued dims the
+// name and carries a small #<num> badge
+const userCard = cardHtml({ file: "000001_a.md", name: "a", priority: "high" }, "doing");
+assert.ok(userCard.includes('<span class="chip">user</span>'), "a user-issued card shows a plain user chip");
+assert.ok(!userCard.includes("issued"), "a user-issued card keeps full-contrast styling");
+const issuedCard = cardHtml({ file: "000002_b.md", name: "b", priority: "low", issuer: "#42" }, "to-do");
+assert.ok(issuedCard.includes('<div class="name issued">'), "a task-issued card dims its name");
+assert.ok(issuedCard.includes('<span class="chip issuer">#42</span>'), "a task-issued card carries a small #num badge");
+assert.ok(page.includes(".chip.issuer {") && page.includes(".issued {"), "the differentiation classes ship in the page css");
 
 // refresh identity: the 5 s poll keeps the node of every card whose markup did not change, so its
 // spinner element keeps spinning; a state change rewrites that card's markup and nothing else
@@ -247,6 +263,7 @@ assert.equal(listed[0].agent, null);
 assert.deepEqual(listed[0].agents, [], "no role logs yet, empty agent history");
 assert.ok(page.includes('id="m-agent"'), "modal has the agent area");
 assert.ok(!page.includes("<div><span>name</span>"), "the detail card drops the name attribute row the title already shows");
+assert.ok(page.includes('"<div><span>issuer</span>" + esc(t.issuer || "user")'), "the detail card shows the issuer row");
 assert.ok(page.includes("#m-log.hidden { display: none; }"), "log pane hides");
 assert.ok(page.includes("/api/agent-log"), "page uses the agent log endpoint");
 assert.ok(page.includes('<span class="check">✓</span>'), "past agent buttons render a green checkmark");

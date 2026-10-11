@@ -216,6 +216,7 @@ export function taskPayload(root: string) {
 		priority: t.priority,
 		state: t.state,
 		worktree: t.worktree,
+		issuer: t.issuer,
 		updated: taskUpdated(root, t.file),
 		body: taskBody(root, t.file),
 		agents: agentHistory(root, t),
@@ -374,9 +375,30 @@ export function spinnerHtml(st: string) {
 	return st === "doing" || st === "reviewing" || st === "live-testing" ? '<span class="spin"></span>' : "";
 }
 
-// one card's markup; this string is the card's identity across a refresh, see syncBoard
+// one card's markup; this string is the card's identity across a refresh, see syncBoard.
+// user-issued cards stay full contrast, task-issued ones (issuer "#<num>") dim the name and
+// carry a small #<num> badge instead of the plain user chip
 export function cardHtml(t: Task, st: string) {
-	return '<div class="name">' + spinnerHtml(st) + '<span class="num">' + num(t) + "</span>" + esc(t.name) + '</div><span class="chip p-' + esc(t.priority) + '">' + esc(t.priority) + "</span>";
+	const issued = !!t.issuer && t.issuer !== "user";
+	return (
+		'<div class="name' +
+		(issued ? " issued" : "") +
+		'">' +
+		spinnerHtml(st) +
+		'<span class="num">' +
+		num(t) +
+		"</span>" +
+		esc(t.name) +
+		'</div><span class="chip p-' +
+		esc(t.priority) +
+		'">' +
+		esc(t.priority) +
+		'</span><span class="chip' +
+		(issued ? " issuer" : "") +
+		'">' +
+		(issued ? esc(t.issuer) : "user") +
+		"</span>"
+	);
 }
 
 // the board shell, built once: a single column per layout string, one .pair wrapper per stacked
@@ -499,6 +521,8 @@ h1 { font-size: 16px; margin: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
 .chip { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: var(--border); color: var(--soft); }
+.chip.issuer { background: var(--code-bg); color: var(--muted); }
+.issued { color: var(--muted); }
 .p-low { background: var(--low-bg); color: var(--low-fg); }
 .p-medium { background: var(--medium-bg); color: var(--medium-fg); }
 .p-high { background: var(--high-bg); color: var(--high-fg); }
@@ -684,7 +708,8 @@ function openTask(file) {
 		"<div><span>file</span>" + esc(t.file) + "</div>" +
 		"<div><span>priority</span><span class='chip p-" + esc(t.priority) + "'>" + esc(t.priority) + "</span></div>" +
 		"<div><span>state</span>" + esc(t.state) + "</div>" +
-		"<div><span>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>";
+		"<div><span>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>" +
+		"<div><span>issuer</span>" + esc(t.issuer || "user") + "</div>";
 	renderAgent(t);
 	document.getElementById("m-body").innerHTML = md(t.body || "");
 	document.getElementById("modal").classList.remove("hidden");

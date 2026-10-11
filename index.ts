@@ -22,7 +22,7 @@ export default function (pi: ExtensionAPI) {
 		name: "kanban_list",
 		label: "Kanban list",
 		description:
-			"List kanban tasks of this project. scope=backlog: tasks to prioritize. scope=in-progress: tasks being worked on. scope=done: completed tasks. Optional priority filter (low/medium/high/critical). Returns file, num (#NN), name, priority, state and summary per task.",
+			"List kanban tasks of this project. scope=backlog: tasks to prioritize. scope=in-progress: tasks being worked on. scope=done: completed tasks. Optional priority filter (low/medium/high/critical). Returns file, num (#NN), name, priority, state, issuer and summary per task.",
 		parameters: Type.Object({
 			scope: StringEnum(["backlog", "in-progress", "done"] as const),
 			priority: Type.Optional(StringEnum(["low", "medium", "high", "critical"] as const)),
@@ -40,7 +40,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "kanban_get",
 		label: "Kanban get",
-		description: "Read one kanban task in full detail (state, worktree, summary, specs, notes).",
+		description: "Read one kanban task in full detail (state, worktree, issuer, summary, specs, notes).",
 		parameters: Type.Object({ file: Type.String({ description: "Task file name, e.g. 000001_nice_thing.md" }) }),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
@@ -56,10 +56,11 @@ export default function (pi: ExtensionAPI) {
 		name: "kanban_create",
 		label: "Kanban create",
 		description:
-			"Create a kanban task in state backlog. Name tasks with a type prefix like 'feat: ', 'fix: ', 'perf: '. Write the specs with the user.",
+			"Create a kanban task in state backlog. Name tasks with a type prefix like 'feat: ', 'fix: ', 'perf: '. Write the specs with the user. Set issuer to '#<num>' when the task was created after live-testing of task #<num>; the default 'user' means the user requested it. The issuer is set at creation only and never changed afterwards.",
 		parameters: Type.Object({
 			name: Type.String({ description: "Task name with type prefix, e.g. 'feat: nice thing'" }),
 			priority: Type.Optional(StringEnum(["low", "medium", "high", "critical"] as const)),
+			issuer: Type.Optional(Type.String({ description: "'user' (default) or '#<num>' when created after live-testing of task #<num>, e.g. '#42'" })),
 			summary: Type.String({ description: "Concise goal, one to three sentences" }),
 			specs: Type.Optional(Type.String({ description: "Detailed description of needs" })),
 			openQuestions: Type.Optional(Type.String({ description: "User/client clarification questions, written to the task body's # Open questions section" })),

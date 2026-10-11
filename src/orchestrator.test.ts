@@ -127,11 +127,11 @@ const deadStub = (root: string) => {
 	return stub;
 };
 
-async function runDaemon(root: string, script = join(HERE, "orchestrator.ts")) {
+async function runDaemon(root: string, script = join(HERE, "orchestrator.ts"), extraEnv: Record<string, string | undefined> = {}) {
 	const daemon = spawn(
 		process.execPath,
 		[script, "--root", root, "--rescan-seconds", "1", "--poll-minutes", "0.05"],
-		{ stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, SE_LLM_TEAM_NO_WEBUI: "1" } },
+		{ stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, SE_LLM_TEAM_NO_WEBUI: "1", ...extraEnv } },
 	);
 	daemons.push({ daemon, root });
 	let out = "";
@@ -1026,6 +1026,10 @@ if (next) writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, 
 
 const rootX = fixture();
 cleaned.push(rootX);
+// the llm-flags assertions expect the board config to be the whole config surface: HOME at an
+// empty temp dir so the user-level ~/.pi/agent/se-llm-team.json cannot leak fields in
+const llmHome = mkdtempSync(join(tmpdir(), "orch-llm-home-"));
+cleaned.push(llmHome);
 mkdirSync(kanbanDir(rootX), { recursive: true });
 writeFileSync(
 	join(kanbanDir(rootX), "se-llm-team.json"),
@@ -1044,7 +1048,7 @@ writeFileSync(
 const taskX = createTask(rootX, { name: "feat: llm flags", summary: "LLM config smoke", specs: "n/a" });
 setState(rootX, taskX, "to-do");
 
-const x = await runDaemon(rootX);
+const x = await runDaemon(rootX, undefined, { HOME: llmHome });
 await waitFor(() => parseTask(rootX, taskX.file).state === "done" && parseTask(rootX, taskX.file).worktree === "", 60000, "pipeline with llm config", x.output);
 const xSpawns = () => readFileSync(join(rootX, "argv.log"), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as { role: string; argv: string[] });
 const xFlags = (role: string) => llmArgs(xSpawns().find((s) => s.role === role)!.argv);
@@ -1077,7 +1081,7 @@ writeFileSync(
 );
 const taskY = createTask(rootY, { name: "fix: bad llm config", summary: "Bad llm config smoke", specs: "n/a" });
 setState(rootY, taskY, "to-do");
-const y = await runDaemon(rootY);
+const y = await runDaemon(rootY, undefined, { HOME: llmHome });
 await waitFor(() => y.output().includes("spawned developer"), 30000, "developer spawned despite bad llm config", y.output);
 assert.ok(y.output().includes('unknown thinking level "banana" (global)'), "global thinking typo warned about");
 assert.ok(y.output().includes('unknown thinking level "wild" for role "reviewer"'), "role thinking typo warned about");
