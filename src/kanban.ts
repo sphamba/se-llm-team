@@ -250,6 +250,33 @@ function replaceSections(root: string, task: Task, updates: Record<string, strin
 	writeFileSync(path, (fm ? raw.slice(0, raw.length - body.length) : "") + out.join("\n"));
 }
 
+// "#42, #43" -> [42, 43]; parses refs with or without the leading # and ignores malformed
+// parts, matching the promotion failsafe's blockedBy parse so the guard checks every ref
+// the failsafe honors
+function blockedNums(blockedBy: string): number[] {
+	const nums: number[] = [];
+	for (const part of blockedBy.split(",")) {
+		const num = parseInt(part.trim().replace(/^#/, ""), 10);
+		if (num > 0 && !nums.includes(num)) nums.push(num);
+	}
+	return nums;
+}
+
+// direct 2-cycle guard on the shared blockedBy write path: setting "B blocks A" while
+// A already blocks B (or a task blocking itself) wedges both tasks forever, since neither
+// can be promoted; one-directional pairs, longer chains, stale refs to missing tasks and
+// clearing stay allowed
+function assertNoBlockCycle(root: string, selfNum: number, blockedBy: string): void {
+	if (!blockedBy.trim()) return;
+	const tasks = listAll(root);
+	for (const ref of blockedNums(blockedBy)) {
+		if (ref === selfNum) throw new Error(`cannot set blockedBy: #${selfNum} blocks itself`);
+		const blocker = tasks.find((t) => taskNum(t.file) === ref);
+		if (blocker && blockedNums(blocker.blockedBy).includes(selfNum))
+			throw new Error(`cannot set blockedBy: #${ref} is already blocked by #${selfNum} - #${selfNum} blocks #${ref} and #${ref} blocks #${selfNum} is not allowed`);
+	}
+}
+
 export function updateTask(
 	root: string,
 	task: Task,
@@ -262,7 +289,10 @@ export function updateTask(
 	if (patch.name !== undefined) attrs.name = patch.name;
 	if (patch.priority !== undefined) attrs.priority = patch.priority;
 	if (patch.complexity !== undefined) attrs.complexity = patch.complexity;
-	if (patch.blockedBy !== undefined) attrs.blockedBy = patch.blockedBy;
+	if (patch.blockedBy !== undefined) {
+		assertNoBlockCycle(root, taskNum(task.file), patch.blockedBy);
+		attrs.blockedBy = patch.blockedBy;
+	}
 	if (Object.keys(attrs).length) updateAttrs(root, task, attrs);
 	const sections: Record<string, string> = {};
 	if (patch.summary !== undefined) sections.summary = patch.summary;
@@ -308,6 +338,9 @@ export function createTask(
 	for (let attempt = 0; attempt < 10; attempt++) {
 		const nums = taskFiles(root).map(taskNum).filter((n) => n > 0);
 		const num = String((nums.length ? Math.max(...nums) : 0) + 1).padStart(6, "0");
+		// the new task's number is known only here: a stale ref to it (a deleted task's
+		// number) or the create's own next number can still form a direct 2-cycle
+		if (input.blockedBy) assertNoBlockCycle(root, parseInt(num, 10), input.blockedBy);
 		const file = `${num}_${shortName ? shortName.replaceAll("-", "_") : slugFile(input.name)}.md`;
 		try {
 			writeFileSync(join(kanbanDir(root), file), content, { flag: "wx" });

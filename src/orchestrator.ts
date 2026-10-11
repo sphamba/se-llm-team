@@ -1,7 +1,6 @@
 import { spawn, execFileSync, execSync } from "node:child_process";
-import { appendFileSync, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { Transform } from "node:stream";
 import { fileURLToPath } from "node:url";
 import {
 	COMPLEXITIES,
@@ -256,74 +255,28 @@ export function compactLogLine(line: string): string | null {
 	}
 }
 
-// line-buffered Transform applying compactLogLine per line: chunk boundaries can split a line
-// or a multibyte character mid-way, so lines reassemble at the byte level (\n never occurs
-// inside a UTF-8 sequence); one JSONL record per line, no re-ordering, no merging
-export function logCompactor(): Transform {
-	let buf: Buffer = Buffer.alloc(0);
-	return new Transform({
-		transform(chunk: Buffer, _enc, cb) {
-			buf = buf.length ? Buffer.concat([buf, chunk]) : chunk;
-			for (let i = buf.indexOf(0x0a); i !== -1; i = buf.indexOf(0x0a)) {
-				const out = compactLogLine(buf.subarray(0, i).toString("utf8"));
-				buf = buf.subarray(i + 1);
-				if (out !== null) this.push(out + "\n");
-			}
-			cb();
-		},
-		flush(cb) {
-			if (buf.length) {
-				const out = compactLogLine(buf.toString("utf8"));
-				if (out !== null) this.push(out + "\n");
-			}
-			cb();
-		},
-	});
-}
-
-// one compactor-fed append-only write stream per source (stdout, stderr) on the same log
-// file: a shared sink would let the first feeder to finish (stderr is usually empty) end it
-// while the other still holds backpressured lines - they would wait for a drain that never
-// comes and be lost silently. O_APPEND keeps every line atomic; each pair ends independently.
-export function logFeeders(path: string) {
-	const feeders = [logCompactor(), logCompactor()];
-	const sinks = feeders.map((f) => {
-		const sink = createWriteStream(path, { flags: "a" });
-		// a dead sink (disk full, log removed) stops its feed instead of buffering the child's
-		// output forever; a stream error loses log lines, never the daemon
-		sink.on("error", () => f.destroy());
-		f.on("error", () => {});
-		f.pipe(sink);
-		return sink;
-	});
-	return { feeders, sinks };
-}
+// raw agent logs are compacted retro-actively, at run end (poll) and via --compact-logs:
+// the log fd belongs to the child, so the write-time pipe (whose read end lived in the
+// daemon and died with it, EPIPE-killing the agent) cannot come back
 
 function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: string, pidName?: string): void {
 	const slug = taskSlug(task.file);
 	mkdirSync(join(kanbanDir(root), ".logs"), { recursive: true });
-	// stdout and stderr flow through the compactor into the append-only log (the write-time
-	// pipe drops the dead weight the fd redirect logged verbatim); the daemon drains the pipe
-	const { feeders } = logFeeders(logPath(root, `${slug}.${role}.${nextRunIndex(root, slug, role)}`));
+	// stdout and stderr write the log file directly through an fd the child owns: a pipe read
+	// end would live in this daemon, and the daemon's death (stop, restart) would close it and
+	// EPIPE-kill the agent's next write. An open file fd survives the daemon, so a restart
+	// leaves in-flight agents running and logging; the raw log is compacted at run end
+	const fd = openSync(logPath(root, `${slug}.${role}.${nextRunIndex(root, slug, role)}`), "a");
 	// --approve trusts the project-local files of the worktree, so the headless session never waits for a trust prompt;
 	// --mode json streams the full JSONL event log (thinking, tool calls, text) instead of print mode's final text only;
 	// the provider/model/thinking flags come from the config, resolved per role
 	const child = spawn(cfg.agent, ["--approve", "--mode", "json", ...llmFlags(root, cfg, role, task.complexity ?? "moderate"), "-p", renderPrompt(root, role, task, cwd === root ? undefined : cwd)], {
 		cwd,
 		detached: true,
-		stdio: ["ignore", "pipe", "pipe"],
+		stdio: ["ignore", fd, fd],
 	});
-	// end:false on both sources: the child close event is the single end path for both
-	// compactors, so neither feeder nor sink ends before its source drains
-	child.stdout?.on("error", () => {});
-	child.stderr?.on("error", () => {});
-	child.stdout?.pipe(feeders[0], { end: false });
-	child.stderr?.pipe(feeders[1], { end: false });
-	child.on("close", () => feeders.forEach((f) => f.end()));
+	closeSync(fd); // the child holds its own dup of the fd from uv_spawn
 	child.on("error", (err) => {
-		// a failed spawn also fires close (verified on this Node), so this end is an idempotent belt
-		// against runtimes where it does not - the leak would be the sink and both pipes
-		feeders.forEach((f) => f.end());
 		log(root, `agent ${role} for ${task.file} failed to start: ${err.message}`);
 	});
 	child.unref();
@@ -334,10 +287,10 @@ function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: st
 	}
 }
 
-// one-time retro sweep (--compact-logs, not wired into normal daemon operation): rewrite
-// finished agent logs through the same compactor, in place via temp file + rename. A log whose
-// writer may still be alive is skipped: non-merger logs while <slug>.pid exists, merger logs
-// while the project-wide merger.pid or a legacy <slug>.merger.pid exists. Non role-log names
+// retro-compact pass, wired at detected run ends (poll) and one-time via --compact-logs:
+// rewrite finished agent logs through the same compactor, in place via temp file + rename. A
+// log whose writer may still be alive is skipped: the liveness of the pid each guard file
+// names, so a finished run's stale pidfile no longer blocks its rewrite. Non role-log names
 // (orchestrator.log, counters, armed markers) never match the pattern.
 export function compactFinishedLogs(root: string): { files: number; before: number; after: number } {
 	const result = { files: 0, before: 0, after: 0 };
@@ -352,7 +305,7 @@ export function compactFinishedLogs(root: string): { files: number; before: numb
 		const m = name.match(/^(.+)\.(developer|reviewer|live-tester|merger)(\.\d+)?\.log$/);
 		if (!m) continue;
 		const guards = m[2] === "merger" ? ["merger", `${m[1]}.merger`] : [m[1]];
-		if (guards.some((g) => existsSync(pidPath(root, g)))) continue;
+		if (guards.some((g) => agentAlive(root, g))) continue;
 		const path = join(kanbanDir(root), ".logs", name);
 		const before = readFileSync(path, "utf8");
 		const after = before.split("\n").map(compactLogLine).filter((l) => l !== null).join("\n");
@@ -1181,6 +1134,9 @@ function bounceDead(root: string, task: Task, next: TaskState, pidName: string, 
 
 // now is injectable so the stall window is testable without waiting out real minutes
 export function poll(root: string, stallMinutes: number, now = Date.now()): void {
+	// a run ended this pass (a bounced working agent, or the stale pidfile of a completed one):
+	// the ended logs are raw, so the pass ends with their retro-compact
+	let ended = false;
 	for (const task of listAll(root)) {
 		try {
 			// no state rewrite on a conflicted file: the parse is bogus and the merger owns resolution
@@ -1199,6 +1155,7 @@ export function poll(root: string, stallMinutes: number, now = Date.now()): void
 				// check, and stale samples are dropped
 				if (working && (task.state !== "merging" || mergerLogSlug === slug) && logStalled(root, slug, working.role, stallMinutes, now)) {
 					log(root, `${task.file}: agent log unchanged for ${stallMinutes}+ min, assuming dead (state ${task.state})`);
+					ended = true;
 					bounceDead(root, task, working.next, pidName, pid, true);
 				} else if (!working) {
 					dropLogSamples(slug);
@@ -1214,19 +1171,27 @@ export function poll(root: string, stallMinutes: number, now = Date.now()): void
 				// stale pidfile here means the agent advanced the task out of the mapped state by
 				// its own action: the death streak is over. Clearing on a missing pidfile too would
 				// wipe the counter of a past-cap task still waiting out its respawn cooldown
-				if (hadPid && readCounter(root, `${slug}.dead`) > 0) {
-					writeFileSync(counterPath(root, `${slug}.dead`), "0");
-					log(root, `${slug}: run completed, cleared the dead-agent counter`);
+				if (hadPid) {
+					ended = true;
+					if (readCounter(root, `${slug}.dead`) > 0) {
+						writeFileSync(counterPath(root, `${slug}.dead`), "0");
+						log(root, `${slug}: run completed, cleared the dead-agent counter`);
+					}
 				}
 				continue;
 			}
 			// the bounce is unconditional: a frozen mid-flight task is worse than a bounced one
 			log(root, `${slug}: agent pid=${pid} dead without state update, ${task.state} -> ${working.next}`);
+			ended = true;
 			bounceDead(root, task, working.next, pidName, pid, false);
 		} catch (err) {
 			log(root, `error polling ${task.file} (${task.state}): ${err instanceof Error ? err.message : err}`);
 		}
 	}
+	// the compactor lives in the retro pass now: a run's raw log is rewritten at its end (the
+	// write-time pipe is gone - the log fd must survive the daemon, so it cannot be a pipe).
+	// compactFinishedLogs skips logs whose writer is still alive
+	if (ended) compactFinishedLogs(root);
 }
 
 function acquireLock(root: string): boolean {
