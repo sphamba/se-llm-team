@@ -118,7 +118,7 @@ async function runDaemon(root: string, script = join(HERE, "orchestrator.ts")) {
 	const daemon = spawn(
 		process.execPath,
 		[script, "--root", root, "--rescan-seconds", "1", "--poll-minutes", "0.05"],
-		{ stdio: ["ignore", "pipe", "pipe"] },
+		{ stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, SE_LLM_TEAM_NO_WEBUI: "1" } },
 	);
 	daemons.push({ daemon, root });
 	let out = "";
@@ -257,7 +257,7 @@ await waitFor(() => lockC() !== "", 10000, "lock acquired", c.output);
 assert.equal(lockC(), String(c.daemon.pid), "lock holds the daemon pid");
 
 // a second start attempt exits instead of becoming a daemon; the first keeps the lock
-const second = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootC], { stdio: "ignore" });
+const second = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootC], { stdio: "ignore", env: { ...process.env, SE_LLM_TEAM_NO_WEBUI: "1" } });
 const secondExit = await Promise.race([
 	new Promise<string>((r) => second.on("exit", (code) => r(String(code)))),
 	new Promise<string>((r) => setTimeout(() => r("timeout"), 10000)),
@@ -751,3 +751,44 @@ assert.equal(r.output().split("promoting ").length - 1, 1, "exactly one promotio
 r.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: ... + failsafe auto-schedule smoke passed");
+
+// --- part S: --no-webui / SE_LLM_TEAM_NO_WEBUI keep smoke daemons off the global webui config ---
+// the global config (like the production ~/.pi/agent/se-llm-team.json) enables the webui on a fixed
+// port; a smoke daemon without the override binds it and steals the real UI
+const rootS = fixture();
+cleaned.push(rootS);
+const homeS = mkdtempSync(join(tmpdir(), "orch-home-"));
+mkdirSync(join(homeS, ".pi", "agent"), { recursive: true });
+writeFileSync(join(homeS, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: 4277 } }));
+
+const sEnv = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootS, "--rescan-seconds", "1"], {
+	stdio: ["ignore", "pipe", "pipe"],
+	env: { ...process.env, HOME: homeS, SE_LLM_TEAM_NO_WEBUI: "1" },
+});
+daemons.push({ daemon: sEnv, root: rootS });
+let sEnvOut = "";
+sEnv.stdout.on("data", (d) => (sEnvOut += d));
+sEnv.stderr.on("data", (d) => (sEnvOut += d));
+await waitFor(() => sEnvOut.includes("web ui disabled"), 10000, "SE_LLM_TEAM_NO_WEBUI disables the webui", () => sEnvOut);
+assert.ok(!sEnvOut.includes("web ui on") && !sEnvOut.includes("web ui failed"), "env override never starts the webui");
+sEnv.kill("SIGTERM");
+// full exit before the next spawn: the lock must be released, or the second daemon exits early
+await Promise.race([new Promise((r) => sEnv.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
+
+const sFlag = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootS, "--rescan-seconds", "1", "--no-webui"], {
+	stdio: ["ignore", "pipe", "pipe"],
+	env: { ...process.env, HOME: homeS },
+});
+daemons.push({ daemon: sFlag, root: rootS });
+let sFlagOut = "";
+sFlag.stdout.on("data", (d) => (sFlagOut += d));
+sFlag.stderr.on("data", (d) => (sFlagOut += d));
+await waitFor(() => sFlagOut.includes("web ui disabled"), 10000, "--no-webui disables the webui", () => sFlagOut);
+// the configured port was free the whole run, so a bound webui would have logged "web ui on":
+// its absence proves the daemon never touched the port
+assert.ok(!sFlagOut.includes("web ui on") && !sFlagOut.includes("web ui failed"), "--no-webui never starts the webui");
+sFlag.kill("SIGTERM");
+await Promise.race([new Promise((r) => sFlag.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
+
+cleanupAll(rootS, homeS);
+console.log("orchestrator.test.ts: ... + no-webui override smoke passed");
