@@ -1,8 +1,8 @@
 ---
 name: "feat: hub backend; daemons register, elect the hub by lock race, hub-only UI ownership"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "feat/hub-backend-daemons-register-elect-the-hub-by-lock-race-hub-only-ui-ownership"
 ---
 
 # Summary
@@ -30,3 +30,11 @@ Constraints:
 - HOLD behind 000034 (board mirror, doing): both rewrite src/orchestrator.ts startup and commit paths.
 
 # Notes
+
+- 000034 (board mirror) is done, so the HOLD is lifted and this task is implemented in worktree commit 67209ac.
+- New src/hub.ts with the hub backend: startHub (in-process hub server) and joinHub (daemon side: startup election by create-exclusive lock race on ~/.pi/agent/se-llm-team-hub.lock with stale-pid steal, register/heartbeat every 5s, failover re-election after 2 consecutive /health failures). Registry file ~/.pi/agent/se-llm-team-hub.json, written only by the hub via sibling temp file + rename, entries {name, root, start, lastHeartbeat} in epoch ms, entries stale beyond 15s dropped at seed and by a 5s reap tick. Routes: GET /health, GET / (page), GET /api/projects, GET /api/tasks?project=NAME (default project = the hub's own root, so the pre-tab UI keeps working), GET /api/agent-log?project=NAME, POST /register, POST /heartbeat. Register validates the name and requires an absolute existing root (trust boundary: the hub reads board files from it). Only the hub owner binds the port and serves HTML; non-hub daemons serve nothing (one port, one UI).
+- Deviation from the file list, for reuse: src/webui.ts gained exports (PAGE, pidAlive, taskPayload, agentLogPayload) with no behavior change, so hub.ts reuses the page and the board/agent-log payload builders instead of duplicating them; startWebUi stays exported (webui.test.ts harness + single-project server) but orchestrator.ts no longer calls it. Task 000039 will replace the PAGE with the tabbed version; hub.ts needs no further change for that.
+- orchestrator.ts wiring: the end-of-main startWebUi call is replaced by joinHub({name: basename(root), root, host, port}) gated on webUi.enabled / --no-webui / SE_LLM_TEAM_NO_WEBUI as before. Env knobs SE_LLM_TEAM_HUB_HEALTH_MS / SE_LLM_TEAM_HUB_STALE_MS let smoke runs shrink the cadences without touching the config schema.
+- orchestrator.test.ts gains part U (hub unit smoke: health, register with rejections, heartbeat, registry shape + stale drop at seed, no temp litter, per-project reads, unknown project 404s, page, method guard, running-hub age-out), part V (election race: two daemons on one port elect exactly one hub, the loser registers, /api/projects lists both, per-project reads, registry file carries both entries), part W (failover: SIGKILL the hub, the survivor re-elects, steals the stale lock, ages out the dead entry, serves only itself). All three suites pass (orchestrator, webui, kanban).
+- Incident: a repo-global git stash (used for a pre-existing-warning check) raced with the concurrent session in the fix/finished-agent-logs worktree and the two stashes were cross-applied (worktrees share refs/stash). My worktree was restored from the stolen changes and committed; the other worktree may still hold a mixed working tree. Do not use git stash in this multi-worktree repo.
+- The task state was reverted from doing to backlog and the worktree attribute cleared while this session worked (known bug 000069: daemon restart reverts in-flight task state and notes to the mirror tip; the PM's doing assignment was wiped by a reconcile before it was mirrored). No other agent is on the task, the work is complete in commit 67209ac, so the state is set to to-review per the completion flow. Worktree for review: feat/hub-backend-daemons-register-elect-the-hub-by-lock-race-hub-only-ui-ownership.
