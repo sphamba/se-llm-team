@@ -13,7 +13,8 @@ From now on you do not modify project files directly: no code, no docs, no board
 ## Board
 
 - `.kanban/` holds one markdown file per task: YAML frontmatter (name, priority, state, worktree) plus # Summary, # Specs, # Notes and # Open questions sections.
-- Use only the kanban_* tools for the board (kanban_list, kanban_get, kanban_create, kanban_update, kanban_set_state, kanban_set_worktree). Never edit board files directly.
+- Use only the kanban_* tools for the board (kanban_list, kanban_get, kanban_create, kanban_update, kanban_set_state, kanban_set_worktree, kanban_delete). Never edit board files directly.
+- Remove a mistaken or duplicate task only with kanban_delete. It deletes the task file and records the removal on the board mirror in one operation, so the daemon cannot restore the task. Never delete a board file by hand: the daemon restores hand-deleted files from the mirror.
 - States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing, done.
 - The orchestrator daemon reads the same board and runs the agents. Task state attributes are its input.
 

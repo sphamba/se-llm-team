@@ -6,7 +6,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { createTask, getTask, kanbanDir, listAll, listTasks, setState, setWorktree, taskNum, updateTask, STATES, type TaskState } from "./src/kanban.ts";
-import { waitForBoardCommits } from "./src/orchestrator.ts";
+import { removeTask, waitForBoardCommits } from "./src/orchestrator.ts";
 
 function text(s: string) {
 	return { content: [{ type: "text" as const, text: s }], details: undefined };
@@ -130,6 +130,20 @@ export default function (pi: ExtensionAPI) {
 			if (!task) return text(`No task ${params.file}`);
 			setWorktree(ctx.cwd, task, params.worktree);
 			return text(`${task.file} (#${taskNum(task.file)}): worktree -> ${params.worktree}`);
+		},
+	});
+
+	pi.registerTool({
+		name: "kanban_delete",
+		label: "Kanban delete",
+		description:
+			"Remove a task from the board. Deletes the task file and commits a whole-board mirror snapshot in one operation, so the daemon cannot restore the task. Use for a mistaken or duplicate task. The worktree and branch of a started task are not removed.",
+		parameters: Type.Object({ file: Type.String({ description: "Task file name, e.g. 000001_nice_thing.md" }) }),
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			ensureBoardWatcher(ctx);
+			const error = await removeTask(ctx.cwd, params.file);
+			if (error) return text(error);
+			return text(`Deleted ${params.file}`);
 		},
 	});
 
