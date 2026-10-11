@@ -1,8 +1,8 @@
 ---
 name: "feat: kanban task removal path (delete file + mirror snapshot in one operation)"
 priority: "low"
-state: "merging"
-worktree: "feat/64-kanban-task-removal"
+state: "done"
+worktree: ""
 ---
 
 # Summary
