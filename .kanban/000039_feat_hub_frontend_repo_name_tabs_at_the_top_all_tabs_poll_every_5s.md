@@ -1,7 +1,7 @@
 ---
 name: "feat: hub frontend; repo-name tabs at the top, all tabs poll every 5s"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "feat/39-hub-frontend-repo"
 ---
 
@@ -29,3 +29,10 @@ Constraints:
 - HOLD behind the webui queue: 000030 (cap/unfold) → 000033 (agent view) → 000036 (sibling FLIP), then this.
 
 # Notes
+
+Developer run (commit db15b73, worktree feat/39-hub-frontend-repo).
+
+- src/webui.ts: four client helpers live in webui.ts and ship into PAGE, so tests call them directly: tabNames (one tab per registered project, none for a single project), tabsHtml (one escaped button per project, active marked), boardOf and mergeBoards (tasks and fold state keyed by project name). PAGE got a `<nav id="tabs">` bar. Each 5 s cycle reads /api/projects and then every /api/tasks?project=NAME, and renders only the active tab.
+- A tab switch renders the cached project state, sets no FLIP baseline from the board just left, and closes the open modal. Agent-log polls carry `&project=<active>`. A single project, and the plain server whose /api/projects is a 404, keeps the bare /api/tasks poll and no tab bar. A failed /api/projects keeps the last known tabs. A vanished active project falls back to the first tab and closes the modal. Per-project state uses Object.create(null), so a project named `__proto__` or `constructor` cannot break it. The updated stamp advances only when the active project's payload arrived.
+- src/webui.test.ts: tests for tabNames and tabsHtml (one tab per project, active marked, escaped labels, single and empty registry render none), mergeBoards (each payload lands under its own project, a null payload keeps the previous data), boardOf (fold choices survive a poll and a switch, prototype-named project gets a real board), plus page assertions (tab bar, switch closes the modal, every tab polled each cycle, 5 s cadence, project param on agent-log, single-project fallback).
+- Checks: `node src/webui.test.ts`, `node src/kanban.test.ts` and `node src/orchestrator.test.ts` (hub smoke, election race, failover) all pass. A throwaway DOM-shim smoke against a real hub with two temp projects confirmed the tabs, the switch, the modal close, inactive-tab polling and the single-project fallback. An independent adversarial review found no spec violation on commit db15b73, and its robustness findings were applied.
