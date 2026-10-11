@@ -1,8 +1,8 @@
 ---
 name: "feat: shorter markdown file names; branch and worktree named feat/42-short-name"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/shorter-markdown-file-names-branch-and-worktree-named-feat-42-short-name"
 ---
 
 # Summary

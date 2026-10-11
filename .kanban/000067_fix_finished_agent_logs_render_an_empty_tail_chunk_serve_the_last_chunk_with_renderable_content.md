@@ -1,8 +1,8 @@
 ---
 name: "fix: finished agent logs render an empty tail chunk - serve the last chunk with renderable content"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/finished-agent-logs-render-an-empty-tail-chunk-serve-the-last-chunk-with-renderable-content"
 ---
 
 # Summary
