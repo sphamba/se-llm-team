@@ -1,7 +1,7 @@
 ---
 name: "fix: kanban tool responses carry only zero-padded numbers - include the short #NN form"
 priority: "medium"
-state: "reviewing"
+state: "to-review"
 worktree: "fix/kanban-tool-responses-carry-only-zero-padded-numbers-include-the-short-nn-form"
 ---
 

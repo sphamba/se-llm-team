@@ -1,8 +1,8 @@
 ---
 name: "test: orchestrator.test.ts part D worktree git-status assertion is flaky"
 priority: "low"
-state: "live-testing"
-worktree: "test/orchestrator-test-ts-part-d-worktree-git-status-assertion-is-flaky"
+state: "done"
+worktree: ""
 ---
 
 # Summary

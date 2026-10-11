@@ -1,7 +1,7 @@
 ---
 name: "fix: agent logs carry only the final output - stream the full JSONL event log"
 priority: "high"
-state: "doing"
+state: "to-do"
 worktree: "fix/agent-logs-carry-only-the-final-output-stream-the-full-jsonl-event-log"
 ---
 
