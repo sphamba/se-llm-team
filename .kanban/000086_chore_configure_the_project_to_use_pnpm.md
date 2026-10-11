@@ -2,7 +2,7 @@
 name: "chore: configure the project to use pnpm"
 priority: "critical"
 state: "done"
-worktree: "chore/86-configure-the-project"
+worktree: ""
 ---
 
 # Summary
