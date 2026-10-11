@@ -1,5 +1,9 @@
 {
 	"name": "se-llm-team",
 	"private": true,
-	"type": "module"
+	"type": "module",
+	"packageManager": "pnpm@12.11.2",
+	"engines": {
+		"pnpm": ">=12.11.2"
+	}
 }
