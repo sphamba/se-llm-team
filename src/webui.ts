@@ -1,6 +1,6 @@
-import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readdirSync, readSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { kanbanDir, listAll, STATES, taskFiles, type Task } from "./kanban.ts";
 
 const DEFAULT_HOST = "localhost";
@@ -8,8 +8,19 @@ const DEFAULT_PORT = 4242;
 export const LOG_CHUNK = 81920;
 // working state -> the agent role the orchestrator spawns for it (spawnAgent, src/orchestrator.ts)
 const AGENT_ROLE = { doing: "developer", reviewing: "reviewer", "live-testing": "live-tester" };
-// the roles the orchestrator writes per task log, in pipeline order
-const PIPELINE_ROLES = Object.values(AGENT_ROLE);
+// the roles the orchestrator writes per task log, in pipeline order, plus the merger
+const LOG_ROLES = [...Object.values(AGENT_ROLE), "merger"];
+// pi's background Agent tool writes each subagent transcript under this dir and names it in the
+// tool result text; both are emergent pi behavior, the parser keys on the text (see subagentLogs)
+const SUB_ROOT = "/tmp/pi-subagents-1000/";
+
+// one agent run: run is the index in `<slug>.<role>.<n>.log`, null for a legacy unsuffixed file
+interface AgentEntry {
+	role: string;
+	run: number | null;
+	alive: boolean;
+	handle: string;
+}
 
 export interface WebUiConfig {
 	enabled: boolean;
@@ -72,30 +83,117 @@ function currentPid(root: string, slug: string): number {
 	}
 }
 
-// role + liveness from the working state and the orchestrator's pid file (.kanban/.pids/{slug}.pid);
-// log is only a handle for the client, the real path is rebuilt server-side in agentLogPath
-function agentInfo(root: string, t: Task): { role: string; alive: boolean; log: string } | null {
+// the pid file of a role's current run (spawnAgent, src/orchestrator.ts): the merger writes its
+// own `<slug>.merger.pid`, the pipeline roles share `<slug>.pid`
+function rolePid(root: string, slug: string, role: string): number {
+	return currentPid(root, role === "merger" ? `${slug}.merger` : slug);
+}
+
+// current agent: the state-mapped role with its pid file liveness, and the handle of the run the
+// client should open; the per-run entries below carry the whole history
+function agentInfo(root: string, t: Task, agents: AgentEntry[]): { role: string; alive: boolean; log: string } | null {
 	const role = AGENT_ROLE[t.state];
 	if (!role) return null;
-	const slug = t.file.replace(/\.md$/, "");
-	return { role, alive: pidAlive(currentPid(root, slug)), log: `${slug}.${role}` };
+	const own = agents.filter((a) => a.role === role);
+	const live = own.find((a) => a.alive);
+	return { role, alive: !!live, log: (live ?? own[own.length - 1])?.handle ?? `${t.file.replace(/\.md$/, "")}.${role}` };
 }
 
-// one entry per existing role log file: only the state-mapped role with a live pid is alive,
-// every other existing role is a past agent
-function agentHistory(root: string, t: Task): { role: string; alive: boolean }[] {
+function logDirFiles(root: string): string[] {
+	try {
+		return readdirSync(join(kanbanDir(root), ".logs"));
+	} catch {
+		return []; // no agent has run yet
+	}
+}
+
+// the indexed run numbers of one role log, ascending: `<slug>.<role>.<n>.log`; a legacy
+// unsuffixed file yields "log" here and the digit check drops it
+function indexRuns(files: string[], base: string): number[] {
+	return files
+		.filter((f) => f.startsWith(`${base}.`) && f.endsWith(".log"))
+		.map((f) => f.slice(base.length + 1, -4))
+		.filter((n) => /^\d+$/.test(n))
+		.map(Number)
+		.sort((a, b) => a - b);
+}
+
+// one entry per existing run log `.logs/<slug>.<role>[.<n>].log`: roles in pipeline order then
+// merger, a legacy unsuffixed file before that role's indexed runs, the list then ordered by log
+// mtime so the detail card shows the runs oldest-first across roles; equal mtimes keep the
+// enumeration order (role order, legacy first, index ascending). Only the newest run of the
+// state-mapped role is the live agent
+function agentHistory(root: string, t: Task, files: string[]): AgentEntry[] {
 	const slug = t.file.replace(/\.md$/, "");
 	const liveRole = AGENT_ROLE[t.state];
-	return PIPELINE_ROLES.filter((role) => existsSync(join(kanbanDir(root), ".logs", `${slug}.${role}.log`)))
-		.map((role) => ({ role, alive: role === liveRole && pidAlive(currentPid(root, slug)) }));
+	const live = !!liveRole && pidAlive(rolePid(root, slug, liveRole));
+	const entries: (AgentEntry & { mtime: number })[] = [];
+	for (const role of LOG_ROLES) {
+		const base = `${slug}.${role}`;
+		const runs: { run: number | null; handle: string }[] = [];
+		if (files.includes(`${base}.log`)) runs.push({ run: null, handle: base });
+		for (const n of indexRuns(files, base)) runs.push({ run: n, handle: `${base}.${n}` });
+		if (!runs.length) continue;
+		const newest = runs[runs.length - 1].handle;
+		for (const r of runs) {
+			let mtime = 0;
+			try {
+				mtime = statSync(join(kanbanDir(root), ".logs", `${r.handle}.log`)).mtimeMs;
+			} catch {
+				/* raced away between readdir and stat */
+			}
+			entries.push({ role, run: r.run, alive: live && role === liveRole && r.handle === newest, handle: r.handle, mtime });
+		}
+	}
+	return entries.sort((a, b) => a.mtime - b.mtime).map(({ role, run, alive, handle }) => ({ role, run, alive, handle }));
 }
 
-// rebuild the log path from the handle: the task must exist on the board and the suffix must be a
-// role the orchestrator actually writes, so a raw client-supplied path can never reach the fs
+// rebuild the log path from the handle: the task must exist on the board and the handle must be
+// `<slug>.<role>` or `<slug>.<role>.<n>` for a role the orchestrator actually writes, so a raw
+// client-supplied path can never reach the fs
 function agentLogPath(root: string, handle: string): string | null {
-	const m = handle.match(/^(.+)\.(developer|reviewer|live-tester)$/);
+	const m = handle.match(/^(.+)\.(developer|reviewer|live-tester|merger)(?:\.(\d+))?$/);
 	if (!m || !taskFiles(root).includes(`${m[1]}.md`)) return null;
-	return join(kanbanDir(root), ".logs", `${m[1]}.${m[2]}.log`);
+	return join(kanbanDir(root), ".logs", m[3] === undefined ? `${m[1]}.${m[2]}.log` : `${m[1]}.${m[2]}.${m[3]}.log`);
+}
+
+// the Agent tool's tool result names the background agent and its .output transcript; ids are in
+// log order, so a subagent's number is its index here. Paths come from the log, never the client:
+// resolve first, then only pi's own subagent dir and .output transcripts pass
+// parsing a parent log is not free (a live-tester log can pass 50 MB), and every panel open asks
+// for the list: memoize per path until the file size changes. A log only ever grows
+const subsCache = new Map<string, { size: number; subs: { id: string; path: string }[] }>();
+function subagentLogs(log: string): { id: string; path: string }[] {
+	let text = "";
+	let size = 0;
+	try {
+		size = statSync(log).size;
+		const hit = subsCache.get(log);
+		if (hit && hit.size === size) return hit.subs;
+		text = readFileSync(log, "utf8");
+	} catch {
+		return []; // parent log gone or not written yet
+	}
+	const subs: { id: string; path: string }[] = [];
+	for (const line of text.split("\n")) {
+		if (!line.includes('"tool_execution_end"')) continue; // cheap filter before JSON.parse
+		let rec: any;
+		try {
+			rec = JSON.parse(line);
+		} catch {
+			continue;
+		}
+		if (rec?.type !== "tool_execution_end") continue;
+		const content = rec.result?.content;
+		const result: string = Array.isArray(content) ? (content.find((c: any) => c?.type === "text")?.text ?? "") : "";
+		const id = result.match(/Agent ID: (\S+)/)?.[1];
+		const path = result.match(/Output file: (\S+)/)?.[1];
+		const resolved = path ? resolve(path) : "";
+		if (!id || !resolved.startsWith(SUB_ROOT) || !resolved.endsWith(".output")) continue;
+		subs.push({ id, path: resolved });
+	}
+	subsCache.set(log, { size, subs });
+	return subs;
 }
 
 // pi --mode json writes JSONL event records (docs/json.md); everything else in the log file is
@@ -212,24 +310,39 @@ function readRange(path: string, start: number, end: number): [string, number] {
 // one payload per task, from board files and pid files of one project root; the single-project
 // server and the hub's per-project variant both serve it
 export function taskPayload(root: string) {
-	return listAll(root).map((t) => ({
-		file: t.file,
-		name: t.name,
-		priority: t.priority,
-		state: t.state,
-		worktree: t.worktree,
-		issuer: t.issuer,
-		updated: taskUpdated(root, t.file),
-		body: taskBody(root, t.file),
-		agents: agentHistory(root, t),
-		agent: agentInfo(root, t),
-	}));
+	const files = logDirFiles(root);
+	return listAll(root).map((t) => {
+		const agents = agentHistory(root, t, files);
+		return {
+			file: t.file,
+			name: t.name,
+			priority: t.priority,
+			state: t.state,
+			worktree: t.worktree,
+			issuer: t.issuer,
+			updated: taskUpdated(root, t.file),
+			body: taskBody(root, t.file),
+			agents,
+			agent: agentInfo(root, t, agents),
+		};
+	});
 }
 
 // {status, body} for /api/agent-log against one project root; null = unknown file or handle
+// `sub=list` lists the handle's subagent transcripts, `sub=<n>` serves the n-th of them through
+// the same chunked payload; no matching record is an empty list, not an error
 export function agentLogPayload(root: string, q: URLSearchParams): string | null {
 	const log = agentLogPath(root, q.get("file") ?? "");
 	if (!log) return null;
+	const sub = q.get("sub");
+	if (sub === "list") return JSON.stringify(subagentLogs(log).map((s, index) => ({ id: s.id, index })));
+	let target = log;
+	if (sub !== null) {
+		const subIndex = /^\d+$/.test(sub) ? parseInt(sub, 10) : -1;
+		const found = subIndex >= 0 ? subagentLogs(log)[subIndex] : undefined;
+		if (!found) return null; // no such subagent in this run
+		target = found.path;
+	}
 	const n = parseInt(q.get("offset") ?? "", 10);
 	const off = Number.isInteger(n) && n >= 0 ? n : null;
 	let head: number, tail: number;
@@ -239,7 +352,7 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 	} else {
 		let size = 0;
 		try {
-			size = statSync(log).size;
+			size = statSync(target).size;
 		} catch {
 			// agent spawned but no output yet
 		}
@@ -256,13 +369,13 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 		// offset and walking back would re-serve it (live watching stays delta-streamed)
 		const walk = off == null || q.get("before") === "1";
 		for (;;) {
-			const [raw, boundary] = readRange(log, head, tail);
+			const [raw, boundary] = readRange(target, head, tail);
 			// a forward poll reports a tail on a record boundary: the client's next offset then
 			// starts at a whole record, so a record split across two windows is re-read from its
 			// start and renders once when its newline arrives, never just as a stripped head line
 			if (q.get("before") !== "1") next = boundary;
 			text = raw;
-			if (head > 0 && readRange(log, head - 1, head)[0] !== "\n") {
+			if (head > 0 && readRange(target, head - 1, head)[0] !== "\n") {
 				// head lands mid-record: drop the partial head line, only whole records render
 				const nl = text.indexOf("\n");
 				text = nl === -1 ? "" : text.slice(nl + 1);
@@ -327,18 +440,27 @@ export function flipDiff(oldPos, newPos) {
 // html escape, shipped to the client and shared with the tab renderer
 export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-// tab labels from the hub's /api/projects entries: one tab per registered project, and none for a
+// tab descriptors from the hub's /api/projects entries: one tab per registered project, and none for a
 // single project, so a single-project setup (or the single-project server, whose /api/projects is
-// a 404) keeps the old single-board ui
+// a 404) keeps the old single-board ui. The identity is the entry's root, unique per checkout, so
+// two same-named checkouts select their own boards; a name registered more than once appends the
+// branch to the label ("" on a detached HEAD keeps the plain name)
 export function tabNames(projects) {
-	return projects.length > 1 ? projects.map((p) => p.name) : [];
+	if (projects.length < 2) return [];
+	const seen = Object.create(null); // a repo basename can collide with Object.prototype keys
+	for (const p of projects) seen[p.name] = (seen[p.name] ?? 0) + 1;
+	return projects.map((p) => ({
+		id: p.root,
+		label: seen[p.name] > 1 && p.branch ? p.name + " (" + p.branch + ")" : p.name,
+	}));
 }
 
-// tab bar html: one button per project, the active one marked; a single project renders no bar
-export function tabsHtml(names, active) {
-	if (names.length < 2) return "";
-	return names
-		.map((n) => '<button class="tab' + (n === active ? " active" : "") + '" data-project="' + esc(n) + '">' + esc(n) + "</button>")
+// tab bar html: one button per tab, data-project carries the root identity, the active one
+// marked; a single project renders no bar
+export function tabsHtml(tabs, active) {
+	if (tabs.length < 2) return "";
+	return tabs
+		.map((t) => '<button class="tab' + (t.id === active ? " active" : "") + '" data-project="' + esc(t.id) + '">' + esc(t.label) + "</button>")
 		.join("");
 }
 
@@ -381,7 +503,7 @@ export function num(t: Task) {
 // markup, so its animation starts or stops with the state, and prefers-reduced-motion turns the CSS
 // animation off underneath
 export function spinnerHtml(st: string) {
-	return st === "doing" || st === "reviewing" || st === "live-testing" ? '<span class="spin"></span>' : "";
+	return st === "doing" || st === "reviewing" || st === "live-testing" || st === "merging" ? '<span class="spin"></span>' : "";
 }
 
 // one card's markup; this string is the card's identity across a refresh, see syncBoard.
@@ -497,7 +619,7 @@ export function syncBoard(cols, tasks, expanded, els, make, visible) {
 }
 
 // served by the single-project server and by the hub for every registered project; the tab bar
-// comes from the hub's /api/projects and each tab polls /api/tasks?project=NAME
+// comes from the hub's /api/projects and each tab polls /api/tasks?project=<root id>
 export const PAGE = `<!doctype html>
 <html lang="en">
 <head>
@@ -517,13 +639,14 @@ h1 { font-size: 16px; margin: 0; }
 #theme { margin-left: auto; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 #theme:hover { background: var(--hover); }
 #updated { font-size: 12px; color: var(--muted); }
-#tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; }
+/* 000091: #modal is position:fixed at z-index auto, so a relative #tabs at z-index 1 keeps the bar above the overlay and clickable while a modal is open */
+#tabs { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; }
 #tabs:empty { display: none; }
 .tab { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px 6px 0 0; padding: 4px 12px; font-size: 12px; cursor: pointer; }
 .tab:hover { background: var(--hover); }
 .tab.active { border-color: var(--link); color: var(--link); }
 #board { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; padding: 10px 18px 18px; overflow-x: auto; align-items: flex-start; }
-/* 000047: six middle columns stack as three pairs, sized and gapped like the single columns */
+/* 000047: the middle columns stack as pairs, sized and gapped like the single columns */
 .pair { display: flex; flex-direction: column; gap: 10px; min-width: 300px; flex: 1 0 300px; }
 .col { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; border-top: 3px solid var(--ac); padding: 10px; min-width: 300px; flex: 1 0 300px; }
 /* 000096: as a .pair child the .col basis would act on the height axis and floor it at 300px */
@@ -551,6 +674,8 @@ h1 { font-size: 16px; margin: 0; }
 .agent-btn:hover { background: var(--hover); }
 .agent-btn-active { border-color: var(--link); }
 .agent-btn.agent-btn-active { background: var(--medium-bg); }
+#m-sub-btns { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 6px; }
+#m-sub-btns:empty { display: none; }
 #m-agent-btns { display: flex; flex-wrap: wrap; gap: 6px; }
 .check { color: var(--low-fg); margin-right: 5px; }
 #m-agent { margin-bottom: 12px; }
@@ -583,6 +708,8 @@ h1 { font-size: 16px; margin: 0; }
 .c-reviewing { --ac: #d97706; }
 .c-to-live-test { --ac: #14b8a6; }
 .c-live-testing { --ac: #0d9488; }
+.c-to-merge { --ac: #d946ef; }
+.c-merging { --ac: #c026d3; }
 .c-done { --ac: #22c55e; }
 </style>
 </head>
@@ -599,8 +726,8 @@ h1 { font-size: 16px; margin: 0; }
 <script>
 "use strict";
 const VISIBLE = 5;
-let projects = [""]; // one tab per registered project; [""] is the single-project server, no tabs
-let active = "";
+let projects = [{ id: "", label: "" }]; // one tab per registered project; id "" is the single-project ui, one board, no tabs
+let active = ""; // the active tab's id: a registry root, or "" for the single-project board
 const boards = Object.create(null);
 const esc = ${esc};
 // 000042_fix_x.md -> #42; parseInt stops at the first non-digit and drops leading zeros
@@ -732,45 +859,86 @@ function openTask(file) {
 	document.getElementById("modal").classList.remove("hidden");
 }
 function closeModal() { closeLog(); document.getElementById("modal").classList.add("hidden"); }
-// live agent log pane: the button carries only the handle, the server resolves the real path
+// live agent log pane: each run button carries only its handle, the server resolves the real
+// path; a run's subagent transcripts load through the same endpoint with sub=list / sub=n
 let modalFile = null;
 let logTimer = null;
 let logState = null;
 const logPane = () => document.getElementById("m-log");
+const projectParam = () => (active ? "&project=" + encodeURIComponent(active) : "");
+const logUrl = extra => "?file=" + encodeURIComponent(logState.handle) + (logState.sub == null ? "" : "&sub=" + logState.sub) + extra + projectParam();
 function markActiveAgent() {
 	const p = logPane();
-	const role = logState && p && !p.classList.contains("hidden") ? logState.role : null;
-	for (const b of document.querySelectorAll("#m-agent .agent-btn")) b.classList.toggle("agent-btn-active", b.dataset.role === role);
+	const st = logState && p && !p.classList.contains("hidden") ? logState : null;
+	for (const b of document.querySelectorAll("#m-agent .agent-btn")) {
+		const active = !!st && b.dataset.handle === st.handle && (b.dataset.sub || null) === (st.sub == null ? null : String(st.sub));
+		b.classList.toggle("agent-btn-active", active);
+	}
 }
 const atBottom = () => { const p = logPane(); return p.scrollTop + p.clientHeight >= p.scrollHeight - 4; };
+// every run as one button, oldest leftmost (payload order is log mtime order), the live run
+// rightmost; a role with several runs labels them by index, so two reviewer runs never read alike
 function renderAgent(t) {
 	const el = document.getElementById("m-agent");
 	el.innerHTML = "";
 	const cap = s => s[0].toUpperCase() + s.slice(1);
-	const btns = [];
-	for (const a of (t.agents || []).filter(a => !a.alive)) btns.push('<button class="agent-btn agent-past" data-role="' + esc(a.role) + '" onclick="openAgentLog(\\'' + esc(a.role) + '\\')"><span class="check">\u2713</span>' + esc(cap(a.role)) + "</button>");
-	if (t.agent && t.agent.alive) btns.push('<button class="agent-btn agent-live" data-role="' + esc(t.agent.role) + '" onclick="openAgentLog(\\'' + esc(t.agent.role) + '\\')"><span class="spin"></span>' + esc(cap(t.agent.role)) + "</button>");
-	if (!btns.length) return;
-	el.innerHTML = '<div id="m-agent-btns">' + btns.join("") + '</div><div id="m-log" class="hidden"><pre id="m-log-text"></pre></div>';
+	const runs = (t.agents || []).slice();
+	const live = runs.find(a => a.alive);
+	if (live) { runs.splice(runs.indexOf(live), 1); runs.push(live); }
+	if (!runs.length) return;
+	const count = {};
+	for (const a of runs) count[a.role] = (count[a.role] || 0) + 1;
+	const label = a => cap(a.role) + (count[a.role] > 1 && a.run != null ? " " + a.run : "");
+	const btns = runs.map(a => !a.alive
+		? '<button class="agent-btn agent-past" data-handle="' + esc(a.handle) + '"><span class="check">\u2713</span>' + esc(label(a)) + "</button>"
+		: '<button class="agent-btn agent-live" data-handle="' + esc(a.handle) + '"><span class="spin"></span>' + esc(label(a)) + "</button>");
+	el.innerHTML = '<div id="m-agent-btns">' + btns.join("") + '</div><div id="m-sub-btns"></div><div id="m-log" class="hidden"><pre id="m-log-text"></pre></div>';
+	// bind by dataset: a hand-written task file name can hold quotes or backslashes, which no
+	// amount of HTML escaping makes safe inside inline JS
+	for (const b of el.querySelectorAll("#m-agent-btns .agent-btn")) b.onclick = () => openAgentLog(b.dataset.handle);
 	markActiveAgent();
 	const p = logPane();
 	p.onscroll = () => {
 		if (!logState || logState.busy || logState.atStart || p.scrollTop > 0) return;
-		pullLog("?file=" + encodeURIComponent(logState.handle) + "&offset=" + logState.head + "&before=1", "history");
+		pullLog(logUrl("&offset=" + logState.head + "&before=1"), "history");
 	};
 }
-function openAgentLog(role) {
-	if (logState && logState.role === role && !logPane().classList.contains("hidden")) { closeLog(); return; }
-	openLog(role);
+// the selected run's subagents: one button per background Agent call, stacked vertically below
+// the run row in log order
+function renderSubs(list) {
+	const el = document.getElementById("m-sub-btns");
+	if (!el || !logState) return;
+	el.innerHTML = list.map(s => '<button class="agent-btn agent-sub" data-handle="' + esc(logState.handle) + '" data-sub="' + s.index + '">' + esc(s.id) + "</button>").join("");
+	for (const b of el.querySelectorAll(".agent-btn")) b.onclick = () => openSubLog(Number(b.dataset.sub));
+	markActiveAgent();
 }
-function openLog(role) {
+function fetchSubs() {
+	const handle = logState && logState.handle;
+	if (!handle) return;
+	fetch("/api/agent-log?file=" + encodeURIComponent(handle) + "&sub=list" + projectParam()).then(r => r.ok ? r.json() : []).then(list => {
+		// a superseded open must not write into the new view
+		if (!logState || logState.handle !== handle) return;
+		renderSubs(Array.isArray(list) ? list : []);
+	}).catch(() => {});
+}
+function openAgentLog(handle) {
+	if (logState && logState.handle === handle && logState.sub == null && !logPane().classList.contains("hidden")) { closeLog(); return; }
+	openLog(handle, null);
+}
+function openSubLog(n) {
+	if (logState && logState.sub === n && !logPane().classList.contains("hidden")) { closeLog(); return; }
+	const handle = logState && logState.handle;
+	if (handle) openLog(handle, n);
+}
+function openLog(handle, sub) {
 	const t = activeBoard().tasks.find(x => x.file === modalFile);
 	const p = logPane();
 	if (!t || !p) return;
 	p.classList.remove("hidden");
-	logState = { handle: t.file.replace(/\\.md$/, "") + "." + role, role, head: 0, tail: 0, atStart: false, busy: false, idle: false };
+	logState = { handle, sub: sub == null ? null : sub, head: 0, tail: 0, atStart: false, busy: false, idle: false };
+	if (sub == null) fetchSubs(); // the sub list belongs to the run, a sub click keeps it
 	markActiveAgent();
-	pullLog("?file=" + encodeURIComponent(logState.handle), "init");
+	pullLog(logUrl(""), "init");
 	if (logTimer) clearInterval(logTimer);
 	logTimer = setInterval(pollLog, 1000);
 }
@@ -779,12 +947,16 @@ function closeLog() {
 	logState = null;
 	const p = logPane();
 	if (p) p.classList.add("hidden");
+	const subs = document.getElementById("m-sub-btns");
+	if (subs) subs.innerHTML = "";
 	markActiveAgent();
 }
 function pollLog() {
 	if (!logState || logState.busy) return;
 	const t = activeBoard().tasks.find(x => x.file === modalFile);
-	const live = !!(t && t.agent && t.agent.alive && t.agent.role === logState.role);
+	const liveRun = t && (t.agents || []).find(a => a.alive);
+	// only the live run's own log keeps writing; a subagent transcript is written once
+	const live = logState.sub == null && !!liveRun && liveRun.handle === logState.handle;
 	// past agents write no lines: one empty poll is proof, stop the timer
 	if (!live && logState.idle) {
 		if (logTimer) { clearInterval(logTimer); logTimer = null; }
@@ -793,17 +965,17 @@ function pollLog() {
 	const p = logPane();
 	// a scroll-to-top can land in a busy poll window and never re-fire; the tick retries history
 	if (p && p.scrollTop === 0 && !logState.atStart) {
-		pullLog("?file=" + encodeURIComponent(logState.handle) + "&offset=" + logState.head + "&before=1", "history");
+		pullLog(logUrl("&offset=" + logState.head + "&before=1"), "history");
 		return;
 	}
-	pullLog("?file=" + encodeURIComponent(logState.handle) + "&offset=" + logState.tail, "poll");
+	pullLog(logUrl("&offset=" + logState.tail), "poll");
 }
 function pullLog(qs, mode) {
 	const st = logState;
 	if (!st) return;
 	st.busy = true;
 	const p = logPane();
-	fetch("/api/agent-log" + qs + (active ? "&project=" + encodeURIComponent(active) : "")).then(r => r.ok ? r.json() : null).then(d => {
+	fetch("/api/agent-log" + qs).then(r => r.ok ? r.json() : null).then(d => {
 		// a superseded open must not write into the new view
 		if (!d || logState !== st || !p || p.classList.contains("hidden")) return;
 		const el = document.getElementById("m-log-text");
@@ -837,19 +1009,19 @@ function refresh() {
 		// the single-project server 404s here, and a transient hub failure keeps the last known
 		// tabs: only a real projects list replaces them
 		if (Array.isArray(list)) {
-			const names = tabNames(list);
-			projects = names.length ? names : [""]; // single project: the old ui, one board, no tabs
+			const tabs = tabNames(list);
+			projects = tabs.length ? tabs : [{ id: "", label: "" }]; // single project: the old ui, one board, no tabs
 		}
 		// a project that vanished from the registry closes the modal its task lived in
-		if (!projects.includes(active)) { active = projects[0]; closeModal(); }
-		const url = name => name ? "/api/tasks?project=" + encodeURIComponent(name) : "/api/tasks";
+		if (!projects.some(t => t.id === active)) { active = projects[0].id; closeModal(); }
+		const url = t => t.id ? "/api/tasks?project=" + encodeURIComponent(t.id) : "/api/tasks";
 		// every tab polls every cycle, only the active one renders
-		return Promise.all(projects.map(name => fetch(url(name)).then(r => r.ok ? r.json() : null).catch(() => null).then(t => [name, t])));
+		return Promise.all(projects.map(t => fetch(url(t)).then(r => r.ok ? r.json() : null).catch(() => null).then(tasks => [t.id, tasks])));
 	}).then(rows => {
 		mergeBoards(boards, rows);
 		render();
 		// stamp only a served board: during a hub outage the old stamp stays visible
-		const current = rows.find(([name]) => name === active);
+		const current = rows.find(([id]) => id === active);
 		if (current && current[1]) document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
 	}).catch(() => {});
 }
