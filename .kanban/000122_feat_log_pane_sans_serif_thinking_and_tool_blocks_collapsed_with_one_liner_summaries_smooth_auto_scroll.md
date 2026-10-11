@@ -3,7 +3,7 @@ name: "feat: log pane sans serif; thinking and tool blocks collapsed with one-li
 priority: "medium"
 state: "backlog"
 worktree: "feat/122-log-pane-sans"
-blockedBy: "#52"
+blockedBy: "#118"
 ---
 
 # Summary

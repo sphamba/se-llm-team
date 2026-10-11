@@ -3,7 +3,7 @@ name: "fix: the open detail card updates on the 5s refresh"
 priority: "medium"
 state: "backlog"
 worktree: ""
-blockedBy: "#52"
+blockedBy: "#120"
 ---
 
 # Summary

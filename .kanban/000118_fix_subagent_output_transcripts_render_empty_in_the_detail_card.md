@@ -1,8 +1,8 @@
 ---
 name: "fix: subagent output transcripts render empty in the detail card"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/118-subagent-output-transcripts"
 blockedBy: "#52"
 ---
 
