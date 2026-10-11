@@ -1,8 +1,8 @@
 ---
 name: "fix: stabilize orchestrator.test.ts part G merger-defer timing"
 priority: "low"
-state: "to-merge"
-worktree: "fix/110-stabilize-orchestrator-test"
+state: "done"
+worktree: ""
 issuer: "#64"
 ---
 
