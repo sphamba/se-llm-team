@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, setState } from "./kanban.ts";
-import { flipDiff, loadWebUiConfig, LOG_CHUNK, renderLogChunk, startWebUi } from "./webui.ts";
+import { buildShell, cardHtml, flipDiff, LAYOUT, loadWebUiConfig, LOG_CHUNK, pairLayout, renderLogChunk, spinnerHtml, startWebUi, syncBoard } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing", "done"];
@@ -99,6 +99,92 @@ assert.deepEqual(
 assert.deepEqual(flipDiff(stacked, stacked), {}, "an unchanged refresh animates nothing");
 assert.ok(page.includes(String(flipDiff)), "the page ships the tested flipDiff source");
 assert.ok(page.includes('transition = "transform .4s ease"'), "sibling shifts reuse the moved-card timing");
+
+// 000047 stacked pairs: the six middle states render as three .pair wrappers (to-do over doing,
+// to-review over reviewing, to-live-test over live-testing), backlog and done stay single columns.
+// El is a minimal element stub: buildShell and syncBoard only touch this DOM surface.
+class El {
+	tag: string;
+	className = "";
+	textContent = "";
+	dataset: Record<string, string> = {};
+	style: Record<string, string> = {};
+	children: El[] = [];
+	parent: El | null = null;
+	writes = 0;
+	html = "";
+	constructor(tag: string) { this.tag = tag; }
+	get firstChild(): El | null { return this.children[0] ?? null; }
+	get nextSibling(): El | null { const p = this.parent; return p ? p.children[p.children.indexOf(this) + 1] ?? null : null; }
+	get innerHTML(): string { return this.html; }
+	set innerHTML(v: string) { this.writes++; this.html = v; }
+	appendChild(c: El): El { c.remove(); c.parent = this; this.children.push(c); return c; }
+	insertBefore(c: El, ref: El | null): El {
+		c.remove();
+		c.parent = this;
+		const i = ref ? Math.max(0, this.children.indexOf(ref)) : this.children.length;
+		this.children.splice(i, 0, c);
+		return c;
+	}
+	remove(): void { const p = this.parent; if (p) p.children.splice(p.children.indexOf(this), 1); this.parent = null; }
+}
+const boardEl = new El("main");
+const cols: Record<string, any> = buildShell(boardEl, { createElement: (tag: string) => new El(tag) });
+assert.deepEqual(boardEl.children.map((c) => c.className), ["col c-backlog", "pair", "pair", "pair", "col c-done"], "backlog and done stay single side columns, the six middle states sit in three pairs");
+assert.deepEqual(
+	boardEl.children.slice(1, 4).map((p) => p.children.map((c) => c.className)),
+	[["col c-to-do", "col c-doing"], ["col c-to-review", "col c-reviewing"], ["col c-to-live-test", "col c-live-testing"]],
+	"to-do over doing, to-review over reviewing, to-live-test over live-testing",
+);
+assert.deepEqual(LAYOUT, ["backlog", ["to-do", "doing"], ["to-review", "reviewing"], ["to-live-test", "live-testing"], "done"], "the states between backlog and done pair up in pipeline order");
+assert.deepEqual(pairLayout([...STATE_NAMES.slice(0, -1), "to-merge", "merging", "done"]), ["backlog", ["to-do", "doing"], ["to-review", "reviewing"], ["to-live-test", "live-testing"], ["to-merge", "merging"], "done"], "the queued to-merge/merging states become a fourth pair with no change here");
+assert.ok(LAYOUT.every((part) => (typeof part === "string" ? cols[part] : part.every((st) => cols[st]))), "every layout state gets a column");
+assert.ok(page.includes(JSON.stringify(LAYOUT)), "the page ships the tested layout");
+assert.ok(page.includes(String(buildShell)) && page.includes(String(syncBoard)), "the page runs the tested shell and card pass");
+
+// the state picks the animation: only the states the orchestrator works on carry the spinner
+assert.ok(spinnerHtml("doing").includes('<span class="spin">') && spinnerHtml("live-testing").includes('<span class="spin">'), "working states render the spinner");
+assert.equal(spinnerHtml("to-do") + spinnerHtml("to-review") + spinnerHtml("done"), "", "waiting and finished states render no spinner");
+assert.ok(cardHtml({ file: "000047_fix_x.md", name: "a & b", priority: "high" }, "doing").includes('<span class="num">#47</span>a &amp; b'), "a card carries its short number and escaped name");
+
+// refresh identity: the 5 s poll keeps the node of every card whose markup did not change, so its
+// spinner element keeps spinning; a state change rewrites that card's markup and nothing else
+const els = new Map<string, El>();
+const make = (file: string) => { const c = new El("div"); c.className = "card"; c.dataset.file = file; return c; };
+const sync = (list: any[], open: Set<string> = new Set()) => syncBoard(cols, list, open, els, make, 5);
+const shown = (st: string) => cols[st].cards.children.filter((c: El) => c.className === "card").map((c: El) => c.dataset.file);
+const tasksA = [
+	{ file: "000001_a.md", name: "feat: a", priority: "high", state: "doing", updated: 2 },
+	{ file: "000002_b.md", name: "feat: b", priority: "low", state: "backlog", updated: 1 },
+];
+sync(tasksA);
+const cardA = els.get("000001_a.md")!;
+assert.ok(cardA.innerHTML.includes('<span class="spin">'), "a doing card carries the spinner");
+assert.equal(cardA.writes, 1, "the first pass writes the card markup");
+sync(tasksA);
+assert.equal(els.get("000001_a.md"), cardA, "an unchanged card keeps its DOM node across a refresh");
+assert.equal(cardA.writes, 1, "and its markup is not rewritten, so its spinner animation keeps running");
+sync(tasksA.map((t) => (t.file === "000001_a.md" ? { ...t, state: "to-do", updated: 3 } : t)));
+assert.equal(els.get("000001_a.md"), cardA, "a card that changes column keeps its node, so FLIP can move it");
+assert.deepEqual(shown("to-do"), ["000001_a.md"], "the card sits in its new column");
+assert.equal(cardA.writes, 2, "a state change rewrites the markup once");
+assert.ok(!cardA.innerHTML.includes("spin"), "leaving a working column stops the spinner");
+sync(tasksA);
+assert.ok(cardA.innerHTML.includes('<span class="spin">'), "entering a working column starts the spinner");
+
+// the per-column cap and unfold (000030) and the empty marker still hold, and a card whose task
+// left the board loses its node
+const many = Array.from({ length: 7 }, (_, i) => ({ file: `00001${i}_x.md`, name: "feat: x", priority: "low", state: "reviewing", updated: i }));
+sync(many);
+assert.equal(shown("reviewing").length, 5, "a column shows at most 5 cards");
+assert.equal(cols.reviewing.toggle.style.display, "", "the unfold button appears past the cap");
+sync(many, new Set(["reviewing"]));
+assert.equal(shown("reviewing").length, 7, "unfolding shows every card");
+assert.equal(cols.reviewing.toggle.textContent, "show less", "an unfolded column offers show less");
+sync(many.slice(1), new Set(["reviewing"]));
+assert.equal(els.has("000010_x.md"), false, "a card whose task left the board loses its node");
+assert.equal(cols["live-testing"].empty.style.display, "", "an empty column shows its dash");
+assert.equal(shown("live-testing").length, 0, "an empty column holds no cards");
 
 // agent info: null for a backlog task; populated for a working task with a live pid
 assert.equal(listed[0].agent, null);

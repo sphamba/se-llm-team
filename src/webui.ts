@@ -315,6 +315,125 @@ export function flipDiff(oldPos, newPos) {
 	return diff;
 }
 
+// board layout, left to right: a string is a single column, an array is a stacked pair with the
+// first state on top. backlog and done stay single side columns, the states between them stack two
+// by two in pipeline order (to-do over doing, to-review over reviewing, ...), so the queued
+// to-merge/merging states become another pair with no change here
+export function pairLayout(states: readonly string[]): (string | string[])[] {
+	const layout: (string | string[])[] = [states[0]];
+	const middle = states.slice(1, -1);
+	for (let i = 0; i < middle.length; i += 2) {
+		const pair = middle.slice(i, i + 2);
+		layout.push(pair.length > 1 ? pair : pair[0]);
+	}
+	layout.push(states[states.length - 1]);
+	return layout;
+}
+
+// interpolated into PAGE as JSON, so the client renders this exact layout
+export const LAYOUT = pairLayout(STATES);
+
+// 000047_fix_x.md -> #47; parseInt stops at the first non-digit and drops leading zeros
+export function num(t: Task) {
+	return "#" + parseInt(t.file, 10);
+}
+
+export function esc(s: unknown) {
+	return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+// the spinner marks a task the orchestrator is working on; a task that changes column changes this
+// markup, so its animation starts or stops with the state, and prefers-reduced-motion turns the CSS
+// animation off underneath
+export function spinnerHtml(st: string) {
+	return st === "doing" || st === "reviewing" || st === "live-testing" ? '<span class="spin"></span>' : "";
+}
+
+// one card's markup; this string is the card's identity across a refresh, see syncBoard
+export function cardHtml(t: Task, st: string) {
+	return '<div class="name">' + spinnerHtml(st) + '<span class="num">' + num(t) + "</span>" + esc(t.name) + '</div><span class="chip p-' + esc(t.priority) + '">' + esc(t.priority) + "</span>";
+}
+
+// the board shell, built once: a single column per layout string, one .pair wrapper per stacked
+// pair; returns each column's parts, keyed by state
+export function buildShell(parent, doc) {
+	const cols = {};
+	const column = (st: string) => {
+		const col = doc.createElement("section");
+		col.className = "col c-" + st;
+		const h2 = doc.createElement("h2");
+		h2.textContent = st + " ";
+		const count = doc.createElement("span");
+		count.className = "count";
+		h2.appendChild(count);
+		const cards = doc.createElement("div");
+		cards.className = "cards";
+		const empty = doc.createElement("div");
+		empty.className = "empty";
+		empty.textContent = "\u2014";
+		cards.appendChild(empty);
+		const toggle = doc.createElement("button");
+		toggle.className = "toggle";
+		toggle.style.display = "none";
+		col.appendChild(h2);
+		col.appendChild(cards);
+		col.appendChild(toggle);
+		cols[st] = { col, count, cards, empty, toggle };
+		return col;
+	};
+	for (const part of LAYOUT) {
+		if (typeof part === "string") {
+			parent.appendChild(column(part));
+			continue;
+		}
+		const pair = doc.createElement("div");
+		pair.className = "pair";
+		for (const st of part) pair.appendChild(column(st));
+		parent.appendChild(pair);
+	}
+	return cols;
+}
+
+// one refresh pass: place every task's card in its column and update counts and the fold toggle. A
+// card is rewritten only when its markup changed, so an unchanged card keeps its DOM node and with
+// it its running spinner animation and in-flight FLIP transform; orders are fixed by moving nodes,
+// so a card entering a column never rebuilds the cards already in it. The caller measures card
+// positions before and after this pass to animate the moves
+export function syncBoard(cols, tasks, expanded, els, make, visible) {
+	const live = new Set();
+	for (const st of Object.keys(cols)) {
+		const inState = tasks.filter((t) => t.state === st).sort((a, b) => b.updated - a.updated);
+		const shown = expanded.has(st) ? inState : inState.slice(0, visible);
+		const part = cols[st];
+		part.count.textContent = inState.length;
+		part.empty.style.display = shown.length ? "none" : "";
+		part.toggle.style.display = inState.length > visible ? "" : "none";
+		part.toggle.textContent = expanded.has(st) ? "show less" : "show all (" + inState.length + ")";
+		let prev = null;
+		for (const t of shown) {
+			live.add(t.file);
+			let el = els.get(t.file);
+			if (!el) {
+				el = make(t.file);
+				els.set(t.file, el);
+			}
+			const html = cardHtml(t, st);
+			if (el.__html !== html) {
+				el.innerHTML = html;
+				el.__html = html;
+			}
+			const next = prev ? prev.nextSibling : part.cards.firstChild;
+			if (next !== el) part.cards.insertBefore(el, next);
+			prev = el;
+		}
+	}
+	for (const [file, el] of els) {
+		if (live.has(file)) continue;
+		el.remove();
+		els.delete(file);
+	}
+}
+
 // served by the single-project server and by the hub for every registered project (000039 makes it tabbed)
 export const PAGE = `<!doctype html>
 <html lang="en">
@@ -336,6 +455,8 @@ h1 { font-size: 16px; margin: 0; }
 #theme:hover { background: var(--hover); }
 #updated { font-size: 12px; color: var(--muted); }
 #board { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; padding: 10px 18px 18px; overflow-x: auto; align-items: flex-start; }
+/* 000047: six middle columns stack as three pairs, sized and gapped like the single columns */
+.pair { display: flex; flex-direction: column; gap: 10px; min-width: 200px; flex: 1 0 200px; }
 .col { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; border-top: 3px solid var(--ac); padding: 10px; min-width: 200px; flex: 1 0 200px; }
 .col h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin: 0 0 10px; color: var(--heading); }
 .count { color: var(--faint); }
@@ -405,13 +526,8 @@ h1 { font-size: 16px; margin: 0; }
 </div></div>
 <script>
 "use strict";
-const STATES = ${JSON.stringify(STATES)};
-const WORKING = ["doing", "reviewing", "live-testing"];
 const VISIBLE = 5;
 let tasks = [];
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-// 000042_fix_x.md -> #42; parseInt stops at the first non-digit and drops leading zeros
-const num = t => "#" + parseInt(t.file, 10);
 const rootEl = document.documentElement;
 const storeTheme = t => { try { localStorage.setItem("theme", t); } catch {} };
 function syncThemeBtn() { document.getElementById("theme").textContent = (rootEl.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark" ? "Light" : "Dark"; }
@@ -446,42 +562,54 @@ function md(src) {
 	if (fence) html += "</code></pre>";
 	return html;
 }
-// FLIP across the innerHTML replace: measure old positions, render, invert, play. Every card whose
+// FLIP across a refresh: measure old positions, sync the cards, invert, play. Every card whose
 // board-content position changed moves, the siblings shifting when a card enters or leaves a
 // column included; positions are board-content relative, so a scrolled refresh animates nothing.
 ${flipDiff}
+// board layout and the card pass, interpolated as source so the client runs the tested code
+const LAYOUT = ${JSON.stringify(LAYOUT)};
+${num}
+${esc}
+${spinnerHtml}
+${cardHtml}
+${buildShell}
+${syncBoard}
 // fold choice keyed by state name, so the 5 s refresh keeps it
 const expanded = new Set();
 function toggleCol(st) { if (expanded.has(st)) expanded.delete(st); else expanded.add(st); render(); }
+// one element per task file, kept across refreshes: an unchanged card keeps its node, so its
+// spinner animation and in-flight FLIP transform are never restarted
+const cardEls = new Map();
+let cols = null;
+function makeCard(file) {
+	const el = document.createElement("div");
+	el.className = "card";
+	el.dataset.file = file;
+	el.onclick = () => openTask(file);
+	return el;
+}
 function render() {
 	const board = document.getElementById("board");
+	if (!cols) {
+		cols = buildShell(board, document);
+		for (const st in cols) cols[st].toggle.onclick = () => toggleCol(st);
+	}
 	const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 	// board-content relative: page scroll cancels, board scroll is added back, so a refresh after
 	// scrolling measures identical positions and animates nothing
 	const boardRect = board.getBoundingClientRect();
 	const pos = el => { const r = el.getBoundingClientRect(); return { x: r.left - boardRect.left + board.scrollLeft, y: r.top - boardRect.top + board.scrollTop }; };
 	const old = {};
-	for (const el of board.querySelectorAll(".card")) {
+	for (const el of cardEls.values()) {
 		el.style.transition = "none";
 		el.style.transform = "";
 		old[el.dataset.file] = pos(el);
 	}
-	board.innerHTML = STATES.map(st => {
-		const inState = tasks.filter(t => t.state === st).sort((a, b) => b.updated - a.updated);
-		const shown = expanded.has(st) ? inState : inState.slice(0, VISIBLE);
-		const cards = shown.map(t =>
-			'<div class="card" data-file="' + esc(t.file) + '"><div class="name">' + (WORKING.includes(st) ? '<span class="spin"></span>' : "") + '<span class="num">' + num(t) + "</span>" + esc(t.name) + '</div><span class="chip p-' + esc(t.priority) + '">' + esc(t.priority) + "</span></div>"
-		).join("");
-		const toggle = inState.length > VISIBLE ? '<button class="toggle" onclick="toggleCol(\\'' + esc(st) + '\\')">' + (expanded.has(st) ? "show less" : "show all (" + inState.length + ")") + "</button>" : "";
-		return '<section class="col c-' + st + '"><h2>' + esc(st) + ' <span class="count">' + inState.length + "</span></h2>" + (cards || '<div class="empty">&mdash;</div>') + toggle + "</section>";
-	}).join("");
+	syncBoard(cols, tasks, expanded, cardEls, makeCard, VISIBLE);
 	const now = {};
-	for (const el of board.querySelectorAll(".card")) {
-		el.onclick = () => openTask(el.dataset.file);
-		now[el.dataset.file] = pos(el);
-	}
+	for (const el of cardEls.values()) now[el.dataset.file] = pos(el);
 	const diff = flipDiff(old, now);
-	for (const el of board.querySelectorAll(".card")) {
+	for (const el of cardEls.values()) {
 		const d = diff[el.dataset.file];
 		if (!d || reduced) continue;
 		el.style.transition = "none";
