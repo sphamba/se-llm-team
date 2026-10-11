@@ -1,10 +1,13 @@
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
-import { kanbanDir, listAll, STATES } from "./kanban.ts";
+import { kanbanDir, listAll, STATES, taskFiles, type Task } from "./kanban.ts";
 
 const DEFAULT_HOST = "localhost";
 const DEFAULT_PORT = 4242;
+const LOG_CHUNK = 16384;
+// working state -> the agent role the orchestrator spawns for it (spawnAgent, src/orchestrator.ts)
+const AGENT_ROLE = { doing: "developer", reviewing: "reviewer", "live-testing": "live-tester" };
 
 export interface WebUiConfig {
 	enabled: boolean;
@@ -46,6 +49,53 @@ function taskUpdated(root: string, file: string): number {
 	}
 }
 
+// mirror of orchestrator.ts pidAlive; webui cannot import orchestrator (it imports webui)
+function pidAlive(pid: number): boolean {
+	if (!Number.isInteger(pid) || pid <= 0) return false;
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (err) {
+		return (err as NodeJS.ErrnoException).code === "EPERM"; // exists but not signalable: still alive
+	}
+}
+
+// role + liveness from the working state and the orchestrator's pid file (.kanban/.pids/{slug}.pid);
+// log is only a handle for the client, the real path is rebuilt server-side in agentLogPath
+function agentInfo(root: string, t: Task): { role: string; alive: boolean; log: string } | null {
+	const role = AGENT_ROLE[t.state];
+	if (!role) return null;
+	const slug = t.file.replace(/\.md$/, "");
+	let pid = 0;
+	try {
+		pid = parseInt(readFileSync(join(kanbanDir(root), ".pids", `${slug}.pid`), "utf8").trim(), 10) || 0;
+	} catch {
+		// no agent spawned yet, or the pid file was already cleared
+	}
+	return { role, alive: pidAlive(pid), log: `${slug}.${role}` };
+}
+
+// rebuild the log path from the handle: the task must exist on the board and the suffix must be a
+// role the orchestrator actually writes, so a raw client-supplied path can never reach the fs
+function agentLogPath(root: string, handle: string): string | null {
+	const m = handle.match(/^(.+)\.(developer|reviewer|live-tester)$/);
+	if (!m || !taskFiles(root).includes(`${m[1]}.md`)) return null;
+	return join(kanbanDir(root), ".logs", `${m[1]}.${m[2]}.log`);
+}
+
+function readRange(path: string, start: number, end: number): string {
+	if (end <= start) return "";
+	const buf = Buffer.alloc(end - start);
+	const fh = openSync(path, "r");
+	try {
+		const n = readSync(fh, buf, 0, buf.length, start);
+		// lenient decode: a multi-byte char split at the chunk edge becomes one replacement glyph
+		return buf.subarray(0, n).toString("utf8");
+	} finally {
+		closeSync(fh);
+	}
+}
+
 function serve(root: string, req: IncomingMessage, res: ServerResponse): void {
 	const path = (req.url ?? "/").split("?")[0];
 	if (req.method !== "GET") {
@@ -65,9 +115,41 @@ function serve(root: string, req: IncomingMessage, res: ServerResponse): void {
 					worktree: t.worktree,
 					updated: taskUpdated(root, t.file),
 					body: taskBody(root, t.file),
+					agent: agentInfo(root, t),
 				})),
 			),
 		);
+	} else if (path === "/api/agent-log") {
+		const q = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
+		const log = agentLogPath(root, q.get("file") ?? "");
+		if (!log) {
+			res.writeHead(404).end();
+		} else {
+			const n = parseInt(q.get("offset") ?? "", 10);
+			const off = Number.isInteger(n) && n >= 0 ? n : null;
+			let head: number, tail: number;
+			if (q.get("before") === "1") {
+				tail = off ?? 0;
+				head = Math.max(0, tail - LOG_CHUNK);
+			} else {
+				let size = 0;
+				try {
+					size = statSync(log).size;
+				} catch {
+					// agent spawned but no output yet
+				}
+				head = off ? Math.min(off, size) : Math.max(0, size - LOG_CHUNK);
+				tail = size;
+			}
+			let text = "";
+			try {
+				text = readRange(log, head, tail);
+			} catch {
+				// log vanished mid-request
+			}
+			res.writeHead(200, { "content-type": "application/json; charset=utf-8", connection: "close" });
+			res.end(JSON.stringify({ text, head, tail, atStart: head === 0 }));
+		}
 	} else {
 		res.writeHead(404).end();
 	}
@@ -121,6 +203,13 @@ h1 { font-size: 16px; margin: 0; }
 .empty { font-size: 12px; color: var(--faint); }
 .toggle { display: block; width: 100%; margin-top: 2px; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 .toggle:hover { background: var(--hover); }
+.agent-btn { display: inline-flex; align-items: center; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
+.agent-btn:hover { background: var(--hover); }
+#m-agent { margin-bottom: 12px; }
+#m-agent:empty { display: none; }
+#m-log { border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 300px; overflow: auto; }
+#m-log.hidden { display: none; }
+#m-log pre { margin: 0; padding: 8px 10px; font-size: 12px; line-height: 1.45; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: break-word; }
 #modal { position: fixed; inset: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
 #modal.hidden { display: none; }
 #m-box { background: var(--panel); border-radius: 10px; padding: 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
@@ -155,6 +244,7 @@ h1 { font-size: 16px; margin: 0; }
 <div id="modal" class="hidden"><div id="m-box">
 <div id="m-head"><h2 id="m-title"></h2><button id="m-close" onclick="closeModal()">Close</button></div>
 <div id="m-attrs"></div>
+<div id="m-agent"></div>
 <div id="m-body"></div>
 </div></div>
 <script>
@@ -244,6 +334,8 @@ function render() {
 function openTask(file) {
 	const t = tasks.find(x => x.file === file);
 	if (!t) return;
+	closeLog();
+	modalFile = file;
 	document.getElementById("m-title").textContent = t.name;
 	document.getElementById("m-attrs").innerHTML =
 		"<div><span>number</span>" + num(t) + "</div>" +
@@ -252,10 +344,90 @@ function openTask(file) {
 		"<div><span>priority</span><span class='chip p-" + esc(t.priority) + "'>" + esc(t.priority) + "</span></div>" +
 		"<div><span>state</span>" + esc(t.state) + "</div>" +
 		"<div><span>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>";
+	renderAgent(t);
 	document.getElementById("m-body").innerHTML = md(t.body || "");
 	document.getElementById("modal").classList.remove("hidden");
 }
-function closeModal() { document.getElementById("modal").classList.add("hidden"); }
+function closeModal() { closeLog(); document.getElementById("modal").classList.add("hidden"); }
+// live agent log pane: the button carries only the handle, the server resolves the real path
+let modalFile = null;
+let logTimer = null;
+let logState = null;
+const logPane = () => document.getElementById("m-log");
+const atBottom = () => { const p = logPane(); return p.scrollTop + p.clientHeight >= p.scrollHeight - 4; };
+function renderAgent(t) {
+	const el = document.getElementById("m-agent");
+	el.innerHTML = "";
+	if (!t.agent || !t.agent.alive) return;
+	const label = t.agent.role[0].toUpperCase() + t.agent.role.slice(1);
+	el.innerHTML = '<button class="agent-btn" onclick="toggleLog()"><span class="spin"></span>' + esc(label) + '</button><div id="m-log" class="hidden"><pre id="m-log-text"></pre></div>';
+	const p = logPane();
+	p.onscroll = () => {
+		if (!logState || logState.busy || logState.atStart || p.scrollTop > 0) return;
+		pullLog("?file=" + encodeURIComponent(logState.handle) + "&offset=" + logState.head + "&before=1", "history");
+	};
+}
+function openLog() {
+	const t = tasks.find(x => x.file === modalFile);
+	const p = logPane();
+	if (!t || !t.agent || !p) return;
+	p.classList.remove("hidden");
+	logState = { handle: t.agent.log, head: 0, tail: 0, atStart: false, busy: false };
+	pullLog("?file=" + encodeURIComponent(t.agent.log), "init");
+	logTimer = setInterval(pollLog, 1000);
+}
+function closeLog() {
+	if (logTimer) { clearInterval(logTimer); logTimer = null; }
+	logState = null;
+	const p = logPane();
+	if (p) p.classList.add("hidden");
+}
+function toggleLog() {
+	const p = logPane();
+	if (!p) return;
+	if (p.classList.contains("hidden")) openLog(); else closeLog();
+}
+function pollLog() {
+	if (!logState || logState.busy) return;
+	const t = tasks.find(x => x.file === modalFile);
+	if (!t || !t.agent || !t.agent.alive) { if (logTimer) { clearInterval(logTimer); logTimer = null; } return; }
+	const p = logPane();
+	// a scroll-to-top can land in a busy poll window and never re-fire; the tick retries history
+	if (p && p.scrollTop === 0 && !logState.atStart) {
+		pullLog("?file=" + encodeURIComponent(logState.handle) + "&offset=" + logState.head + "&before=1", "history");
+		return;
+	}
+	pullLog("?file=" + encodeURIComponent(logState.handle) + "&offset=" + logState.tail, "poll");
+}
+function pullLog(qs, mode) {
+	logState.busy = true;
+	const p = logPane();
+	fetch("/api/agent-log" + qs).then(r => r.ok ? r.json() : null).then(d => {
+		if (!d || !logState || !p || p.classList.contains("hidden")) return;
+		const el = document.getElementById("m-log-text");
+		if (mode === "history") {
+			logState.head = d.head;
+			logState.atStart = d.atStart;
+			if (d.text) {
+				const before = p.scrollHeight;
+				el.textContent = d.text + el.textContent;
+				p.scrollTop += p.scrollHeight - before;
+			}
+		} else {
+			logState.tail = d.tail;
+			if (mode === "init") {
+				logState.head = d.head;
+				logState.atStart = d.atStart;
+				el.textContent = d.text;
+				p.scrollTop = p.scrollHeight;
+			} else if (d.text) {
+				const stick = atBottom();
+				el.textContent += d.text;
+				if (stick) p.scrollTop = p.scrollHeight;
+			}
+		}
+	}).catch(() => {}).finally(() => { if (logState) logState.busy = false; });
+}
 document.getElementById("modal").onclick = e => { if (e.target.id === "modal") closeModal(); };
 function refresh() {
 	fetch("/api/tasks").then(r => r.ok ? r.json() : null).then(data => {
