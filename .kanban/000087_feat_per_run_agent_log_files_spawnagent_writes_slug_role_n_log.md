@@ -1,7 +1,7 @@
 ---
 name: "feat: per-run agent log files; spawnAgent writes slug.role.N.log"
 priority: "medium"
-state: "live-testing"
+state: "done"
 worktree: "feat/87-per-run-agent"
 ---
 
@@ -38,6 +38,13 @@ HOLD: behind #69 (doing on fix/69, dirtying src/orchestrator.ts + src/orchestrat
 - Acceptance verified on 35ba118: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts all pass. The orchestrator suite ran end to end and includes part AA (exactly 3 reviewer spawns, the 4th refused, forced to-live-test, counter cleared, pipeline completes to done), the part B developer rerun log 1, the part E six indexed reviewer logs with no count for died runs, and the part K three indexed merger logs.
 - Reviewed 35ba118 (landed mid-review): it adds the part A legacy-log assertion (spec 2 coverage) and isolates parts X and Y from the ambient user-level config. Correct; no further action.
 - Known latent, pre-existing and not this task: fixture() runs `git init -q` and parts K/X then `git checkout -q main`, so the suite depends on the machine's global git init.defaultBranch=main (this machine has it). One-word fix when it bites: `git init -qb main`.
+- Live test (head 35ba118, scratch project with a 4-task board, stub agent set through the `.kanban/se-llm-team.json` "agent" key, daemon `node src/orchestrator.ts --root ... --rescan-seconds 1 --poll-minutes 0.05` from this worktree, SE_LLM_TEAM_NO_WEBUI=1). All four flows reached done and merged; meta/kanban got 4 create and 4 done commits.
+- Per-run logs confirmed live. A died developer run wrote `000001_legacy_dev.developer.0.log` (empty file, still the indexed name); the rerun wrote `.developer.1.log` with the JSONL event stream. Six same-role reviewer respawns wrote `.reviewer.0` to `.reviewer.5.log` as separate files, no appending. The merger spawn wrote `000004_conflict_dev.merger.0.log`. The pre-existing legacy `000001_legacy_dev.developer.log` stayed byte-identical (15 bytes) and the first indexed run was `.0.log` next to it.
+- Reviewer cap confirmed live. Task 2 (rework cycle): 3 successful to-review runs counted, a died run in between did not count (the cap fired after the 3rd success, and no 5th reviewer log was written). The task moved to to-live-test, the counter cleared to 0, and the log line is present. Task 3 (approval cycle): 3 approvals counted; after the live-tester bounced the task back a third time, the next reviewer spawn was refused and the task force-advanced with the counter cleared. Task 4 exercised the conflict path: one merger spawn (merge-attempts 1), then a clean merge.
+- Counter-after-done behavior confirmed live: tasks 1 and 4 keep `reviewer-runs.count` = 1 after done. This matches the open question below.
+- Issue found (minor, sent to the PM): the cap-advance log line does not name the task file. Every other state-touching log line names the task. With several tasks in to-review, the operator cannot tell which task was force-advanced.
+- Test-harness note (not a code issue): my first stub gave task 1's reviewer no behavior, so it died 5 times and the daemon gave up (state stayed reviewing, dead counter kept growing, armed marker left on disk). After I fixed the stub and set the state back to to-review like a user would, the stale marker was consumed with a pid mismatch (no count) and the task completed to done.
+- Acceptance re-verified on this head: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts all pass.
 
 # Open questions
 - An approval bump stays in the reviewer-runs counter until a forced advance clears it. Shall the counter also clear when the task completes (reaches done), so every rework cycle starts at zero? The current code follows the spec test list ("an approval counts toward the cap").

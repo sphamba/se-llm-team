@@ -1,6 +1,6 @@
 ---
 name: "feat: webui task ids are links; blockedBy shown in the detail card"
-priority: "medium"
+priority: "high"
 state: "backlog"
 worktree: ""
 ---
