@@ -29,6 +29,7 @@ export interface Task {
 
 export interface TaskRef {
 	file: string;
+	num: number;
 	name: string;
 	priority: string;
 	state: TaskState;
@@ -49,6 +50,12 @@ export function taskFiles(root: string): string[] {
 	} catch {
 		return [];
 	}
+}
+
+// leading 6-digit task number; 0 for names without one
+export function taskNum(file: string): number {
+	const n = parseInt(file.slice(0, 6), 10);
+	return Number.isNaN(n) ? 0 : n;
 }
 
 // an unresolved git merge conflict leaves both marker lines in the working-tree file;
@@ -109,7 +116,7 @@ export function listTasks(root: string, scope: Scope, priority?: Priority | stri
 			scope === "backlog" ? t.state === "backlog" : scope === "done" ? t.state === "done" : IN_PROGRESS.has(t.state),
 		)
 		.filter((t) => priority === undefined || t.priority === priority)
-		.map(({ file, name, priority, state, summary }) => ({ file, name, priority, state, summary }));
+		.map(({ file, name, priority, state, summary }) => ({ file, num: taskNum(file), name, priority, state, summary }));
 }
 
 export function getTask(root: string, file: string): Task | undefined {
@@ -245,9 +252,7 @@ export function createTask(
 		`# Summary\n${input.summary.trim()}\n\n# Specs\n${(input.specs ?? "").trim()}\n\n# Notes\n`;
 	mkdirSync(kanbanDir(root), { recursive: true });
 	for (let attempt = 0; attempt < 10; attempt++) {
-		const nums = taskFiles(root)
-			.map((f) => parseInt(f.slice(0, 6), 10))
-			.filter((n) => !Number.isNaN(n));
+		const nums = taskFiles(root).map(taskNum).filter((n) => n > 0);
 		const num = String((nums.length ? Math.max(...nums) : 0) + 1).padStart(6, "0");
 		const file = `${num}_${slugFile(input.name)}.md`;
 		try {
