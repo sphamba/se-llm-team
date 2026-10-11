@@ -135,10 +135,9 @@ export function renderLogChunk(text: string): string {
 		}
 	};
 	const lines = text.split("\n");
-	if (lines[lines.length - 1] !== "") lines.pop(); // the byte boundary split a record: drop the partial
+	lines.pop(); // split's last element is the trailing-newline sentinel or a byte-split partial record, not content
 	const seenTools = new Set<string>();
 	for (const line of lines) {
-		if (!line) continue;
 		let rec: Record<string, any>;
 		try {
 			rec = JSON.parse(line);
