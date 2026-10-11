@@ -1,7 +1,7 @@
 ---
 name: "feat: SKILL.md blocking-task guidance; the kanban tools reject circular blocks"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "feat/131-skill-md-blocking"
 complexity: "moderate"
 ---
@@ -30,3 +30,8 @@ kanban_create and kanban_update set blockedBy (index.ts ~:72, ~:99). Setting "B 
 moderate. Files: skills/se-llm-team/SKILL.md, src/kanban.ts, src/kanban.test.ts, index.ts (error wording only if needed).
 
 # Notes
+- Implemented in the worktree, commit e6045ed on feat/131-skill-md-blocking.
+- src/kanban.ts: added blockedNums ("#42, #43" -> [42, 43], deduped, malformed parts ignored) and assertNoBlockCycle (direct 2-cycle and self-block reject; one-directional pairs, longer chains, stale refs to missing tasks and clearing stay allowed). Wired into updateTask (when patch.blockedBy is set, checked before updateAttrs) and into createTask inside the number-allocation loop, since a new task's number is only known there: a stale ref to the next number (a deleted task's number) or the create's own next number cannot form a cycle either. index.ts needed no change: both tools call these paths and the thrown error propagates to the caller as the tool error.
+- src/kanban.test.ts: new cycle-guard section on its own tmp root covers the 2-cycle reject with the exact message, the rejected write leaving the file unchanged, self-reference reject, clearing, the a->b->c chain, and both create-path rejections (stale-ref 2-cycle, self-number).
+- skills/se-llm-team/SKILL.md step 4: appended the blockedBy guidance - every kanban_create sets blockedBy with blockers in any state (backlog included), blockedBy only gates promotion (step 6); a new task in a non-empty backlog re-chains the queue in promotion order (priority rank, then file number): it lists the task before it plus shared in-flight lanes, and the backlog task that now follows it gains the new task as a blocker ref via kanban_update. Step 6 wording untouched.
+- Verified: node src/kanban.test.ts, node src/orchestrator.test.ts and node index.test.ts all pass.
