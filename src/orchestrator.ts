@@ -21,6 +21,9 @@ const DEFAULT_POLL_MINUTES = 1;
 const DEFAULT_AUTO_SCHEDULE_MINUTES = 5;
 const RESPAWN_CAP = 5;
 const MERGE_ATTEMPT_CAP = 3;
+// consecutive failed auto-pushes before the daemon logs its once-only warning (a success
+// resets the count); the per-failure line is easy to miss, the warning names the consequence
+const PUSH_WARN_AFTER = 3;
 // the board's home ref: a branch is the only git-native carrier (push and clone transfer
 // refs/heads/* only), so the board mirrors there and a fresh clone can bootstrap from it
 const KANBAN_REF = "refs/heads/meta/kanban";
@@ -198,7 +201,10 @@ function commitKanban(root: string, message: string): boolean {
 	return true;
 }
 
-// best-effort auto-push of only the board mirror ref; failures are logged, never fatal
+// best-effort auto-push of only the board mirror ref; failures are logged, never fatal.
+// PUSH_WARN_AFTER consecutive failures log a prominent warning once (a success resets the
+// count), so a permanently unreachable origin is visible instead of silently defeating the
+// mirror and the fresh-clone bootstrap
 function pushMirror(root: string): void {
 	if (!git(root, ["remote"], true)) return;
 	try {
@@ -208,8 +214,13 @@ function pushMirror(root: string): void {
 			stdio: ["ignore", "pipe", "pipe"],
 			timeout: 30000,
 		});
+		if (readCounter(root, "push-failures") > 0) writeFileSync(counterPath(root, "push-failures"), "0");
 	} catch (err) {
 		log(root, `push of ${KANBAN_REF} failed (non-fatal): ${err instanceof Error ? err.message : err}`);
+		// counter keeps growing while pushes keep failing; log the warning only once per streak
+		if (bumpCounter(root, "push-failures") === PUSH_WARN_AFTER) {
+			log(root, `WARNING: auto-push of ${KANBAN_REF} to origin failed ${PUSH_WARN_AFTER} times in a row; the board mirror is not reaching origin and fresh-clone bootstrap cannot work. Check SSH access to origin for the daemon user (known_hosts entry, deploy key). This warning is logged once until a push succeeds.`);
+		}
 	}
 }
 

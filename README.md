@@ -44,6 +44,10 @@ States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing,
 - done with a worktree: merges the branch into the main checkout, removes the worktree, deletes the branch, then commits the task file (the done commit). On conflict, spawns a Merger agent, capped at 3 attempts. done without a worktree: the orchestrator commits the task file at the next rescan. The done commit is skipped when the file has nothing uncommitted.
 - A task file with unresolved merge conflict markers is left untouched: the daemon spawns no agents, rewrites no attribute, and commits nothing for it until the merger or the user resolves the conflict.
 
+### Board mirror to origin
+
+Every mirror commit is best-effort pushed to `origin` as `refs/heads/meta/kanban` (only that ref; failures are logged, never fatal). The push needs SSH access to origin for the daemon user (a known_hosts entry and a deploy key); without it the mirror stays local and a fresh-clone bootstrap on another machine cannot work. After 3 consecutive failed pushes the daemon logs one warning (repeated only after a push succeeds again), visible in `.kanban/.logs/orchestrator.log`.
+
 ## Extension load path
 
 Role agents run in task worktrees, but pi loads the extension from the global symlink `~/.pi/agent/extensions/se-llm-team/`, which resolves to the main checkout. Tools added on an unmerged branch are invisible to role agents until the branch merges. Until then, a Live-tester of a new tool verifies it with fixtures and code inspection instead of invoking the tool.
