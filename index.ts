@@ -80,6 +80,8 @@ export default function (pi: ExtensionAPI) {
 		label: "Kanban update",
 		description:
 			"Update an existing task. Use this instead of creating a duplicate when a not-done task already covers the same need. Omitted fields stay unchanged.",
+		// additionalProperties: false so pi rejects an unrecognized field (e.g. notes)
+		// with a validation error instead of dropping it and reporting a false update
 		parameters: Type.Object({
 			file: Type.String({ description: "Task file name" }),
 			name: Type.Optional(Type.String()),
@@ -87,11 +89,13 @@ export default function (pi: ExtensionAPI) {
 			summary: Type.Optional(Type.String({ description: "Replaces the whole Summary section" })),
 			specs: Type.Optional(Type.String({ description: "Replaces the whole Specs section" })),
 			openQuestions: Type.Optional(Type.String({ description: "User/client clarification questions, written to the task body's # Open questions section" })),
-		}),
+		}, { additionalProperties: false }),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
 			const task = getTask(ctx.cwd, params.file);
 			if (!task) return text(`No task ${params.file}`);
+			const hasField = Object.entries(params).some(([k, v]) => k !== "file" && v !== undefined);
+			if (!hasField) return text(`Nothing to update in ${task.file}`);
 			updateTask(ctx.cwd, task, params);
 			return text(`Updated ${task.file} (#${taskNum(task.file)})`);
 		},
