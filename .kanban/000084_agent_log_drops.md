@@ -1,8 +1,8 @@
 ---
 name: "fix: agent log drops a JSONL record split across two poll windows"
 priority: "medium"
-state: "doing"
-worktree: "fix/84-agent-log-drops"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -30,3 +30,26 @@ Suggested direction (pick one, keep the 000054/000067/000068 contracts intact - 
 Ship with a test that reproduces the two-poll split (assert the completed record renders exactly once) and runs the full suite green; per project convention, code changes ship with tests.
 
 # Notes
+Implemented the record-boundary tail approach in src/webui.ts, commit 8be9e72.
+- readRange now returns [text, byte offset just past the window's last newline-terminated record].
+- agentLogPayload reports that boundary as `tail` on forward polls (init and offset polls); the `before=1` history tail is unchanged. The client's next offset then starts at a whole record, so a record split across two windows is re-read from its start and renders once when its newline arrives. The already-served prefix is not re-served.
+Test in src/webui.test.ts: split a record at byte 1, 20, half and last byte, plus a mid-multibyte split; asserts only the terminated line renders in the first poll, the completed record renders once in the second, and a third poll from the new tail yields "". Verified red on the pre-fix src/webui.ts (first.tail 13 != 12) and green after.
+Full suite green: node src/kanban.test.ts, node src/webui.test.ts (x3), node src/orchestrator.test.ts (all smoke parts).
+
+Review 2026-10-11, no code changes made.
+- The design matches the Specs. readRange returns the offset just past the window's last newline. agentLogPayload reports that offset as tail on init polls and offset polls. The client's next offset is then a record boundary, so the head guard never strips a continuation. The before=1 history tail is unchanged.
+- Red check repeated in a throwaway copy with main's src/webui.ts. The new test fails at src/webui.test.ts:369 (first.tail 13 != 12). The fixed code is green.
+- Suites green in the worktree: node src/kanban.test.ts, node src/webui.test.ts (twice), node src/orchestrator.test.ts (all smoke parts).
+- Extra edge checks passed (throwaway script, not committed). A window that completes record R2 and starts a partial R3 reports the tail at the start of R3. R2 renders once and R3 renders once when its newline arrives. An init poll bigger than LOG_CHUNK with an unterminated last record reports the record start as the tail and renders the record once. Empty files and files with no newline report tail 0 and render nothing. They render the record once when the newline arrives.
+- No defect found. No open user questions.
+
+Live test 2026-10-11, no code changes made. Ran the webui from the worktree as a user (startWebUi + real HTTP GET /api/agent-log) plus the shipped suites.
+- Suites green: node src/kanban.test.ts, node src/webui.test.ts, node src/orchestrator.test.ts (all smoke parts).
+- Two-poll split at every one of the record's 128 byte offsets: the first poll serves only the terminated line and reports tail on the record boundary, the second poll from that tail renders the completed record exactly once, a third poll yields "". No offset lost the record and none re-rendered the prefix.
+- Live tail: appended one record byte by byte, polled after every byte. Each line rendered exactly once, in order, and the settled stream re-rendered nothing.
+- Non-JSON: an unterminated non-JSON line is not rendered and reports tail 0; its continuation appended in a later window renders the whole line once.
+- before=1 history poll keeps the requested offset as tail and returns renderable text.
+- Regression: a large all-terminated log serves the last LOG_CHUNK unchanged with tail at the file end. A finished log still walks back to renderable content with tail on the last record boundary. An init poll over a huge unterminated record serves no raw JSON.
+- Red check repeated: a detached worktree at d56b833 (pre-fix) with the new test file fails at src/webui.test.ts:369 (first.tail 13 != 12); the fix is green.
+- One candidate issue investigated and dismissed as a test artifact: rewriting mid-file at an already-consumed offset reports "" (the byte before the offset is no longer a newline). Real agent logs are append-only; append-only growth renders correctly. Not a defect.
+- No defect found. No open user questions.
