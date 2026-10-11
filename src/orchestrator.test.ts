@@ -298,7 +298,6 @@ await waitFor(
 	60000,
 	"worktree board symlink",
 	d.output,
-	rootD,
 );
 assert.equal(readlinkSync(wtBoardD), kanbanDir(rootD)); // absolute path to the shared board
 // the excludes setup lands milliseconds after the symlink: wait for convergence before asserting
