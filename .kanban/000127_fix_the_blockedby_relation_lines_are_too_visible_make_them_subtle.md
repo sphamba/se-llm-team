@@ -3,6 +3,8 @@ name: "fix: the blockedBy relation lines are too visible; make them subtle"
 priority: "medium"
 state: "backlog"
 worktree: ""
+complexity: simple
+blockedBy: "#118, #121"
 ---
 
 # Summary
