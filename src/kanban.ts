@@ -24,6 +24,7 @@ export interface Task {
 	summary: string;
 	specs: string;
 	notes: string;
+	openQuestions: string;
 	conflicted: boolean;
 }
 
@@ -34,6 +35,7 @@ export interface TaskRef {
 	priority: string;
 	state: TaskState;
 	summary: string;
+	openQuestions: string;
 }
 
 const IN_PROGRESS = new Set<TaskState>(["to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing"]);
@@ -100,6 +102,7 @@ export function parseTask(root: string, file: string): Task {
 		summary: trim(sections["summary"]),
 		specs: trim(sections["specs"]),
 		notes: trim(sections["notes"]),
+		openQuestions: trim(sections["open questions"]),
 		// a conflicted file parses bogus values (duplicate keys resolve last-wins, the
 		// merged-in side wins); callers must not rewrite or act on it
 		conflicted: hasConflictMarkers(raw),
@@ -116,7 +119,7 @@ export function listTasks(root: string, scope: Scope, priority?: Priority | stri
 			scope === "backlog" ? t.state === "backlog" : scope === "done" ? t.state === "done" : IN_PROGRESS.has(t.state),
 		)
 		.filter((t) => priority === undefined || t.priority === priority)
-		.map(({ file, name, priority, state, summary }) => ({ file, num: taskNum(file), name, priority, state, summary }));
+		.map(({ file, name, priority, state, summary, openQuestions }) => ({ file, num: taskNum(file), name, priority, state, summary, openQuestions }));
 }
 
 export function getTask(root: string, file: string): Task | undefined {
@@ -219,7 +222,7 @@ function replaceSections(root: string, task: Task, updates: Record<string, strin
 export function updateTask(
 	root: string,
 	task: Task,
-	patch: { name?: string; priority?: string; summary?: string; specs?: string },
+	patch: { name?: string; priority?: string; summary?: string; specs?: string; openQuestions?: string },
 ): void {
 	const current = parseTask(root, task.file);
 	const rawTask = readFileSync(join(kanbanDir(root), task.file), "utf8");
@@ -233,6 +236,7 @@ export function updateTask(
 	const sections: Record<string, string> = {};
 	if (patch.summary !== undefined) sections.summary = patch.summary;
 	if (patch.specs !== undefined) sections.specs = patch.specs;
+	if (patch.openQuestions !== undefined) sections["open questions"] = patch.openQuestions;
 	if (Object.keys(sections).length) replaceSections(root, task, sections);
 }
 
@@ -254,14 +258,16 @@ export function appendNote(root: string, task: Task, note: string): void {
 
 export function createTask(
 	root: string,
-	input: { name: string; priority?: Priority | string; summary: string; specs?: string },
+	input: { name: string; priority?: Priority | string; summary: string; specs?: string; openQuestions?: string },
 ): Task {
 	const priority = (["low", "medium", "high", "critical"] as const).includes(input.priority as Priority)
 		? input.priority
 		: "medium";
+	const open = (input.openQuestions ?? "").trim();
 	const content =
 		`${serializeFrontmatter({ name: input.name, priority, state: "backlog", worktree: "" })}\n` +
-		`# Summary\n${input.summary.trim()}\n\n# Specs\n${(input.specs ?? "").trim()}\n\n# Notes\n`;
+		`# Summary\n${input.summary.trim()}\n\n# Specs\n${(input.specs ?? "").trim()}\n\n# Notes\n` +
+		(open ? `\n# Open questions\n${open}\n` : "");
 	mkdirSync(kanbanDir(root), { recursive: true });
 	for (let attempt = 0; attempt < 10; attempt++) {
 		const nums = taskFiles(root).map(taskNum).filter((n) => n > 0);

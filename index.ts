@@ -62,6 +62,7 @@ export default function (pi: ExtensionAPI) {
 			priority: Type.Optional(StringEnum(["low", "medium", "high", "critical"] as const)),
 			summary: Type.String({ description: "Concise goal, one to three sentences" }),
 			specs: Type.Optional(Type.String({ description: "Detailed description of needs" })),
+			openQuestions: Type.Optional(Type.String({ description: "User/client clarification questions, written to the task body's # Open questions section" })),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
@@ -84,6 +85,7 @@ export default function (pi: ExtensionAPI) {
 			priority: Type.Optional(StringEnum(["low", "medium", "high", "critical"] as const)),
 			summary: Type.Optional(Type.String({ description: "Replaces the whole Summary section" })),
 			specs: Type.Optional(Type.String({ description: "Replaces the whole Specs section" })),
+			openQuestions: Type.Optional(Type.String({ description: "User/client clarification questions, written to the task body's # Open questions section" })),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
