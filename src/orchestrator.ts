@@ -1,6 +1,6 @@
 import { spawn, execFileSync, execSync } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, realpathSync, readFileSync, readlinkSync, rmSync, symlinkSync, watch, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	appendNote,
@@ -14,7 +14,8 @@ import {
 	type Task,
 	type TaskState,
 } from "./kanban.ts";
-import { loadWebUiConfig, startWebUi } from "./webui.ts";
+import { joinHub } from "./hub.ts";
+import { loadWebUiConfig } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_POLL_MINUTES = 1;
@@ -167,8 +168,7 @@ function git(root: string, args: string[], allowFailure = false): string | null 
 // Never touches the index or working tree, so main history gets no kanban commits. The tree
 // is rebuilt from the whole board, so deleted files and disk drift self-heal on the next
 // mirror commit.
-function commitKanban(root: string, message: string): boolean {
-	const files = taskFiles(root);
+function commitKanban(root: string, message: string, files: string[]): boolean {
 	if (!files.length) return false;
 	let tree: string;
 	try {
@@ -228,9 +228,8 @@ function pushMirror(root: string): void {
 // board file status relative to the meta/kanban mirror: "??" = not on the mirror yet (new
 // task), non-empty = differs from the mirror (changed after its last mirror commit), "" =
 // identical; empty when git is missing
-function boardStatus(root: string): Map<string, string> {
+function boardStatus(root: string, files: string[]): Map<string, string> {
 	const status = new Map<string, string>();
-	const files = taskFiles(root);
 	if (!files.length) return status;
 	if (git(root, ["rev-parse", "--git-dir"], true) === null) return status;
 	let mirrored = "";
@@ -543,7 +542,10 @@ function rescan(root: string, cfg: Config): void {
 	// branch-only files, so an external mirror-head move is materialized before boardStatus
 	// reads and before any commitKanban
 	reconcileBoard(root);
-	const status = boardStatus(root);
+	// one board snapshot per sweep: a file created after this read must not fold into an
+	// in-flight commit's label (whole-board tree) or its own create event never surfaces
+	const files = taskFiles(root);
+	const status = boardStatus(root, files);
 	const tasks = listAll(root);
 	// sole commit points: board files not on the mirror yet are new, finished tasks fold in
 	// their whole life; everything else stays unmirrored until done. Creates run first:
@@ -553,7 +555,7 @@ function rescan(root: string, cfg: Config): void {
 	for (const task of tasks) {
 		try {
 			if (task.conflicted) continue;
-			if (status.get(join(".kanban", task.file)) === "??") commitKanban(root, `kanban: create ${task.file}`);
+			if (status.get(join(".kanban", task.file)) === "??") commitKanban(root, `kanban: create ${task.file}`, files);
 		} catch (err) {
 			log(root, `error handling ${task.file} (create): ${err instanceof Error ? err.message : err}`);
 		}
@@ -570,7 +572,7 @@ function rescan(root: string, cfg: Config): void {
 			// "??" here means the pass-one create commit failed (git error): retry it; the
 			// identical-tree guard keeps an already-mirrored file a no-op
 			const code = status.get(join(".kanban", task.file));
-			if (code === "??") commitKanban(root, `kanban: create ${task.file}`);
+			if (code === "??") commitKanban(root, `kanban: create ${task.file}`, files);
 			if (task.state === "to-do") startTodo(root, cfg, task);
 			else if (task.state === "to-review") {
 				const ensured = ensureWorktree(root, task);
@@ -593,7 +595,7 @@ function rescan(root: string, cfg: Config): void {
 				// since an unchanged done task would otherwise issue a whole-board commit every sweep
 				// and fold other tasks' pending changes under its label
 				const merged = !task.worktree || mergeDone(root, cfg, task);
-				if (code && merged) commitKanban(root, `kanban: done ${task.file}`);
+				if (code && merged) commitKanban(root, `kanban: done ${task.file}`, files);
 			}
 		} catch (err) {
 			log(root, `error handling ${task.file} (${task.state}): ${err instanceof Error ? err.message : err}`);
@@ -775,9 +777,9 @@ export function main(argv: string[]): void {
 	if (webUi.enabled && noWebUi) {
 		log(root, "web ui disabled (no-webui)");
 	} else if (webUi.enabled) {
-		startWebUi(root, webUi)
-			.then((ui) => (ui ? log(root, `web ui on http://${webUi.host}:${ui.port}`) : log(root, `web ui failed to start on ${webUi.host}:${webUi.port} (port taken by another webui?), continuing without it`)))
-			.catch((err) => log(root, `web ui failed to start, continuing without it: ${err instanceof Error ? err.message : err}`));
+		// the elected hub daemon serves every registered board on the webUi port; non-hub
+		// daemons register with it and serve nothing (one port, one ui)
+		joinHub({ name: basename(root), root, host: webUi.host, port: webUi.port, log: (message) => log(root, message) });
 	}
 }
 

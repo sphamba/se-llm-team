@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn, execSync, type ChildProcess } from "node:child_process";
+import { createServer } from "node:http";
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readHubRegistry, startHub } from "./hub.ts";
 import { createTask, kanbanDir, parseTask, setState, setWorktree } from "./kanban.ts";
 import { pidAlive, waitForBoardCommits } from "./orchestrator.ts";
 
@@ -829,3 +831,163 @@ assert.equal(s.output().split("WARNING: auto-push").length - 1, 1, "push warning
 s.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: ... + push warning smoke passed");
+
+// async variant of waitFor for fetch-based conditions
+const waitForAsync = async (cond: () => Promise<boolean>, ms: number, what: string) => {
+	const end = Date.now() + ms;
+	while (Date.now() < end) {
+		if (await cond()) return;
+		await new Promise((r) => setTimeout(r, 250));
+	}
+	console.error(`timeout waiting for ${what}`);
+	killAll();
+	process.exit(1);
+};
+
+const freePort = async (): Promise<number> => {
+	const server = createServer();
+	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+	const port = (server.address() as { port: number }).port;
+	await new Promise<void>((r) => server.close(r));
+	return port;
+};
+
+// --- part U: hub server unit smoke: health, register, heartbeat, registry, per-project reads ---
+const rootU1 = fixture();
+const rootU2 = fixture();
+const homeU = mkdtempSync(join(tmpdir(), "orch-hub-home-"));
+cleaned.push(rootU1, rootU2, homeU);
+const taskU2 = createTask(rootU2, { name: "fix: hub board b", summary: "Hub smoke", specs: "n/a" });
+const realHome = process.env.HOME;
+process.env.HOME = homeU;
+// a registry left by a previous hub, carrying one long-stale entry: the new hub drops it at seed
+mkdirSync(join(homeU, ".pi", "agent"), { recursive: true });
+writeFileSync(join(homeU, ".pi", "agent", "se-llm-team-hub.json"), JSON.stringify([{ name: "stale", root: rootU1, start: Date.now() - 60000, lastHeartbeat: Date.now() - 60000 }]));
+const hubU = await startHub({ name: "a", root: rootU1, host: "127.0.0.1", port: 0, staleMs: 400, healthMs: 150 });
+assert.ok(hubU, "hub starts and returns a port");
+const hubBase = `http://127.0.0.1:${hubU.port}`;
+assert.equal(await (await fetch(`${hubBase}/health`)).text(), "ok");
+const regRes = await fetch(`${hubBase}/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "b", root: rootU2 }) });
+assert.equal(regRes.status, 200);
+const regEntry = await regRes.json();
+assert.deepEqual(Object.keys(regEntry).sort(), ["lastHeartbeat", "name", "root", "start"], "register answers the entry shape");
+assert.equal((await fetch(`${hubBase}/register`, { method: "POST", body: JSON.stringify({ name: "b" }) })).status, 400, "register without root rejected");
+assert.equal((await fetch(`${hubBase}/register`, { method: "POST", body: JSON.stringify({ name: "", root: rootU2 }) })).status, 400, "register with empty name rejected");
+assert.equal((await fetch(`${hubBase}/register`, { method: "POST", body: JSON.stringify({ name: "b", root: "/nonexistent/dir" }) })).status, 400, "register with nonexistent root rejected");
+assert.equal((await fetch(`${hubBase}/register`, { method: "POST", body: JSON.stringify({ name: "b", root: "relative/dir" }) })).status, 400, "register with relative root rejected");
+const beforeBeat = (await (await fetch(`${hubBase}/api/projects`)).json()).find((e: any) => e.name === "b");
+assert.equal((await fetch(`${hubBase}/heartbeat`, { method: "POST", body: JSON.stringify({ name: "b" }) })).status, 200);
+assert.equal((await fetch(`${hubBase}/heartbeat`, { method: "POST", body: JSON.stringify({ name: "nope" }) })).status, 404, "heartbeat of an unknown project 404s");
+const afterBeat = (await (await fetch(`${hubBase}/api/projects`)).json()).find((e: any) => e.name === "b");
+assert.ok(afterBeat.lastHeartbeat >= beforeBeat.lastHeartbeat, "heartbeat refreshes lastHeartbeat");
+const registryU = readHubRegistry();
+assert.deepEqual(registryU.map((e) => e.name).sort(), ["a", "b"], "stale seed entry dropped, one entry per project");
+assert.equal(registryU.find((e) => e.name === "a")!.root, rootU1);
+assert.equal(registryU.find((e) => e.name === "b")!.root, rootU2);
+assert.deepEqual(readdirSync(join(homeU, ".pi", "agent")).filter((f) => f.includes(".tmp")), [], "no atomic-rename temp litter");
+const viaProject = await (await fetch(`${hubBase}/api/tasks?project=b`)).json();
+assert.equal(viaProject.length, 1);
+assert.equal(viaProject[0].file, taskU2.file);
+assert.equal(viaProject[0].name, "fix: hub board b");
+assert.equal((await fetch(`${hubBase}/api/tasks?project=nope`)).status, 404, "unknown project rejected");
+assert.equal((await (await fetch(`${hubBase}/api/tasks`)).json()).length, 0, "no project param serves the hub's own board");
+assert.equal((await (await fetch(`${hubBase}/api/projects`)).json()).length, 2);
+assert.ok((await (await fetch(`${hubBase}/`)).text()).includes("Software Engineering LLM Team"), "the hub serves the ui page");
+assert.equal((await fetch(`${hubBase}/api/tasks`, { method: "POST" })).status, 404);
+// b stops heartbeating: the running hub ages the silent entry out of the registry
+await waitFor(() => readHubRegistry().map((e) => e.name).join() === "a", 5000, "running hub ages out silent entries", () => "");
+assert.equal((await fetch(`${hubBase}/api/tasks?project=b`)).status, 404, "aged-out project no longer served");
+hubU.close();
+process.env.HOME = realHome;
+console.log("orchestrator.test.ts: ... + hub server unit smoke passed");
+
+// --- part V: election race: two daemons on one port elect exactly one hub, the loser joins ---
+const rootV1 = fixture();
+const rootV2 = fixture();
+const homeV = mkdtempSync(join(tmpdir(), "orch-hub-race-home-"));
+cleaned.push(rootV1, rootV2, homeV);
+const taskV2 = createTask(rootV2, { name: "fix: raced board", summary: "Election smoke", specs: "n/a" });
+const portV = await freePort();
+mkdirSync(join(homeV, ".pi", "agent"), { recursive: true });
+writeFileSync(join(homeV, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portV } }));
+const hubEnv = { ...process.env, HOME: homeV, SE_LLM_TEAM_HUB_HEALTH_MS: "500" };
+delete hubEnv.SE_LLM_TEAM_NO_WEBUI; // the election needs the webui enabled; the temp HOME config picks a free port
+const dV1 = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootV1, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnv });
+const dV2 = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootV2, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnv });
+daemons.push({ daemon: dV1, root: rootV1 }, { daemon: dV2, root: rootV2 });
+let outV1 = "", outV2 = "";
+dV1.stdout.on("data", (d) => (outV1 += d));
+dV1.stderr.on("data", (d) => (outV1 += d));
+dV2.stdout.on("data", (d) => (outV2 += d));
+dV2.stderr.on("data", (d) => (outV2 += d));
+const nameV1 = basename(rootV1), nameV2 = basename(rootV2);
+await waitFor(() => outV1.includes("web ui on") || outV2.includes("web ui on"), 15000, "one daemon won the election", () => outV1 + outV2);
+const winnerIs1 = outV1.includes("web ui on");
+assert.ok(!(winnerIs1 ? outV2 : outV1).includes("web ui on"), "the loser never served the ui");
+await waitFor(() => (winnerIs1 ? outV2 : outV1).includes(`registered ${winnerIs1 ? nameV2 : nameV1} with the hub`), 15000, "loser registered with the hub", () => outV1 + outV2);
+const baseV = `http://127.0.0.1:${portV}`;
+await waitForAsync(async () => {
+	try {
+		return (await (await fetch(`${baseV}/api/projects`)).json()).length === 2;
+	} catch {
+		return false;
+	}
+}, 15000, "both projects registered in the hub");
+assert.deepEqual((await (await fetch(`${baseV}/api/projects`)).json()).map((e: any) => e.name).sort(), [nameV1, nameV2].sort());
+const tasksV = await (await fetch(`${baseV}/api/tasks?project=${nameV2}`)).json();
+assert.equal(tasksV.length, 1);
+assert.equal(tasksV[0].file, taskV2.file);
+assert.equal((await (await fetch(`${baseV}/api/tasks?project=${nameV1}`)).json()).length, 0);
+assert.equal((await fetch(`${baseV}/api/tasks?project=nope`)).status, 404);
+const registryV = JSON.parse(readFileSync(join(homeV, ".pi", "agent", "se-llm-team-hub.json"), "utf8"));
+assert.deepEqual(registryV.map((e: any) => e.name).sort(), [nameV1, nameV2].sort(), "registry file carries both entries");
+dV1.kill("SIGTERM");
+dV2.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + election race smoke passed");
+
+// --- part W: failover: killing the hub re-elects a survivor, the new hub ages out the dead entry ---
+const rootW1 = fixture();
+const rootW2 = fixture();
+const homeW = mkdtempSync(join(tmpdir(), "orch-hub-fail-home-"));
+cleaned.push(rootW1, rootW2, homeW);
+const portW = await freePort();
+mkdirSync(join(homeW, ".pi", "agent"), { recursive: true });
+writeFileSync(join(homeW, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portW } }));
+const hubEnvW = { ...process.env, HOME: homeW, SE_LLM_TEAM_HUB_HEALTH_MS: "500", SE_LLM_TEAM_HUB_STALE_MS: "1500" };
+delete hubEnvW.SE_LLM_TEAM_NO_WEBUI;
+const dW1 = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootW1, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnvW });
+const dW2 = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootW2, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnvW });
+daemons.push({ daemon: dW1, root: rootW1 }, { daemon: dW2, root: rootW2 });
+let outW1 = "", outW2 = "";
+dW1.stdout.on("data", (d) => (outW1 += d));
+dW1.stderr.on("data", (d) => (outW1 += d));
+dW2.stdout.on("data", (d) => (outW2 += d));
+dW2.stderr.on("data", (d) => (outW2 += d));
+const nameW1 = basename(rootW1), nameW2 = basename(rootW2);
+await waitFor(() => outW1.includes("web ui on") || outW2.includes("web ui on"), 15000, "hub elected", () => outW1 + outW2);
+const hubIs1 = outW1.includes("web ui on");
+const hubProc = hubIs1 ? dW1 : dW2;
+const survProc = hubIs1 ? dW2 : dW1;
+const survName = hubIs1 ? nameW2 : nameW1;
+const deadName = hubIs1 ? nameW1 : nameW2;
+await waitForAsync(async () => {
+	try {
+		return (await (await fetch(`http://127.0.0.1:${portW}/api/projects`)).json()).length === 2;
+	} catch {
+		return false;
+	}
+}, 15000, "both registered before the kill");
+hubProc.kill("SIGKILL");
+await waitFor(() => (hubIs1 ? outW2 : outW1).includes("web ui on"), 20000, "survivor re-elected as hub after hub death", () => outW1 + outW2);
+await waitForAsync(async () => {
+	try {
+		const projects = await (await fetch(`http://127.0.0.1:${portW}/api/projects`)).json();
+		return projects.length === 1 && projects[0].name === survName;
+	} catch {
+		return false;
+	}
+}, 15000, "new hub serves only the survivor (dead entry aged out)");
+assert.equal((await fetch(`http://127.0.0.1:${portW}/api/tasks?project=${deadName}`)).status, 404, "dead project rejected by the new hub");
+assert.equal(parseInt(readFileSync(join(homeW, ".pi", "agent", "se-llm-team-hub.lock"), "utf8").trim(), 10), survProc.pid, "the stale hub lock was stolen by the survivor");
+survProc.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + hub failover smoke passed");
