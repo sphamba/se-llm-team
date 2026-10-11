@@ -1,8 +1,8 @@
 ---
 name: "feat: webui agent history per run; subagent logs in the detail card"
 priority: "medium"
-state: "merging"
-worktree: "feat/88-webui-agent-history"
+state: "done"
+worktree: ""
 ---
 
 # Summary

@@ -1,8 +1,8 @@
 ---
 name: "fix: live-tester prompt runs real usage tests, not the unit suite"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/107-live-tester-prompt"
 ---
 
 # Summary
