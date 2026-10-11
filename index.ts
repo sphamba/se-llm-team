@@ -6,6 +6,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { createTask, getTask, kanbanDir, listAll, listTasks, setState, setWorktree, taskNum, updateTask, STATES, type TaskState } from "./src/kanban.ts";
+import { pidAlive } from "./src/pid.ts";
 import { removeTask, waitForBoardCommits } from "./src/orchestrator.ts";
 
 function text(s: string) {
@@ -167,7 +168,7 @@ export default function (pi: ExtensionAPI) {
 			"Start the se-llm-team orchestrator daemon for this project. It watches .kanban/, spawns Developer/Reviewer/Live-tester agents for to-do/to-review/to-live-test tasks, polls agent liveness, and merges done branches. When webUi.enabled is set in ~/.pi/agent/se-llm-team.json it also starts an in-process web dashboard for the board. Exits early if it already runs for this project.",
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
-			const { root } = resolveRoot(ctx.cwd);
+			const root = resolveRoot(ctx.cwd);
 			if (!root) return text("Not a git repository: agents cannot run without git (worktrees, branches, board commits). No orchestrator started.");
 			const pid = readPid(root);
 			if (pid && pidAlive(pid)) return text(`Orchestrator already running (pid ${pid})`);
@@ -195,7 +196,7 @@ export default function (pi: ExtensionAPI) {
 		description: "Report whether the orchestrator daemon runs for this project and give kanban state counts.",
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
-			const root = resolveRoot(ctx.cwd).root ?? ctx.cwd;
+			const root = resolveRoot(ctx.cwd) ?? ctx.cwd;
 			const counts: Record<string, number> = {};
 			for (const t of listAll(root)) counts[t.state] = (counts[t.state] ?? 0) + 1;
 			const pid = readPid(root);
@@ -210,7 +211,7 @@ export default function (pi: ExtensionAPI) {
 		description: "Poke the se-llm-team orchestrator daemon to trigger an immediate scan and agent scheduling.",
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
-			const root = resolveRoot(ctx.cwd).root ?? ctx.cwd;
+			const root = resolveRoot(ctx.cwd) ?? ctx.cwd;
 			try {
 				// rm+create so every poke fires a fs.watch event; a bare open("a") on an
 				// existing file writes nothing and Linux inotify reports no event for it.
@@ -232,7 +233,7 @@ export default function (pi: ExtensionAPI) {
 		description: "Stop the orchestrator daemon for this project.",
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
-			const pid = readPid(resolveRoot(ctx.cwd).root ?? ctx.cwd);
+			const pid = readPid(resolveRoot(ctx.cwd) ?? ctx.cwd);
 			if (!pid || !pidAlive(pid)) return text("Orchestrator not running");
 			try {
 				process.kill(pid, "SIGTERM");
@@ -285,12 +286,11 @@ export default function (pi: ExtensionAPI) {
 	});
 }
 
-export function resolveRoot(cwd: string): { root: string } | { root: null } {
+export function resolveRoot(cwd: string): string | null {
 	try {
-		const root = execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-		return { root: root || null };
+		return execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim() || null;
 	} catch {
-		return { root: null };
+		return null;
 	}
 }
 
@@ -299,15 +299,5 @@ function readPid(root: string): number | null {
 		return parseInt(readFileSync(join(kanbanDir(root), ".orchestrator.lock"), "utf8").trim(), 10) || null;
 	} catch {
 		return null;
-	}
-}
-
-function pidAlive(pid: number): boolean {
-	if (!Number.isInteger(pid) || pid <= 0) return false;
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (err) {
-		return (err as NodeJS.ErrnoException).code === "EPERM"; // exists but not signalable: still alive
 	}
 }

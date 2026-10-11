@@ -8,14 +8,17 @@ import {
 	getTask,
 	kanbanDir,
 	listAll,
+	PRIORITY_RANK,
 	setState,
 	setWorktree,
 	slugWorktree,
 	taskFiles,
+	taskSlug,
 	type Task,
 	type TaskState,
 } from "./kanban.ts";
 import { joinHub } from "./hub.ts";
+import { agentAlive, agentPid, clearPid, pidAlive, pidEntry, pidPath, writePid } from "./pid.ts";
 import { loadWebUiConfig } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -163,7 +166,6 @@ function parseArgs(argv: string[]): { root?: string; rescanSeconds?: number; pol
 }
 
 const logPath = (root: string, name: string) => join(kanbanDir(root), ".logs", `${name}.log`);
-const pidPath = (root: string, name: string) => join(kanbanDir(root), ".pids", `${name}.pid`);
 const counterPath = (root: string, name: string) => join(kanbanDir(root), ".logs", `${name}.count`);
 // one-shot marker that the last spawn from the to-review path was a reviewer; the value is
 // that spawn's pid, so a later developer spawn (pidfile overwrite) or a poll-cleared pidfile
@@ -189,91 +191,6 @@ function bumpCounter(root: string, name: string): number {
 	const n = readCounter(root, name) + 1;
 	writeFileSync(counterPath(root, name), String(n));
 	return n;
-}
-
-// /proc/<pid>/stat field 22 (starttime, ticks since boot): a discriminator that survives pid
-// reuse, since a recycled pid starts at a different tick. comm (field 2) can contain spaces
-// and parens, so parse after the last ')'; fields[0] after it is state (field 3), which puts
-// field 22 at index 19. Null when /proc is unreadable (non-Linux)
-function procStartTicks(pid: number): string | null {
-	try {
-		const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-		return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? null;
-	} catch {
-		return null;
-	}
-}
-
-function procCmdline(pid: number): string | null {
-	try {
-		return readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ").trim() || null;
-	} catch {
-		return null;
-	}
-}
-
-// the discriminator recorded next to a pid: the process start time, or the cmdline when the
-// start time is unreadable; null when neither is available (non-Linux keeps today's behavior)
-function pidDiscriminator(pid: number): string | null {
-	return procStartTicks(pid) ?? procCmdline(pid);
-}
-
-export function pidAlive(pid: number, disc?: string | null): boolean {
-	if (!Number.isInteger(pid) || pid <= 0) return false;
-	// /proc readable for this pid: compare the discriminator, so a recycled pid reads dead
-	// even though kill(pid, 0) would pass. An unreadable /proc entry (dead pid, or non-Linux)
-	// falls through to the signal check, which is correct in both cases (ESRCH: dead)
-	if (disc != null && procStartTicks(pid) !== null) return pidDiscriminator(pid) === disc;
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (err) {
-		return (err as NodeJS.ErrnoException).code === "EPERM"; // exists but not signalable: still alive
-	}
-}
-
-function writePid(root: string, name: string, pid: number): void {
-	mkdirSync(dirname(pidPath(root, name)), { recursive: true });
-	// the discriminator next to the pid makes the liveness check pid-reuse-proof: a recycled
-	// pid re-reads dead because its start time (or cmdline) no longer matches
-	const disc = pidDiscriminator(pid);
-	writeFileSync(pidPath(root, name), disc === null ? String(pid) : `${pid} ${disc}`);
-}
-
-function clearPid(root: string, name: string): void {
-	try {
-		rmSync(pidPath(root, name));
-	} catch {
-		/* already gone */
-	}
-}
-
-// parseInt stops at the space, so a "<pid> <disc>" file still reads as the pid
-function agentPid(root: string, slug: string): number {
-	try {
-		return parseInt(readFileSync(pidPath(root, slug), "utf8").trim(), 10);
-	} catch {
-		return 0;
-	}
-}
-
-// a pid file's entry: the pid plus its discriminator, for the reuse-proof liveness check;
-// a legacy pid-only file (or a missing one) reads a null discriminator
-function pidEntry(root: string, name: string): { pid: number; disc: string | null } {
-	try {
-		const raw = readFileSync(pidPath(root, name), "utf8").trim();
-		const [pidStr, ...rest] = raw.split(/\s+/);
-		return { pid: parseInt(pidStr, 10) || 0, disc: rest.length ? rest.join(" ") : null };
-	} catch {
-		return { pid: 0, disc: null };
-	}
-}
-
-// liveness of the agent a pid file names: the discriminator decides, so a pid recycled by
-// another process reads dead instead of wedging the gate and the state transitions
-function agentAlive(root: string, name: string): boolean {
-	const { pid, disc } = pidEntry(root, name);
-	return pidAlive(pid, disc);
 }
 
 function renderPrompt(root: string, role: string, task: Task, worktreeDir?: string): string {
@@ -383,7 +300,7 @@ export function logFeeders(path: string) {
 }
 
 function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: string, pidName?: string): void {
-	const slug = task.file.replace(/\.md$/, "");
+	const slug = taskSlug(task.file);
 	mkdirSync(join(kanbanDir(root), ".logs"), { recursive: true });
 	// stdout and stderr flow through the compactor into the append-only log (the write-time
 	// pipe drops the dead weight the fd redirect logged verbatim); the daemon drains the pipe
@@ -892,7 +809,7 @@ function bootstrapBoard(root: string): void {
 }
 
 function startTodo(root: string, cfg: Config, task: Task): void {
-	const slug = task.file.replace(/\.md$/, "");
+	const slug = taskSlug(task.file);
 	// a manual to-do rewrite can land while the spawned agent still runs: the live pid is the
 	// guard, the state alone is not, or a second sweep spawns a twin that overwrites the pid file
 	if (pidAlive(agentPid(root, slug))) return;
@@ -924,7 +841,7 @@ function clearMergerAttempt(root: string, slug: string): void {
 // lives. The task moves to merging at spawn; a merger that requeues the task re-runs only
 // after the idle cooldown.
 function sweepToMerge(root: string, cfg: Config, task: Task): void {
-	const slug = task.file.replace(/\.md$/, "");
+	const slug = taskSlug(task.file);
 	// the live-tester may still be committing and writing its report after setting to-merge
 	if (agentAlive(root, slug)) return;
 	// at most one merger at a time, project-wide
@@ -989,7 +906,7 @@ function doneCleanup(root: string, task: Task): void {
 // time is the idle clock (the bounce's setState wrote it). Read before any write:
 // ensureWorktree/setWorktree bump the mtime and would restart the clock mid-check
 function deadCooldownActive(root: string, cfg: Config, task: Task): boolean {
-	if (readCounter(root, `${task.file.replace(/\.md$/, "")}.dead`) <= RESPAWN_CAP) return false;
+	if (readCounter(root, `${taskSlug(task.file)}.dead`) <= RESPAWN_CAP) return false;
 	return Date.now() - statSync(join(kanbanDir(root), task.file)).mtimeMs < cfg.autoScheduleMinutes * 60_000;
 }
 
@@ -997,7 +914,7 @@ function deadCooldownActive(root: string, cfg: Config, task: Task): boolean {
 // current code reads only the global merger pid, so a leftover is dead weight. Drop each one
 // whose process is dead; a live pid keeps its file, and a task still in merging is skipped
 function janitorPids(root: string, tasks: Task[]): void {
-	const merging = new Set(tasks.filter((t) => t.state === "merging").map((t) => t.file.replace(/\.md$/, "")));
+	const merging = new Set(tasks.filter((t) => t.state === "merging").map((t) => taskSlug(t.file)));
 	let files: string[] = [];
 	try {
 		files = readdirSync(join(kanbanDir(root), ".pids"));
@@ -1062,7 +979,7 @@ function rescan(root: string, cfg: Config): void {
 				// a failed spawn would bounce or strand the task; leave the state for the next rescan to retry
 				if (!ensured) log(root, `${task.file}: worktree could not be created, reviewer not spawned (state unchanged)`);
 				else {
-					const slug = task.file.replace(/\.md$/, "");
+					const slug = taskSlug(task.file);
 					consumeReviewerRun(root, slug);
 					const cap = cfg.reviewerCap[task.complexity] ?? REVIEWER_RUN_CAP;
 					if (readCounter(root, `${slug}.reviewer-runs`) >= cap) {
@@ -1089,7 +1006,7 @@ function rescan(root: string, cfg: Config): void {
 				else {
 					// a reviewer approval is a successful run too; the forced advance arrives with the
 					// marker already consumed at the to-review branch, so it never re-counts
-					const slug = task.file.replace(/\.md$/, "");
+					const slug = taskSlug(task.file);
 					consumeReviewerRun(root, slug);
 					if (!pidAlive(agentPid(root, slug))) {
 						// the reviewer that approved it may still be alive: defer the spawn to a later sweep
@@ -1119,7 +1036,7 @@ function rescan(root: string, cfg: Config): void {
 	// the task moved on (a successful merge ends in done)
 	if (!tasks.some((t) => t.state === "merging") && !agentAlive(root, "merger")) clearPid(root, "merger");
 	for (const task of tasks) {
-		if (task.state !== "to-merge" && task.state !== "merging") clearMergerAttempt(root, task.file.replace(/\.md$/, ""));
+		if (task.state !== "to-merge" && task.state !== "merging") clearMergerAttempt(root, taskSlug(task.file));
 	}
 	janitorPids(root, tasks);
 	autoSchedule(root, cfg, tasks);
@@ -1146,9 +1063,9 @@ const logSamples = new Map<string, { path: string; size: number; since: number }
 // process killed
 let mergerLogSlug: string | null = null;
 
-const PRIORITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-const rank = (priority: string) => PRIORITY_RANK[priority] ?? PRIORITY_RANK.low + 1;
-const taskNum = (file: string) => {
+const rank = (priority: string) => PRIORITY_RANK[priority] ?? 4;
+// unprefixed files sort last (MAX_SAFE_INTEGER), distinct from kanban.ts taskNum (0)
+const sortNum = (file: string) => {
 	const n = parseInt(file.slice(0, 6), 10);
 	return Number.isNaN(n) ? Number.MAX_SAFE_INTEGER : n;
 };
@@ -1163,7 +1080,7 @@ let idleSince: number | null = null;
 // a ref resolving to no existing task is ignored
 function blockedByUndone(tasks: Task[], task: Task): boolean {
 	if (!task.blockedBy) return false;
-	const states = new Map(tasks.map((t) => [taskNum(t.file), t.state]));
+	const states = new Map(tasks.map((t) => [sortNum(t.file), t.state]));
 	return task.blockedBy.split(",").some((ref) => {
 		const num = parseInt(ref.trim().replace(/^#/, ""), 10);
 		return num > 0 && states.get(num) !== undefined && states.get(num) !== "done";
@@ -1189,7 +1106,7 @@ function autoSchedule(root: string, cfg: Config, tasks: Task[]): void {
 	// unfinished blockers hold the task: the failsafe never auto-promotes a blocked task
 	const next = [...backlog]
 		.filter((t) => !blockedByUndone(tasks, t))
-		.sort((a, b) => rank(a.priority) - rank(b.priority) || taskNum(a.file) - taskNum(b.file))[0];
+		.sort((a, b) => rank(a.priority) - rank(b.priority) || sortNum(a.file) - sortNum(b.file))[0];
 	if (!next) return;
 	idleSince = null;
 	log(root, `no active task for ${cfg.autoScheduleMinutes}min, promoting ${next.file} to to-do (failsafe)`);
@@ -1241,7 +1158,7 @@ function logStalled(root: string, slug: string, role: string, stallMinutes: numb
 // the cap, idle-cooldown past it). The bounce itself is unconditional past RESPAWN_CAP: a
 // frozen mid-flight task is worse than a bounced one, only the respawn backs off
 function bounceDead(root: string, task: Task, next: TaskState, pidName: string, pid: number, kill: boolean): void {
-	const slug = task.file.replace(/\.md$/, "");
+	const slug = taskSlug(task.file);
 	dropLogSamples(slug);
 	if (kill) {
 		try {
@@ -1269,7 +1186,7 @@ export function poll(root: string, stallMinutes: number, now = Date.now()): void
 			// no state rewrite on a conflicted file: the parse is bogus and the merger owns resolution
 			if (task.conflicted) continue;
 			const working = WORKING_STATES[task.state];
-			const slug = task.file.replace(/\.md$/, "");
+			const slug = taskSlug(task.file);
 			// a merging task's agent is the project-wide merger (the global pid file); every other
 			// state maps to the task's own agent pid. Clear before the transition check: a pidfile
 			// for a state with no transition (to-merge, done) would otherwise linger forever
@@ -1351,7 +1268,7 @@ function holdsLock(root: string): boolean {
 export function main(argv: string[]): void {
 	const args = parseArgs(argv);
 	if (!args.root) {
-		process.stderr.write("usage: node orchestrator.ts --root <project-dir> [--no-webui] [--compact-logs]\n");
+		process.stderr.write("usage: node orchestrator.ts --root <project-dir> [--rescan-seconds <s>] [--poll-minutes <m>] [--no-webui] [--compact-logs]\n");
 		process.exitCode = 1;
 		return;
 	}

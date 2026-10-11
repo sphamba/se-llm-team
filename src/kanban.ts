@@ -15,7 +15,10 @@ export const STATES = [
 ] as const;
 export type TaskState = (typeof STATES)[number];
 export type Priority = "low" | "medium" | "high" | "critical";
+export const PRIORITIES = ["low", "medium", "high", "critical"] as const;
 export type Scope = "backlog" | "in-progress" | "done";
+// sort rank for priority-first boards: critical first, low last; unknown priorities sort after all
+export const PRIORITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 export const COMPLEXITIES = ["simple", "moderate", "complex"] as const;
 export type Complexity = (typeof COMPLEXITIES)[number];
 
@@ -81,27 +84,38 @@ export function taskNum(file: string): number {
 	return Number.isNaN(n) ? 0 : n;
 }
 
+// task file name without the .md extension: log handles, pid names, branch labels
+export function taskSlug(file: string): string {
+	return file.replace(/\.md$/, "");
+}
+
 // an unresolved git merge conflict leaves both marker lines in the working-tree file;
 // both are required so content that merely mentions one marker does not read as conflicted
 function hasConflictMarkers(raw: string): boolean {
 	return /^<{7} /m.test(raw) && /^>{7} /m.test(raw);
 }
 
+// frontmatter attrs + body; null when the frontmatter block is missing
+export function splitFrontmatter(raw: string): { attrs: Record<string, string>; body: string } | null {
+	const m = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+	if (!m) return null;
+	const attrs: Record<string, string> = {};
+	for (const line of m[1].split("\n")) {
+		const i = line.indexOf(":");
+		if (i < 1) continue;
+		let v = line.slice(i + 1).trim();
+		if (v.startsWith('"') && v.endsWith('"')) v = decodeAttr(v.slice(1, -1));
+		else if (v.startsWith("'") && v.endsWith("'")) v = v.slice(1, -1);
+		attrs[line.slice(0, i).trim()] = v;
+	}
+	return { attrs, body: m[2] };
+}
+
 export function parseTask(root: string, file: string): Task {
 	const raw = readFileSync(join(kanbanDir(root), file), "utf8");
-	const m = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-	const attrs: Record<string, string> = {};
-	const body = m ? m[2] : raw;
-	if (m) {
-		for (const line of m[1].split("\n")) {
-			const i = line.indexOf(":");
-			if (i < 1) continue;
-			let v = line.slice(i + 1).trim();
-			if (v.startsWith('"') && v.endsWith('"')) v = decodeAttr(v.slice(1, -1));
-			else if (v.startsWith("'") && v.endsWith("'")) v = v.slice(1, -1);
-			attrs[line.slice(0, i).trim()] = v;
-		}
-	}
+	const fm = splitFrontmatter(raw);
+	const attrs = fm?.attrs ?? {};
+	const body = fm?.body ?? raw;
 	const sections: Record<string, string> = {};
 	let current = "";
 	for (const line of body.split("\n")) {
@@ -116,7 +130,7 @@ export function parseTask(root: string, file: string): Task {
 	const trim = (s?: string) => (s ?? "").trim();
 	return {
 		file,
-		name: attrs.name ?? file.replace(/\.md$/, ""),
+		name: attrs.name ?? taskSlug(file),
 		shortName: attrs.shortName ?? "",
 		priority: attrs.priority ?? "medium",
 		state: (STATES as readonly string[]).includes(attrs.state) ? (attrs.state as TaskState) : "backlog",
@@ -195,21 +209,12 @@ function updateAttrs(root: string, task: Task, patch: Record<string, string>): v
 	const path = join(kanbanDir(root), task.file);
 	const raw = readFileSync(path, "utf8");
 	if (hasConflictMarkers(raw)) throw new Error(`unresolved merge conflict markers in ${task.file}; not rewriting`);
-	const m = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-	if (!m) throw new Error(`no frontmatter in ${task.file}`);
-	const attrs: Record<string, string> = {};
-	for (const line of m[1].split("\n")) {
-		const i = line.indexOf(":");
-		if (i < 1) continue;
-		let v = line.slice(i + 1).trim();
-		if (v.startsWith('"') && v.endsWith('"')) v = decodeAttr(v.slice(1, -1));
-		else if (v.startsWith("'") && v.endsWith("'")) v = v.slice(1, -1);
-		attrs[line.slice(0, i).trim()] = v;
-	}
-	const changed = Object.entries(patch).filter(([k, v]) => attrs[k] !== v);
+	const fm = splitFrontmatter(raw);
+	if (!fm) throw new Error(`no frontmatter in ${task.file}`);
+	const changed = Object.entries(patch).filter(([k, v]) => fm.attrs[k] !== v);
 	if (!changed.length) return;
-	for (const [k, v] of changed) attrs[k] = v;
-	writeFileSync(path, serializeFrontmatter(attrs) + m[2]);
+	for (const [k, v] of changed) fm.attrs[k] = v;
+	writeFileSync(path, serializeFrontmatter(fm.attrs) + fm.body);
 }
 
 export function setState(root: string, task: Task, state: TaskState): void {
@@ -220,8 +225,8 @@ export function setState(root: string, task: Task, state: TaskState): void {
 function replaceSections(root: string, task: Task, updates: Record<string, string>): void {
 	const path = join(kanbanDir(root), task.file);
 	const raw = readFileSync(path, "utf8");
-	const m = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-	const body = m ? m[2] : raw;
+	const fm = splitFrontmatter(raw);
+	const body = fm?.body ?? raw;
 	const lines = body.split("\n");
 	const headers: { index: number; name: string }[] = [];
 	lines.forEach((line, index) => {
@@ -242,7 +247,7 @@ function replaceSections(root: string, task: Task, updates: Record<string, strin
 		const end = headers.find((h) => h.index > job.header.index)?.index ?? lines.length;
 		out.splice(job.header.index + 1, end - job.header.index - 1, ...job.value.split("\n"), "");
 	}
-	writeFileSync(path, (m ? raw.slice(0, raw.length - body.length) : "") + out.join("\n"));
+	writeFileSync(path, (fm ? raw.slice(0, raw.length - body.length) : "") + out.join("\n"));
 }
 
 export function updateTask(
@@ -250,11 +255,9 @@ export function updateTask(
 	task: Task,
 	patch: { name?: string; priority?: string; complexity?: string; blockedBy?: string; summary?: string; specs?: string; openQuestions?: string },
 ): void {
-	const current = parseTask(root, task.file);
 	const rawTask = readFileSync(join(kanbanDir(root), task.file), "utf8");
 	if (hasConflictMarkers(rawTask)) throw new Error(`unresolved merge conflict markers in ${task.file}; not rewriting`);
-	const m = rawTask.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-	if (!m) throw new Error(`no frontmatter in ${task.file}`);
+	if (!splitFrontmatter(rawTask)) throw new Error(`no frontmatter in ${task.file}`);
 	const attrs: Record<string, string> = {};
 	if (patch.name !== undefined) attrs.name = patch.name;
 	if (patch.priority !== undefined) attrs.priority = patch.priority;
@@ -272,18 +275,6 @@ export function setWorktree(root: string, task: Task, worktree: string): void {
 	updateAttrs(root, task, { worktree });
 }
 
-export function appendNote(root: string, task: Task, note: string): void {
-	const path = join(kanbanDir(root), task.file);
-	const raw = readFileSync(path, "utf8");
-	const stamp = new Date().toISOString().replace("T", " ").slice(0, 16);
-	const entry = `\n- [${stamp}] ${note}`;
-	if (/^# Notes$/m.test(raw)) {
-		writeFileSync(path, raw.replace(/^(# Notes$)/m, `$1${entry}`));
-	} else {
-		writeFileSync(path, `${raw.replace(/\s*$/, "")}\n\n# Notes${entry}\n`);
-	}
-}
-
 // strict creation slug: lowercase letters/digits, single hyphens between words
 const SHORTNAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -291,7 +282,7 @@ export function createTask(
 	root: string,
 	input: { name: string; shortName?: string; priority?: Priority | string; complexity?: string; summary: string; specs?: string; openQuestions?: string; issuer?: string; blockedBy?: string },
 ): Task {
-	const priority = (["low", "medium", "high", "critical"] as const).includes(input.priority as Priority)
+	const priority = (PRIORITIES as readonly string[]).includes(input.priority as Priority)
 		? input.priority
 		: "medium";
 	const complexity = (COMPLEXITIES as readonly string[]).includes(input.complexity as string)

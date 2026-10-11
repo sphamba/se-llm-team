@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, setState } from "./kanban.ts";
-import { agentLabel, boardOf, buildShell, cardHtml, curve, flipDiff, LAYOUT, loadWebUiConfig, LOG_CHUNK, mergeBoards, numLinkHtml, pairLayout, relationPaths, renderLogChunk, spinnerHtml, startWebUi, syncBoard, tabNames, tabsHtml } from "./webui.ts";
+import { startHub } from "./hub.ts";
+import { agentLabel, boardOf, buildShell, cardHtml, curve, flipDiff, LAYOUT, loadWebUiConfig, LOG_CHUNK, mergeBoards, numLinkHtml, pairLayout, relationPaths, renderLogChunk, spinnerHtml, syncBoard, tabNames, tabsHtml } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing", "to-merge", "merging", "done"];
@@ -64,10 +65,12 @@ assert.equal(renderLogChunk(legacy), legacy, "blank paragraph lines in non-JSON 
 const mixed = JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "paragraph" } }) + "\n\nlegacy line\n";
 assert.equal(renderLogChunk(mixed), "paragraph\n\nlegacy line\n", "a blank line flushes pending text and passes through");
 
-// startWebUi on port 0 against a temp board with one task
+// the hub serves the dashboard endpoints; HOME at the temp home keeps the hub registry and
+// lock out of the real pi agent dir
 const task = createTask(root, { name: "feat: webui smoke", summary: "Dashboard smoke", specs: "Render the board" });
-const ui = await startWebUi(root, { port: 0 });
-assert.ok(ui, "web ui starts on port 0");
+process.env.HOME = home;
+const ui = await startHub({ name: "webui-test", root, host: "localhost", port: 0 });
+assert.ok(ui, "hub starts on port 0");
 const base = `http://localhost:${ui.port}`;
 
 const tasksRes = await fetch(`${base}/api/tasks`);
@@ -374,8 +377,10 @@ assert.deepEqual(boardOf(boards, "gamma").tasks, [], "an unvisited tab starts as
 assert.deepEqual(boardOf(Object.create(null), "__proto__").tasks, [], "a project named like an object key gets its own board");
 assert.ok(page.includes("Object.create(null)"), "the page keys per-project state without inherited keys");
 
-// single-project mode is unchanged: no registry, one bare board, no project param
-assert.equal((await fetch(`${base}/api/projects`)).status, 404, "the single-project server has no registry");
+// the hub registry answers /api/projects with its own entry
+const projects = await (await fetch(`${base}/api/projects`)).json();
+assert.equal(projects.length, 1, "the hub registry lists its own entry");
+assert.equal(projects[0].root, root);
 assert.ok(page.includes('projects = tabs.length ? tabs : [{ id: "", label: "" }]'), "the page falls back to one unnamed tab");
 assert.ok(
 	page.includes('t.id ? "/api/tasks?project=" + encodeURIComponent(t.id) : "/api/tasks"'),
@@ -694,9 +699,10 @@ for (const f of [dev0, dev1, lt0, lt1, rv0, mg0, mg1]) rmSync(f, { force: true }
 rmSync(subDir, { recursive: true, force: true });
 setState(root, getTask(root, task.file)!, "backlog");
 
-// a second startWebUi on the taken port reports failure instead of throwing
-assert.equal(await startWebUi(root, { port: ui.port }), null);
+// a second hub on the taken port reports failure instead of throwing
+assert.equal(await startHub({ name: "webui-test", root, host: "localhost", port: ui.port }), null);
 ui.close();
+process.env.HOME = realHome;
 
 // daemon wiring: HOME at a config with webUi enabled and port 0 -> OS picks, URL logged
 mkdirSync(join(home, ".pi", "agent"), { recursive: true });

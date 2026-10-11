@@ -1,7 +1,7 @@
 import { closeSync, openSync, readFileSync, readdirSync, readSync, statSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join, resolve } from "node:path";
-import { kanbanDir, listAll, STATES, taskFiles, type Task } from "./kanban.ts";
+import { kanbanDir, listAll, PRIORITY_RANK, splitFrontmatter, STATES, taskFiles, taskSlug, type Task } from "./kanban.ts";
+import { agentAlive } from "./pid.ts";
 
 const DEFAULT_HOST = "localhost";
 const DEFAULT_PORT = 4242;
@@ -47,8 +47,7 @@ export function loadWebUiConfig(root?: string): WebUiConfig {
 function taskBody(root: string, file: string): string {
 	try {
 		const raw = readFileSync(join(kanbanDir(root), file), "utf8");
-		const m = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-		return m ? m[2] : raw;
+		return splitFrontmatter(raw)?.body ?? raw;
 	} catch {
 		return "";
 	}
@@ -62,33 +61,6 @@ function taskUpdated(root: string, file: string): number {
 	}
 }
 
-// mirror of orchestrator.ts pidAlive; webui and hub cannot import orchestrator (it imports webui),
-// so this copy is shared with hub.ts
-export function pidAlive(pid: number): boolean {
-	if (!Number.isInteger(pid) || pid <= 0) return false;
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (err) {
-		return (err as NodeJS.ErrnoException).code === "EPERM"; // exists but not signalable: still alive
-	}
-}
-
-// the orchestrator's pid file (.kanban/.pids/{slug}.pid) holds the current agent's pid
-function currentPid(root: string, slug: string): number {
-	try {
-		return parseInt(readFileSync(join(kanbanDir(root), ".pids", `${slug}.pid`), "utf8").trim(), 10) || 0;
-	} catch {
-		return 0; // no agent spawned yet, or the pid file was already cleared
-	}
-}
-
-// the pid file of a role's current run (spawnAgent, src/orchestrator.ts): the merger writes its
-// own `<slug>.merger.pid`, the pipeline roles share `<slug>.pid`
-function rolePid(root: string, slug: string, role: string): number {
-	return currentPid(root, role === "merger" ? `${slug}.merger` : slug);
-}
-
 // current agent: the state-mapped role with its pid file liveness, and the handle of the run the
 // client should open; the per-run entries below carry the whole history
 function agentInfo(root: string, t: Task, agents: AgentEntry[]): { role: string; alive: boolean; log: string } | null {
@@ -96,7 +68,7 @@ function agentInfo(root: string, t: Task, agents: AgentEntry[]): { role: string;
 	if (!role) return null;
 	const own = agents.filter((a) => a.role === role);
 	const live = own.find((a) => a.alive);
-	return { role, alive: !!live, log: (live ?? own[own.length - 1])?.handle ?? `${t.file.replace(/\.md$/, "")}.${role}` };
+	return { role, alive: !!live, log: (live ?? own[own.length - 1])?.handle ?? `${taskSlug(t.file)}.${role}` };
 }
 
 function logDirFiles(root: string): string[] {
@@ -124,9 +96,9 @@ function indexRuns(files: string[], base: string): number[] {
 // enumeration order (role order, legacy first, index ascending). Only the newest run of the
 // state-mapped role is the live agent
 function agentHistory(root: string, t: Task, files: string[]): AgentEntry[] {
-	const slug = t.file.replace(/\.md$/, "");
+	const slug = taskSlug(t.file);
 	const liveRole = AGENT_ROLE[t.state];
-	const live = !!liveRole && pidAlive(rolePid(root, slug, liveRole));
+	const live = !!liveRole && agentAlive(root, slug);
 	const entries: (AgentEntry & { mtime: number })[] = [];
 	for (const role of LOG_ROLES) {
 		const base = `${slug}.${role}`;
@@ -393,29 +365,6 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 	return JSON.stringify({ text, head, tail, atStart: head === 0 });
 }
 
-function serve(root: string, req: IncomingMessage, res: ServerResponse): void {
-	const path = (req.url ?? "/").split("?")[0];
-	if (req.method !== "GET") {
-		res.writeHead(404).end();
-	} else if (path === "/") {
-		res.writeHead(200, { "content-type": "text/html; charset=utf-8", connection: "close" });
-		res.end(PAGE);
-	} else if (path === "/api/tasks") {
-		res.writeHead(200, { "content-type": "application/json; charset=utf-8", connection: "close" });
-		res.end(JSON.stringify(taskPayload(root)));
-	} else if (path === "/api/agent-log") {
-		const payload = agentLogPayload(root, new URLSearchParams((req.url ?? "").split("?")[1] ?? ""));
-		if (!payload) {
-			res.writeHead(404).end();
-		} else {
-			res.writeHead(200, { "content-type": "application/json; charset=utf-8", connection: "close" });
-			res.end(payload);
-		}
-	} else {
-		res.writeHead(404).end();
-	}
-}
-
 // Ayu Dark palette (ayu-theme/ayu-colors), written once and applied twice: explicit choice via data-theme, browser default via media query
 const DARK_VARS = `
 :root[data-theme="dark"] { --bg: #10141c; --fg: #bfbdb6; --panel: #141821; --border: #1b1f29; --heading: #bfbdb6; --muted: #5a6673; --faint: #5a6673; --soft: #bfbdb6; --hover: #1b1f29; --overlay: rgba(0, 0, 0, .6); --code-bg: #010102; --link: #e6b450;
@@ -647,12 +596,11 @@ export function syncBoard(cols, tasks, expanded, els, make, visible) {
 	// backlog is priority-first (critical above high above medium above low), every other column is
 	// newest-first only; the sort is stable and the payload arrives in task-number order, so equal
 	// keys keep that order
-	const rank: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 	const live = new Set();
 	for (const st of Object.keys(cols)) {
 		const inState = tasks
 			.filter((t) => t.state === st)
-			.sort((a, b) => (st === "backlog" ? (rank[a.priority] ?? 4) - (rank[b.priority] ?? 4) : 0) || b.updated - a.updated);
+			.sort((a, b) => (st === "backlog" ? (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) : 0) || b.updated - a.updated);
 		const shown = expanded.has(st) ? inState : inState.slice(0, visible);
 		const part = cols[st];
 		part.count.textContent = inState.length;
@@ -1150,31 +1098,3 @@ setInterval(refresh, 5000);
 </body>
 </html>
 `;
-
-// read-only dashboard server; resolves null on any failure (EADDRINUSE and friends) instead of
-// throwing, so the pipeline can log and continue
-export function startWebUi(root: string, opts: { host?: string; port?: number } = {}): Promise<{ port: number; close: () => void } | null> {
-	const server = createServer((req, res) => {
-		res.on("error", () => {}); // client aborted mid-response
-		try {
-			serve(root, req, res);
-		} catch (err) {
-			try {
-				res.writeHead(500, { "content-type": "text/plain" });
-				res.end("web ui error: " + (err instanceof Error ? err.message : String(err)));
-			} catch {
-				/* headers already sent */
-			}
-		}
-	});
-	return new Promise((resolve) => {
-		server.on("error", () => resolve(null));
-		server.listen(opts.port ?? DEFAULT_PORT, opts.host ?? DEFAULT_HOST, () => {
-			const addr = server.address();
-			resolve({
-				port: addr && typeof addr === "object" ? addr.port : opts.port ?? DEFAULT_PORT,
-				close: () => server.close(),
-			});
-		});
-	});
-}

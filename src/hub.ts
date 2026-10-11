@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { agentLogPayload, PAGE, pidAlive, taskPayload } from "./webui.ts";
+import { pidAlive } from "./pid.ts";
+import { agentLogPayload, PAGE, taskPayload } from "./webui.ts";
 
 // Hub backend: daemons register on spawn, the hub is elected by a lock race, the registry is
 // one hub-written file, failover re-elects on hub death, and only the hub serves the ui.

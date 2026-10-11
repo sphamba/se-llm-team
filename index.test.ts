@@ -44,9 +44,9 @@ mkdirSync(sub, { recursive: true });
 const plain = mkdtempSync(join(tmpdir(), "index-plain-"));
 
 // resolveRoot: the repo root from the root and from a subdirectory, a marker elsewhere
-assert.deepEqual(resolveRoot(repo), { root: repo });
-assert.deepEqual(resolveRoot(sub), { root: repo });
-assert.deepEqual(resolveRoot(plain), { root: null });
+assert.deepEqual(resolveRoot(repo), repo);
+assert.deepEqual(resolveRoot(sub), repo);
+assert.deepEqual(resolveRoot(plain), null);
 
 // orchestrator_start on a fresh git repo resolves the root and spawns the daemon there
 const started = await tools.get("orchestrator_start").execute("id", {}, undefined, undefined, ctx(sub));

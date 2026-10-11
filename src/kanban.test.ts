@@ -3,7 +3,7 @@ import { execSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendNote, createTask, getTask, listAll, listTasks, parseTask, setState, setWorktree, slugFile, slugWorktree, taskFiles, taskNum, updateTask } from "./kanban.ts";
+import { createTask, getTask, listAll, listTasks, parseTask, setState, setWorktree, slugFile, slugWorktree, taskFiles, taskNum, updateTask } from "./kanban.ts";
 
 const root = mkdtempSync(join(tmpdir(), "kanban-test-"));
 const fail = (msg: string) => {
@@ -77,8 +77,11 @@ assert.match(raw, /^worktree: "feat\/nice-thing"$/m);
 assert.match(raw, /# Summary\nDo a thing/);
 assert.equal(parseTask(root, t1.file).state, "to-do");
 
-// notes, updateTask
-appendNote(root, t1, "first note");
+// notes survive a summary/specs patch: a seeded note, then the patch rewrites only that section
+writeFileSync(
+	join(root, ".kanban", t1.file),
+	readFileSync(join(root, ".kanban", t1.file), "utf8").replace(/^# Notes$/m, "# Notes\n- first note"),
+);
 assert.match(parseTask(root, t1.file).notes, /first note/);
 // a summary/specs patch rewrites only that section: unknown sections stay byte-for-byte
 const withUnknown = readFileSync(join(root, ".kanban", t1.file), "utf8").replace(
@@ -134,7 +137,6 @@ assert.equal(sh("git rev-list --count HEAD").trim(), "1"); // create writes the 
 assert.match(sh("git status --porcelain -uall"), new RegExp(`\\?\\? \\.kanban/${tg.file}`));
 setState(gitRoot, tg, "to-do");
 setWorktree(gitRoot, tg, "feat/git-board");
-appendNote(gitRoot, tg, "note");
 updateTask(gitRoot, tg, { summary: "s2" });
 assert.equal(sh("git rev-list --count HEAD").trim(), "1"); // intermediate updates create no commits
 assert.match(sh("git status --porcelain -uall"), new RegExp(`\\?\\? \\.kanban/${tg.file}`)); // still uncommitted
@@ -202,12 +204,10 @@ assert.equal(
 const te = createTask(qRoot, { name: "feat: empty questions", summary: "s", openQuestions: "  " });
 assert.equal(te.openQuestions, "");
 assert.ok(!readFileSync(join(qRoot, ".kanban", te.file), "utf8").includes("# Open questions"));
-// state changes, note appends and spec rewrites leave the section alone
+// state changes and spec rewrites leave the section alone
 setState(qRoot, tq, "to-do");
-appendNote(qRoot, tq, "note");
 updateTask(qRoot, tq, { specs: "spec v2" });
 assert.equal(parseTask(qRoot, tq.file).openQuestions, "- [user] Which colour?");
-assert.match(parseTask(qRoot, tq.file).notes, /note/);
 assert.match(readFileSync(join(qRoot, ".kanban", tq.file), "utf8"), /# Open questions\n- \[user\] Which colour\?\n$/);
 // answering clears the section in place; a new question re-fills it, never a second header
 updateTask(qRoot, tq, { openQuestions: "" });
