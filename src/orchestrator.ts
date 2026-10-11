@@ -89,7 +89,7 @@ function loadConfig(root: string): Config {
 		for (const [role, entry] of Object.entries(cfg.roles)) {
 			const clean: RoleLlmConfig = cleanLlm(root, entry, ` for role "${role}"`);
 			// nested complexity sub-objects are cleaned like role entries; a non-object value
-			// under those keys warns and is ignored, like a non-object role
+			// under those keys warns and is ignored
 			const src = (entry ?? {}) as Record<string, unknown>;
 			for (const cx of COMPLEXITIES) {
 				const v = src[cx];
