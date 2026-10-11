@@ -151,6 +151,13 @@ assert.ok(servedLog.text.includes("Checking the board.\n"), "endpoint renders th
 assert.ok(servedLog.text.includes("[tool] read: src/webui.ts\n"), "endpoint renders the tool line");
 assert.ok(servedLog.text.includes("not json at all\n"), "endpoint passes non-JSON lines through");
 
+// a record split at the chunk head (init fetch of a log bigger than LOG_CHUNK) drops its partial
+// line instead of rendering raw JSON
+const bigRecord = JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "z".repeat(20000) } });
+writeFileSync(logFile, JSON.stringify({ type: "session", id: "s" }) + "\n" + bigRecord + "\n" + JSON.stringify({ type: "message_end", message: { role: "user", content: "tail" } }) + "\n");
+const splitLog = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.equal(splitLog.text, "[prompt] tail\n", "a record split at the chunk head drops its partial line, later records still render");
+
 // a second startWebUi on the taken port reports failure instead of throwing
 assert.equal(await startWebUi(root, { port: ui.port }), null);
 ui.close();

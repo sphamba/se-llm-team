@@ -240,7 +240,13 @@ function serve(root: string, req: IncomingMessage, res: ServerResponse): void {
 			}
 			let text = "";
 			try {
-				text = renderLogChunk(readRange(log, head, tail));
+				text = readRange(log, head, tail);
+				if (head > 0 && readRange(log, head - 1, head) !== "\n") {
+					// head lands mid-record: drop the partial head line, only whole records render
+					const nl = text.indexOf("\n");
+					text = nl === -1 ? "" : text.slice(nl + 1);
+				}
+				text = renderLogChunk(text);
 			} catch {
 				// log vanished mid-request
 			}

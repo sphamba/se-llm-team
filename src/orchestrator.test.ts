@@ -76,10 +76,17 @@ const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
 if (!file || !readFileSync(file, "utf8").match(/^state: /m)) process.exit(0);
 if (prompt.includes("Developer agent")) {
-	process.stdout.write(JSON.stringify({ type: "session", version: 3, id: "s", timestamp: 0, cwd: process.cwd() }) + "\\n");
-	process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "working" } }) + "\\n");
-	process.stdout.write(JSON.stringify({ type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: { command: "git status" } }) + "\\n");
-	process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant", content: "work" } }) + "\\n");
+	// emit JSONL only when spawned with --mode json, print-mode final text otherwise, so the
+	// developer-log assertion below actually verifies the orchestrator's spawn args
+	const m = process.argv.indexOf("--mode");
+	if (m !== -1 && process.argv[m + 1] === "json") {
+		process.stdout.write(JSON.stringify({ type: "session", version: 3, id: "s", timestamp: 0, cwd: process.cwd() }) + "\\n");
+		process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "working" } }) + "\\n");
+		process.stdout.write(JSON.stringify({ type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: { command: "git status" } }) + "\\n");
+		process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant", content: "work" } }) + "\\n");
+	} else {
+		process.stdout.write("final text only\\n");
+	}
 	writeFileSync("code.txt", "work\\n");
 	execSync("git add -A && git commit -qm work", { stdio: "ignore" });
 }
