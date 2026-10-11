@@ -9,7 +9,7 @@ import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { readHubRegistry, startHub } from "./hub.ts";
 import { createTask, kanbanDir, parseTask, setState, setWorktree } from "./kanban.ts";
-import { compactFinishedLogs, compactLogLine, logCompactor, logFeeders, pidAlive, removeTask, waitForBoardCommits } from "./orchestrator.ts";
+import { compactFinishedLogs, compactLogLine, loadConfig, logCompactor, logFeeders, pidAlive, poll, removeTask, waitForBoardCommits } from "./orchestrator.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -1896,3 +1896,156 @@ am.daemon.kill("SIGTERM");
 silentOrigin.close();
 for (const s of silentOriginSockets) s.destroy();
 console.log("orchestrator.test.ts: ... + non-blocking push smoke passed");
+
+// --- part AN: a live-but-silent agent (log unchanged for the stall window) is bounced, killed
+// and counted. poll() runs directly with an injected clock, so the default 5-minute window is
+// tested without waiting out real minutes ---
+const rootAN = fixture();
+cleaned.push(rootAN);
+mkdirSync(join(kanbanDir(rootAN), ".logs"), { recursive: true });
+mkdirSync(join(kanbanDir(rootAN), ".pids"), { recursive: true });
+// a real live process behind each pid file: the stall bounce must SIGTERM it; 60s bounds the
+// leak if the run dies before the cleanup below
+const sleeperAN = (ms: number) => spawn(process.execPath, ["-e", `setTimeout(() => {}, ${ms})`], { stdio: "ignore" });
+const sleepersAN: ChildProcess[] = [];
+const stallTask = (name: string, state: string) => {
+	const t = createTask(rootAN, { name, summary: "Log stall smoke", specs: "n/a" });
+	setState(rootAN, t, state);
+	return t;
+};
+const stallPidFile = (slug: string, pid: number) => {
+	const p = join(kanbanDir(rootAN), ".pids", `${slug}.pid`);
+	writeFileSync(p, String(pid));
+	return p;
+};
+// task 1: doing, alive pid, a log that never grows -> stalls at the 5-minute edge
+const taskAN1 = stallTask("fix: stalled agent", "doing");
+const slugAN1 = taskAN1.file.replace(/\.md$/, "");
+const sleeperAN1 = sleeperAN(60000);
+sleepersAN.push(sleeperAN1);
+const pidFileAN1 = stallPidFile(slugAN1, sleeperAN1.pid!);
+writeFileSync(join(kanbanDir(rootAN), ".logs", `${slugAN1}.developer.0.log`), "silent\n");
+// task 2: doing, alive pid, a log that grows at every poll -> never stalls
+const taskAN2 = stallTask("fix: growing log", "doing");
+const slugAN2 = taskAN2.file.replace(/\.md$/, "");
+const sleeperAN2 = sleeperAN(60000);
+sleepersAN.push(sleeperAN2);
+stallPidFile(slugAN2, sleeperAN2.pid!);
+const logAN2 = join(kanbanDir(rootAN), ".logs", `${slugAN2}.developer.0.log`);
+writeFileSync(logAN2, "run\n");
+// task 3: doing, alive pid, no log file at all -> the check is skipped
+const taskAN3 = stallTask("fix: no log", "doing");
+const slugAN3 = taskAN3.file.replace(/\.md$/, "");
+const sleeperAN3 = sleeperAN(60000);
+sleepersAN.push(sleeperAN3);
+stallPidFile(slugAN3, sleeperAN3.pid!);
+// task 4: reviewing past RESPAWN_CAP, alive pid, a silent log -> still bounced (and killed)
+const taskAN4 = stallTask("fix: stalled past cap", "reviewing");
+const slugAN4 = taskAN4.file.replace(/\.md$/, "");
+const sleeperAN4 = sleeperAN(60000);
+sleepersAN.push(sleeperAN4);
+stallPidFile(slugAN4, sleeperAN4.pid!);
+writeFileSync(join(kanbanDir(rootAN), ".logs", `${slugAN4}.dead.count`), "6");
+writeFileSync(join(kanbanDir(rootAN), ".logs", `${slugAN4}.reviewer.0.log`), "silent\n");
+// task 5: merging with a live merger pid, but its old merger log is not the current merger's
+// run (mergerLogSlug is null in this process): never sampled, never a false kill
+const taskAN5 = stallTask("fix: stale merger task", "merging");
+const slugAN5 = taskAN5.file.replace(/\.md$/, "");
+const sleeperAN5 = sleeperAN(60000);
+sleepersAN.push(sleeperAN5);
+writeFileSync(join(kanbanDir(rootAN), ".pids", "merger.pid"), String(sleeperAN5.pid!));
+writeFileSync(join(kanbanDir(rootAN), ".logs", `${slugAN5}.merger.0.log`), "old run\n");
+
+const t0AN = Date.now();
+poll(rootAN, 5, t0AN); // first samples
+// inside the window: no bounce and no kill for the unchanged logs
+poll(rootAN, 5, t0AN + 60_000);
+poll(rootAN, 5, t0AN + 4 * 60_000);
+assert.equal(parseTask(rootAN, taskAN1.file).state, "doing", "no bounce inside the stall window");
+assert.ok(pidAlive(sleeperAN1.pid!), "no kill inside the stall window");
+assert.equal(parseTask(rootAN, taskAN4.file).state, "reviewing", "no bounce inside the stall window past the cap");
+// at the 5-minute edge (>= 5 min unchanged): bounce one state back, kill the agent, count the death.
+// The growing log grows at the same poll, so only the two silent logs stall here
+appendFileSync(logAN2, "tick 5\n");
+poll(rootAN, 5, t0AN + 5 * 60_000);
+await waitFor(() => !pidAlive(sleeperAN1.pid!), 5000, "stalled agent killed", () => "");
+assert.equal(parseTask(rootAN, taskAN1.file).state, "to-do", "stalled agent bounced doing -> to-do");
+assert.ok(!existsSync(pidFileAN1), "pid file cleared on the stall bounce");
+assert.equal(readFileSync(join(kanbanDir(rootAN), ".logs", `${slugAN1}.dead.count`), "utf8").trim(), "1", "dead counter bumped on the stall bounce");
+await waitFor(() => !pidAlive(sleeperAN4.pid!), 5000, "past-cap stalled agent killed", () => "");
+assert.equal(parseTask(rootAN, taskAN4.file).state, "to-review", "stall bounce is unconditional past RESPAWN_CAP");
+assert.equal(readFileSync(join(kanbanDir(rootAN), ".logs", `${slugAN4}.dead.count`), "utf8").trim(), "7", "dead counter bumped past the cap");
+// a log that grows at every poll resets the window and never bounces, past the window included
+for (const at of [6, 7, 8]) {
+	appendFileSync(logAN2, `tick ${at}\n`);
+	poll(rootAN, 5, t0AN + at * 60_000);
+}
+assert.equal(parseTask(rootAN, taskAN2.file).state, "doing", "a growing log never bounces");
+assert.ok(pidAlive(sleeperAN2.pid!), "a growing log never gets the agent killed");
+// no per-run log file: no sample, no check, no bounce
+assert.equal(parseTask(rootAN, taskAN3.file).state, "doing", "no log file: the stall check is skipped");
+assert.ok(pidAlive(sleeperAN3.pid!), "no log file: the agent is not killed");
+// the merging guard: the old merger log is never sampled while the live merger serves another task
+assert.equal(parseTask(rootAN, taskAN5.file).state, "merging", "stale merging task never sampled");
+assert.ok(pidAlive(sleeperAN5.pid!), "the merger working another task is not killed");
+for (const s of sleepersAN) {
+	try {
+		s.kill("SIGKILL");
+	} catch {
+		/* already gone */
+	}
+}
+console.log("orchestrator.test.ts: ... + log-stall detection smoke passed");
+
+// --- part AO: a configured logStallMinutes applies: with a 2-minute window the same silent
+// log bounces at the 2-minute edge, not before ---
+const rootAO = fixture();
+cleaned.push(rootAO);
+mkdirSync(join(kanbanDir(rootAO), ".logs"), { recursive: true });
+mkdirSync(join(kanbanDir(rootAO), ".pids"), { recursive: true });
+const taskAO = createTask(rootAO, { name: "fix: stalled on the configured window", summary: "Log stall smoke", specs: "n/a" });
+setState(rootAO, taskAO, "doing");
+const slugAO = taskAO.file.replace(/\.md$/, "");
+const sleeperAO = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+writeFileSync(join(kanbanDir(rootAO), ".pids", `${slugAO}.pid`), String(sleeperAO.pid!));
+writeFileSync(join(kanbanDir(rootAO), ".logs", `${slugAO}.developer.0.log`), "silent\n");
+const t0AO = Date.now();
+poll(rootAO, 2, t0AO);
+poll(rootAO, 2, t0AO + 60_000);
+assert.equal(parseTask(rootAO, taskAO.file).state, "doing", "no bounce before the configured window");
+poll(rootAO, 2, t0AO + 2 * 60_000);
+await waitFor(() => !pidAlive(sleeperAO.pid!), 5000, "configured-window stalled agent killed", () => "");
+assert.equal(parseTask(rootAO, taskAO.file).state, "to-do", "the configured 2-minute window bounces the stalled agent");
+assert.equal(readFileSync(join(kanbanDir(rootAO), ".logs", `${slugAO}.dead.count`), "utf8").trim(), "1", "dead counter bumped on the configured-window bounce");
+try {
+	sleeperAO.kill("SIGKILL");
+} catch {
+	/* already gone */
+}
+console.log("orchestrator.test.ts: ... + configured logStallMinutes smoke passed");
+
+// --- part AP: the logStallMinutes config: a missing key keeps the default 5, a configured
+// value applies, an invalid value warns and keeps 5. loadConfig runs directly; the empty
+// temp HOME keeps the ambient user-level config out ---
+const rootAP = fixture();
+cleaned.push(rootAP);
+const homeAP = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAP);
+mkdirSync(kanbanDir(rootAP), { recursive: true });
+const savedHomeAP = process.env.HOME;
+process.env.HOME = homeAP;
+try {
+	assert.equal(loadConfig(rootAP).logStallMinutes, 5, "a missing logStallMinutes key keeps the default 5");
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ logStallMinutes: 0.05 }));
+	assert.equal(loadConfig(rootAP).logStallMinutes, 0.05, "a configured logStallMinutes applies");
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ logStallMinutes: "banana" }));
+	assert.equal(loadConfig(rootAP).logStallMinutes, 5, "a non-number logStallMinutes keeps 5");
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ logStallMinutes: 0 }));
+	assert.equal(loadConfig(rootAP).logStallMinutes, 5, "logStallMinutes <= 0 keeps 5");
+} finally {
+	process.env.HOME = savedHomeAP;
+}
+const orchLogAP = () => readFileSync(join(kanbanDir(rootAP), ".logs", "orchestrator.log"), "utf8");
+assert.ok(orchLogAP().includes('logStallMinutes "banana" ignored: must be a positive number of minutes'), "a non-number logStallMinutes warned about");
+assert.ok(orchLogAP().includes("logStallMinutes 0 ignored: must be a positive number of minutes"), "logStallMinutes <= 0 warned about");
+console.log("orchestrator.test.ts: ... + logStallMinutes config smoke passed");

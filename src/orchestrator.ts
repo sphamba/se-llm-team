@@ -21,6 +21,8 @@ import { loadWebUiConfig } from "./webui.ts";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_POLL_MINUTES = 1;
 const DEFAULT_AUTO_SCHEDULE_MINUTES = 5;
+// minutes a working agent's log may keep its size before the agent is assumed dead
+const DEFAULT_LOG_STALL_MINUTES = 5;
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const RESPAWN_CAP = 5;
 // final fallback for the per-complexity cap when a Config carries no reviewerCap entry for
@@ -57,6 +59,7 @@ interface Config {
 	agent: string;
 	pollMinutes: number;
 	autoScheduleMinutes: number;
+	logStallMinutes: number;
 	llm: LlmConfig;
 	roles: Record<string, RoleLlmConfig>;
 	reviewerCap: Record<string, number>;
@@ -75,8 +78,8 @@ function cleanLlm(root: string, entry: unknown, where = ""): LlmConfig {
 	return clean;
 }
 
-function loadConfig(root: string): Config {
-	let cfg: { agent?: string; pollMinutes?: number; autoScheduleMinutes?: number; provider?: unknown; model?: unknown; thinking?: unknown; roles?: unknown; reviewerCap?: unknown } = {};
+export function loadConfig(root: string): Config {
+	let cfg: { agent?: string; pollMinutes?: number; autoScheduleMinutes?: number; logStallMinutes?: unknown; provider?: unknown; model?: unknown; thinking?: unknown; roles?: unknown; reviewerCap?: unknown } = {};
 	// user-level first, project .kanban/se-llm-team.json overrides it
 	for (const path of [join(process.env.HOME ?? "", ".pi", "agent", "se-llm-team.json"), join(root, ".kanban", "se-llm-team.json")]) {
 		try {
@@ -113,10 +116,17 @@ function loadConfig(root: string): Config {
 			reviewerCap[cx] = v;
 		}
 	}
+	let logStallMinutes = DEFAULT_LOG_STALL_MINUTES;
+	const stall = cfg.logStallMinutes;
+	if (stall !== undefined) {
+		if (typeof stall !== "number" || stall <= 0) log(root, `logStallMinutes ${JSON.stringify(stall)} ignored: must be a positive number of minutes`);
+		else logStallMinutes = stall;
+	}
 	return {
 		agent: cfg.agent ?? "pi",
 		pollMinutes: cfg.pollMinutes ?? DEFAULT_POLL_MINUTES,
 		autoScheduleMinutes: cfg.autoScheduleMinutes ?? DEFAULT_AUTO_SCHEDULE_MINUTES,
+		logStallMinutes,
 		llm: cleanLlm(root, cfg, " (global)"),
 		roles,
 		reviewerCap,
@@ -942,6 +952,7 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	}
 	mkdirSync(join(kanbanDir(root), ".pids"), { recursive: true });
 	writeFileSync(mergerAttemptPath(root, slug), "");
+	mergerLogSlug = slug;
 	spawnAgent(root, cfg, "merger", { ...task, worktree: ensured.wt }, root, "merger");
 	setState(root, task, "merging");
 }
@@ -1114,12 +1125,26 @@ function rescan(root: string, cfg: Config): void {
 	autoSchedule(root, cfg, tasks);
 }
 
-const DEAD_TRANSITIONS: Partial<Record<TaskState, TaskState>> = {
-	doing: "to-do",
-	reviewing: "to-review",
-	"live-testing": "to-merge",
-	merging: "to-merge",
+// the working states with an agent out: next is the one-state-back bounce target when the
+// agent dies, role is the agent role whose per-run log (.kanban/.logs/<slug>.<role>.<n>.log)
+// the stall check samples
+const WORKING_STATES: Partial<Record<TaskState, { next: TaskState; role: string }>> = {
+	doing: { next: "to-do", role: "developer" },
+	reviewing: { next: "to-review", role: "reviewer" },
+	"live-testing": { next: "to-merge", role: "live-tester" },
+	merging: { next: "to-merge", role: "merger" },
 };
+
+// a live-but-hung agent passes pidAlive forever: the stall check kills it by its log instead
+// (the window itself is the logStallMinutes config, default DEFAULT_LOG_STALL_MINUTES)
+// per-daemon log-size samples for the stall check: "<slug>.<role>" -> the sampled log path,
+// its size and the time that size was first seen; a daemon restart restarts the window
+const logSamples = new Map<string, { path: string; size: number; since: number }>();
+// the slug the live merger was spawned for: the merger pid file is project-wide, so a merging
+// task can outlive its own merger run while another task's merger works; only the task the
+// current merger serves may stall-bounce it, or an old merger log would get the wrong
+// process killed
+let mergerLogSlug: string | null = null;
 
 const PRIORITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 const rank = (priority: string) => PRIORITY_RANK[priority] ?? PRIORITY_RANK.low + 1;
@@ -1175,22 +1200,99 @@ function autoSchedule(root: string, cfg: Config, tasks: Task[]): void {
 	}
 }
 
-function poll(root: string, cfg: Config): void {
+// every sample of one task's agent logs: dropped when the task leaves the working states or
+// its pid dies (the dead-pid path owns it then)
+function dropLogSamples(slug: string): void {
+	for (const key of logSamples.keys()) {
+		if (key.startsWith(`${slug}.`)) logSamples.delete(key);
+	}
+}
+
+// the stall check for one working-state task with a live agent: sample the newest per-run
+// log's size and report a stall when the size is unchanged for the whole window. No per-run
+// log (nothing indexed yet, or vanished between readdir and stat) => no sample, no check
+function logStalled(root: string, slug: string, role: string, stallMinutes: number, now: number): boolean {
+	const key = `${slug}.${role}`;
+	const n = nextRunIndex(root, slug, role) - 1;
+	if (n < 0) {
+		logSamples.delete(key);
+		return false;
+	}
+	const path = logPath(root, `${slug}.${role}.${n}`);
+	let size: number;
+	try {
+		size = statSync(path).size;
+	} catch {
+		logSamples.delete(key);
+		return false;
+	}
+	const prev = logSamples.get(key);
+	// a new run (new file) or any size change restarts the window
+	if (!prev || prev.path !== path || prev.size !== size) {
+		logSamples.set(key, { path, size, since: now });
+		return false;
+	}
+	return now - prev.since >= stallMinutes * 60_000;
+}
+
+// one bounce for both death kinds (dead pid, stalled log): SIGTERM the agent on request,
+// clear its pid files, re-read the task and move it one state back when the state has not
+// moved on, then bump the death counter so the respawn machinery takes over (immediate under
+// the cap, idle-cooldown past it). The bounce itself is unconditional past RESPAWN_CAP: a
+// frozen mid-flight task is worse than a bounced one, only the respawn backs off
+function bounceDead(root: string, task: Task, next: TaskState, pidName: string, pid: number, kill: boolean): void {
+	const slug = task.file.replace(/\.md$/, "");
+	dropLogSamples(slug);
+	if (kill) {
+		try {
+			process.kill(pid, "SIGTERM");
+		} catch {
+			/* already gone */
+		}
+	}
+	clearPid(root, pidName);
+	// re-read + state-match: a task that moved on underneath (agent, PM or user) wins
+	const fresh = getTask(root, task.file);
+	if (!fresh || fresh.state !== task.state) return;
+	setState(root, fresh, next);
+	// past the cap the fresh spawn waits for the idle cooldown (the sweep defers it);
+	// logged once at cap+1, like the old give-up line
+	if (bumpCounter(root, `${slug}.dead`) === RESPAWN_CAP + 1) {
+		log(root, `${slug}: agent died ${RESPAWN_CAP}+ times; respawn waits for the idle cooldown (state ${next})`);
+	}
+}
+
+// now is injectable so the stall window is testable without waiting out real minutes
+export function poll(root: string, stallMinutes: number, now = Date.now()): void {
 	for (const task of listAll(root)) {
 		try {
 			// no state rewrite on a conflicted file: the parse is bogus and the merger owns resolution
 			if (task.conflicted) continue;
-			const next = DEAD_TRANSITIONS[task.state];
+			const working = WORKING_STATES[task.state];
 			const slug = task.file.replace(/\.md$/, "");
 			// a merging task's agent is the project-wide merger (the global pid file); every other
 			// state maps to the task's own agent pid. Clear before the transition check: a pidfile
 			// for a state with no transition (to-merge, done) would otherwise linger forever
 			const pidName = task.state === "merging" ? "merger" : slug;
 			const { pid, disc } = pidEntry(root, pidName);
-			if (pidAlive(pid, disc)) continue;
+			if (pidAlive(pid, disc)) {
+				// a live pid is stalled when its per-run log size is unchanged for the whole window:
+				// bounced and killed like a dead agent. A merging task only samples while the live
+				// merger is its own (see mergerLogSlug); outside the working states there is no
+				// check, and stale samples are dropped
+				if (working && (task.state !== "merging" || mergerLogSlug === slug) && logStalled(root, slug, working.role, stallMinutes, now)) {
+					log(root, `${task.file}: agent log unchanged for ${stallMinutes}+ min, assuming dead (state ${task.state})`);
+					bounceDead(root, task, working.next, pidName, pid, true);
+				} else if (!working) {
+					dropLogSamples(slug);
+				}
+				continue;
+			}
+			// a dead or missing pid: the dead-pid path owns the task, its stall samples are dropped
+			dropLogSamples(slug);
 			const hadPid = pid > 0;
 			clearPid(root, pidName);
-			if (!next) {
+			if (!working) {
 				// a completed run leaves its stale pidfile behind, a bounce clears it first, so a
 				// stale pidfile here means the agent advanced the task out of the mapped state by
 				// its own action: the death streak is over. Clearing on a missing pidfile too would
@@ -1202,14 +1304,8 @@ function poll(root: string, cfg: Config): void {
 				continue;
 			}
 			// the bounce is unconditional: a frozen mid-flight task is worse than a bounced one
-			log(root, `${slug}: agent pid=${pid} dead without state update, ${task.state} -> ${next}`);
-			const fresh = getTask(root, task.file);
-			if (fresh) setState(root, fresh, next);
-			// past the cap the fresh spawn waits for the idle cooldown (the sweep defers it);
-			// logged once at cap+1, like the old give-up line
-			if (bumpCounter(root, `${slug}.dead`) === RESPAWN_CAP + 1) {
-				log(root, `${slug}: agent died ${RESPAWN_CAP}+ times; respawn waits for the idle cooldown (state ${next})`);
-			}
+			log(root, `${slug}: agent pid=${pid} dead without state update, ${task.state} -> ${working.next}`);
+			bounceDead(root, task, working.next, pidName, pid, false);
 		} catch (err) {
 			log(root, `error polling ${task.file} (${task.state}): ${err instanceof Error ? err.message : err}`);
 		}
@@ -1311,9 +1407,9 @@ export function main(argv: string[]): void {
 	});
 
 	sweep();
-	poll(root, cfg);
+	poll(root, cfg.logStallMinutes);
 	const timer = setInterval(sweep, rescanSeconds * 1000);
-	const poller = setInterval(() => poll(root, cfg), pollMinutes * 60 * 1000);
+	const poller = setInterval(() => poll(root, cfg.logStallMinutes), pollMinutes * 60 * 1000);
 	try {
 		const w = watch(kanbanDir(root), scheduleSweep);
 		w.on("error", (err) => log(root, `fs.watch error, polling only: ${err instanceof Error ? err.message : err}`));

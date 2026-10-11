@@ -30,6 +30,7 @@ ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
 | `agent` | `pi` | Executable the orchestrator spawns for agents. |
 | `pollMinutes` | `1` | Agent liveness poll interval. |
 | `autoScheduleMinutes` | `5` | Failsafe: promote the oldest highest-priority backlog task to to-do after this many minutes with no active task. PM promotion stays the primary path. |
+| `logStallMinutes` | `5` | A working agent whose log size stays unchanged for this many minutes is assumed dead: the task bounces one state back, the agent process is killed, and the respawn machinery takes over. An invalid value (non-number or <= 0) warns and keeps the default. |
 | `provider` | unset | LLM provider to pass as `--provider`. Requires `model`; a provider without a model is ignored with a warning. |
 | `model` | unset | LLM model or pattern to pass as `--model`. A `:<thinking>` suffix in the pattern keeps working natively. |
 | `thinking` | unset | Reasoning level to pass as `--thinking`: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. An unknown value is ignored with a warning. |
