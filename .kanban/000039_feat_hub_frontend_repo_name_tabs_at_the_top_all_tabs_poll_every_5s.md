@@ -1,7 +1,7 @@
 ---
 name: "feat: hub frontend; repo-name tabs at the top, all tabs poll every 5s"
 priority: "medium"
-state: "live-testing"
+state: "done"
 worktree: "feat/39-hub-frontend-repo"
 ---
 
@@ -46,3 +46,23 @@ Developer run (commit db15b73, worktree feat/39-hub-frontend-repo).
 - Single-project check in the browser against a hub with one registered project: no tab renders, `#tabs` is `display: none`, every poll is a bare `/api/tasks`, and the board renders as before.
 - Observation (not a Spec violation, no fix): the pre-existing full-screen `#modal` overlay covers the tab bar, so a pointer click on a tab lands on the overlay while a modal is open. The `closeModal()` call in `switchTab` is still correct for a programmatic switch and for the vanished-project path. A user-facing tab click with an open modal needs a stacking change on the tab bar, and that is a UX change outside this Spec.
 - No fixes made, state set to to-live-test.
+
+## Live test (2026-10-11)
+
+PASS. Verified like a user in system Google Chrome through Playwright (worktree feat/39-hub-frontend-repo) against a real hub (src/hub.ts) with two registered fixture projects, 13 tasks each (7 backlog plus one per other state). No code was edited.
+
+- Tabs: two tabs labeled alpha-web and beta-api (the repo names), the first active. The active board renders only that project's tasks with the 5-card cap and the priority chips. Switching to beta renders its cached board within the same tick (no empty frame), and switching back works.
+- Per-project state: on beta the backlog column was collapsed at 5, expanded to 7, alpha stayed at 5, and beta kept 7 after a switch away and back. Dark mode survived a tab switch.
+- Polling: in an 11.5 s window both `/api/tasks?project=alpha-web` and `/api/tasks?project=beta-api` were fetched twice, 5.002 s apart, plus one `/api/projects` per cycle. The updated stamp advanced.
+- Modal: the attributes (number, file, priority chip, state, worktree) render from the active project's payload. Opening a past Developer log issued `/api/agent-log?file=...&project=beta-api`.
+- FLIP: a fixture task moved from backlog to done on disk; on the next poll the moving cards got the inversion and `transition: transform 0.4s`, so the animation still applies to a tabbed board.
+- Single project: a hub with one registered project renders no tab bar (`#tabs` is `display: none`), polls bare `/api/tasks`, and the board is unchanged.
+- Escaping: a project registered with name `x<img src=x onerror=...><b>&"q` renders as inert tab text, no injected element, no page error.
+- No JavaScript page errors in any run. `node src/webui.test.ts` passes (all assertions passed).
+
+Finding (reported to the PM, not fixed here):
+
+- With a task modal open, the full-screen `#modal` overlay covers the tab bar, so a real pointer click on another repo's tab closes the modal and does not switch. `document.elementFromPoint` at the tab center returns `#modal` (screenshot /tmp/lt39/modal-over-tabs.png). The Spec line "The open modal closes on tab switch" is therefore only reachable programmatically for a pointer user, who needs a second click. A stacking change (tab bar above the overlay) or hiding the bar while the modal is open would fix it. The reviewer flagged the same as an out-of-spec UX observation.
+- No other issue found.
+
+State set to done.
