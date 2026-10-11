@@ -1086,3 +1086,37 @@ const yDev = JSON.parse(readFileSync(join(rootY, "argv.log"), "utf8").trim().spl
 assert.deepEqual(llmArgs(yDev.argv), [], "bad config values add no flags");
 y.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + bad llm config smoke passed");
+
+// --- part Z: a daemon restart preserves in-flight working-tree state and notes on a file
+// already on the mirror. Mirror commits carry only creates and dones, so a reviewer's state
+// and notes write lives in the working tree alone; the startup reconcile must keep it
+// instead of reverting the task to its create-time mirror content and re-running it.
+const rootZ = fixture();
+cleaned.push(rootZ);
+mkdirSync(kanbanDir(rootZ), { recursive: true });
+writeFileSync(join(kanbanDir(rootZ), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootZ), pollMinutes: 0.05 }));
+const taskZ = createTask(rootZ, { name: "fix: restart keeps in-flight state", summary: "Restart smoke", specs: "n/a" });
+const z1 = await runDaemon(rootZ);
+await waitFor(() => mirrorSubjects(rootZ).includes(`kanban: create ${taskZ.file}`), 30000, "task mirrored before the restart", z1.output);
+z1.daemon.kill("SIGTERM");
+// full exit first: the lock must be released and lastMirrorHash is process state
+await Promise.race([new Promise((r) => z1.daemon.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
+// in-flight reviewer write: newer state and notes in the working tree, never mirrored
+writeFileSync(
+	join(kanbanDir(rootZ), taskZ.file),
+	readFileSync(join(kanbanDir(rootZ), taskZ.file), "utf8")
+		.replace(/^state: .*/m, 'state: "to-live-test"')
+		.replace(/\n# Notes\n/, "\n# Notes\n- in-flight note\n"),
+);
+assert.ok(showTip(rootZ, taskZ.file)!.includes('state: "backlog"'), "precondition: the mirror tip still has the create-time state");
+
+const z2 = await runDaemon(rootZ);
+await waitFor(() => z2.output().includes("1 in-flight kept"), 30000, "reconcile kept the in-flight working-tree file", z2.output);
+await waitFor(() => z2.output().includes("spawned live-tester"), 30000, "restart acted on the in-flight state, not the mirror tip", z2.output);
+assert.ok(readFileSync(join(kanbanDir(rootZ), taskZ.file), "utf8").includes("- in-flight note"), "in-flight notes survived the restart");
+// the dead stub dies without a state update: the poll moves live-testing to done, and the
+// done transition still mirrors because the working-tree file differs from the tip
+await waitFor(() => mirrorSubjects(rootZ).includes(`kanban: done ${taskZ.file}`), 30000, "done mirror commit after the restart", z2.output);
+assert.ok(showTip(rootZ, taskZ.file)!.includes("- in-flight note"), "the done mirror commit carries the in-flight note");
+z2.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + restart preserves in-flight board state smoke passed");
