@@ -3,6 +3,8 @@ name: "docs: tasks from a merge completion carry the issuer task number"
 priority: "medium"
 state: "backlog"
 worktree: ""
+complexity: simple
+blockedBy: "#131, #130"
 ---
 
 # Summary
