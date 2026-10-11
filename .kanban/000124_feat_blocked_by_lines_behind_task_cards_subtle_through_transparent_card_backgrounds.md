@@ -1,8 +1,8 @@
 ---
 name: "feat: blocked-by lines behind task cards, subtle through transparent card backgrounds"
 priority: "medium"
-state: "reviewing"
-worktree: "feat/124-blocked-by-lines"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -14,3 +14,8 @@ Rework the blockedBy relation-line paint order in the webui per user decisions: 
 # Notes
 - Implementation committed in worktree feat/124-blocked-by-lines (356ddf2). .card now carries position: relative; z-index: 2, so #relations (z-index 1, untouched) paints above the static .col/.pair containers and below the cards. Card background is color-mix(in srgb, var(--panel) 85%, transparent) in both themes; the spec's example used var(--card) but no such variable exists, so --panel (the card's effective base color in both themes) is used instead. .card:hover mixes --hover the same way so a line under a hovered dark-theme card stays visible too. #modal bumped z-index 2 to 3; the 000119/000091 comments updated to stay coherent. Dash animation, pointer-events none and the prefers-reduced-motion kill untouched.
 - src/webui.test.ts: added a source assert for the .card position/z-index/semi-transparent background, reworded the #relations z-index-1 message, and added cardZ extraction with an assert that #modal outranks .card. node src/webui.test.ts green; kanban/orchestrator/extension/index suites also pass.
+- Review of commit 356ddf2 (diff main...HEAD): all spec points are correct in the code. #relations stays at z-index 1, absolute, top 0 left 0, pointer-events none (not touched). .card is the only card rule; it has position: relative; z-index: 2 and no later rule overwrites it. The card background is color-mix(in srgb, var(--panel) 85%, transparent). --panel is set per theme (light #ffffff, dark #141821), so both themes get a semi-transparent card. No --card variable exists, as the note says. .card:hover mixes --hover the same way. #modal goes from z-index 2 to 3; the 000091/000119 comments stay correct. The dash animation, pointer-events none and the prefers-reduced-motion rule stay as they were.
+- No absolute-positioned element lives inside a card, so the new position: relative on .card changes no containing block.
+- All four test files pass in the worktree: webui, extension, kanban, orchestrator. The orchestrator suite needs more than 300 s; run it with a longer timeout. src/index.test.ts does not exist; the "index" part of the note above is the hub/index smoke inside orchestrator.test.ts, and it passed.
+- Review found no mistakes. No fixes committed. No open questions. State set to to-live-test.
+- Live test (browser, real hub). Started the worktree hub (src/hub.ts startHub) against a 9-task fixture board with cross-column and same-column blockedBy relations, port 4399, and drove it with headless Chromium. Verified: .card computes position:relative, z-index 2, background color(srgb ... / 0.85) in both themes (light --panel #ffffff, dark #141821); #relations stays absolute z-index 1; #modal computes z-index 3 (above the cards). Stacking is behind-then-show-through: hidden-relations vs shown-relations screenshots of card #201 differ by 711 pixels (mean 0.0012, max 0.047), so the dashes are faintly visible under the card, not painted over it. Clicking card #202 (crossed by three lines) still opens its modal, so pointer-events none holds. The open modal paints above the board and the lines; no dash appears on the modal box, and the board lines stay behind the dim overlay. Same-column loop and cross-column beziers render as before. No live-test issues found.
