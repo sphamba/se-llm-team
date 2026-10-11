@@ -2,14 +2,13 @@ import assert from "node:assert/strict";
 import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { createServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
-import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { readHubRegistry, startHub } from "./hub.ts";
 import { createTask, kanbanDir, parseTask, setState, setWorktree } from "./kanban.ts";
-import { compactFinishedLogs, compactLogLine, loadConfig, logCompactor, logFeeders, poll, removeTask, waitForBoardCommits } from "./orchestrator.ts";
+import { compactFinishedLogs, compactLogLine, loadConfig, poll, removeTask, waitForBoardCommits } from "./orchestrator.ts";
 import { pidAlive } from "./pid.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -281,13 +280,21 @@ assert.equal(
 	"only meta/kanban is pushed to origin",
 );
 // --mode json: the agent log carries the full JSONL event stream (message, thinking, tool
-// events), not print mode's final text only; per-run naming: the first indexed run is 0
+// events), not print mode's final text only; per-run naming: the first indexed run is 0.
+// The run ended while the pipeline moved on, so its raw log was retro-compacted (the fd
+// redirect removed the write-time pipe): wait for the dead weight to be stripped
 const logsA = join(kanbanDir(rootA), ".logs");
+await waitFor(
+	() => !readFileSync(join(logsA, `${slugA}.developer.0.log`), "utf8").includes('"usage"'),
+	30000,
+	"retro compaction of the finished developer log",
+	a.output,
+);
 const devLogA = readFileSync(join(logsA, `${slugA}.developer.0.log`), "utf8");
 for (const record of ['"type":"message_update"', '"type":"tool_execution_start"', '"type":"message_end"']) {
 	assert.ok(devLogA.includes(record), `developer log carries JSONL ${record}`);
 }
-// the write-time compactor dropped the dead weight, the streamed deltas survive the pipe
+// the retro compact dropped the dead weight, the streamed deltas survive the rewrite
 assert.ok(!devLogA.includes('"usage"'), "message_update usage envelope stripped");
 assert.ok(!devLogA.includes('"sections"'), "run-opening system prompt echo dropped");
 assert.ok(devLogA.includes('"text_delta"'), "streamed text deltas survive the compactor");
@@ -1502,23 +1509,12 @@ const turnEndLine = JSON.stringify({ type: "turn_end", message: { role: "assista
 assert.equal(compactLogLine(turnEndLine), turnEndLine, "turn_end kept verbatim");
 assert.equal(compactLogLine("plain stderr line"), "plain stderr line", "non-JSON stderr passthrough");
 
-// the whole fixture through the Transform: chunk boundaries split a line and the multibyte
-// delta mid-way, so line reassembly must be byte-level
-const srcAB = new PassThrough();
-let outAB = "";
-const compactorAB = logCompactor();
-compactorAB.on("data", (d) => (outAB += d));
-srcAB.pipe(compactorAB);
-const rawAB = Buffer.from(compactorFixture(), "utf8");
-const splitAB = rawAB.indexOf(Buffer.from("é", "utf8"));
-srcAB.write(rawAB.subarray(0, splitAB + 1)); // 1 byte into the 2-byte é
-srcAB.write(rawAB.subarray(splitAB + 1));
-srcAB.end();
-await new Promise<void>((r) => compactorAB.on("end", r));
-
-const linesAB = outAB.split("\n");
+// the whole fixture line-by-line: compaction is the retro pass now (the fd redirect removed
+// the write-time pipe), so each complete line goes through compactLogLine directly, the way
+// compactFinishedLogs runs it
+const linesAB = compactorFixture().split("\n").map(compactLogLine);
 assert.equal(linesAB[linesAB.length - 1], "", "trailing newline preserved");
-const recsAB = linesAB.slice(0, -1);
+const recsAB = linesAB.slice(0, -1).filter((l) => l !== null);
 assert.equal(recsAB.length, 14, "one line per surviving record, dropped records removed whole");
 const parsedAB = recsAB.map((l) => {
 	try {
@@ -1576,49 +1572,6 @@ assert.equal(readFileSync(logAC(`${slugDoneAC}.reviewer-armed`), "utf8"), "123",
 assert.equal(readFileSync(logAC("push-failures.count"), "utf8"), "3", "counter skipped");
 assert.equal(compactFinishedLogs(rootAC).files, 0, "a second pass is a no-op");
 console.log("orchestrator.test.ts: ... + retro sweep smoke passed");
-
-// --- part AD: two sources share the sink, so each feeds its own compactor: a stderr line
-// interleaving mid-way through a split stdout record must merge into neither ---
-const sinkAD = new PassThrough();
-let outAD = "";
-sinkAD.on("data", (d) => (outAD += d));
-const stdoutAD = logCompactor();
-const stderrAD = logCompactor();
-stdoutAD.pipe(sinkAD);
-stderrAD.pipe(sinkAD);
-const bigAD = JSON.stringify({ type: "turn_end", message: { role: "assistant", content: "x".repeat(200000) } }) + "\n";
-stdoutAD.write(bigAD.slice(0, 50000)); // stdout record split across reads, no newline yet
-stderrAD.write("stderr diagnostic mid-record\n"); // the other source interleaves
-stdoutAD.write(bigAD.slice(50000));
-stdoutAD.end();
-stderrAD.end();
-await new Promise<void>((r) => stdoutAD.on("end", r));
-const linesAD = outAD.split("\n").slice(0, -1);
-assert.equal(linesAD.length, 2, "no merged lines: two whole records, one per source");
-assert.equal(linesAD.filter((l) => l === "stderr diagnostic mid-record").length, 1, "the stderr line survives whole");
-const turnEndAD = JSON.parse(linesAD.find((l) => l !== "stderr diagnostic mid-record"));
-assert.equal(turnEndAD.message.content.length, 200000, "the split stdout record reassembled intact");
-console.log("orchestrator.test.ts: ... + cross-source pipe integrity smoke passed");
-
-// --- part AE: per-source sinks on one append-only log file. A shared sink would let the
-// first feeder to finish (stderr is usually empty) end it while the other still holds
-// backpressured lines: with a real fs sink they would wait for a drain that never comes and
-// be lost silently ---
-const rootAE = fixture();
-cleaned.push(rootAE);
-mkdirSync(join(kanbanDir(rootAE), ".logs"), { recursive: true });
-const logAE = join(kanbanDir(rootAE), ".logs", "000205_end_race.developer.0.log");
-const { feeders: feedersAE, sinks: sinksAE } = logFeeders(logAE);
-const lineAE = (n: number) => JSON.stringify({ type: "turn_end", message: { role: "assistant", content: "x".repeat(n) } }) + "\n";
-feedersAE[0].write(lineAE(5000) + lineAE(5000) + lineAE(5000) + lineAE(5000)); // backpressures the 64 KB fs sink
-feedersAE[1].write("stderr line\n");
-feedersAE[0].end(); // child close: both feeders end in the same tick
-feedersAE[1].end();
-await Promise.all(sinksAE.map((s) => new Promise<void>((r) => s.on("close", r))));
-const allAE = readFileSync(logAE, "utf8");
-assert.equal((allAE.match(/turn_end/g) || []).length, 4, "no silent loss: the stderr feeder finishing first must not drop the stdout feeder's queued lines");
-assert.ok(allAE.includes("stderr line"), "stderr line present");
-console.log("orchestrator.test.ts: ... + per-source sink close race smoke passed");
 
 // --- part AF: a live agent pid defers the sweep spawn, so a to-do rewrite cannot twin it ---
 // the bug: the liveness poll requeued a doing task to to-do, the sweep spawned a developer,
@@ -2064,3 +2017,59 @@ const orchLogAP = () => readFileSync(join(kanbanDir(rootAP), ".logs", "orchestra
 assert.ok(orchLogAP().includes('logStallMinutes "banana" ignored: must be a positive number of minutes'), "a non-number logStallMinutes warned about");
 assert.ok(orchLogAP().includes("logStallMinutes 0 ignored: must be a positive number of minutes"), "logStallMinutes <= 0 warned about");
 console.log("orchestrator.test.ts: ... + logStallMinutes config smoke passed");
+
+// --- part AQ: killing or restarting the daemon must not kill the spawned agents. The agent's
+// stdout/stderr are the log file fd (a pipe read end would live in the daemon and its death
+// would EPIPE the agent's next write), so the agent survives a SIGTERM stop, keeps logging,
+// and the next daemon picks it up as alive from the pid file instead of spawning a twin ---
+const rootAQ = fixture();
+cleaned.push(rootAQ);
+mkdirSync(kanbanDir(rootAQ), { recursive: true });
+// a fake long-running agent: one JSONL delta line every 100ms, never exits, never touches the task
+const fakeAQ = join(rootAQ, "fake-agent.cjs");
+writeFileSync(
+	fakeAQ,
+	`#!/usr/bin/env node
+setInterval(() => {
+	process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: String(process.hrtime.bigint()) } }) + "\\n");
+}, 100);
+`,
+);
+chmodSync(fakeAQ, 0o755);
+writeFileSync(join(kanbanDir(rootAQ), "se-llm-team.json"), JSON.stringify({ agent: fakeAQ, pollMinutes: 0.05 }));
+const taskAQ = createTask(rootAQ, { name: "fix: survive restart", summary: "Restart survival smoke", specs: "n/a" });
+setState(rootAQ, taskAQ, "to-do");
+const slugAQ = taskAQ.file.replace(/\.md$/, "");
+const logAQ = join(kanbanDir(rootAQ), ".logs", `${slugAQ}.developer.0.log`);
+const pidFileAQ = join(kanbanDir(rootAQ), ".pids", `${slugAQ}.pid`);
+
+const aq = await runDaemon(rootAQ);
+await waitFor(() => existsSync(logAQ) && statSync(logAQ).size > 0, 30000, "fake agent spawned and logging", aq.output);
+const agentPidAQ = parseInt(readFileSync(pidFileAQ, "utf8").trim(), 10);
+assert.ok(pidAlive(agentPidAQ), "the fake agent runs");
+
+// stop the daemon the way production does: kill <pid>
+aq.daemon.kill("SIGTERM");
+await Promise.race([new Promise((r) => aq.daemon.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
+assert.ok(pidAlive(agentPidAQ), "the agent survived the daemon's death");
+const sizeAQ = statSync(logAQ).size;
+await new Promise((r) => setTimeout(r, 1500));
+assert.ok(statSync(logAQ).size > sizeAQ, "the log still grows after the daemon's death");
+assert.ok(pidAlive(agentPidAQ), "the agent still runs while logging");
+
+// the restart picks the agent up as alive (pid file + liveness): no twin, the log keeps growing
+const aq2 = await runDaemon(rootAQ);
+await new Promise((r) => setTimeout(r, 4500));
+assert.equal(aq2.output().split("spawned developer").length - 1, 0, "the new daemon spawned no twin");
+assert.ok(pidAlive(agentPidAQ), "the agent survived the restart");
+const size2AQ = statSync(logAQ).size;
+await new Promise((r) => setTimeout(r, 1500));
+assert.ok(statSync(logAQ).size > size2AQ, "the log still grows after the restart");
+assert.equal(parseTask(rootAQ, taskAQ.file).state, "doing", "the in-flight state survived the restart");
+aq2.daemon.kill("SIGTERM");
+try {
+	process.kill(agentPidAQ, "SIGKILL");
+} catch {
+	/* already gone */
+}
+console.log("orchestrator.test.ts: ... + daemon-restart survival smoke passed");
