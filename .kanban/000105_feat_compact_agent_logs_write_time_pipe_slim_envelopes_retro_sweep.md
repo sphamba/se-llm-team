@@ -1,7 +1,7 @@
 ---
 name: "feat: compact agent logs; write-time pipe, slim envelopes, retro sweep"
 priority: "medium"
-state: "reviewing"
+state: "to-merge"
 worktree: "feat/105-compact-agent-logs"
 ---
 
@@ -59,3 +59,17 @@ Constraints:
 - Fix: the shared sink is gone. New exported logFeeders(path) gives each source its own compactor feeding its own append-only write stream on the same log file (O_APPEND keeps every line atomic, each pair ends independently via the default pipe end); spawnAgent pipes the child stdio into the feeders with end:false and child close stays the single end path. A 4 x 50 KB probe through the fixed wiring keeps all 4 records plus the stderr line across repeated runs. Part AE now wires the real helper against a real fs sink at default highWaterMark and asserts no loss; part AD (mid-record interleave) unchanged and still green.
 - Re-verified the rest of the first-pass findings unchanged: read-path contract vs src/webui.ts (renderLogChunk reads only assistantMessageEvent, tool_execution_start/end, user-prompt message_end), retro sweep skip guards, --compact-logs usage, subagent-log matching, files touched (orchestrator.ts + orchestrator.test.ts only). All three suites green after the fix, run by the reviewer (orchestrator 21 parts).
 - Merge-base note stands: #101 is at to-merge and both tasks dirty spawnAgent, so merge #101 first and expect conflicts.
+
+2026-10-11 (reviewer, third pass):
+- Found and fixed one wrong comment, committed e8cace4: the spawn error handler claimed "ENOENT never fires close", which is false on this runtime. Verified empirically on Node v24.20.0: a failed spawn fires child error AND child close (close-after-error has been the behavior since Node 15), and the resulting double feeders.end() is an idempotent no-op with no error event. The belt-and-braces handlers themselves were correct - only the comment asserted the opposite of the runtime, which would have led a future maintainer to delete the close handler's end as redundant for the wrong reason. Corrected the comment to state that close also fires and the extra end is an idempotent belt against runtimes where it does not. The developer note above ("compactor.end() also on spawn error because ENOENT never fires close") carries the same stale premise; the corrected comment supersedes it.
+- Re-verified the standing findings unchanged: read-path contract vs src/webui.ts (renderLogChunk reads only assistantMessageEvent from message_update, tool_execution_start, tool_execution_end with isError, user-prompt message_end), retro sweep skip guards (project-wide merger.pid plus legacy <slug>.merger, non role-log names never match), subagent-log matching on kept full tool_execution_end results, files touched (orchestrator.ts + orchestrator.test.ts only). All three suites green after the fix, run by the reviewer (orchestrator 21 parts + final, kanban, webui).
+- Production log observation (read-only): .logs now holds 227 logs / 727 MB total, above the post-sweep 653 MB, because the production daemon still runs main's pre-compactor code and new runs write uncompacted logs. Expected: write-time compaction only takes effect once this task merges to main and the daemon restarts with the pipe. A second retro sweep pass after the merge would shrink the new growth.
+- Merge-base note stands: #101 is still at to-merge on its own worktree and both tasks dirty spawnAgent, so merge #101 first and expect conflicts.
+
+2026-10-11 (live-tester):
+- Ran all three suites from the worktree on Node v24.20.0. kanban.test.ts, webui.test.ts and orchestrator.test.ts all pass (orchestrator: 21 parts, including log compactor rules, retro sweep, cross-source pipe integrity, per-source sink close race). Exit code 0 for each.
+- Ran the new user command `node src/orchestrator.ts --root <dir> --compact-logs` on a sandbox project. Setup: one finished log, one running log (its pidfile exists), one merger log (project merger.pid exists), plus orchestrator.log and a counter file. Result: the finished log 960 -> 441 bytes; the system echoes, the agent_end messages array and the toolResult message_start are gone; message_update carries only assistantMessageEvent; the tool_execution_end result (with the Agent ID/Output file lines) and the user-prompt message_end survive. The running log, the merger log, orchestrator.log and the counter file are byte-identical. A second run reports 0 files (idempotent). No .compact-tmp leftovers.
+- The CLI without --root prints the usage line with [--compact-logs] and exits 1, as before.
+- Sampled production logs read-only. The largest log (52,059,872 bytes, the compacted 57 MB target) has no "sections", no message_update with usage, 75 tool_execution_start and 75 tool_execution_end records with full results, and one user-prompt message_end. One JSONL record per line is preserved. This confirms the read-path contract on real data.
+- The 278 production logs are 736,653,006 bytes in total. Logs written after the sweep carry "sections" again (for example the 105 developer log, 20,592,777 bytes), because the production daemon still runs main's pre-compactor code. This is expected and it ends after the merge and the daemon restart.
+- No issues found.
