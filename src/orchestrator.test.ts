@@ -866,6 +866,11 @@ mkdirSync(kanbanDir(rootR), { recursive: true });
 // 0.05min = 3s idle window; the dead stub keeps any started task active forever (to-do/doing cycle)
 writeFileSync(join(kanbanDir(rootR), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootR), pollMinutes: 0.05, autoScheduleMinutes: 0.05 }));
 const taskR0 = createTask(rootR, { name: "feat: active task", summary: "Failsafe smoke", specs: "n/a" });
+// the oldest candidate: without the open-questions guard it would win the sort and be promoted
+const taskRQ = createTask(rootR, { name: "feat: blocked by questions", priority: "critical", summary: "Failsafe smoke", specs: "n/a", openQuestions: "- [user] Which API?" });
+// the next critical: its explicitly empty questions section must not block promotion
+const taskRE = createTask(rootR, { name: "feat: empty questions", priority: "critical", summary: "Failsafe smoke", specs: "n/a" });
+appendFileSync(join(kanbanDir(rootR), taskRE.file), "\n# Open questions\n");
 const taskR1 = createTask(rootR, { name: "feat: older critical", priority: "critical", summary: "Failsafe smoke", specs: "n/a" });
 const taskR3 = createTask(rootR, { name: "feat: newer critical", priority: "critical", summary: "Failsafe smoke", specs: "n/a" });
 const taskR2 = createTask(rootR, { name: "feat: low task", priority: "low", summary: "Failsafe smoke", specs: "n/a" });
@@ -873,6 +878,8 @@ setState(rootR, taskR0, "to-do");
 
 const r = await runDaemon(rootR);
 const readR = (file: string) => parseTask(rootR, file);
+assert.equal(readR(taskRQ.file).openQuestions, "- [user] Which API?", "precondition: unanswered open questions present");
+assert.equal(readR(taskRE.file).openQuestions, "", "precondition: explicit empty questions section");
 // while taskR0 cycles to-do/doing the board is never idle: no promotion despite the elapsed window
 await new Promise((res) => setTimeout(res, 10000));
 assert.ok(!r.output().includes("promoting"), "no promotion while a task is active");
@@ -883,15 +890,19 @@ writeFileSync(
 	join(kanbanDir(rootR), taskR0.file),
 	readFileSync(join(kanbanDir(rootR), taskR0.file), "utf8").replace(/^state: .*/m, 'state: "done"'),
 );
-// the window elapses: the failsafe promotes the older critical task, not the newer one or the low one
-await waitFor(() => r.output().includes(`promoting ${taskR1.file} to to-do`), 30000, "failsafe promotion of the oldest critical task", r.output);
-assert.ok(["to-do", "doing"].includes(readR(taskR1.file).state), "promoted task is active");
+// the window elapses: the failsafe promotes the oldest critical task whose questions are
+// answered, never the older critical task that still has unanswered open questions
+await waitFor(() => r.output().includes(`promoting ${taskRE.file} to to-do`), 30000, "failsafe promotion of the empty-questions task", r.output);
+assert.ok(["to-do", "doing"].includes(readR(taskRE.file).state), "promoted task is active");
+assert.equal(readR(taskRQ.file).state, "backlog", "task with unanswered open questions never promoted");
 assert.equal(readR(taskR2.file).state, "backlog", "lower priority not promoted first");
 assert.equal(readR(taskR3.file).state, "backlog", "newer task in the same priority not promoted first");
+assert.equal(readR(taskR1.file).state, "backlog", "critical task after the promoted one not promoted");
 // the promoted task stays active, so the window never re-arms: no second promotion
 await new Promise((res) => setTimeout(res, 8000));
 assert.equal(readR(taskR2.file).state, "backlog", "no second promotion while the promoted task is active");
 assert.equal(readR(taskR3.file).state, "backlog", "no second promotion while the promoted task is active");
+assert.equal(readR(taskRQ.file).state, "backlog", "no second promotion while the promoted task is active");
 assert.equal(r.output().split("promoting ").length - 1, 1, "exactly one promotion logged");
 r.daemon.kill("SIGTERM");
 

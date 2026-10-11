@@ -785,7 +785,8 @@ let idleSince: number | null = null;
 function autoSchedule(root: string, cfg: Config, tasks: Task[]): void {
 	// conflicted files parse bogus state values: neither promotable nor proof of activity
 	const candidates = tasks.filter((t) => !t.conflicted);
-	const backlog = candidates.filter((t) => t.state === "backlog");
+	// unanswered open questions mean the task waits for the user: never promote it
+	const backlog = candidates.filter((t) => t.state === "backlog" && !t.openQuestions);
 	if (!backlog.length || candidates.some((t) => t.state !== "backlog" && t.state !== "done")) {
 		idleSince = null;
 		return;
