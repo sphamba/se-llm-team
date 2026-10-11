@@ -56,6 +56,11 @@ Live-test report (2026-10-11). Worktree feat/88-webui-agent-history at f8896ae, 
 - Reconfirmed spec 6 limitation: a sidechain-only `.output` (real pi shape) serves 200 but renders an empty pane; a non-JSON line in the same file passes through. This is the open question below.
 - Verdict: the change matches specs 1 to 6 and no code fix is needed. State set to to-merge.
 
+Merger notes (2026-10-11). Worktree feat/88-webui-agent-history, branch merged into main.
+
+- Step 1, merge main into feat/88-webui-agent-history: one conflict in src/webui.ts, in the agentLogPayload walk-back loop. Main's #84 changed readRange to return [text, boundary] and set next = boundary on a forward poll, so a tail lands on a record boundary; main reads `log`. This branch reads `target`, the file the request serves (the parent log, or the subagent .output file for sub=<n>). Resolution: main's record-boundary logic stays, applied to `target`; sub=list and subagentLogs keep reading `log`, the parent log. src/webui.test.ts auto-merged: the branch's per-run, handle and sub assertions plus main's to-merge/merging state names, four-pair layout and priority-order tests.
+- Step 2, merge feat/88-webui-agent-history into main: fast-forward (01136ea..d93e444), no conflicts. `node src/kanban.test.ts`, `node src/orchestrator.test.ts` and `node src/webui.test.ts` pass in the worktree after the merge and again on main. No fixes needed.
+
 # Open questions
 
 1. Subagent transcripts show an empty pane. A real pi .output file holds sidechain records that renderLogChunk drops. Spec point 6 says no special casing, so the file is served unchanged. Do you want a follow-up task that teaches renderLogChunk the sidechain record shapes, or is the empty pane acceptable?
