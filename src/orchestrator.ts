@@ -264,12 +264,14 @@ function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: st
 	// stdout and stderr flow through the compactor into the append-only log (the write-time
 	// pipe drops the dead weight the fd redirect logged verbatim); the daemon drains the pipe
 	const sink = createWriteStream(logPath(root, `${slug}.${role}.${nextRunIndex(root, slug, role)}`), { flags: "a" });
-	const compactor = logCompactor();
-	compactor.pipe(sink);
+	// one compactor per source: both streams share the sink, so a shared line buffer would
+	// reassemble stdout's partial records with interleaved stderr bytes into merged lines
+	const feeders = [logCompactor(), logCompactor()];
+	for (const f of feeders) f.pipe(sink);
 	// a dead sink (disk full, log removed) stops the feed instead of buffering the child's
 	// output forever; a stream error loses log lines, never the daemon
-	sink.on("error", () => compactor.destroy());
-	compactor.on("error", () => {});
+	sink.on("error", () => feeders.forEach((f) => f.destroy()));
+	for (const f of feeders) f.on("error", () => {});
 	// --approve trusts the project-local files of the worktree, so the headless session never waits for a trust prompt;
 	// --mode json streams the full JSONL event log (thinking, tool calls, text) instead of print mode's final text only;
 	// the provider/model/thinking flags come from the config, resolved per role
@@ -278,16 +280,16 @@ function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: st
 		detached: true,
 		stdio: ["ignore", "pipe", "pipe"],
 	});
-	// end:false on both sources: the first ending stream must not finish the shared compactor
-	// before the other drains; the child close event ends it once both pipes are done
+	// end:false on both sources: a compactor ending early would end the shared sink before
+	// the other source drains; the child close event ends both compactors together
 	child.stdout?.on("error", () => {});
 	child.stderr?.on("error", () => {});
-	child.stdout?.pipe(compactor, { end: false });
-	child.stderr?.pipe(compactor, { end: false });
-	child.on("close", () => compactor.end());
+	child.stdout?.pipe(feeders[0], { end: false });
+	child.stderr?.pipe(feeders[1], { end: false });
+	child.on("close", () => feeders.forEach((f) => f.end()));
 	child.on("error", (err) => {
 		// ENOENT never fires close: the feed would leak the sink and both pipes per failed spawn
-		compactor.end();
+		feeders.forEach((f) => f.end());
 		log(root, `agent ${role} for ${task.file} failed to start: ${err.message}`);
 	});
 	child.unref();

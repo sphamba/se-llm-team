@@ -1438,3 +1438,26 @@ assert.equal(readFileSync(logAC(`${slugDoneAC}.reviewer-armed`), "utf8"), "123",
 assert.equal(readFileSync(logAC("push-failures.count"), "utf8"), "3", "counter skipped");
 assert.equal(compactFinishedLogs(rootAC).files, 0, "a second pass is a no-op");
 console.log("orchestrator.test.ts: ... + retro sweep smoke passed");
+
+// --- part AD: two sources share the sink, so each feeds its own compactor: a stderr line
+// interleaving mid-way through a split stdout record must merge into neither ---
+const sinkAD = new PassThrough();
+let outAD = "";
+sinkAD.on("data", (d) => (outAD += d));
+const stdoutAD = logCompactor();
+const stderrAD = logCompactor();
+stdoutAD.pipe(sinkAD);
+stderrAD.pipe(sinkAD);
+const bigAD = JSON.stringify({ type: "turn_end", message: { role: "assistant", content: "x".repeat(200000) } }) + "\n";
+stdoutAD.write(bigAD.slice(0, 50000)); // stdout record split across reads, no newline yet
+stderrAD.write("stderr diagnostic mid-record\n"); // the other source interleaves
+stdoutAD.write(bigAD.slice(50000));
+stdoutAD.end();
+stderrAD.end();
+await new Promise<void>((r) => stdoutAD.on("end", r));
+const linesAD = outAD.split("\n").slice(0, -1);
+assert.equal(linesAD.length, 2, "no merged lines: two whole records, one per source");
+assert.equal(linesAD.filter((l) => l === "stderr diagnostic mid-record").length, 1, "the stderr line survives whole");
+const turnEndAD = JSON.parse(linesAD.find((l) => l !== "stderr diagnostic mid-record"));
+assert.equal(turnEndAD.message.content.length, 200000, "the split stdout record reassembled intact");
+console.log("orchestrator.test.ts: ... + cross-source pipe integrity smoke passed");
