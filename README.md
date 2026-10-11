@@ -16,7 +16,7 @@ ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
 ```json
 {
   "agent": "pi",
-  "pollMinutes": 15,
+  "pollMinutes": 1,
   "model": "anthropic/claude-sonnet-4-5",
   "thinking": "high",
   "roles": { "developer": { "thinking": "xhigh", "complex": { "model": "big-model" } } },
@@ -98,6 +98,8 @@ The PM session gets: kanban_list, kanban_get, kanban_create, kanban_update, kanb
 node src/kanban.test.ts
 node src/orchestrator.test.ts
 node src/webui.test.ts
+node src/extension.test.ts
+node index.test.ts
 ```
 
 Sidecar files (`.kanban/.logs/`, `.kanban/.pids/`, `.kanban/.orchestrator.lock`) are gitignored.

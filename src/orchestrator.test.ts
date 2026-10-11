@@ -9,7 +9,8 @@ import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { readHubRegistry, startHub } from "./hub.ts";
 import { createTask, kanbanDir, parseTask, setState, setWorktree } from "./kanban.ts";
-import { compactFinishedLogs, compactLogLine, loadConfig, logCompactor, logFeeders, pidAlive, poll, removeTask, waitForBoardCommits } from "./orchestrator.ts";
+import { compactFinishedLogs, compactLogLine, loadConfig, logCompactor, logFeeders, poll, removeTask, waitForBoardCommits } from "./orchestrator.ts";
+import { pidAlive } from "./pid.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
