@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, setState } from "./kanban.ts";
-import { flipDiff, loadWebUiConfig, renderLogChunk, startWebUi } from "./webui.ts";
+import { flipDiff, loadWebUiConfig, LOG_CHUNK, renderLogChunk, startWebUi } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing", "done"];
@@ -107,13 +107,14 @@ assert.ok(page.includes('id="m-agent"'), "modal has the agent area");
 assert.ok(page.includes("#m-log.hidden { display: none; }"), "log pane hides");
 assert.ok(page.includes("/api/agent-log"), "page uses the agent log endpoint");
 assert.ok(page.includes('<span class="check">✓</span>'), "past agent buttons render a green checkmark");
+assert.ok(page.includes(".agent-btn-active"), "the shown agent button gets an active class");
 setState(root, getTask(root, task.file)!, "doing");
 const slug = task.file.replace(/\.md$/, "");
 mkdirSync(join(root, ".kanban", ".pids"), { recursive: true });
 writeFileSync(join(root, ".kanban", ".pids", `${slug}.pid`), String(process.pid));
 mkdirSync(join(root, ".kanban", ".logs"), { recursive: true });
 const logFile = join(root, ".kanban", ".logs", `${slug}.developer.log`);
-const logText = Array.from({ length: 626 }, () => "H".repeat(63) + "\n").join(""); // 64-byte lines: 16384-byte chunks never split one
+const logText = Array.from({ length: 2600 }, () => "H".repeat(63) + "\n").join(""); // 64-byte lines: chunk boundaries never split one, 2+ history pages
 writeFileSync(logFile, logText);
 const working = (await (await fetch(`${base}/api/tasks`)).json())[0];
 assert.deepEqual(working.agent, { role: "developer", alive: true, log: `${slug}.developer` });
@@ -123,8 +124,8 @@ assert.deepEqual(working.agents, [{ role: "developer", alive: true }], "single r
 const enc = encodeURIComponent(`${slug}.developer`);
 const tail = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
 assert.equal(tail.tail, logText.length);
-assert.equal(tail.head, logText.length - 16384);
-assert.equal(tail.text, logText.slice(logText.length - 16384));
+assert.equal(tail.head, logText.length - LOG_CHUNK);
+assert.equal(tail.text, logText.slice(logText.length - LOG_CHUNK));
 assert.equal(tail.atStart, false);
 
 // poll from an offset returns only new content
@@ -137,7 +138,7 @@ assert.equal(appended.tail, logText.length + 4);
 
 // history: chunks before an offset down to the start of the file
 const h1 = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${tail.head}&before=1`)).json();
-assert.equal(h1.head, tail.head - 16384);
+assert.equal(h1.head, tail.head - LOG_CHUNK);
 assert.equal(h1.text, logText.slice(h1.head, tail.head));
 const h2 = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${h1.head}&before=1`)).json();
 assert.equal(h2.head, 0);
@@ -181,7 +182,7 @@ assert.ok(servedLog.text.includes("not json at all\n"), "endpoint passes non-JSO
 
 // a record split at the chunk head (init fetch of a log bigger than LOG_CHUNK) drops its partial
 // line instead of rendering raw JSON
-const bigRecord = JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "z".repeat(20000) } });
+const bigRecord = JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "z".repeat(100000) } });
 writeFileSync(logFile, JSON.stringify({ type: "session", id: "s" }) + "\n" + bigRecord + "\n" + JSON.stringify({ type: "message_end", message: { role: "user", content: "tail" } }) + "\n");
 const splitLog = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
 assert.equal(splitLog.text, "[prompt] tail\n", "a record split at the chunk head drops its partial line, later records still render");
@@ -189,7 +190,7 @@ assert.equal(splitLog.text, "[prompt] tail\n", "a record split at the chunk head
 // a finished log: the tail is terminal records (assistant message_end, turn_end, agent_end,
 // agent_settled) that render to nothing, so an unrenderable tail chunk walks back instead of
 // serving an empty pane
-const pad = "z".repeat(40000); // one assistant message_end record bigger than LOG_CHUNK
+const pad = "z".repeat(100000); // one assistant message_end record bigger than LOG_CHUNK
 const terminalLog = [
 	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "final output line" } }),
 	JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: pad }], timestamp: 2 } }),
