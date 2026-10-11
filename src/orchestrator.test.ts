@@ -1452,7 +1452,7 @@ assert.equal(guardRunsAF().length, 1, "the stub never ran a second time");
 assert.equal(Number(readFileSync(pidFileAF, "utf8").trim()), guardRunsAF()[0].pid, "pid file still names the first agent");
 assert.equal(parseTask(rootAF, taskAF.file).state, "to-do", "the to-do rewrite is left alone while the agent lives");
 // the agent exits: the next sweep spawns exactly one replacement and rewrites the pid file
-await waitFor(() => spawnedAF() === 2, 30000, "single replacement after the first agent died", af.output);
+await waitFor(() => guardRunsAF().length === 2, 30000, "single replacement after the first agent died", af.output);
 assert.equal(guardRunsAF().length, 2, "exactly one replacement agent");
 assert.notEqual(guardRunsAF()[1].pid, guardRunsAF()[0].pid, "the replacement is a new process");
 assert.equal(Number(readFileSync(pidFileAF, "utf8").trim()), guardRunsAF()[1].pid, "pid file names the single live agent");
