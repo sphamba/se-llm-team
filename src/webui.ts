@@ -447,9 +447,15 @@ export function buildShell(parent, doc) {
 // so a card entering a column never rebuilds the cards already in it. The caller measures card
 // positions before and after this pass to animate the moves
 export function syncBoard(cols, tasks, expanded, els, make, visible) {
+	// backlog is priority-first (critical above high above medium above low), every other column is
+	// newest-first only; the sort is stable and the payload arrives in task-number order, so equal
+	// keys keep that order
+	const rank: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 	const live = new Set();
 	for (const st of Object.keys(cols)) {
-		const inState = tasks.filter((t) => t.state === st).sort((a, b) => b.updated - a.updated);
+		const inState = tasks
+			.filter((t) => t.state === st)
+			.sort((a, b) => (st === "backlog" ? (rank[a.priority] ?? 4) - (rank[b.priority] ?? 4) : 0) || b.updated - a.updated);
 		const shown = expanded.has(st) ? inState : inState.slice(0, visible);
 		const part = cols[st];
 		part.count.textContent = inState.length;
