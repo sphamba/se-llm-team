@@ -1,8 +1,8 @@
 ---
 name: "refactor: general code architecture review and potential refactors"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "refactor/52-general-code-architecture"
 blockedBy: "#115"
 ---
 
