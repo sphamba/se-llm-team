@@ -329,6 +329,14 @@ assert.equal(b.output().split("respawn waits for the idle cooldown").length - 1,
 await waitFor(() => b.output().includes("live-testing -> to-merge"), 30000, "poll advanced the dead live-tester to to-merge", b.output);
 await waitFor(() => b.output().includes("merging -> to-merge"), 30000, "poll requeued the dead merger's task to to-merge", b.output);
 assert.equal(parseTask(rootB, taskB2.file).state, "to-merge", "requeued task waits for the idle cooldown");
+// a completed run re-arms the streak: a stale pidfile on a task outside the mapped states
+// clears the counter, so a second streak past the cap gets its own cooldown log, not silence
+setState(rootB, taskB, "backlog");
+writeFileSync(join(kanbanDir(rootB), ".pids", `${slugB}.pid`), "999999999");
+await waitFor(() => b.output().includes("cleared the dead-agent counter"), 30000, "completed run cleared the dead counter", b.output);
+setState(rootB, taskB, "to-do");
+await waitFor(() => b.output().split("respawn waits for the idle cooldown").length - 1 >= 2, 90000, "second streak cooldown log", b.output);
+assert.equal(b.output().split("respawn waits for the idle cooldown").length - 1, 2, "second death streak logged its own cooldown message");
 b.daemon.kill("SIGTERM");
 
 // --- part C: lock lifecycle: singleton, self-heal while running, release on stop ---
