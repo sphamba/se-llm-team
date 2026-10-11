@@ -1,7 +1,7 @@
 ---
 name: "docs: README Checks section lists only one of three test files"
 priority: "low"
-state: "reviewing"
+state: "live-testing"
 worktree: "docs/90-readme-checks-section"
 ---
 
@@ -32,3 +32,4 @@ Constraints:
 - Updated README.md "## Checks" code block to list the three suites in order. No other section changed (git diff: README.md only, +2 lines).
 - Ran all three listed commands: kanban.test.ts all assertions passed, orchestrator.test.ts all smoke parts passed, webui.test.ts all assertions passed.
 - Commit 92da32a on branch docs/90-readme-checks-section.
+- Reviewer: diff main...HEAD is README.md only, +2 lines inside the "## Checks" code block; no other section touched. Order matches the Specs (kanban, orchestrator, webui). Re-ran all three files independently: exit 0 each (kanban all assertions passed, orchestrator smoke suite passed, webui all assertions passed). Line 49's "see [Checks](#checks)" anchor still resolves to the updated block, so no second edit needed. No findings, change accepted as-is.

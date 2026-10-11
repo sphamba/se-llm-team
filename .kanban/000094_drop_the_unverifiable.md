@@ -1,7 +1,7 @@
 ---
 name: "chore: drop the unverifiable typecheck acceptance line; name the runnable checks"
 priority: "low"
-state: "reviewing"
+state: "live-testing"
 worktree: "chore/94-drop-the-unverifiable"
 ---
 
@@ -37,3 +37,4 @@ Constraints:
 - Changed `skills/se-llm-team/SKILL.md` step 5 only (commit b31fae3): added two bullets naming `node src/kanban.test.ts`, `node src/orchestrator.test.ts` and `node src/webui.test.ts` as the acceptance baseline, and stating the repo has no tsconfig and no typecheck command, so "Typecheck and the full test suite pass" must not be an acceptance criterion (an ad hoc strict tsc comparison against the pre-change baseline belongs in # Notes as evidence only).
 - No other file changed; README untouched (belongs to #90). No tsconfig, package.json scripts, dependencies, lockfile or TypeScript tooling added.
 - Ran all three suites on the branch: `node src/kanban.test.ts` (all assertions passed), `node src/orchestrator.test.ts` (all smoke parts passed), `node src/webui.test.ts` (all assertions passed).
+- Review: acceptance met. The diff against main is two bullets under step 5 of `skills/se-llm-team/SKILL.md` and no other tracked or untracked file. The first bullet names `node src/kanban.test.ts`, `node src/orchestrator.test.ts` and `node src/webui.test.ts` as the acceptance baseline, plus task-specific browser or CLI checks. The second bullet states that the repo has no tsconfig and no typecheck command, bans the typecheck acceptance line, and allows an ad hoc strict `tsc` comparison in # Notes as evidence only. The skill was not restructured. No tsconfig, package.json scripts, dependencies, lockfile or TypeScript tooling added. README untouched. Ran the three suites on the branch: all pass, exit 0. A dry-run merge of main into the branch is clean, and main did not touch `skills/se-llm-team/SKILL.md` since the merge base. No fixes made.
