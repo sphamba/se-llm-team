@@ -113,8 +113,9 @@ assert.deepEqual(flipDiff(stacked, stacked), {}, "an unchanged refresh animates 
 assert.ok(page.includes(String(flipDiff)), "the page ships the tested flipDiff source");
 assert.ok(page.includes('transition = "transform .4s ease"'), "sibling shifts reuse the moved-card timing");
 
-// 000047 stacked pairs: the six middle states render as three .pair wrappers (to-do over doing,
-// to-review over reviewing, to-live-test over live-testing), backlog and done stay single columns.
+// 000047 stacked pairs: the eight middle states render as four .pair wrappers (to-do over doing,
+// to-review over reviewing, to-live-test over live-testing, to-merge over merging), backlog and done
+// stay single columns.
 // El is a minimal element stub: buildShell and syncBoard only touch this DOM surface.
 class El {
 	tag: string;
