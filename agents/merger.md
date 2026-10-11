@@ -14,4 +14,6 @@ The orchestrator failed to merge {{WORKTREE_NAME}} into the main branch because 
 
 Never touch worktrees under {{ROOT}}/.worktrees.
 
+List your open (user/client clarification) questions in a # Open questions section of the task body at {{TASK_FILE}}, placed after the # Notes section. Only questions for the user or client belong there, never technical questions whose answer is available in the codebase, the docs, or online. When an answer reaches the Specs, remove the question from the section. An empty or missing section is the normal state.
+
 Before every state transition (kanban_set_state), re-read the task with kanban_get first. Abort the transition when the state no longer matches what you saw when you started (for example the task moved to done, or another session moved it on).
