@@ -6,7 +6,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { createTask, getTask, kanbanDir, listAll, listTasks, setState, setWorktree, taskNum, updateTask, STATES, type TaskState } from "./src/kanban.ts";
-import { waitForBoardCommits } from "./src/orchestrator.ts";
+import { removeTask, waitForBoardCommits } from "./src/orchestrator.ts";
 
 function text(s: string) {
 	return { content: [{ type: "text" as const, text: s }], details: undefined };
@@ -22,7 +22,7 @@ export default function (pi: ExtensionAPI) {
 		name: "kanban_list",
 		label: "Kanban list",
 		description:
-			"List kanban tasks of this project. scope=backlog: tasks to prioritize. scope=in-progress: tasks being worked on. scope=done: completed tasks. Optional priority filter (low/medium/high/critical). Returns file, num (#NN), name, priority, state, issuer, summary and openQuestions (the task body's # Open questions section, empty when none) per task.",
+			"List kanban tasks of this project. scope=backlog: tasks to prioritize. scope=in-progress: tasks being worked on. scope=done: completed tasks. Optional priority filter (low/medium/high/critical). Returns file, num (#NN), name, priority, state, issuer, summary, openQuestions (the task body's # Open questions section, empty when none), complexity and blockedBy (comma-joined blocker task refs like \"#42, #43\", empty when none) per task.",
 		parameters: Type.Object({
 			scope: StringEnum(["backlog", "in-progress", "done"] as const),
 			priority: Type.Optional(StringEnum(["low", "medium", "high", "critical"] as const)),
@@ -40,7 +40,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "kanban_get",
 		label: "Kanban get",
-		description: "Read one kanban task in full detail (state, worktree, issuer, summary, specs, notes, openQuestions). openQuestions is the task body's # Open questions section, empty when none.",
+		description: "Read one kanban task in full detail (state, worktree, issuer, complexity, blockedBy, summary, specs, notes, openQuestions). openQuestions is the task body's # Open questions section, empty when none.",
 		parameters: Type.Object({ file: Type.String({ description: "Task file name, e.g. 000001_nice_thing.md" }) }),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
@@ -56,14 +56,16 @@ export default function (pi: ExtensionAPI) {
 		name: "kanban_create",
 		label: "Kanban create",
 		description:
-			"Create a kanban task in state backlog. Name tasks with a type prefix like 'feat: ', 'fix: ', 'perf: '. Write the specs with the user. Set issuer to '#<num>' when the task was created after live-testing of task #<num>; the default 'user' means the user requested it. The issuer is set at creation only and never changed afterwards.",
+			"Create a kanban task in state backlog. Name tasks with a type prefix like 'feat: ', 'fix: ', 'perf: '. Write the specs with the user. Set issuer to '#<num>' when the task was created after live-testing of task #<num>; the default 'user' means the user requested it. The issuer is set at creation only and never changed afterwards. Set complexity to simple, moderate (default) or complex; it drives which per-complexity LLM config entry and reviewer-pass cap apply. Complexity stays updatable later via kanban_update.",
 		parameters: Type.Object({
 			name: Type.String({ description: "Task name with type prefix, e.g. 'feat: nice thing'" }),
 			priority: Type.Optional(StringEnum(["low", "medium", "high", "critical"] as const)),
+			complexity: Type.Optional(StringEnum(["simple", "moderate", "complex"] as const)),
 			issuer: Type.Optional(Type.String({ description: "'user' (default) or '#<num>' when created after live-testing of task #<num>, e.g. '#42'" })),
 			summary: Type.String({ description: "Concise goal, one to three sentences" }),
 			specs: Type.Optional(Type.String({ description: "Detailed description of needs" })),
 			openQuestions: Type.Optional(Type.String({ description: "User/client clarification questions, written to the task body's # Open questions section" })),
+			blockedBy: Type.Optional(Type.String({ description: "Comma-joined blocker task refs, e.g. '#42, #43'; the task waits for them" })),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
@@ -80,18 +82,24 @@ export default function (pi: ExtensionAPI) {
 		label: "Kanban update",
 		description:
 			"Update an existing task. Use this instead of creating a duplicate when a not-done task already covers the same need. Omitted fields stay unchanged.",
+		// additionalProperties: false so pi rejects an unrecognized field (e.g. notes)
+		// with a validation error instead of dropping it and reporting a false update
 		parameters: Type.Object({
 			file: Type.String({ description: "Task file name" }),
 			name: Type.Optional(Type.String()),
 			priority: Type.Optional(StringEnum(["low", "medium", "high", "critical"] as const)),
+			complexity: Type.Optional(StringEnum(["simple", "moderate", "complex"] as const)),
 			summary: Type.Optional(Type.String({ description: "Replaces the whole Summary section" })),
 			specs: Type.Optional(Type.String({ description: "Replaces the whole Specs section" })),
 			openQuestions: Type.Optional(Type.String({ description: "User/client clarification questions, written to the task body's # Open questions section" })),
-		}),
+			blockedBy: Type.Optional(Type.String({ description: "Comma-joined blocker task refs, e.g. '#42, #43'; replaces the whole list, empty string clears it" })),
+		}, { additionalProperties: false }),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
 			const task = getTask(ctx.cwd, params.file);
 			if (!task) return text(`No task ${params.file}`);
+			const hasField = Object.entries(params).some(([k, v]) => k !== "file" && v !== undefined);
+			if (!hasField) return text(`Nothing to update in ${task.file}`);
 			updateTask(ctx.cwd, task, params);
 			return text(`Updated ${task.file} (#${taskNum(task.file)})`);
 		},
@@ -128,6 +136,20 @@ export default function (pi: ExtensionAPI) {
 			if (!task) return text(`No task ${params.file}`);
 			setWorktree(ctx.cwd, task, params.worktree);
 			return text(`${task.file} (#${taskNum(task.file)}): worktree -> ${params.worktree}`);
+		},
+	});
+
+	pi.registerTool({
+		name: "kanban_delete",
+		label: "Kanban delete",
+		description:
+			"Remove a task from the board. Deletes the task file and commits a whole-board mirror snapshot in one operation, so the daemon cannot restore the task. Use for a mistaken or duplicate task. The worktree and branch of a started task are not removed.",
+		parameters: Type.Object({ file: Type.String({ description: "Task file name, e.g. 000001_nice_thing.md" }) }),
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			ensureBoardWatcher(ctx);
+			const error = await removeTask(ctx.cwd, params.file);
+			if (error) return text(error);
+			return text(`Deleted ${params.file}`);
 		},
 	});
 
