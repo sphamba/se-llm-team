@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, setState } from "./kanban.ts";
-import { loadWebUiConfig, startWebUi } from "./webui.ts";
+import { flipDiff, loadWebUiConfig, startWebUi } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing", "done"];
@@ -57,6 +57,22 @@ assert.ok(page.includes('id="theme"'), "page has the theme toggle");
 for (const st of STATE_NAMES) assert.ok(page.includes(st), `page mentions state ${st}`);
 assert.equal((await fetch(`${base}/nope`)).status, 404);
 assert.equal((await fetch(`${base}/api/tasks`, { method: "POST" })).status, 404);
+
+// FLIP diff: which cards get transforms. a on top, b below in one column; 210px is the next column
+const stacked = { a: { x: 0, y: 0 }, b: { x: 0, y: 50 } };
+assert.deepEqual(
+	flipDiff({ ...stacked }, { a: { x: 210, y: 0 }, b: { x: 0, y: 0 } }),
+	{ a: { dx: -210, dy: 0 }, b: { dx: 0, dy: 50 } },
+	"a card leaving slides laterally and the cards below shift upward",
+);
+assert.deepEqual(
+	flipDiff({ ...stacked }, { c: { x: 0, y: 0 }, a: { x: 0, y: 50 }, b: { x: 0, y: 100 } }),
+	{ a: { dx: 0, dy: -50 }, b: { dx: 0, dy: -50 } },
+	"a card entering slides the cards below downward; the new card itself gets no transform",
+);
+assert.deepEqual(flipDiff(stacked, stacked), {}, "an unchanged refresh animates nothing");
+assert.ok(page.includes(String(flipDiff)), "the page ships the tested flipDiff source");
+assert.ok(page.includes('transition = "transform .4s ease"'), "sibling shifts reuse the moved-card timing");
 
 // agent info: null for a backlog task; populated for a working task with a live pid
 assert.equal(listed[0].agent, null);

@@ -165,6 +165,19 @@ const DARK_VARS = `
 :root:not([data-theme="light"]) #theme { color: var(--link); border-color: var(--link); } }
 `;
 
+// FLIP diff, interpolated into PAGE so the client ships this exact source: which files changed
+// board-content position between renders; new files and unchanged positions get no transform
+export function flipDiff(oldPos, newPos) {
+	const diff = {};
+	for (const file in newPos) {
+		const from = oldPos[file];
+		if (!from) continue;
+		const dx = from.x - newPos[file].x, dy = from.y - newPos[file].y;
+		if (dx || dy) diff[file] = { dx, dy };
+	}
+	return diff;
+}
+
 const PAGE = `<!doctype html>
 <html lang="en">
 <head>
@@ -290,22 +303,25 @@ function md(src) {
 	if (fence) html += "</code></pre>";
 	return html;
 }
-// FLIP across the innerHTML replace: measure old positions, render, invert, play. Only cards whose
-// state changed move, so a refresh with no state changes re-animates nothing.
-let prevStates = {};
+// FLIP across the innerHTML replace: measure old positions, render, invert, play. Every card whose
+// board-content position changed moves, the siblings shifting when a card enters or leaves a
+// column included; positions are board-content relative, so a scrolled refresh animates nothing.
+${flipDiff}
 // fold choice keyed by state name, so the 5 s refresh keeps it
 const expanded = new Set();
 function toggleCol(st) { if (expanded.has(st)) expanded.delete(st); else expanded.add(st); render(); }
 function render() {
 	const board = document.getElementById("board");
-	const states = {};
-	for (const t of tasks) states[t.file] = t.state;
 	const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+	// board-content relative: page scroll cancels, board scroll is added back, so a refresh after
+	// scrolling measures identical positions and animates nothing
+	const boardRect = board.getBoundingClientRect();
+	const pos = el => { const r = el.getBoundingClientRect(); return { x: r.left - boardRect.left + board.scrollLeft, y: r.top - boardRect.top + board.scrollTop }; };
 	const old = {};
 	for (const el of board.querySelectorAll(".card")) {
 		el.style.transition = "none";
 		el.style.transform = "";
-		old[el.dataset.file] = el.getBoundingClientRect();
+		old[el.dataset.file] = pos(el);
 	}
 	board.innerHTML = STATES.map(st => {
 		const inState = tasks.filter(t => t.state === st).sort((a, b) => b.updated - a.updated);
@@ -316,20 +332,22 @@ function render() {
 		const toggle = inState.length > VISIBLE ? '<button class="toggle" onclick="toggleCol(\\'' + esc(st) + '\\')">' + (expanded.has(st) ? "show less" : "show all (" + inState.length + ")") + "</button>" : "";
 		return '<section class="col c-' + st + '"><h2>' + esc(st) + ' <span class="count">' + inState.length + "</span></h2>" + (cards || '<div class="empty">&mdash;</div>') + toggle + "</section>";
 	}).join("");
+	const now = {};
 	for (const el of board.querySelectorAll(".card")) {
 		el.onclick = () => openTask(el.dataset.file);
-		const from = old[el.dataset.file], before = prevStates[el.dataset.file];
-		if (!from || before === undefined || before === states[el.dataset.file] || reduced) continue;
-		const rect = el.getBoundingClientRect(), dx = from.left - rect.left, dy = from.top - rect.top;
-		if (!dx && !dy) continue;
+		now[el.dataset.file] = pos(el);
+	}
+	const diff = flipDiff(old, now);
+	for (const el of board.querySelectorAll(".card")) {
+		const d = diff[el.dataset.file];
+		if (!d || reduced) continue;
 		el.style.transition = "none";
-		el.style.transform = "translate(" + dx + "px," + dy + "px)";
+		el.style.transform = "translate(" + d.dx + "px," + d.dy + "px)";
 		el.getBoundingClientRect();
 		el.style.transition = "transform .4s ease";
 		el.style.transform = "";
 		el.ontransitionend = () => { el.style.transition = ""; el.ontransitionend = null; };
 	}
-	prevStates = states;
 }
 function openTask(file) {
 	const t = tasks.find(x => x.file === file);
