@@ -86,7 +86,7 @@ function acquireHubLock(): boolean {
 			return false; // lock vanished since the wx attempt: a rival holds or released it, stand down
 		}
 		if (pidAlive(other)) return false;
-		rmSync(lock);
+		rmSync(lock, { force: true }); // a rival stealing the same stale lock must not crash the election
 		return acquireHubLock();
 	}
 }
@@ -159,7 +159,8 @@ async function route(
 			body = null;
 		}
 		const name = typeof body?.name === "string" ? body.name.trim() : "";
-		const root = typeof body?.root === "string" ? resolve(body.root) : "";
+		// resolve only after the absolute check: resolve() maps relative roots onto the hub's cwd
+		const root = typeof body?.root === "string" && isAbsolute(body.root) ? resolve(body.root) : "";
 		// trust boundary: the hub reads board files from root, so only absolute existing dirs register
 		if (!name || name.length > 200 || !root || !isAbsolute(root) || !existsSync(root)) {
 			res.writeHead(400).end();
