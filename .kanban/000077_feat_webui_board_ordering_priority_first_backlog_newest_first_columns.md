@@ -1,8 +1,8 @@
 ---
 name: "feat: webui board ordering; priority-first backlog, newest-first columns"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/77-webui-board-ordering"
 ---
 
 # Summary
