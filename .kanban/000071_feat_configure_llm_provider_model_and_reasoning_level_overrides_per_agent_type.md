@@ -1,7 +1,7 @@
 ---
 name: "feat: configure LLM provider, model, and reasoning level; overrides per agent type"
 priority: "critical"
-state: "reviewing"
+state: "live-testing"
 worktree: "feat/71-configure-llm-provider"
 ---
 
@@ -46,10 +46,7 @@ Constraints:
 - Tests in src/orchestrator.test.ts: part X checks the global flags, a developer override, a reviewer provider+model override, the live-tester globals, and a merger override through a real merge conflict. Part Y checks the bad-value warnings and the absence of flags. The daemon stays alive in both parts.
 - Checks pass: node src/kanban.test.ts, node src/orchestrator.test.ts (all parts), node src/webui.test.ts. A strict tsc run reports no error in src/orchestrator.ts or the new test code. The repo has no tsconfig. Pre-existing strict errors remain in untouched files.
 - Commit f28f0de in the worktree.
-
-# Review (commit f28f0de, no fixes needed)
-
-- Spec compliance: the config schema, the per-field precedence (role entry > global > unset), the flag mapping and order (after --mode json, before -p), all four spawn call sites, and the README config docs match the Specs. Only spawnAgent spawns agents, so every role gets the flags.
+- Review (commit f28f0de): no fixes needed. Spec compliance: the config schema, the per-field precedence (role entry > global > unset), the flag mapping and order (after --mode json, before -p), all four spawn call sites, and the README config docs match the Specs. Only spawnAgent spawns agents, so every role gets the flags.
 - Bad values stay non-fatal: an unknown thinking level (global or role) warns and drops, a provider without a resolved model warns and drops. The warnings come from loadConfig at daemon start, so they do not repeat on each sweep.
 - Checked pi --help: --provider requires --model, --model accepts "provider/id" and a ":<thinking>" suffix, and the thinking levels are exactly off, minimal, low, medium, high, xhigh, max. The code matches.
 - Ran the full suite in the worktree: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts all pass. Ran src/orchestrator.test.ts a second time: the new parts X and Y pass again, no flakiness seen.

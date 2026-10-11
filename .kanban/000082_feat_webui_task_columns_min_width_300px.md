@@ -1,8 +1,8 @@
 ---
 name: "feat: webui task columns min-width 300px"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/82-webui-task-columns"
 ---
 
 # Summary
