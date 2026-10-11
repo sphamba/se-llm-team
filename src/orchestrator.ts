@@ -18,6 +18,7 @@ import { loadWebUiConfig, startWebUi } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_POLL_MINUTES = 1;
+const DEFAULT_AUTO_SCHEDULE_MINUTES = 5;
 const RESPAWN_CAP = 5;
 const MERGE_ATTEMPT_CAP = 3;
 // the board's home ref: a branch is the only git-native carrier (push and clone transfer
@@ -30,10 +31,11 @@ let lastMirrorHash: string | null = null;
 interface Config {
 	agent: string;
 	pollMinutes: number;
+	autoScheduleMinutes: number;
 }
 
 function loadConfig(root: string): Config {
-	let cfg: { agent?: string; pollMinutes?: number } = {};
+	let cfg: { agent?: string; pollMinutes?: number; autoScheduleMinutes?: number } = {};
 	// user-level first, project .kanban/se-llm-team.json overrides it
 	for (const path of [join(process.env.HOME ?? "", ".pi", "agent", "se-llm-team.json"), join(root, ".kanban", "se-llm-team.json")]) {
 		try {
@@ -42,7 +44,11 @@ function loadConfig(root: string): Config {
 			/* optional file */
 		}
 	}
-	return { agent: cfg.agent ?? "pi", pollMinutes: cfg.pollMinutes ?? DEFAULT_POLL_MINUTES };
+	return {
+		agent: cfg.agent ?? "pi",
+		pollMinutes: cfg.pollMinutes ?? DEFAULT_POLL_MINUTES,
+		autoScheduleMinutes: cfg.autoScheduleMinutes ?? DEFAULT_AUTO_SCHEDULE_MINUTES,
+	};
 }
 
 function parseArgs(argv: string[]): { root?: string; rescanSeconds?: number; pollMinutes?: number } {
@@ -580,6 +586,7 @@ function rescan(root: string, cfg: Config): void {
 			log(root, `error handling ${task.file} (${task.state}): ${err instanceof Error ? err.message : err}`);
 		}
 	}
+	autoSchedule(root, cfg, tasks);
 }
 
 const DEAD_TRANSITIONS: Partial<Record<TaskState, TaskState>> = {
@@ -587,6 +594,44 @@ const DEAD_TRANSITIONS: Partial<Record<TaskState, TaskState>> = {
 	reviewing: "to-review",
 	"live-testing": "done",
 };
+
+const PRIORITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+const rank = (priority: string) => PRIORITY_RANK[priority] ?? PRIORITY_RANK.low + 1;
+const taskNum = (file: string) => {
+	const n = parseInt(file.slice(0, 6), 10);
+	return Number.isNaN(n) ? Number.MAX_SAFE_INTEGER : n;
+};
+
+// failsafe for when nothing gets scheduled: PM promotion stays the primary path. idleSince is
+// null while any task is active or the backlog is empty, else the timestamp the board was last
+// seen idle with promotable backlog work; the promotion fires after autoScheduleMinutes of
+// continuous idle. Module state like lastMirrorHash: one locked daemon per project.
+let idleSince: number | null = null;
+
+function autoSchedule(root: string, cfg: Config, tasks: Task[]): void {
+	// conflicted files parse bogus state values: neither promotable nor proof of activity
+	const candidates = tasks.filter((t) => !t.conflicted);
+	const backlog = candidates.filter((t) => t.state === "backlog");
+	if (!backlog.length || candidates.some((t) => t.state !== "backlog" && t.state !== "done")) {
+		idleSince = null;
+		return;
+	}
+	const now = Date.now();
+	if (idleSince === null) {
+		idleSince = now;
+		return;
+	}
+	if (now - idleSince < cfg.autoScheduleMinutes * 60_000) return;
+	// taskFiles sorts by file name, so the stable sort keeps the oldest first within a rank
+	const next = [...backlog].sort((a, b) => rank(a.priority) - rank(b.priority) || taskNum(a.file) - taskNum(b.file))[0];
+	idleSince = null;
+	log(root, `no active task for ${cfg.autoScheduleMinutes}min, promoting ${next.file} to to-do (failsafe)`);
+	try {
+		setState(root, next, "to-do");
+	} catch (err) {
+		log(root, `auto-schedule of ${next.file} failed: ${err instanceof Error ? err.message : err}`);
+	}
+}
 
 function poll(root: string, cfg: Config): void {
 	for (const task of listAll(root)) {
@@ -667,7 +712,7 @@ export function main(argv: string[]): void {
 		return;
 	}
 	for (const dir of [".logs", ".pids"]) mkdirSync(join(kanbanDir(root), dir), { recursive: true });
-	log(root, `orchestrator started (root=${root}, agent=${cfg.agent}, poll=${pollMinutes}min, rescan=${rescanSeconds}s)`);
+	log(root, `orchestrator started (root=${root}, agent=${cfg.agent}, poll=${pollMinutes}min, rescan=${rescanSeconds}s, auto-schedule=${cfg.autoScheduleMinutes}min)`);
 	bootstrapBoard(root);
 
 	const sweep = () => {

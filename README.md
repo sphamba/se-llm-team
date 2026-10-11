@@ -21,6 +21,7 @@ ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
 | --- | --- | --- |
 | `agent` | `pi` | Executable the orchestrator spawns for agents. |
 | `pollMinutes` | `1` | Agent liveness poll interval. |
+| `autoScheduleMinutes` | `5` | Failsafe: promote the oldest highest-priority backlog task to to-do after this many minutes with no active task. PM promotion stays the primary path. |
 | `webUi.enabled` | off | Serve the web dashboard with the daemon. |
 | `webUi.host` | `localhost` | Dashboard bind host. |
 | `webUi.port` | `4242` | Dashboard port. |
