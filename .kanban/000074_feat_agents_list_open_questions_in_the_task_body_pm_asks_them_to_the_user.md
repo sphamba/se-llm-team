@@ -1,8 +1,8 @@
 ---
 name: "feat: agents list open questions in the task body; PM asks them to the user"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/74-agents-list-open"
 ---
 
 # Summary
