@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -298,6 +298,7 @@ assert.ok(!page.includes(".agent-past {") && !page.includes(".agent-live {"), "n
 const pastAt = page.indexOf('class="agent-btn agent-past"');
 const liveAt = page.indexOf('class="agent-btn agent-live"');
 assert.ok(pastAt >= 0 && liveAt > pastAt, "buttons render chronologically: oldest first, live agent last");
+assert.ok(!page.includes("openAgentLog(&quot;"), "no run handle reaches inline JS: quotes and backslashes would break the onclick");
 setState(root, getTask(root, task.file)!, "doing");
 const slug = task.file.replace(/\.md$/, "");
 mkdirSync(join(root, ".kanban", ".pids"), { recursive: true });
@@ -308,7 +309,7 @@ const logText = Array.from({ length: 2600 }, () => "H".repeat(63) + "\n").join("
 writeFileSync(logFile, logText);
 const working = (await (await fetch(`${base}/api/tasks`)).json())[0];
 assert.deepEqual(working.agent, { role: "developer", alive: true, log: `${slug}.developer` });
-assert.deepEqual(working.agents, [{ role: "developer", alive: true }], "single role log, live agent only");
+assert.deepEqual(working.agents, [{ role: "developer", run: null, alive: true, handle: `${slug}.developer` }], "legacy role log, live agent only");
 
 // tail: no offset returns only the last chunk, with cursors for poll and history
 const enc = encodeURIComponent(`${slug}.developer`);
@@ -335,15 +336,23 @@ assert.equal(h2.head, 0);
 assert.equal(h2.atStart, true);
 assert.equal(h2.text + h1.text + tail.text, logText);
 
-// unknown files and non-agent handles are rejected
-assert.equal((await fetch(`${base}/api/agent-log?file=nope.developer`)).status, 404);
-assert.equal((await fetch(`${base}/api/agent-log?file=${encodeURIComponent(slug + ".merger")}`)).status, 404);
+// unknown files and unknown roles are rejected; merger handles are allowlisted now
+assert.equal((await fetch(`${base}/api/agent-log?file=nope.developer`)).status, 404, "a handle needs its task on the board");
+assert.equal((await fetch(`${base}/api/agent-log?file=${encodeURIComponent(slug + ".auditor")}`)).status, 404, "an unknown role is rejected");
+assert.equal((await fetch(`${base}/api/agent-log?file=${encodeURIComponent(slug + ".merger")}`)).status, 200, "a merger handle is allowlisted (empty until a merger runs)");
 assert.equal((await fetch(`${base}/api/agent-log`)).status, 404);
 
 // a past role log lists as a dead agent and streams through the same endpoint
 writeFileSync(join(root, ".kanban", ".logs", `${slug}.reviewer.log`), "REVIEW\n");
 const past = (await (await fetch(`${base}/api/tasks`)).json())[0];
-assert.deepEqual(past.agents, [{ role: "developer", alive: true }, { role: "reviewer", alive: false }], "past reviewer after the live developer, pipeline order");
+assert.deepEqual(
+	past.agents,
+	[
+		{ role: "developer", run: null, alive: true, handle: `${slug}.developer` },
+		{ role: "reviewer", run: null, alive: false, handle: `${slug}.reviewer` },
+	],
+	"past reviewer after the live developer, pipeline order",
+);
 const reviewerLog = await (await fetch(`${base}/api/agent-log?file=${encodeURIComponent(slug + ".reviewer")}`)).json();
 assert.equal(reviewerLog.text, "REVIEW\n");
 
@@ -351,7 +360,14 @@ assert.equal(reviewerLog.text, "REVIEW\n");
 writeFileSync(join(root, ".kanban", ".pids", `${slug}.pid`), "999999999");
 const stale = (await (await fetch(`${base}/api/tasks`)).json())[0];
 assert.equal(stale.agent.alive, false);
-assert.deepEqual(stale.agents, [{ role: "developer", alive: false }, { role: "reviewer", alive: false }], "a dead state-mapped agent is past too");
+assert.deepEqual(
+	stale.agents,
+	[
+		{ role: "developer", run: null, alive: false, handle: `${slug}.developer` },
+		{ role: "reviewer", run: null, alive: false, handle: `${slug}.reviewer` },
+	],
+	"a dead state-mapped agent is past too",
+);
 
 // leave the board as the daemon section expects it
 rmSync(join(root, ".kanban", ".pids", `${slug}.pid`));
@@ -439,6 +455,130 @@ assert.ok(padded.text.includes("tail delta\n"), "a renderable tail chunk serves 
 const paddedHist = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${padded.head}&before=1`)).json();
 assert.ok(paddedHist.text.includes("early delta\n"), "a history page inside an unrenderable record walks back to renderable content");
 assert.equal(paddedHist.head, 0);
+
+
+// 000088 per-run agent history: every `<slug>.<role>.<n>.log` is an entry of its own, a legacy
+// unsuffixed file stays readable and sorts before its role's runs, and the entries are ordered by
+// log mtime, so the run buttons read chronologically across roles
+setState(root, getTask(root, task.file)!, "doing");
+writeFileSync(join(root, ".kanban", ".pids", `${slug}.pid`), String(process.pid));
+const logsDir = join(root, ".kanban", ".logs");
+const dev0 = join(logsDir, `${slug}.developer.0.log`);
+const dev1 = join(logsDir, `${slug}.developer.1.log`);
+const lt0 = join(logsDir, `${slug}.live-tester.0.log`);
+const lt1 = join(logsDir, `${slug}.live-tester.1.log`);
+const rv0 = join(logsDir, `${slug}.reviewer.0.log`);
+const mg0 = join(logsDir, `${slug}.merger.0.log`);
+const mg1 = join(logsDir, `${slug}.merger.1.log`);
+writeFileSync(logFile, "LEGACY\n");
+writeFileSync(dev0, "RUN0\n");
+writeFileSync(dev1, "RUN1\n");
+writeFileSync(lt0, "LT\n");
+writeFileSync(lt1, "LT1\n");
+writeFileSync(rv0, "RV\n");
+writeFileSync(mg0, "MG0\n");
+writeFileSync(mg1, "MG1\n");
+// mtime decides: the legacy developer file ties with run 0 (legacy first), then run 1, a
+// live-tester run, a reviewer run, all inside a merger run on each side of the range
+const t0 = Math.floor(Date.now() / 1000) - 1000;
+const at = (file: string, seconds: number) => utimesSync(file, seconds, seconds);
+at(mg0, t0 - 10);
+at(logFile, t0);
+at(dev0, t0);
+at(dev1, t0 + 10);
+at(lt0, t0 + 20);
+at(lt1, t0 + 30); // ties with the reviewer run: pipeline order breaks the tie (reviewer first)
+at(rv0, t0 + 30);
+at(mg1, t0 + 40);
+const history = (await (await fetch(`${base}/api/tasks`)).json())[0];
+assert.deepEqual(
+	history.agents,
+	[
+		{ role: "merger", run: 0, alive: false, handle: `${slug}.merger.0` },
+		{ role: "developer", run: null, alive: false, handle: `${slug}.developer` },
+		{ role: "developer", run: 0, alive: false, handle: `${slug}.developer.0` },
+		{ role: "developer", run: 1, alive: true, handle: `${slug}.developer.1` },
+		{ role: "live-tester", run: 0, alive: false, handle: `${slug}.live-tester.0` },
+		{ role: "reviewer", run: 0, alive: false, handle: `${slug}.reviewer.0` },
+		{ role: "live-tester", run: 1, alive: false, handle: `${slug}.live-tester.1` },
+		{ role: "merger", run: 1, alive: false, handle: `${slug}.merger.1` },
+	],
+	"indexed runs are their own entries, a legacy file ties first within its role, mtime orders across roles, the newest run of the live role is the live one",
+);
+assert.deepEqual(history.agent, { role: "developer", alive: true, log: `${slug}.developer.1` }, "the agent handle points at the live run, never the legacy file");
+
+// a run-suffixed handle resolves to its own indexed file, a plain handle to the legacy file
+const get = (file: string) => fetch(`${base}/api/agent-log?file=${encodeURIComponent(file)}`);
+assert.equal((await (await get(`${slug}.developer.1`)).json()).text, "RUN1\n", "a run handle serves its own indexed file, never the legacy file");
+assert.equal((await (await get(`${slug}.developer.0`)).json()).text, "RUN0\n");
+assert.equal((await (await get(`${slug}.developer`)).json()).text, "LEGACY\n", "the plain handle still serves the legacy file");
+assert.equal((await (await get(`${slug}.merger.1`)).json()).text, "MG1\n", "an indexed merger handle serves its own file");
+assert.equal((await get(`${slug}.developer.x`)).status, 404, "a non-numeric run index is rejected");
+assert.equal((await get(`${slug}.developer.0.1`)).status, 404, "a doubly suffixed handle is rejected");
+assert.equal((await get("nope.developer.0")).status, 404, "a run handle needs its task on the board");
+// the #67 walk-back applies to a run-suffixed handle too
+writeFileSync(dev1, terminalLog);
+const walkedRun = await (await get(`${slug}.developer.1`)).json();
+assert.ok(walkedRun.text.includes("final output line\n") && walkedRun.head === 0, "an unrenderable tail of a run log walks back to renderable content");
+
+// 000088 subagent transcripts: the Agent tool result in the parent log names each background agent
+// and its .output file; sub=list enumerates them, sub=<n> serves the n-th through the same payload
+mkdirSync("/tmp/pi-subagents-1000", { recursive: true });
+const subDir = mkdtempSync("/tmp/pi-subagents-1000/webui-test-");
+const out0 = join(subDir, "aaaaaaaa-0000-0000-0000-000000000000.output");
+const out1 = join(subDir, "bbbbbbbb-0000-0000-0000-000000000000.output");
+writeFileSync(out0, "SUB ZERO\n");
+writeFileSync(out1, JSON.stringify({ isSidechain: true, agentId: "bbbbbbbb", type: "user", message: { role: "user", content: "do the thing" } }) + "\nplain fallback\n");
+const subPath = (id: string, file: string) =>
+	JSON.stringify({
+		type: "tool_execution_end",
+		toolCallId: id,
+		toolName: "Agent",
+		result: { content: [{ type: "text", text: `Agent started in background.\nAgent ID: ${id}\nType: subagent\nOutput file: ${file}\n\nYou will be notified when it settles.` }] },
+		isError: false,
+	});
+writeFileSync(
+	rv0,
+	[
+		subPath("aaaaaaaa-0000-0000-0000-000000000000", out0),
+		// one spawn emits more records under the same toolCallId: only tool_execution_end counts
+		JSON.stringify({ type: "message_end", message: { role: "toolResult", content: [{ type: "text", text: "Agent ID: aaaaaaaa-0000-0000-0000-000000000000" }] } }),
+		subPath("bbbbbbbb-0000-0000-0000-000000000000", out1),
+		subPath("cccccccc-0000-0000-0000-000000000000", "/etc/evil.output"),
+		subPath("dddddddd-0000-0000-0000-000000000000", "/tmp/pi-subagents-1000/../evil.output"),
+		subPath("eeeeeeee-0000-0000-0000-000000000000", join(subDir, "notes.txt")),
+	].join("\n") + "\n",
+);
+const rvEnc = encodeURIComponent(`${slug}.reviewer.0`);
+const subList = await (await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=list`)).json();
+assert.deepEqual(
+	subList,
+	[
+		{ id: "aaaaaaaa-0000-0000-0000-000000000000", index: 0 },
+		{ id: "bbbbbbbb-0000-0000-0000-000000000000", index: 1 },
+	],
+	"sub=list enumerates background agents in log order and drops non-transcript records and paths outside pi's .output dir",
+);
+const subZero = await (await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=0`)).json();
+assert.equal(subZero.text, "SUB ZERO\n", "sub=0 serves the first subagent transcript through the chunked payload");
+const subOne = await (await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=1`)).json();
+assert.equal(subOne.text, "plain fallback\n", "a sidechain record renders to nothing through renderLogChunk, its non-JSON line passes through (no special casing)");
+assert.equal((await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=9`)).status, 404, "an out-of-range subagent index is rejected");
+assert.equal((await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=x`)).status, 404, "a non-numeric subagent index is rejected");
+assert.equal((await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=1abc`)).status, 404, "a partially numeric subagent index is rejected too");
+assert.deepEqual(await (await fetch(`${base}/api/agent-log?file=${encodeURIComponent(`${slug}.live-tester.0`)}&sub=list`)).json(), [], "a log without spawn records yields an empty subagent list, never an error");
+// the memoized sub list must refresh when the parent log grows
+const out2 = join(subDir, "ffffffff-0000-0000-0000-000000000000.output");
+writeFileSync(out2, "SUB TWO\n");
+appendFileSync(rv0, subPath("ffffffff-0000-0000-0000-000000000000", out2) + "\n");
+const grown = await (await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=list`)).json();
+assert.deepEqual(grown.map(s => s.id), ["aaaaaaaa-0000-0000-0000-000000000000", "bbbbbbbb-0000-0000-0000-000000000000", "ffffffff-0000-0000-0000-000000000000"], "a parent log that grew invalidates the memoized sub list");
+
+// restore the board for the daemon section below
+rmSync(join(root, ".kanban", ".pids", `${slug}.pid`));
+for (const f of [dev0, dev1, lt0, lt1, rv0, mg0, mg1]) rmSync(f, { force: true });
+rmSync(subDir, { recursive: true, force: true });
+setState(root, getTask(root, task.file)!, "backlog");
 
 // a second startWebUi on the taken port reports failure instead of throwing
 assert.equal(await startWebUi(root, { port: ui.port }), null);
