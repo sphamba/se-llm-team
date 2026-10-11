@@ -1,7 +1,7 @@
 ---
 name: "test: orchestrator.test.ts late task-create commit wait is flaky"
 priority: "low"
-state: "doing"
+state: "reviewing"
 worktree: "test/83-orchestrator-test-ts"
 ---
 
@@ -22,3 +22,9 @@ Suggested direction:
 - Per this project's convention (see 000049), flaky-test fixes ship with the reproduced failure and a green multi-run of the suite.
 
 # Notes
+
+## Notes
+- Reproduced per convention: baseline suite green (2m24s); loop under 8 sha256sum CPU hogs gave run 1 PASS (163s), run 2 PASS (163s), run 3 FAIL (120s). The reproduced failure was part Q "timeout waiting for branch-only file materialized", not part O "late task create commit" - the same flake class: a fixed 10s wait on daemon mirror behavior timing out under load.
+- Failure analysis: the failing run's daemon log showed only start + no-webui + "orchestrator lock was missing, re-acquired" ~1s after start, then 10s of silence with no "[daemon exit ...]" line and no crash - the daemon's scan loop stalled past 10s (no exit, no JS stack). Instrumented the daemon temporarily (lock canary + per-sweep heartbeat to /tmp/tempdiag83.log): 25 instrumented full-suite runs plus 8 isolated lock-canary runs showed a healthy daemon never pauses more than 1.37s between sweeps and the lock never vanishes in isolation; no git failures beyond the expected no-ref-yet ones. The >10s stall is rare (1 in ~30 runs under load) and memory-pressure-shaped (box has ~2GB free); no product defect found, so the fix stays test-only per the specs.
+- Fix (test-only, commit 817a060): raised the seven scan-dependent waits in parts O, P, Q from 10000ms to 30000ms - part O "settled done task mirrored" and "late task create commit" (the reported flake), part P "external add materialized"/"external deletion propagated"/"reconcile logged", part Q "branch-only file materialized" (the reproduced flake) and "next mirror commit keeps the branch-only file". 30s is the generous timeout the parts' first waits already used and that survived the failing run; healthy sweeps answer within 1.4s. One comment in part O records the reason. Locks, webui, symlink, bootstrap (L/M), worktree (D) and push-warning waits left untouched.
+- Green multi-run: 3 suite runs under 8-hog CPU load all PASS (166s, 165s, 156s); kanban.test.ts also green. Temporary diagnostic instrumentation reverted; src/orchestrator.ts untouched.

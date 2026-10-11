@@ -1,8 +1,8 @@
 ---
 name: "fix: the merger merges the root checkout's current branch, not a hardcoded main"
 priority: "medium"
-state: "to-merge"
-worktree: "fix/102-the-merger-merges"
+state: "done"
+worktree: ""
 ---
 
 # Summary
