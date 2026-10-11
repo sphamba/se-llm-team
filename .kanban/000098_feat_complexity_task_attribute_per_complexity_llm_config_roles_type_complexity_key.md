@@ -1,7 +1,7 @@
 ---
 name: "feat: complexity task attribute; per-complexity LLM config roles.<type>.<complexity>.<key>"
 priority: "medium"
-state: "to-live-test"
+state: "live-testing"
 worktree: "feat/98-complexity-task-attribute"
 ---
 

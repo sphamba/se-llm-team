@@ -36,5 +36,8 @@ Priority low, type fix.
 - Stale counter: pre-seeded `.kanban/.logs/push-failures.count` = 5. One failed push raised the counter to 6 and logged the WARNING once; `push-warned.count` became 1. A second failed push raised the counter to 7 and logged no further warning.
 - Recovery: after switching `origin` to a valid bare repo, the next push succeeded, both `push-failures.count` and `push-warned.count` reset to 0, and `refs/heads/meta/kanban` appeared on origin.
 - Fresh streak after reset: with `origin` unreachable again, four failed pushes warned exactly once (at the 3rd failure) and left `push-warned.count` = 1. One warning per streak holds across a success-then-failure cycle.
+- Merge completed (merger): merged main into fix/65-push-warning-counter in the worktree (merge commit 9845ef2, no conflicts; git auto-merged src/orchestrator.ts, src/orchestrator.test.ts, src/webui.ts, src/webui.test.ts, README.md, .gitignore). No fixes were needed: both sides of the auto-merged files kept the intended behavior, the >= plus warned-marker logic in pushMirror and the T2 stale-counter regression test survived intact.
+- Test suites in the worktree after the merge: orchestrator.test.ts all parts passed twice, including `... + push warning smoke passed` (part T) and `... + stale push counter warning smoke passed` (part T2); kanban.test.ts and webui.test.ts all assertions passed.
+- Merged fix/65-push-warning-counter into main in the project root as a fast-forward (main now at 9845ef2). No conflicts.
 
 # Open questions
