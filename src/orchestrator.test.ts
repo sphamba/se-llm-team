@@ -7,7 +7,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readHubRegistry, startHub } from "./hub.ts";
 import { createTask, kanbanDir, parseTask, setState, setWorktree } from "./kanban.ts";
-import { pidAlive, waitForBoardCommits } from "./orchestrator.ts";
+import { pidAlive, removeTask, waitForBoardCommits } from "./orchestrator.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -1371,24 +1371,108 @@ assert.equal(runsAA(), 0, "counter still cleared after the pipeline completed");
 aa.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + reviewer successful-run cap smoke passed");
 
-// --- part AB: a completed run clears the dead counter, so the cooldown applies to consecutive-death streaks only ---
+// --- part AB: kanban task removal: the file and the mirror go in one operation ---
+// reconcileBoard restores files the working tree lacks whenever the mirror tip still carries
+// them, so a removal must reach the mirror itself or the task comes back (the self-heal)
 const rootAB = fixture();
 cleaned.push(rootAB);
-mkdirSync(join(kanbanDir(rootAB), ".logs"), { recursive: true });
-writeFileSync(join(kanbanDir(rootAB), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootAB), pollMinutes: 0.05 }));
-const taskAB = createTask(rootAB, { name: "fix: clear dead counter", summary: "Counter clear smoke", specs: "n/a" });
-setState(rootAB, taskAB, "to-do");
-// a stale death streak from earlier respawns: the next completed run must clear it, else the
-// cooldown would gate a fresh streak that never had six deaths
-const slugAB = taskAB.file.replace(/\.md$/, "");
-writeFileSync(join(kanbanDir(rootAB), ".logs", `${slugAB}.dead.count`), "3");
+mkdirSync(kanbanDir(rootAB), { recursive: true });
+writeFileSync(join(kanbanDir(rootAB), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAB), pollMinutes: 0.05 }));
+const taskAB = createTask(rootAB, { name: "fix: mistaken task", summary: "Removal smoke", specs: "n/a" });
+const taskAB2 = createTask(rootAB, { name: "fix: keep me", summary: "Stays on the board", specs: "n/a" });
 
 const ab = await runDaemon(rootAB);
-await waitFor(() => ab.output().includes("cleared the dead-agent counter"), 60000, "completed run cleared the dead counter", ab.output);
-assert.equal(ab.output().split("cleared the dead-agent counter").length - 1, 1, "counter clear logged once per streak");
-assert.equal(readFileSync(join(kanbanDir(rootAB), ".logs", `${slugAB}.dead.count`), "utf8").trim(), "0", "the completed run cleared the death counter");
-// the pipeline still completes: the cleared counter does not disturb the normal flow
-await waitFor(() => parseTask(rootAB, taskAB.file).state === "done" && parseTask(rootAB, taskAB.file).worktree === "", 60000, "pipeline after the counter clear", ab.output);
-assert.equal(readFileSync(join(kanbanDir(rootAB), ".logs", `${slugAB}.dead.count`), "utf8").trim(), "0", "counter stays cleared");
+// both tasks reach the mirror first: creates run for every file not on the mirror yet
+await waitFor(() => showTip(rootAB, taskAB.file) !== null && showTip(rootAB, taskAB2.file) !== null, 30000, "both tasks mirrored", ab.output);
+
+// removal while the daemon runs: the file leaves the tree and the mirror in one operation
+assert.equal(await removeTask(rootAB, taskAB.file), null, "removal succeeds");
+assert.equal(existsSync(join(kanbanDir(rootAB), taskAB.file)), false, "task file deleted");
+assert.equal(showTip(rootAB, taskAB.file), null, "task gone from the mirror tip");
+assert.ok(mirrorSubjects(rootAB).includes(`kanban: delete ${taskAB.file}`), "delete commit recorded on the mirror");
+assert.ok(showTip(rootAB, taskAB2.file) !== null, "other task untouched on the mirror");
+assert.equal(existsSync(join(kanbanDir(rootAB), taskAB2.file)), true, "other task untouched in the tree");
+
+// the running daemon's reconcile self-heal must not restore the removed task
+await new Promise((r) => setTimeout(r, 2500));
+assert.equal(existsSync(join(kanbanDir(rootAB), taskAB.file)), false, "daemon sweep does not restore the removed task");
+
+// a restart re-materializes from the mirror tip: the removal survives it too
 ab.daemon.kill("SIGTERM");
+await Promise.race([new Promise((r) => ab.daemon.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
+const ab2 = await runDaemon(rootAB);
+await new Promise((r) => setTimeout(r, 2500));
+assert.equal(existsSync(join(kanbanDir(rootAB), taskAB.file)), false, "daemon restart does not restore the removed task");
+ab2.daemon.kill("SIGTERM");
+await Promise.race([new Promise((r) => ab2.daemon.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
+
+// removing the last task empties the mirror board: the tip no longer carries the file
+assert.equal(await removeTask(rootAB, taskAB2.file), null, "last-task removal succeeds");
+assert.equal(existsSync(join(kanbanDir(rootAB), taskAB2.file)), false, "last task file deleted");
+assert.equal(showTip(rootAB, taskAB2.file), null, "last task gone from the mirror tip");
+assert.ok((await removeTask(rootAB, "000999_ghost.md"))!.includes("No task"), "unknown task reported, nothing deleted");
+
+console.log("orchestrator.test.ts: ... + task removal smoke passed");
+
+// --- part AC: the failsafe never auto-promotes a task with unfinished blockers; a ghost ref
+// is ignored, and the blocked task schedules normally once its blocker is done ---
+const rootAC = fixture();
+cleaned.push(rootAC);
+mkdirSync(kanbanDir(rootAC), { recursive: true });
+// 0.05min = 3s idle window and poll; the dead stub keeps a promoted task active forever
+writeFileSync(join(kanbanDir(rootAC), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAC), pollMinutes: 0.05, autoScheduleMinutes: 0.05 }));
+const taskAC0 = createTask(rootAC, { name: "feat: blocker task", summary: "Failsafe smoke", specs: "n/a" });
+const taskAC1 = createTask(rootAC, { name: "feat: blocked critical", priority: "critical", summary: "Failsafe smoke", specs: "n/a", blockedBy: `#${parseInt(taskAC0.file, 10)}` });
+const taskAC2 = createTask(rootAC, { name: "feat: ghost ref", priority: "critical", summary: "Failsafe smoke", specs: "n/a", blockedBy: "#999" });
+
+const ac = await runDaemon(rootAC);
+const readAC = (file: string) => parseTask(rootAC, file);
+// the ghost ref is ignored: the critical ghost task is promotable and wins by priority over
+// the medium blocker task, while the blocked critical task stays held despite its priority
+await waitFor(() => ac.output().includes(`promoting ${taskAC2.file} to to-do`), 30000, "ghost-only task promoted", ac.output);
+assert.equal(readAC(taskAC1.file).state, "backlog", "blocked critical task not promoted despite priority");
+// settle the ghost task: past the respawn cap the poll bounces it back and the sweep defers
+// the respawn, so the board goes idle once it is settled done
+await waitFor(() => ac.output().includes(`${taskAC2.file.replace(/\.md$/, "")}: agent died`), 60000, "respawn cap on the ghost task", ac.output);
+writeFileSync(
+	join(kanbanDir(rootAC), taskAC2.file),
+	readFileSync(join(kanbanDir(rootAC), taskAC2.file), "utf8").replace(/^state: .*/m, 'state: "done"'),
+);
+// the blocker task is still backlog: the blocked critical task stays held, the medium task promotes
+await waitFor(() => ac.output().includes(`promoting ${taskAC0.file} to to-do`), 30000, "unblocked medium task promoted", ac.output);
+assert.equal(readAC(taskAC1.file).state, "backlog", "still held while the blocker is not done");
+// settle the blocker: the deferred respawn is parked, so the board goes idle once it is done
+await waitFor(() => ac.output().includes(`${taskAC0.file.replace(/\.md$/, "")}: agent died`), 60000, "respawn cap on the blocker task", ac.output);
+writeFileSync(
+	join(kanbanDir(rootAC), taskAC0.file),
+	readFileSync(join(kanbanDir(rootAC), taskAC0.file), "utf8").replace(/^state: .*/m, 'state: "done"'),
+);
+await waitFor(() => ac.output().includes(`promoting ${taskAC1.file} to to-do`), 30000, "blocked task promoted after the blocker is done", ac.output);
+assert.ok(["to-do", "doing"].includes(readAC(taskAC1.file).state), "promoted task is active");
+ac.daemon.kill("SIGTERM");
+// full exit before the removal: a sweep mid-flight still writes into the fixture
+await Promise.race([new Promise((r) => ac.daemon.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
+cleanupAll(rootAC);
+console.log("orchestrator.test.ts: ... + blockedBy failsafe smoke passed");
+
+// --- part AD: a completed run clears the dead counter, so the cooldown applies to consecutive-death streaks only ---
+const rootAD = fixture();
+cleaned.push(rootAD);
+mkdirSync(join(kanbanDir(rootAD), ".logs"), { recursive: true });
+writeFileSync(join(kanbanDir(rootAD), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootAD), pollMinutes: 0.05 }));
+const taskAD = createTask(rootAD, { name: "fix: clear dead counter", summary: "Counter clear smoke", specs: "n/a" });
+setState(rootAD, taskAD, "to-do");
+// a stale death streak from earlier respawns: the next completed run must clear it, else the
+// cooldown would gate a fresh streak that never had six deaths
+const slugAD = taskAD.file.replace(/\.md$/, "");
+writeFileSync(join(kanbanDir(rootAD), ".logs", `${slugAD}.dead.count`), "3");
+
+const ad = await runDaemon(rootAD);
+await waitFor(() => ad.output().includes("cleared the dead-agent counter"), 60000, "completed run cleared the dead counter", ad.output);
+assert.equal(ad.output().split("cleared the dead-agent counter").length - 1, 1, "counter clear logged once per streak");
+assert.equal(readFileSync(join(kanbanDir(rootAD), ".logs", `${slugAD}.dead.count`), "utf8").trim(), "0", "the completed run cleared the death counter");
+// the pipeline still completes: the cleared counter does not disturb the normal flow
+await waitFor(() => parseTask(rootAD, taskAD.file).state === "done" && parseTask(rootAD, taskAD.file).worktree === "", 60000, "pipeline after the counter clear", ad.output);
+assert.equal(readFileSync(join(kanbanDir(rootAD), ".logs", `${slugAD}.dead.count`), "utf8").trim(), "0", "counter stays cleared");
+ad.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + dead-counter clear on completed run smoke passed");

@@ -249,17 +249,20 @@ function git(root: string, args: string[], allowFailure = false): string | null 
 // Never touches the index or working tree, so main history gets no kanban commits. The tree
 // is rebuilt from the whole board, so deleted files and disk drift self-heal on the next
 // mirror commit.
-function commitKanban(root: string, message: string, files: string[]): boolean {
-	if (!files.length) return false;
+function commitKanban(root: string, message: string, files: string[], allowEmpty = false): boolean {
+	if (!files.length && !allowEmpty) return false;
 	let tree: string;
 	try {
-		const blobs = execFileSync("git", ["hash-object", "-w", "--", ...files.map((f) => join(".kanban", f))], {
-			cwd: root,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-		})
-			.trim()
-			.split("\n");
+		// empty board (removal of the last task): mktree with no entries yields the empty tree
+		const blobs = files.length
+			? execFileSync("git", ["hash-object", "-w", "--", ...files.map((f) => join(".kanban", f))], {
+					cwd: root,
+					encoding: "utf8",
+					stdio: ["ignore", "pipe", "pipe"],
+				})
+					.trim()
+					.split("\n")
+			: [];
 		const board = execFileSync("git", ["mktree"], {
 			cwd: root,
 			input: files.map((f, i) => `100644 blob ${blobs[i]}\t${f}\n`).join(""),
@@ -307,6 +310,40 @@ function pushMirror(root: string): void {
 			log(root, `WARNING: auto-push of ${KANBAN_REF} to origin failed ${PUSH_WARN_AFTER} times in a row; the board mirror is not reaching origin and fresh-clone bootstrap cannot work. Check SSH access to origin for the daemon user (known_hosts entry, deploy key). This warning is logged once until a push succeeds.`);
 		}
 	}
+}
+
+// removes a task in one operation: delete the file, then commit a whole-board mirror
+// snapshot, so the removal reaches refs/heads/meta/kanban and reconcileBoard cannot restore
+// it (the tip no longer carries the file). The daemon is the only other mirror writer: a
+// sweep mid-flight with a pre-removal board snapshot can re-add the file with its commit, so
+// while a daemon runs the tip is checked after a settle delay and the removal retries when
+// the file returned. Returns null on success, else a reason string.
+export async function removeTask(root: string, file: string): Promise<string | null> {
+	const name = file.endsWith(".md") ? file : `${file}.md`;
+	if (!taskFiles(root).includes(name)) return `No task ${file}`;
+	const hasGit = git(root, ["rev-parse", "--git-dir"], true) !== null;
+	rmSync(join(kanbanDir(root), name), { force: true });
+	// no git, no mirror and no reconcile: deleting the file is the whole removal
+	if (!hasGit) return null;
+	let daemonPid = 0;
+	try {
+		daemonPid = parseInt(readFileSync(join(kanbanDir(root), ".orchestrator.lock"), "utf8").trim(), 10) || 0;
+	} catch {
+		/* no lock: no daemon runs */
+	}
+	for (let attempt = 0; attempt < 3; attempt++) {
+		if (!commitKanban(root, `kanban: delete ${name}`, taskFiles(root), true)) {
+			return `mirror commit for ${name} failed, the board may restore the file: retry`;
+		}
+		// let a racing in-flight daemon commit land before the tip check
+		if (pidAlive(daemonPid)) await new Promise((resolve) => setTimeout(resolve, 1000));
+		const onTip = git(root, ["ls-tree", "--name-only", KANBAN_REF, "--", join(".kanban", name)], true);
+		if (onTip === null) return "git unavailable, the removal may not be mirrored";
+		if (!onTip) return null;
+		// a racing sweep re-added the file: the daemon may have restored it to the tree too
+		rmSync(join(kanbanDir(root), name), { force: true });
+	}
+	return `${name} returned to the mirror (a daemon sweep raced the removal): retry`;
 }
 
 // board file status relative to the meta/kanban mirror: "??" = not on the mirror yet (new
@@ -798,6 +835,17 @@ const taskNum = (file: string) => {
 // continuous idle. Module state like lastMirrorHash: one locked daemon per project.
 let idleSince: number | null = null;
 
+// a blockedBy entry ("#<num>") holds the task while its blocker exists and is not done;
+// a ref resolving to no existing task is ignored
+function blockedByUndone(tasks: Task[], task: Task): boolean {
+	if (!task.blockedBy) return false;
+	const states = new Map(tasks.map((t) => [taskNum(t.file), t.state]));
+	return task.blockedBy.split(",").some((ref) => {
+		const num = parseInt(ref.trim().replace(/^#/, ""), 10);
+		return num > 0 && states.get(num) !== undefined && states.get(num) !== "done";
+	});
+}
+
 function autoSchedule(root: string, cfg: Config, tasks: Task[]): void {
 	// conflicted files parse bogus state values: neither promotable nor proof of activity
 	const candidates = tasks.filter((t) => !t.conflicted);
@@ -813,8 +861,12 @@ function autoSchedule(root: string, cfg: Config, tasks: Task[]): void {
 		return;
 	}
 	if (now - idleSince < cfg.autoScheduleMinutes * 60_000) return;
-	// taskFiles sorts by file name, so the stable sort keeps the oldest first within a rank
-	const next = [...backlog].sort((a, b) => rank(a.priority) - rank(b.priority) || taskNum(a.file) - taskNum(b.file))[0];
+	// taskFiles sorts by file name, so the stable sort keeps the oldest first within a rank;
+	// unfinished blockers hold the task: the failsafe never auto-promotes a blocked task
+	const next = [...backlog]
+		.filter((t) => !blockedByUndone(tasks, t))
+		.sort((a, b) => rank(a.priority) - rank(b.priority) || taskNum(a.file) - taskNum(b.file))[0];
+	if (!next) return;
 	idleSince = null;
 	log(root, `no active task for ${cfg.autoScheduleMinutes}min, promoting ${next.file} to to-do (failsafe)`);
 	try {

@@ -86,7 +86,7 @@ Agent prompts live in `agents/`. The orchestrator runs each agent as a headless 
 
 ## Tools
 
-The PM session gets: kanban_list, kanban_get, kanban_create, kanban_update, kanban_set_state, kanban_set_worktree, orchestrator_start, orchestrator_status, orchestrator_stop, orchestrator_poke. The extension also notifies the session when a task reaches done.
+The PM session gets: kanban_list, kanban_get, kanban_create, kanban_update, kanban_set_state, kanban_set_worktree, kanban_delete, orchestrator_start, orchestrator_status, orchestrator_stop, orchestrator_poke. kanban_delete removes a mistaken task: it deletes the task file and commits a whole-board mirror snapshot in one operation, so the daemon cannot restore the task. Never delete a board file by hand. The daemon restores hand-deleted files from the mirror. The extension also notifies the session when a task reaches done.
 
 ## Checks
 

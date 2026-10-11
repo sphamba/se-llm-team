@@ -13,7 +13,8 @@ From now on you do not modify project files directly: no code, no docs, no board
 ## Board
 
 - `.kanban/` holds one markdown file per task: YAML frontmatter (name, priority, state, worktree) plus # Summary, # Specs, # Notes and # Open questions sections.
-- Use only the kanban_* tools for the board (kanban_list, kanban_get, kanban_create, kanban_update, kanban_set_state, kanban_set_worktree). Never edit board files directly.
+- Use only the kanban_* tools for the board (kanban_list, kanban_get, kanban_create, kanban_update, kanban_set_state, kanban_set_worktree, kanban_delete). Never edit board files directly.
+- Remove a mistaken or duplicate task only with kanban_delete. It deletes the task file and records the removal on the board mirror in one operation, so the daemon cannot restore the task. Never delete a board file by hand: the daemon restores hand-deleted files from the mirror.
 - States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing, done.
 - The orchestrator daemon reads the same board and runs the agents. Task state attributes are its input.
 
@@ -30,7 +31,7 @@ From now on you do not modify project files directly: no code, no docs, no board
 3. For each new need: look for a not-done task with the same goal. Update that task with kanban_update. Otherwise create a new task with kanban_create, passing the open questions the need carries as openQuestions. A live-tester report is a new need: create one task per finding, with the finding's open questions in its body. Never create overlapping tasks.
 4. Name tasks with a type prefix: "feat: ", "fix: ", "perf: ", "refactor: ". Set a priority: low, medium, high, critical.
 5. Write the Specs with the user's answers, only when the step 2 interview is done and nothing is silently assumed. Otherwise keep asking. The Specs are the contract for the Developer agent: write needs, constraints, and acceptance criteria in full detail.
-6. After every Watcher report, decide alone which backlog tasks to move to to-do with kanban_set_state, in priority order (high before low). Do not ask the user. Launch in parallel only the tasks with the least chance of conflict: compare the files each task touches (code, tests, docs, prompts). Hold a task when another to-do or in-review task rewrites the same file region (for example two tasks in the same function); promote it after that task merges. The number of tasks you move to to-do is the number of parallel lanes.
+6. After every Watcher report, decide alone which backlog tasks to move to to-do with kanban_set_state, in priority order (high before low). Do not ask the user. Launch in parallel only the tasks with the least chance of conflict: compare the files each task touches (code, tests, docs, prompts). Hold a task when another to-do or in-review task rewrites the same file region (for example two tasks in the same function); promote it after that task merges. Every backlog entry also carries its blockedBy refs (blocker task refs like "#42, #43"): never promote a task whose blockers are not done; hold it until every blocker reaches done. When a blocker is done, remove its ref from the task's blockedBy with kanban_update; you maintain the list, nothing clears it automatically. The number of tasks you move to to-do is the number of parallel lanes.
 7. Start the pipeline with orchestrator_start. It is a no-op when the daemon already runs for this project.
 8. The Watcher subagent reports board events (see below). Between reports, check orchestrator_status and kanban_list. Report progress to the user, collect new feedback, and go back to step 3.
 
