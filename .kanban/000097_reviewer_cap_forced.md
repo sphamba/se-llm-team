@@ -1,8 +1,8 @@
 ---
 name: "fix: reviewer-cap forced-advance log line omits the task file"
 priority: "low"
-state: "to-merge"
-worktree: "fix/97-reviewer-cap-forced"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -34,5 +34,11 @@ This is a minor observability/log-quality fix; no behavior change beyond the log
 - Grepped src/ and *.md for the old message text. Only the new slug-bearing line in src/orchestrator.ts:719 and the updated assertion in src/orchestrator.test.ts:1312 exist. No stale copies.
 - Diff vs main is two one-line changes (code + test). No behavior change beyond the log text, as the spec states.
 - No issues found.
+
+# Merge report
+
+- MERGE: Merged main into fix/97-reviewer-cap-forced in the worktree (git merge main). Auto-merge succeeded with no conflicts: git took our slug-bearing log line and test assertion, and main's dead-cooldown guards on the adjacent `to-review`/`to-live-test` branches and other 33 commits of main landed around them. Verified the merged files: the forced-advance line keeps the slug (src/orchestrator.ts:772), the assertion keeps the slug (src/orchestrator.test.ts:1363), main's `deadCooldownActive` guards are present, and no stale copy of the old message text exists anywhere. Merge commit 3592f85.
+- MERGE: Ran all three test suites in the worktree: `node src/kanban.test.ts` exit 0, `node src/orchestrator.test.ts` exit 0 (including `reviewer successful-run cap smoke passed`, which exercises the merged forced-advance path), `node src/webui.test.ts` exit 0. No fixes needed.
+- MERGE: Merged fix/97-reviewer-cap-forced into main in the project root (git merge --no-edit fix/97-reviewer-cap-forced). Fast-forward, no conflicts; main is now at 3592f85 and carries the slug-bearing log line and its test assertion.
 
 # Open questions
