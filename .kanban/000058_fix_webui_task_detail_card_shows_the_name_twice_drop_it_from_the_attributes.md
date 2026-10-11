@@ -1,8 +1,8 @@
 ---
 name: "fix: webui task detail card shows the name twice - drop it from the attributes"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "fix/58-webui-task-detail"
 ---
 
 # Summary
@@ -22,3 +22,7 @@ Constraints:
 - Conflicts are minor and merger-resolvable: this removes a row inside #m-attrs while #56 adds past-agent buttons below #m-attrs - different statements of the same modal, sequential two-way merge.
 
 # Notes
+- Removed the name row from the #m-attrs rendering in src/webui.ts (openTask). The title still shows the name. Number, file, priority, state and worktree rows are unchanged.
+- Added one regression assertion in src/webui.test.ts: the served page does not contain the name attribute row.
+- Checks pass: node src/webui.test.ts, node src/kanban.test.ts, node src/orchestrator.test.ts.
+- Commit 44f559a in worktree fix/58-webui-task-detail. Two files changed, one line removed and one line added.

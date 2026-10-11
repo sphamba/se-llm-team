@@ -1,6 +1,6 @@
 ---
 name: "feat: webui board ordering; priority-first backlog, newest-first columns"
-priority: "medium"
+priority: "high"
 state: "backlog"
 worktree: ""
 ---
@@ -14,7 +14,7 @@ Order the tasks inside the board columns (user feedback): backlog sorts by prior
 Facts:
 - Cards in each column are rendered in the /api/tasks order (file-name/task-number order). render() (src/webui.ts:446) rebuilds all columns and cards in one string.
 - Task files carry no stored update timestamp; the file mtime is the natural update signal (the daemon and kanban tools rewrite task files on state changes and note appends).
-- Lanes: #38 (hub backend, live-testing) branch rewrites src/webui.ts; #47 (high) and #76 (medium) are held on the same webui lane.
+- Lanes: #38 (hub backend, live-testing) branch rewrites src/webui.ts; #47 (high), #76 (medium), and #77 (high) are queued on the same webui lane.
 
 Changes:
 1. /api/tasks exposes each task's update time (from the task file's mtime) so the client can sort; alternatively the server pre-sorts per column - the developer picks the simpler option, keeping the API backward-compatible for existing consumers.
@@ -31,6 +31,6 @@ Acceptance:
 
 Constraints:
 - Files: src/webui.ts, src/webui.test.ts.
-- HOLD behind 000038 (live-testing): its branch rewrites src/webui.ts. Sequence on the webui lane after 000047 (high, same files) and 000076 (medium, same files): the three tasks cannot run in parallel.
+- HOLD behind 000038 (live-testing): its branch rewrites src/webui.ts. Sequence on the webui lane by priority order: 000047 (high), then 000077 (high), then 000076 (medium); the three tasks cannot run in parallel.
 
 # Notes

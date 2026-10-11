@@ -2,7 +2,7 @@
 name: "feat: hub backend; daemons register, elect the hub by lock race, hub-only UI ownership"
 priority: "medium"
 state: "done"
-worktree: "feat/hub-backend-daemons-register-elect-the-hub-by-lock-race-hub-only-ui-ownership"
+worktree: ""
 ---
 
 # Summary

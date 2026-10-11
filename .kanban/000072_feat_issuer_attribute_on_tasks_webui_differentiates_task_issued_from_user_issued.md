@@ -1,6 +1,6 @@
 ---
 name: "feat: issuer attribute on tasks; webui differentiates task-issued from user-issued"
-priority: "medium"
+priority: "high"
 state: "backlog"
 worktree: ""
 ---
