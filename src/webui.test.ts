@@ -57,6 +57,12 @@ assert.ok(rendered.includes("pi: diagnostic that never was JSON\n"), "non-JSON l
 assert.ok(rendered.includes("[prompt] Run the checks\n"), "user message_end renders the prompt");
 assert.ok(!rendered.includes('"type"'), "parsed JSON records never leak raw JSON");
 assert.equal(renderLogChunk(jsonl + "partial-without-newline"), rendered, "a partial trailing record is dropped");
+// blank lines in legacy print-mode text pass through unchanged: an empty line fails JSON.parse
+const legacy = "first paragraph\n\nsecond paragraph\n\nthird paragraph\n";
+assert.equal(renderLogChunk(legacy), legacy, "blank paragraph lines in non-JSON text pass through");
+// a blank line also flushes buffered JSONL text instead of being skipped
+const mixed = JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "paragraph" } }) + "\n\nlegacy line\n";
+assert.equal(renderLogChunk(mixed), "paragraph\n\nlegacy line\n", "a blank line flushes pending text and passes through");
 
 // startWebUi on port 0 against a temp board with one task
 const task = createTask(root, { name: "feat: webui smoke", summary: "Dashboard smoke", specs: "Render the board" });
