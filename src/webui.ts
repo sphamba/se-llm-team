@@ -732,15 +732,16 @@ h1 { font-size: 16px; margin: 0; }
 #theme { margin-left: auto; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 #theme:hover { background: var(--hover); }
 #updated { font-size: 12px; color: var(--muted); }
-/* 000091: a relative #tabs at z-index 1 keeps the bar above the overlay and clickable while a modal is open; 000119: #modal must sit above #tabs and #relations (both z-index 1) or the relation lines paint over it */
+/* 000091: a relative #tabs at z-index 1 keeps the bar above the overlay and clickable while a modal is open; 000119: #modal must sit above #tabs and #relations (both z-index 1) or the relation lines paint over it; 000124: the task cards stack at z-index 2, so #modal bumps to 3 */
 #tabs { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; }
 #tabs:empty { display: none; }
 .tab { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px 6px 0 0; padding: 4px 12px; font-size: 12px; cursor: pointer; }
 .tab:hover { background: var(--hover); }
 .tab.active { border-color: var(--link); color: var(--link); }
 #board { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; padding: 10px 18px 18px; overflow-x: auto; align-items: flex-start; position: relative; }
-/* relation lines: absolute in the relative board, so the overlay scrolls with the content; above
-the cards, pointer-events none so their clicks pass through */
+/* relation lines: absolute in the relative board, so the overlay scrolls with the content; z-index 1
+paints them above the static .col/.pair containers and below the z-index-2 task cards, pointer-events
+none so the card clicks pass through */
 #relations { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; }
 #relations path { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 6 4; animation: dashflow 1s linear infinite; }
 @keyframes dashflow { to { stroke-dashoffset: -10; } }
@@ -751,8 +752,9 @@ the cards, pointer-events none so their clicks pass through */
 .pair .col { flex: 0 0 auto; }
 .col h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin: 0 0 10px; color: var(--heading); }
 .count { color: var(--faint); }
-.card { border: 1px solid var(--border); border-left: 3px solid var(--ac); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
-.card:hover { background: var(--hover); }
+/* 000124: positioned above the z-index-1 relation lines; the semi-transparent background lets a line passing under the card show through faintly (no --card var, --panel is the card's base color in both themes) */
+.card { position: relative; z-index: 2; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--border); border-left: 3px solid var(--ac); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
+.card:hover { background: color-mix(in srgb, var(--hover) 85%, transparent); }
 .name { font-size: 13px; line-height: 1.35; margin-bottom: 6px; }
 .num { color: var(--faint); margin-right: 4px; }
 .num-link { color: var(--link); cursor: pointer; }
@@ -785,7 +787,7 @@ the cards, pointer-events none so their clicks pass through */
 #m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 300px; overflow: auto; }
 #m-log.hidden { display: none; }
 #m-log pre { margin: 0; padding: 8px 10px; font-size: 10px; line-height: 1.45; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: break-word; }
-#modal { position: fixed; inset: 0; z-index: 2; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
+#modal { position: fixed; inset: 0; z-index: 3; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
 #modal.hidden { display: none; }
 #m-box { background: var(--panel); border-radius: 10px; padding: 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
 #m-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
