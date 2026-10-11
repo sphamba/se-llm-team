@@ -909,6 +909,7 @@ const portV = await freePort();
 mkdirSync(join(homeV, ".pi", "agent"), { recursive: true });
 writeFileSync(join(homeV, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portV } }));
 const hubEnv = { ...process.env, HOME: homeV, SE_LLM_TEAM_HUB_HEALTH_MS: "500" };
+delete hubEnv.SE_LLM_TEAM_NO_WEBUI; // the election needs the webui enabled; the temp HOME config picks a free port
 const dV1 = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootV1, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnv });
 const dV2 = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootV2, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnv });
 daemons.push({ daemon: dV1, root: rootV1 }, { daemon: dV2, root: rootV2 });
@@ -951,6 +952,7 @@ const portW = await freePort();
 mkdirSync(join(homeW, ".pi", "agent"), { recursive: true });
 writeFileSync(join(homeW, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portW } }));
 const hubEnvW = { ...process.env, HOME: homeW, SE_LLM_TEAM_HUB_HEALTH_MS: "500", SE_LLM_TEAM_HUB_STALE_MS: "1500" };
+delete hubEnvW.SE_LLM_TEAM_NO_WEBUI;
 const dW1 = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootW1, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnvW });
 const dW2 = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootW2, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnvW });
 daemons.push({ daemon: dW1, root: rootW1 }, { daemon: dW2, root: rootW2 });
