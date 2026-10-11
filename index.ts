@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { createTask, getTask, kanbanDir, listAll, listTasks, setState, taskNum, updateTask, STATES, type TaskState } from "./src/kanban.ts";
+import { createTask, getTask, kanbanDir, listAll, listTasks, setState, setWorktree, taskNum, updateTask, STATES, type TaskState } from "./src/kanban.ts";
 import { waitForBoardCommits } from "./src/orchestrator.ts";
 
 function text(s: string) {
