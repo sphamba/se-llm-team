@@ -236,6 +236,13 @@ updateTask(root, ti, { summary: "s2" });
 assert.equal(parseTask(root, ti.file).issuer, "#42");
 // kanban_list refs carry the field
 assert.equal(listTasks(root, "in-progress").find((t) => t.file === ti.file)?.issuer, "#42");
+// to-merge and merging parse and count as in-progress (scope filter and orchestrator_status)
+setState(root, ti, "to-merge");
+assert.equal(parseTask(root, ti.file).state, "to-merge");
+assert.ok(listTasks(root, "in-progress").some((t) => t.file === ti.file), "to-merge counts as in-progress");
+setState(root, ti, "merging");
+assert.equal(parseTask(root, ti.file).state, "merging");
+assert.ok(listTasks(root, "in-progress").some((t) => t.file === ti.file), "merging counts as in-progress");
 
 rmSync(root, { recursive: true, force: true });
 console.log("kanban.test.ts: all assertions passed");

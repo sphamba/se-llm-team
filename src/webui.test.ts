@@ -8,7 +8,7 @@ import { createTask, getTask, setState } from "./kanban.ts";
 import { boardOf, buildShell, cardHtml, flipDiff, LAYOUT, loadWebUiConfig, LOG_CHUNK, mergeBoards, pairLayout, renderLogChunk, spinnerHtml, startWebUi, syncBoard, tabNames, tabsHtml } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing", "done"];
+const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing", "to-merge", "merging", "done"];
 
 const root = mkdtempSync(join(tmpdir(), "webui-test-"));
 const home = mkdtempSync(join(tmpdir(), "webui-home-"));
@@ -89,7 +89,7 @@ const issuedRow = (await (await fetch(`${base}/api/tasks`)).json()).find((t) => 
 assert.equal(issuedRow.issuer, "#42");
 rmSync(join(root, ".kanban", issued.file)); // the daemon section below expects a one-task board
 
-// GET / mentions all 8 state names; other paths and methods are 404
+// GET / mentions all 10 state names; other paths and methods are 404
 const page = await (await fetch(`${base}/`)).text();
 assert.ok(page.includes("Software Engineering LLM Team"), "page shows the new title");
 assert.ok(page.includes('id="theme"'), "page has the theme toggle");
@@ -143,14 +143,14 @@ class El {
 }
 const boardEl = new El("main");
 const cols: Record<string, any> = buildShell(boardEl, { createElement: (tag: string) => new El(tag) });
-assert.deepEqual(boardEl.children.map((c) => c.className), ["col c-backlog", "pair", "pair", "pair", "col c-done"], "backlog and done stay single side columns, the six middle states sit in three pairs");
+assert.deepEqual(boardEl.children.map((c) => c.className), ["col c-backlog", "pair", "pair", "pair", "pair", "col c-done"], "backlog and done stay single side columns, the eight middle states sit in four pairs");
 assert.deepEqual(
-	boardEl.children.slice(1, 4).map((p) => p.children.map((c) => c.className)),
-	[["col c-to-do", "col c-doing"], ["col c-to-review", "col c-reviewing"], ["col c-to-live-test", "col c-live-testing"]],
-	"to-do over doing, to-review over reviewing, to-live-test over live-testing",
+	boardEl.children.slice(1, 5).map((p) => p.children.map((c) => c.className)),
+	[["col c-to-do", "col c-doing"], ["col c-to-review", "col c-reviewing"], ["col c-to-live-test", "col c-live-testing"], ["col c-to-merge", "col c-merging"]],
+	"to-do over doing, to-review over reviewing, to-live-test over live-testing, to-merge over merging",
 );
-assert.deepEqual(LAYOUT, ["backlog", ["to-do", "doing"], ["to-review", "reviewing"], ["to-live-test", "live-testing"], "done"], "the states between backlog and done pair up in pipeline order");
-assert.deepEqual(pairLayout([...STATE_NAMES.slice(0, -1), "to-merge", "merging", "done"]), ["backlog", ["to-do", "doing"], ["to-review", "reviewing"], ["to-live-test", "live-testing"], ["to-merge", "merging"], "done"], "the queued to-merge/merging states become a fourth pair with no change here");
+assert.deepEqual(LAYOUT, ["backlog", ["to-do", "doing"], ["to-review", "reviewing"], ["to-live-test", "live-testing"], ["to-merge", "merging"], "done"], "the states between backlog and done pair up in pipeline order");
+assert.deepEqual(pairLayout(STATE_NAMES), LAYOUT, "the pairs derive from the state list, with no state-specific wiring");
 assert.ok(LAYOUT.every((part) => (typeof part === "string" ? cols[part] : part.every((st) => cols[st]))), "every layout state gets a column");
 assert.ok(page.includes(JSON.stringify(LAYOUT)), "the page ships the tested layout");
 assert.ok(page.includes(String(buildShell)) && page.includes(String(syncBoard)), "the page runs the tested shell and card pass");
@@ -207,6 +207,26 @@ sync(many.slice(1), new Set(["reviewing"]));
 assert.equal(els.has("000010_x.md"), false, "a card whose task left the board loses its node");
 assert.equal(cols["live-testing"].empty.style.display, "", "an empty column shows its dash");
 assert.equal(shown("live-testing").length, 0, "an empty column holds no cards");
+
+// 000077 ordering: backlog is priority-first then newest-first, every other column is newest-first
+// only; the stable sort keeps the payload's task-number order on equal keys
+const ordered = [
+	{ file: "000001_a.md", name: "a", priority: "low", state: "backlog", updated: 100 },
+	{ file: "000002_b.md", name: "b", priority: "critical", state: "backlog", updated: 1 },
+	{ file: "000003_c.md", name: "c", priority: "high", state: "backlog", updated: 5 },
+	{ file: "000004_d.md", name: "d", priority: "high", state: "backlog", updated: 5 },
+	{ file: "000005_e.md", name: "e", priority: "critical", state: "backlog", updated: 9 },
+	{ file: "000006_f.md", name: "f", priority: "low", state: "reviewing", updated: 5 },
+	{ file: "000007_g.md", name: "g", priority: "critical", state: "reviewing", updated: 3 },
+	{ file: "000008_h.md", name: "h", priority: "low", state: "reviewing", updated: 3 },
+	{ file: "000009_i.md", name: "i", priority: "medium", state: "backlog", updated: 50 },
+];
+const backlogOrder = ["000005_e.md", "000002_b.md", "000003_c.md", "000004_d.md", "000009_i.md", "000001_a.md"];
+sync(ordered, new Set(["backlog"]));
+assert.deepEqual(shown("backlog"), backlogOrder, "backlog sorts priority-desc, then update-desc; equal keys keep task-number order");
+assert.deepEqual(shown("reviewing"), ["000006_f.md", "000007_g.md", "000008_h.md"], "other columns sort update-desc with no priority weighting; equal update times keep task-number order");
+sync(ordered, new Set(["backlog"]));
+assert.deepEqual(shown("backlog"), backlogOrder, "a refresh with the same payload keeps the backlog order");
 
 // tabs: one per registered project; a single project keeps the old ui, no tab bar
 assert.deepEqual(tabNames([{ name: "alpha" }, { name: "beta" }]), ["alpha", "beta"], "one tab per registered project");
@@ -372,6 +392,33 @@ const bigRecord = JSON.stringify({ type: "message_update", assistantMessageEvent
 writeFileSync(logFile, JSON.stringify({ type: "session", id: "s" }) + "\n" + bigRecord + "\n" + JSON.stringify({ type: "message_end", message: { role: "user", content: "tail" } }) + "\n");
 const splitLog = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
 assert.equal(splitLog.text, "[prompt] tail\n", "a record split at the chunk head drops its partial line, later records still render");
+
+// 000084: a JSONL record split across two poll windows renders exactly once, when its newline
+// arrives. The first poll's tail sits on the last record boundary, so the next poll re-reads the
+// partial record from its start instead of stripping it as a mid-record head line.
+const splitRecord = JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "splittable record" } });
+const splitPrefix = "legacy line\n";
+for (const at of [1, 20, splitRecord.length >> 1, splitRecord.length - 1]) {
+	writeFileSync(logFile, splitPrefix + splitRecord.slice(0, at));
+	const first = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+	assert.equal(first.text, splitPrefix, `split at ${at}: the terminated line renders, the partial record does not`);
+	assert.equal(first.tail, splitPrefix.length, `split at ${at}: the tail sits on the last record boundary`);
+	writeFileSync(logFile, splitPrefix + splitRecord + "\n");
+	const second = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${first.tail}`)).json();
+	assert.equal(second.text, "splittable record\n", `split at ${at}: the record renders once its newline arrives`);
+	assert.equal(second.tail, (splitPrefix + splitRecord + "\n").length, `split at ${at}: the tail advances past the completed record`);
+	const third = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${second.tail}`)).json();
+	assert.equal(third.text, "", `split at ${at}: the already-served prefix is not rendered twice`);
+}
+// the split can land inside a multi-byte character: the boundary stays before the record and the
+// second poll re-reads the completed record whole, without a replacement glyph
+const uniRecord = Buffer.from(splitPrefix + JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "→ done" } }) + "\n", "utf8");
+writeFileSync(logFile, uniRecord.subarray(0, uniRecord.indexOf(Buffer.from("→")) + 1));
+const uniFirst = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.equal(uniFirst.text, splitPrefix, "a mid-multibyte split serves only the terminated line");
+assert.equal(uniFirst.tail, splitPrefix.length, "a mid-multibyte split still reports the boundary before the record");
+writeFileSync(logFile, uniRecord);
+assert.equal((await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${uniFirst.tail}`)).json()).text, "→ done\n", "a record split mid-multibyte renders whole once its newline arrives");
 
 // a finished log: the tail is terminal records (assistant message_end, turn_end, agent_end,
 // agent_settled) that render to nothing, so an unrenderable tail chunk walks back instead of
