@@ -1,8 +1,8 @@
 ---
 name: "fix: kanban_set_state and kanban_set_worktree accept an unsupported field"
 priority: "low"
-state: "to-merge"
-worktree: "fix/112-kanban-set-state"
+state: "done"
+worktree: ""
 issuer: "#85"
 ---
 
