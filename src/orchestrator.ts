@@ -1,6 +1,6 @@
 import { spawn, execFileSync, execSync } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, realpathSync, readFileSync, readlinkSync, rmSync, symlinkSync, watch, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	appendNote,
@@ -14,7 +14,8 @@ import {
 	type Task,
 	type TaskState,
 } from "./kanban.ts";
-import { loadWebUiConfig, startWebUi } from "./webui.ts";
+import { joinHub } from "./hub.ts";
+import { loadWebUiConfig } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_POLL_MINUTES = 1;
@@ -775,9 +776,9 @@ export function main(argv: string[]): void {
 	if (webUi.enabled && noWebUi) {
 		log(root, "web ui disabled (no-webui)");
 	} else if (webUi.enabled) {
-		startWebUi(root, webUi)
-			.then((ui) => (ui ? log(root, `web ui on http://${webUi.host}:${ui.port}`) : log(root, `web ui failed to start on ${webUi.host}:${webUi.port} (port taken by another webui?), continuing without it`)))
-			.catch((err) => log(root, `web ui failed to start, continuing without it: ${err instanceof Error ? err.message : err}`));
+		// the elected hub daemon serves every registered board on the webUi port; non-hub
+		// daemons register with it and serve nothing (one port, one ui)
+		joinHub({ name: basename(root), root, host: webUi.host, port: webUi.port, log: (message) => log(root, message) });
 	}
 }
 

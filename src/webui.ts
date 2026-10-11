@@ -51,8 +51,9 @@ function taskUpdated(root: string, file: string): number {
 	}
 }
 
-// mirror of orchestrator.ts pidAlive; webui cannot import orchestrator (it imports webui)
-function pidAlive(pid: number): boolean {
+// mirror of orchestrator.ts pidAlive; webui and hub cannot import orchestrator (it imports webui),
+// so this copy is shared with hub.ts
+export function pidAlive(pid: number): boolean {
 	if (!Number.isInteger(pid) || pid <= 0) return false;
 	try {
 		process.kill(pid, 0);
@@ -207,6 +208,57 @@ function readRange(path: string, start: number, end: number): string {
 	}
 }
 
+// one payload per task, from board files and pid files of one project root; the single-project
+// server and the hub's per-project variant both serve it
+export function taskPayload(root: string) {
+	return listAll(root).map((t) => ({
+		file: t.file,
+		name: t.name,
+		priority: t.priority,
+		state: t.state,
+		worktree: t.worktree,
+		updated: taskUpdated(root, t.file),
+		body: taskBody(root, t.file),
+		agents: agentHistory(root, t),
+		agent: agentInfo(root, t),
+	}));
+}
+
+// {status, body} for /api/agent-log against one project root; null = unknown file or handle
+export function agentLogPayload(root: string, q: URLSearchParams): string | null {
+	const log = agentLogPath(root, q.get("file") ?? "");
+	if (!log) return null;
+	const n = parseInt(q.get("offset") ?? "", 10);
+	const off = Number.isInteger(n) && n >= 0 ? n : null;
+	let head: number, tail: number;
+	if (q.get("before") === "1") {
+		tail = off ?? 0;
+		head = Math.max(0, tail - LOG_CHUNK);
+	} else {
+		let size = 0;
+		try {
+			size = statSync(log).size;
+		} catch {
+			// agent spawned but no output yet
+		}
+		head = off ? Math.min(off, size) : Math.max(0, size - LOG_CHUNK);
+		tail = size;
+	}
+	let text = "";
+	try {
+		text = readRange(log, head, tail);
+		if (head > 0 && readRange(log, head - 1, head) !== "\n") {
+			// head lands mid-record: drop the partial head line, only whole records render
+			const nl = text.indexOf("\n");
+			text = nl === -1 ? "" : text.slice(nl + 1);
+		}
+		text = renderLogChunk(text);
+	} catch {
+		// log vanished mid-request
+	}
+	return JSON.stringify({ text, head, tail, atStart: head === 0 });
+}
+
 function serve(root: string, req: IncomingMessage, res: ServerResponse): void {
 	const path = (req.url ?? "/").split("?")[0];
 	if (req.method !== "GET") {
@@ -216,57 +268,14 @@ function serve(root: string, req: IncomingMessage, res: ServerResponse): void {
 		res.end(PAGE);
 	} else if (path === "/api/tasks") {
 		res.writeHead(200, { "content-type": "application/json; charset=utf-8", connection: "close" });
-		res.end(
-			JSON.stringify(
-				listAll(root).map((t) => ({
-					file: t.file,
-					name: t.name,
-					priority: t.priority,
-					state: t.state,
-					worktree: t.worktree,
-					updated: taskUpdated(root, t.file),
-					body: taskBody(root, t.file),
-					agents: agentHistory(root, t),
-					agent: agentInfo(root, t),
-				})),
-			),
-		);
+		res.end(JSON.stringify(taskPayload(root)));
 	} else if (path === "/api/agent-log") {
-		const q = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
-		const log = agentLogPath(root, q.get("file") ?? "");
-		if (!log) {
+		const payload = agentLogPayload(root, new URLSearchParams((req.url ?? "").split("?")[1] ?? ""));
+		if (!payload) {
 			res.writeHead(404).end();
 		} else {
-			const n = parseInt(q.get("offset") ?? "", 10);
-			const off = Number.isInteger(n) && n >= 0 ? n : null;
-			let head: number, tail: number;
-			if (q.get("before") === "1") {
-				tail = off ?? 0;
-				head = Math.max(0, tail - LOG_CHUNK);
-			} else {
-				let size = 0;
-				try {
-					size = statSync(log).size;
-				} catch {
-					// agent spawned but no output yet
-				}
-				head = off ? Math.min(off, size) : Math.max(0, size - LOG_CHUNK);
-				tail = size;
-			}
-			let text = "";
-			try {
-				text = readRange(log, head, tail);
-				if (head > 0 && readRange(log, head - 1, head) !== "\n") {
-					// head lands mid-record: drop the partial head line, only whole records render
-					const nl = text.indexOf("\n");
-					text = nl === -1 ? "" : text.slice(nl + 1);
-				}
-				text = renderLogChunk(text);
-			} catch {
-				// log vanished mid-request
-			}
 			res.writeHead(200, { "content-type": "application/json; charset=utf-8", connection: "close" });
-			res.end(JSON.stringify({ text, head, tail, atStart: head === 0 }));
+			res.end(payload);
 		}
 	} else {
 		res.writeHead(404).end();
@@ -296,7 +305,8 @@ export function flipDiff(oldPos, newPos) {
 	return diff;
 }
 
-const PAGE = `<!doctype html>
+// served by the single-project server and by the hub for every registered project (000039 makes it tabbed)
+export const PAGE = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
