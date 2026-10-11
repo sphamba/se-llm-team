@@ -2,7 +2,8 @@
 name: "feat: log pane sans serif; thinking and tool blocks collapsed with one-liner summaries; smooth auto-scroll"
 priority: "medium"
 state: "backlog"
-worktree: ""
+worktree: "feat/122-log-pane-sans"
+blockedBy: "#52"
 ---
 
 # Summary
