@@ -3,6 +3,7 @@ import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, 
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+	COMPLEXITIES,
 	getTask,
 	kanbanDir,
 	listAll,
@@ -21,7 +22,12 @@ const DEFAULT_POLL_MINUTES = 1;
 const DEFAULT_AUTO_SCHEDULE_MINUTES = 5;
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const RESPAWN_CAP = 5;
+// final fallback for the per-complexity cap when a Config carries no reviewerCap entry for
+// the task's complexity
 const REVIEWER_RUN_CAP = 3;
+// per-complexity forced-advance caps: successful reviewer runs before to-review moves on to
+// to-live-test; each overridable via the top-level reviewerCap config key
+const DEFAULT_REVIEWER_CAP: Record<string, number> = { simple: 1, moderate: 2, complex: 3 };
 // consecutive failed auto-pushes before the daemon logs its once-only warning (a success
 // resets the count); the per-failure line is easy to miss, the warning names the consequence
 const PUSH_WARN_AFTER = 3;
@@ -38,12 +44,21 @@ interface LlmConfig {
 	thinking?: string;
 }
 
+// a roles entry may also hold per-complexity sub-objects keyed simple/moderate/complex, each
+// an LlmConfig that overrides the role defaults for tasks of that complexity
+interface RoleLlmConfig extends LlmConfig {
+	simple?: LlmConfig;
+	moderate?: LlmConfig;
+	complex?: LlmConfig;
+}
+
 interface Config {
 	agent: string;
 	pollMinutes: number;
 	autoScheduleMinutes: number;
 	llm: LlmConfig;
-	roles: Record<string, LlmConfig>;
+	roles: Record<string, RoleLlmConfig>;
+	reviewerCap: Record<string, number>;
 }
 
 // the provider/model/thinking triple of one config object (global or a roles entry); values
@@ -60,7 +75,7 @@ function cleanLlm(root: string, entry: unknown, where = ""): LlmConfig {
 }
 
 function loadConfig(root: string): Config {
-	let cfg: { agent?: string; pollMinutes?: number; autoScheduleMinutes?: number; provider?: unknown; model?: unknown; thinking?: unknown; roles?: unknown } = {};
+	let cfg: { agent?: string; pollMinutes?: number; autoScheduleMinutes?: number; provider?: unknown; model?: unknown; thinking?: unknown; roles?: unknown; reviewerCap?: unknown } = {};
 	// user-level first, project .kanban/se-llm-team.json overrides it
 	for (const path of [join(process.env.HOME ?? "", ".pi", "agent", "se-llm-team.json"), join(root, ".kanban", "se-llm-team.json")]) {
 		try {
@@ -69,9 +84,33 @@ function loadConfig(root: string): Config {
 			/* optional file */
 		}
 	}
-	const roles: Record<string, LlmConfig> = {};
+	const roles: Record<string, RoleLlmConfig> = {};
 	if (cfg.roles && typeof cfg.roles === "object" && !Array.isArray(cfg.roles)) {
-		for (const [role, entry] of Object.entries(cfg.roles)) roles[role] = cleanLlm(root, entry, ` for role "${role}"`);
+		for (const [role, entry] of Object.entries(cfg.roles)) {
+			const clean: RoleLlmConfig = cleanLlm(root, entry, ` for role "${role}"`);
+			// nested complexity sub-objects are cleaned like role entries; a non-object value
+			// under those keys warns and is ignored, like a non-object role
+			const src = (entry ?? {}) as Record<string, unknown>;
+			for (const cx of COMPLEXITIES) {
+				const v = src[cx];
+				if (v === undefined) continue;
+				if (v && typeof v === "object" && !Array.isArray(v)) clean[cx] = cleanLlm(root, v, ` for role "${role}" ${cx}`);
+				else log(root, `non-object complexity override ${JSON.stringify(v)} for role "${role}" ${cx}, ignored`);
+			}
+			roles[role] = clean;
+		}
+	}
+	const reviewerCap: Record<string, number> = { ...DEFAULT_REVIEWER_CAP };
+	if (cfg.reviewerCap && typeof cfg.reviewerCap === "object" && !Array.isArray(cfg.reviewerCap)) {
+		for (const cx of COMPLEXITIES) {
+			const v = (cfg.reviewerCap as Record<string, unknown>)[cx];
+			if (v === undefined) continue;
+			if (typeof v !== "number" || !Number.isInteger(v) || v < 1) {
+				log(root, `invalid reviewerCap.${cx} ${JSON.stringify(v)}, ignored (expected an integer >= 1)`);
+				continue;
+			}
+			reviewerCap[cx] = v;
+		}
 	}
 	return {
 		agent: cfg.agent ?? "pi",
@@ -79,16 +118,19 @@ function loadConfig(root: string): Config {
 		autoScheduleMinutes: cfg.autoScheduleMinutes ?? DEFAULT_AUTO_SCHEDULE_MINUTES,
 		llm: cleanLlm(root, cfg, " (global)"),
 		roles,
+		reviewerCap,
 	};
 }
 
-// per-field precedence: the role entry wins over the global default, an unset field adds no
-// flag. --provider is only valid together with --model, so a provider alone is ignored.
-function llmFlags(root: string, cfg: Config, role: string): string[] {
+// per-field precedence: the role's complexity entry wins over the role default, which wins
+// over the global default; an unset field adds no flag. --provider is only valid together
+// with --model, so a provider alone is ignored.
+function llmFlags(root: string, cfg: Config, role: string, complexity: string): string[] {
 	const roleCfg = cfg.roles[role] ?? {};
-	const provider = roleCfg.provider ?? cfg.llm.provider;
-	const model = roleCfg.model ?? cfg.llm.model;
-	const thinking = roleCfg.thinking ?? cfg.llm.thinking;
+	const cxCfg = (roleCfg as Record<string, LlmConfig | undefined>)[complexity] ?? {};
+	const provider = cxCfg.provider ?? roleCfg.provider ?? cfg.llm.provider;
+	const model = cxCfg.model ?? roleCfg.model ?? cfg.llm.model;
+	const thinking = cxCfg.thinking ?? roleCfg.thinking ?? cfg.llm.thinking;
 	const flags: string[] = [];
 	if (provider && !model) log(root, `provider "${provider}" for role ${role} ignored: --provider requires --model`);
 	else if (provider) flags.push("--provider", provider);
@@ -202,7 +244,7 @@ function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: st
 	// --approve trusts the project-local files of the worktree, so the headless session never waits for a trust prompt;
 	// --mode json streams the full JSONL event log (thinking, tool calls, text) instead of print mode's final text only;
 	// the provider/model/thinking flags come from the config, resolved per role
-	const child = spawn(cfg.agent, ["--approve", "--mode", "json", ...llmFlags(root, cfg, role), "-p", renderPrompt(root, role, task, cwd === root ? undefined : cwd)], {
+	const child = spawn(cfg.agent, ["--approve", "--mode", "json", ...llmFlags(root, cfg, role, task.complexity ?? "moderate"), "-p", renderPrompt(root, role, task, cwd === root ? undefined : cwd)], {
 		cwd,
 		detached: true,
 		stdio: ["ignore", out, out],
@@ -709,14 +751,15 @@ function rescan(root: string, cfg: Config): void {
 				else {
 					const slug = task.file.replace(/\.md$/, "");
 					consumeReviewerRun(root, slug);
-					if (readCounter(root, `${slug}.reviewer-runs`) >= REVIEWER_RUN_CAP) {
+					const cap = cfg.reviewerCap[task.complexity] ?? REVIEWER_RUN_CAP;
+					if (readCounter(root, `${slug}.reviewer-runs`) >= cap) {
 						// re-read before the forced advance: a state changed underneath (PM or user) wins
 						const fresh = getTask(root, task.file);
 						if (fresh && fresh.state === "to-review") {
 							setState(root, fresh, "to-live-test");
 							// clears the count, so a future rework cycle starts fresh
 							writeFileSync(counterPath(root, `${slug}.reviewer-runs`), "0");
-							log(root, "reviewer succeeded 3+ times, moving to to-live-test");
+							log(root, `${task.file}: reviewer succeeded ${cap}+ times, moving to to-live-test`);
 						}
 					} else {
 						spawnAgent(root, cfg, "reviewer", task, ensured.wtDir);

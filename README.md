@@ -19,7 +19,8 @@ ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
   "pollMinutes": 15,
   "model": "anthropic/claude-sonnet-4-5",
   "thinking": "high",
-  "roles": { "developer": { "thinking": "xhigh" } },
+  "roles": { "developer": { "thinking": "xhigh", "complex": { "model": "big-model" } } },
+  "reviewerCap": { "simple": 1, "moderate": 2, "complex": 3 },
   "webUi": { "enabled": true, "host": "localhost", "port": 4242 }
 }
 ```
@@ -33,6 +34,8 @@ ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
 | `model` | unset | LLM model or pattern to pass as `--model`. A `:<thinking>` suffix in the pattern keeps working natively. |
 | `thinking` | unset | Reasoning level to pass as `--thinking`: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. An unknown value is ignored with a warning. |
 | `roles.<type>.<key>` | unset | Override `provider`, `model` or `thinking` for one agent type (`developer`, `reviewer`, `live-tester`, `merger`); per-field, so unset fields keep the global value. |
+| `roles.<type>.<complexity>.<key>` | unset | Same fields nested under `simple`, `moderate` or `complex` inside a roles entry. Applies to tasks whose `complexity` attribute matches; per-field, so unset fields keep the role default and unset role fields keep the global value. |
+| `reviewerCap.<complexity>` | `1`/`2`/`3` | Successful reviewer runs before a to-review task force-advances to to-live-test, per task complexity: simple `1`, moderate `2`, complex `3`. An invalid value (non-integer or < 1) warns and keeps the default. |
 | `webUi.enabled` | off | Serve the web dashboard with the daemon. |
 | `webUi.host` | `localhost` | Dashboard bind host. |
 | `webUi.port` | `4242` | Dashboard port. |
@@ -50,7 +53,7 @@ There are no dependencies and no lockfile yet. The checks still run with `node` 
 
 ## Kanban board
 
-`.kanban/` in the project repo holds one markdown file per task, named `000001_nice_thing.md` (zero-padded number, slug capped at 4 words with the type word dropped). Flat YAML frontmatter (name, priority, state, worktree) plus # Summary, # Specs, # Notes sections. The library writes files only; the orchestrator daemon is the sole git committer for `.kanban/` paths, at two points only: creation in backlog, and done. Edits in between stay uncommitted and land in the one done commit.
+`.kanban/` in the project repo holds one markdown file per task, named `000001_nice_thing.md` (zero-padded number, slug capped at 4 words with the type word dropped). Flat YAML frontmatter (name, priority, state, worktree, issuer, complexity) plus # Summary, # Specs, # Notes sections. The complexity attribute (`simple`, `moderate` or `complex`) defaults to `moderate` and drives which per-complexity LLM config entry and reviewer-pass cap apply. The library writes files only; the orchestrator daemon is the sole git committer for `.kanban/` paths, at two points only: creation in backlog, and done. Edits in between stay uncommitted and land in the one done commit.
 
 States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing, to-merge, merging, done.
 
@@ -60,7 +63,7 @@ States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing,
 
 - Watches `.kanban/` (fs.watch) and rescans every 10 s. The `orchestrator_poke` tool touches `.kanban/.poke` for an immediate scan and agent scheduling.
 - to-do: creates `.worktrees/<type>/<num>-<short-slug>` (e.g. feat/1-nice-thing) from the task, sets the worktree attribute, spawns a Developer, moves to doing. Unlimited lanes; the PM throttles by how many tasks it promotes to to-do.
-- to-review: spawns a Reviewer, moves to reviewing.
+- to-review: spawns a Reviewer, moves to reviewing. After `reviewerCap.<complexity>` successful reviewer runs (1 for simple, 2 for moderate, 3 for complex by default) the task force-advances to to-live-test.
 - to-live-test: spawns a Live-tester, moves to live-testing.
 - to-merge: spawns at most one Merger for the whole project (while the task's own agent is still alive the spawn waits), moves to merging. Only after the task sat idle in to-merge for `autoScheduleMinutes` does a merger requeued by a failed merge get a retry.
 - merging: the Merger merges main into the task worktree, resolves conflicts and runs the tests there, then merges the branch into main from the root checkout and sets done. When the merge cannot be completed it sets the task back to to-merge and aborts any merge left dirty in the root or the worktree, so main never sits mid-merge.

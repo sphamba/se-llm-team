@@ -1178,7 +1178,7 @@ writeFileSync(
 		model: "global-model",
 		thinking: "high",
 		roles: {
-			developer: { model: "dev-model", thinking: "low" },
+			developer: { model: "dev-model", thinking: "low", complex: { model: "dev-complex-model" } },
 			reviewer: { provider: "prov", model: "rev-model" },
 			merger: { provider: "mprov", model: "merge-model" },
 		},
@@ -1186,14 +1186,28 @@ writeFileSync(
 );
 const taskX = createTask(rootX, { name: "feat: llm flags", summary: "LLM config smoke", specs: "n/a" });
 setState(rootX, taskX, "to-do");
+// a complex task: the developer resolves through roles.developer.complex
+const taskX3 = createTask(rootX, { name: "feat: llm flags complex", summary: "LLM config smoke", specs: "n/a", complexity: "complex" });
+setState(rootX, taskX3, "to-do");
 
 const x = await runDaemon(rootX, join(HERE, "orchestrator.ts"), homeX);
-await waitFor(() => parseTask(rootX, taskX.file).state === "done" && parseTask(rootX, taskX.file).worktree === "", 60000, "pipeline with llm config", x.output);
+await waitFor(
+	() =>
+		[taskX, taskX3].every((t) => parseTask(rootX, t.file).state === "done" && parseTask(rootX, t.file).worktree === ""),
+	60000,
+	"pipelines with llm config",
+	x.output,
+);
 const xSpawns = () => readFileSync(join(rootX, "argv.log"), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as { role: string; argv: string[] });
-const xFlags = (role: string) => llmArgs(xSpawns().find((s) => s.role === role)!.argv);
-assert.deepEqual(xFlags("developer"), ["--model", "dev-model", "--thinking", "low"], "role entry overrides both global fields");
-assert.deepEqual(xFlags("reviewer"), ["--provider", "prov", "--model", "rev-model", "--thinking", "high"], "role provider+model keeps the global thinking");
-assert.deepEqual(xFlags("live-tester"), ["--model", "global-model", "--thinking", "high"], "no role entry: the global fields apply");
+// the prompt carries the task file path, so spawns are attributable per task
+const xFlags = (role: string, file: string) => {
+	const spawns = xSpawns().filter((s) => s.role === role && (s.argv[s.argv.indexOf("-p") + 1] ?? "").includes(file));
+	return llmArgs(spawns[spawns.length - 1].argv);
+};
+assert.deepEqual(xFlags("developer", taskX.file), ["--model", "dev-model", "--thinking", "low"], "role entry overrides both global fields for a moderate task");
+assert.deepEqual(xFlags("developer", taskX3.file), ["--model", "dev-complex-model", "--thinking", "low"], "complexity entry overrides the nested field; unset nested fields keep the role default");
+assert.deepEqual(xFlags("reviewer", taskX.file), ["--provider", "prov", "--model", "rev-model", "--thinking", "high"], "role provider+model keeps the global thinking");
+assert.deepEqual(xFlags("live-tester", taskX.file), ["--model", "global-model", "--thinking", "high"], "no role entry: the global fields apply");
 
 // a conflicting branch under the same running daemon makes the merger path run and record
 execSync("git checkout -qb fix/llm-conflict", { cwd: rootX, shell: "/bin/bash" });
@@ -1206,7 +1220,7 @@ const taskX2 = createTask(rootX, { name: "fix: llm merger", summary: "LLM merger
 setState(rootX, taskX2, "to-merge");
 setWorktree(rootX, taskX2, "fix/llm-conflict");
 await waitFor(() => xSpawns().some((s) => s.role === "merger"), 30000, "merger spawned under the llm config", x.output);
-assert.deepEqual(xFlags("merger"), ["--provider", "mprov", "--model", "merge-model", "--thinking", "high"], "merger role override applies");
+assert.deepEqual(xFlags("merger", taskX2.file), ["--provider", "mprov", "--model", "merge-model", "--thinking", "high"], "merger role override applies");
 x.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + llm config flags smoke passed");
 
@@ -1218,7 +1232,7 @@ cleaned.push(homeY);
 mkdirSync(kanbanDir(rootY), { recursive: true });
 writeFileSync(
 	join(kanbanDir(rootY), "se-llm-team.json"),
-	JSON.stringify({ agent: argvStub(rootY), pollMinutes: 0.05, provider: "lonely-provider", thinking: "banana", roles: { developer: "not-an-object", reviewer: { thinking: "wild" } } }),
+	JSON.stringify({ agent: argvStub(rootY), pollMinutes: 0.05, provider: "lonely-provider", thinking: "banana", roles: { developer: "not-an-object", reviewer: { thinking: "wild", complex: "not-an-object" } } }),
 );
 const taskY = createTask(rootY, { name: "fix: bad llm config", summary: "Bad llm config smoke", specs: "n/a" });
 setState(rootY, taskY, "to-do");
@@ -1234,6 +1248,7 @@ await waitFor(() => {
 assert.ok(y.output().includes('unknown thinking level "banana" (global)'), "global thinking typo warned about");
 assert.ok(y.output().includes('unknown thinking level "wild" for role "reviewer"'), "role thinking typo warned about");
 assert.ok(y.output().includes('provider "lonely-provider" for role developer ignored'), "provider without model warned about");
+assert.ok(y.output().includes('non-object complexity override "not-an-object" for role "reviewer" complex, ignored'), "non-object complexity override warned about");
 const yDev = JSON.parse(readFileSync(join(rootY, "argv.log"), "utf8").trim().split("\n").find((l) => l.includes('"developer"'))!) as { role: string; argv: string[] };
 assert.deepEqual(llmArgs(yDev.argv), [], "bad config values add no flags");
 y.daemon.kill("SIGTERM");
@@ -1272,7 +1287,8 @@ assert.ok(showTip(rootZ, taskZ.file)!.includes("- in-flight note"), "the done mi
 z2.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + restart preserves in-flight board state smoke passed");
 
-// --- part AA: the reviewer successful-run cap: 3 successful runs, the 4th spawn is refused ---
+// --- part AA: the reviewer successful-run cap: for the default moderate complexity, 2
+// successful runs, the 3rd spawn is refused ---
 // a reviewer run is successful when it sets the task state itself (back to to-review after
 // changes, or forward to to-live-test on approval); died runs go through the dead counter
 const loopStub = (root: string) => {
@@ -1308,14 +1324,42 @@ const runsAA = () => {
 		return 0;
 	}
 };
-// three successful reviewer runs (each back to to-review), then the 4th spawn is refused
-await waitFor(() => aa.output().includes("reviewer succeeded 3+ times, moving to to-live-test"), 60000, "reviewer cap refusal logged", aa.output);
-assert.equal(aa.output().split("spawned reviewer").length - 1, 3, "exactly three reviewer spawns before the refusal");
+// two successful reviewer runs (each back to to-review), then the 3rd spawn is refused
+await waitFor(() => aa.output().includes(`${taskAA.file}: reviewer succeeded 2+ times, moving to to-live-test`), 60000, "reviewer cap refusal logged", aa.output);
+assert.equal(aa.output().split("spawned reviewer").length - 1, 2, "exactly two reviewer spawns before the refusal");
 assert.equal(runsAA(), 0, "the counter cleared on the forced to-live-test advance");
 const reviewerLogsAA = readdirSync(join(kanbanDir(rootAA), ".logs")).filter((f) => f.startsWith(`${slugAA}.reviewer.`) && f.endsWith(".log")).sort();
-assert.deepEqual(reviewerLogsAA, [`${slugAA}.reviewer.0.log`, `${slugAA}.reviewer.1.log`, `${slugAA}.reviewer.2.log`], "three indexed reviewer run logs, no fourth");
+assert.deepEqual(reviewerLogsAA, [`${slugAA}.reviewer.0.log`, `${slugAA}.reviewer.1.log`], "two indexed reviewer run logs, no third");
 // the pipeline continues from the forced advance: the live-tester runs and the task completes
 await waitFor(() => parseTask(rootAA, taskAA.file).state === "done" && parseTask(rootAA, taskAA.file).worktree === "", 60000, "pipeline after the cap refusal", aa.output);
 assert.equal(runsAA(), 0, "counter still cleared after the pipeline completed");
 aa.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + reviewer successful-run cap smoke passed");
+
+// --- part AB: the reviewer cap follows the task's complexity: simple advances at the default 1,
+// a configured override applies, an invalid configured value warns and falls back to the default 3
+const rootAB = fixture();
+cleaned.push(rootAB);
+mkdirSync(kanbanDir(rootAB), { recursive: true });
+writeFileSync(
+	join(kanbanDir(rootAB), "se-llm-team.json"),
+	JSON.stringify({ agent: loopStub(rootAB), pollMinutes: 0.05, reviewerCap: { moderate: 1, complex: 0 } }),
+);
+const taskABSimple = createTask(rootAB, { name: "fix: simple cap", summary: "Per-complexity cap smoke", specs: "n/a", complexity: "simple" });
+const taskABMod = createTask(rootAB, { name: "fix: overridden cap", summary: "Per-complexity cap smoke", specs: "n/a" });
+const taskABComplex = createTask(rootAB, { name: "fix: complex cap", summary: "Per-complexity cap smoke", specs: "n/a", complexity: "complex" });
+for (const t of [taskABSimple, taskABMod, taskABComplex]) setState(rootAB, t, "to-review");
+
+const ab = await runDaemon(rootAB);
+// invalid reviewerCap.complex warns at load; the cap falls back to the default 3
+await waitFor(() => ab.output().includes("invalid reviewerCap.complex 0, ignored (expected an integer >= 1)"), 10000, "invalid reviewerCap warning", ab.output);
+// simple: default cap 1; moderate: the configured override 1; complex: fallback to the default 3
+await waitFor(() => ab.output().includes(`${taskABSimple.file}: reviewer succeeded 1+ times, moving to to-live-test`), 60000, "simple cap 1", ab.output);
+await waitFor(() => ab.output().includes(`${taskABMod.file}: reviewer succeeded 1+ times, moving to to-live-test`), 60000, "configured override cap 1", ab.output);
+await waitFor(() => ab.output().includes(`${taskABComplex.file}: reviewer succeeded 3+ times, moving to to-live-test`), 60000, "invalid value fell back to the default 3", ab.output);
+const reviewerSpawns = (file: string) => ab.output().split("\n").filter((l) => l.includes("spawned reviewer") && l.includes(`for ${file}`)).length;
+assert.equal(reviewerSpawns(taskABSimple.file), 1, "simple task force-advanced after one successful run");
+assert.equal(reviewerSpawns(taskABMod.file), 1, "configured moderate override applied");
+assert.equal(reviewerSpawns(taskABComplex.file), 3, "invalid configured value fell back to the default 3");
+ab.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + per-complexity reviewer cap smoke passed");

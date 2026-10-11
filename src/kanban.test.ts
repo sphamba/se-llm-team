@@ -34,9 +34,12 @@ assert.equal(t1.file, "000001_nice_thing.md");
 assert.equal(t1.state, "backlog");
 assert.equal(t1.name, "feat: nice thing");
 assert.equal(t1.priority, "high");
+assert.equal(t1.complexity, "moderate"); // default complexity written on every new task
+assert.match(readFileSync(join(root, ".kanban", t1.file), "utf8"), /^complexity: "moderate"$/m);
 const t2 = createTask(root, { name: "fix: other thing", summary: "Fix it" });
 assert.equal(t2.file, "000002_other_thing.md");
 assert.equal(t2.priority, "medium");
+assert.equal(t2.complexity, "moderate");
 // name with colon must round-trip through the quoted frontmatter
 assert.equal(parseTask(root, t1.file).name, "feat: nice thing");
 
@@ -51,10 +54,10 @@ assert.deepEqual(listTasks(root, "backlog").map((t) => ({ file: t.file, priority
 	{ file: t2.file, priority: "medium", state: "backlog" },
 ]);
 
-// listTasks entries carry num
-assert.deepEqual(listTasks(root, "backlog").map((t) => ({ file: t.file, num: t.num })), [
-	{ file: t1.file, num: 1 },
-	{ file: t2.file, num: 2 },
+// listTasks entries carry num and complexity
+assert.deepEqual(listTasks(root, "backlog").map((t) => ({ file: t.file, num: t.num, complexity: t.complexity })), [
+	{ file: t1.file, num: 1, complexity: "moderate" },
+	{ file: t2.file, num: 2, complexity: "moderate" },
 ]);
 
 // priority filter, alone and combined with scope
@@ -187,10 +190,10 @@ assert.equal(tq.openQuestions, "- [user] Which colour?");
 assert.match(readFileSync(join(qRoot, ".kanban", tq.file), "utf8"), /# Notes\n\n# Open questions\n- \[user\] Which colour\?\n$/);
 const tn = createTask(qRoot, { name: "feat: no questions", summary: "s" });
 assert.equal(tn.openQuestions, "");
-// without openQuestions the body is byte-identical to the pre-change format plus the issuer line
+// without openQuestions the body is byte-identical to the pre-change format plus the issuer and complexity lines
 assert.equal(
 	readFileSync(join(qRoot, ".kanban", tn.file), "utf8"),
-	`---\nname: "feat: no questions"\npriority: "medium"\nstate: "backlog"\nworktree: ""\nissuer: "user"\n---\n\n# Summary\ns\n\n# Specs\n\n\n# Notes\n`,
+	`---\nname: "feat: no questions"\npriority: "medium"\nstate: "backlog"\nworktree: ""\nissuer: "user"\ncomplexity: "moderate"\n---\n\n# Summary\ns\n\n# Specs\n\n\n# Notes\n`,
 );
 // an empty/whitespace openQuestions reads as absent: no section
 const te = createTask(qRoot, { name: "feat: empty questions", summary: "s", openQuestions: "  " });
@@ -243,6 +246,25 @@ assert.ok(listTasks(root, "in-progress").some((t) => t.file === ti.file), "to-me
 setState(root, ti, "merging");
 assert.equal(parseTask(root, ti.file).state, "merging");
 assert.ok(listTasks(root, "in-progress").some((t) => t.file === ti.file), "merging counts as in-progress");
+
+// complexity: passed value written and quoted, updatable with replace semantics
+const tcx = createTask(root, { name: "feat: complex work", summary: "s", complexity: "complex" });
+assert.equal(tcx.complexity, "complex");
+assert.match(readFileSync(join(root, ".kanban", tcx.file), "utf8"), /^complexity: "complex"$/m);
+assert.equal(parseTask(root, tcx.file).complexity, "complex"); // the quoted value round-trips
+updateTask(root, tcx, { complexity: "simple" });
+assert.equal(parseTask(root, tcx.file).complexity, "simple");
+assert.match(readFileSync(join(root, ".kanban", tcx.file), "utf8"), /^complexity: "simple"$/m);
+// state transitions and section rewrites never touch it
+setState(root, tcx, "to-do");
+updateTask(root, tcx, { summary: "s2" });
+assert.equal(parseTask(root, tcx.file).complexity, "simple");
+// unknown and absent values resolve as "moderate" at parse (attribute-less pre-change files too)
+writeFileSync(join(root, ".kanban", "000091_banana.md"), '---\nname: "banana"\ncomplexity: "banana"\n---\n# Summary\nx\n');
+assert.equal(getTask(root, "000091_banana.md")?.complexity, "moderate");
+assert.equal(getTask(root, "000090_legacy.md")?.complexity, "moderate");
+// kanban_list refs carry complexity
+assert.equal(listTasks(root, "in-progress").find((t) => t.file === tcx.file)?.complexity, "simple");
 
 rmSync(root, { recursive: true, force: true });
 console.log("kanban.test.ts: all assertions passed");
