@@ -1,7 +1,7 @@
 ---
 name: "fix: kanban tool responses carry only zero-padded numbers - include the short #NN form"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/kanban-tool-responses-carry-only-zero-padded-numbers-include-the-short-nn-form"
 ---
 
@@ -24,3 +24,5 @@ Constraints:
 - Files: src/kanban.ts, index.ts, src/kanban.test.ts. Disjoint from all active lanes (#54, #50, #49, #56, #36).
 
 # Notes
+
+- [2026-10-11 09:05] Implemented in worktree commit 24d3719: exported taskNum(file) from src/kanban.ts (leading 6 digits, 0 fallback for non-numbered names) and reused it in createTask numbering; all four kanban tool responses (create/update/set_state/set_worktree) now carry both the file name and (#NN); kanban_list entries and the tool description gain num. Checks: node kanban.test.ts, orchestrator.test.ts, webui.test.ts all pass (webui.test spawns its own daemon with isolated HOME and port 0, so it runs without the no-webui override). No real tsc installed; typechecked src/kanban.ts + src/kanban.test.ts with typescript 5.9.3 strict from another local project: only the two pre-existing errors in untouched replaceSections code, error set identical to main.
