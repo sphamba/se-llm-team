@@ -87,4 +87,11 @@ Constraints:
   - Escaping: a task name of `<img src=x onerror=alert(1)> "quote"` renders as literal text in the card and the detail card, injects no img element, fires no alert/XSS dialog, and its blockedBy link to `#8` still works. No page errors across the run.
 - No issues found; no follow-up tasks created.
 
+## 2026-10-11 (merger)
+
+- Step 1: base branch resolved as main (root on main). Merged main into feat/81-webui-task-ids in the worktree. One conflict: src/webui.test.ts (main's task 000100 agentLabel import + complexity assert vs this task's curve/numLinkHtml/relationPaths imports + blockedBy assert - both sides additive, both kept in one merged import line and one merged assert block). Committed as 6e8a219.
+- All three suites re-run green in the worktree after the merge: kanban, orchestrator, webui. No fixes needed. (The first orchestrator run timed out at 180s only because the #114 session was running its own load-test loop with CPU hogs on the same machine; the rerun after that loop finished passed.)
+- Step 2: base branch re-resolved as main (unchanged, root clean). Merged feat/81-webui-task-ids into main in the project root: fast-forward 52c358b..6e8a219, no conflicts. main now carries the full change (src/webui.ts, src/webui.test.ts).
+- No open questions.
+
 # Open questions
