@@ -55,3 +55,11 @@ Method: ran the real daemon (`node src/orchestrator.ts --root <tmp> --no-webui -
 - README: the `logStallMinutes` row is present with the default 5, the bounce/kill behavior, and the invalid-value warning.
 
 Result: no issues found. The stall window is configurable, applies within the window plus one poll, kills the process, bounces one state back, and counts the death. The healthy, no-log and dead-pid paths behave as specified. The worktree stayed clean (no code change by the live test).
+
+## Merge report (2026-10-11)
+
+Step 1: the root checkout was on `main`; merged `main` into `feat/115-detect-a-stalled` in the worktree. Git auto-merged `src/orchestrator.test.ts` (main's two-token pid-file test assertions from 016a975 vs the branch's stall tests); clean, no conflicts, no manual resolution. Merge commit `fa562ae`... wait, that is the fast-forward on root; the worktree merge commit is the one on the branch. Since the merge was clean (no conflicts), the test suites were skipped per the merge procedure.
+
+Step 2: the root checkout was still on `main`; merged `feat/115-detect-a-stalled` into `main` in the project root with `git merge --no-edit`. Fast-forward (`1f3e1bb` -> `fa562ae`), clean; no conflicts and no test run.
+
+Both merges complete; state set to done.
