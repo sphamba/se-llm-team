@@ -467,12 +467,29 @@ const g = await runDaemon(rootG);
 // "fix: defer merge while alive" caps at 4 words then drops the type word: defer-merge-while
 const wtG = join(rootG, ".worktrees", "fix/1-defer-merge-while");
 await waitFor(() => parseTask(rootG, taskG.file).state === "to-merge", 30000, "live-tester set to-merge", g.output);
-// the stub lingers 5s and the daemon rescans every 1s, so sweeps ran while the pid was alive:
-// no merger spawn, no done mirror commit
-await new Promise((r) => setTimeout(r, 2000));
-assert.ok(existsSync(wtG), "worktree kept while the live-tester pid is alive");
-assert.ok(!g.output().includes("spawned merger"), "no merger spawned while the live-tester pid is alive");
-assert.ok(!mirrorSubjects(rootG).includes(`kanban: done ${taskG.file}`), "no done mirror commit while the live-tester pid is alive");
+// the stub lingers 5s before exiting, but its node startup eats into that window, so a fixed
+// sleep can land after the stub's death and the whole merger chain on a loaded machine. Poll
+// until the registered pid is actually dead instead, asserting the defer continuously while
+// it lives: every sweep in the window must defer
+const livePidG = () => {
+	try {
+		return parseInt(readFileSync(join(kanbanDir(rootG), ".pids", `${taskG.file.replace(/\.md$/, "")}.pid`), "utf8").trim(), 10);
+	} catch {
+		return 0; // pid file cleared once the poll saw the agent dead: the defer window is over
+	}
+};
+await waitFor(
+	() => {
+		if (!pidAlive(livePidG())) return true;
+		assert.ok(existsSync(wtG), "worktree kept while the live-tester pid is alive");
+		assert.ok(!g.output().includes("spawned merger"), "no merger spawned while the live-tester pid is alive");
+		assert.ok(!mirrorSubjects(rootG).includes(`kanban: done ${taskG.file}`), "no done mirror commit while the live-tester pid is alive");
+		return false;
+	},
+	30000,
+	"live-tester pid death",
+	g.output,
+);
 // once the agent exits, the to-merge sweep spawns the merger, the merge completes and the
 // done mirror commit folds in the report
 await waitFor(() => !existsSync(wtG), 30000, "merge after agent death", g.output);
