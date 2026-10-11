@@ -1,8 +1,8 @@
 ---
 name: "feat: issuer attribute on tasks; webui differentiates task-issued from user-issued"
 priority: "high"
-state: "live-testing"
-worktree: "feat/72-issuer-attribute-on"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -37,6 +37,7 @@ Constraints:
 - Note: 000047 and 000058 (backlog) also touch src/webui.ts, and 000064 touches src/index.ts/src/kanban.ts - promote them after this task merges, in priority order.
 
 # Notes
+- [2026-10-11 12:35] Merge conflict for branch feat/72-issuer-attribute-on, merger spawned (attempt 1).
 
 - Rebased the branch onto main before starting: the hold 000070 is done and merged, and main had moved (000047's stacked webui columns, fix/69), so the webui changes sit on the merged code. No conflicts.
 - src/kanban.ts: Task and TaskRef carry issuer. parseTask reads it, absent -> "user" (existing files are never rewritten). createTask writes it at creation only: values "user" or "#<num>", anything else (including absent) falls back to "user". serializeFrontmatter quotes every value, so issuer: "#42" stays a string and cannot start a YAML comment. kanban_update/setState/setWorktree never touch issuer.
@@ -52,3 +53,16 @@ Constraints:
 - The src/orchestrator.test.ts change is outside the Specs' file list but is a real pre-existing failure fix, not scope creep: on a pristine main copy in /tmp, part X stops at orchestrator.test.ts:1051 with actual ['--provider','RCP','--model','dev-model','--thinking','low'] because the daemon reads the user-level ~/.pi/agent/se-llm-team.json (src/orchestrator.ts:66) and this machine's sets provider/model/thinking. The extraEnv HOME isolation follows the file's existing pattern (homeS/homeU/homeV/homeW) and keeps every assertion in parts X and Y intact, now against the board config alone.
 - Accepted as-is: parseTask does not validate a hand-written issuer value, so issuer: "bogus" would render a "bogus" chip; the Specs require only absent -> "user" and only createTask writes the key. SPECS.md and README.md still describe the frontmatter as name/priority/state/worktree; the Specs' file list excludes docs, so they are unchanged (fold into a later docs task if wanted).
 - Live-test focus: a task only gets issuer "#<num>" if the Project manager actually passes it to kanban_create. Only the kanban_create tool description carries that rule; skills/se-llm-team/SKILL.md and agents/live-tester.md never mention issuer and the Specs' file list excludes them. Confirm a live-tester -> PM follow-up task lands as issuer "#<num>" and renders quieter, and that the hub view (GET /api/tasks?project=NAME) shows the chip too.
+
+Live test (commit b5e8466, worktree feat/72-issuer-attribute-on): PASS. No defect found.
+- Ran the full suite in the worktree: node src/kanban.test.ts, node src/webui.test.ts, node src/orchestrator.test.ts. All green (the orchestrator smoke ran to completion).
+- Drove the change like a user in a temp project (/tmp/lt72/root), through the worktree src/kanban.ts: a default task writes issuer: "user"; a task with issuer "#42" writes issuer: "#42" (quoted) and round-trips; an invalid issuer falls back to "user"; a hand-written pre-change file with no issuer reads as "user" and never gains the key after setState, updateTask and appendNote; listTasks carries the issuer.
+- Started the worktree webui on the temp project and opened it in a real browser (Playwright, system Chrome, screenshot at /tmp/lt72/light.png and /tmp/lt72/dark.png). Both themes render. User-issued cards show a plain "user" chip at full contrast. The task-issued card shows a dimmed name and a "#42" badge. The detail card shows issuer "#42". The light-theme badge is faint but legible (1.9:1, the same de-emphasis pair the page already ships for #updated). No visual defect.
+- GET /api/tasks carries the issuer for every task. hub.ts serves each project through the same taskPayload, so the hub view inherits the chip and the detail row. The hub server unit smoke in the orchestrator suite passed.
+- Existing task files are untouched: git diff main...HEAD lists no .kanban file.
+- Observed, not a defect and not given a task: the PM sets issuer only when it passes it to kanban_create, and that rule lives only in the tool description (skills/se-llm-team/SKILL.md and agents/*.md do not name issuer, and the Specs file list excludes them). A real live-tester to PM follow-up will land as issuer "#<num>" only if the PM reads the tool description. Worth confirming on the first real follow-up after the merge.
+
+Merge resolution (attempt 1): commit f8c8262 on main.
+- One unmerged file: src/orchestrator.test.ts, four hunks. Cause: main moved past the branch base (4d79759) with 35ba118, which independently landed the same fix the branch made there - parts X and Y isolate HOME so the user-level ~/.pi/agent/se-llm-team.json cannot leak into the exact-flag assertions. Main used a home?: string third param on runDaemon with per-part temp dirs (homeX, homeY); the branch used a general extraEnv param with one shared llmHome for both parts.
+- Resolution: took main's side in all four hunks (runDaemon signature, part X setup comment + homeX, part X and part Y runDaemon calls), per the main-wins rule - the Specs do not dictate the runDaemon signature, and main's form is the one already merged. Nothing from the branch is lost: its only changes to that file were the superseded HOME-isolation fix, and the branch's issuer feature lives in the five other files, which merged cleanly.
+- Validated the merged tree before committing: node src/kanban.test.ts, node src/webui.test.ts and node src/orchestrator.test.ts all pass, including the llm config flags and bad llm config smokes that the two HOME-isolation variants protect. No .kanban file changed in the merge.

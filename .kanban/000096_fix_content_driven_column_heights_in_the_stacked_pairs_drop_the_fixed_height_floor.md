@@ -1,7 +1,7 @@
 ---
 name: "fix: content-driven column heights in the stacked pairs; drop the fixed height floor"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/96-content-driven-column"
 ---
 
@@ -33,3 +33,12 @@ Constraints:
 - Suite: node src/kanban.test.ts, node src/orchestrator.test.ts and node src/webui.test.ts all green. No test change was needed.
 - Environment note: without an isolated HOME, the orchestrator llm-config-flags smoke fails on the unmodified base too (actual developer flags include `--provider RCP`, which comes from the machine-global ~/.pi/agent/se-llm-team.json; the test fixture declares no provider). This is pre-existing and not caused by this change. The run with a temp HOME makes all three suites green.
 - Browser check (headless Chrome over CDP against startWebUi on a temp board, ephemeral port, production webui untouched): with 5 cards in to-do and 1 in doing, the fixed CSS gives to-do 413px, doing 117px, all empty stacked columns 62px, side columns 62px high and 300px wide. Re-injecting the old `flex: 1 0 300px` gives 300px for doing and for every empty stacked column, the reported floor. So stacked columns grow with content and shrink to the header when empty, and the side columns are unchanged.
+
+## Reviewer notes
+- Review of commit 7e4683a on fix/96-content-driven-column. The diff against main is two added lines in src/webui.ts only: the `.pair .col { flex: 0 0 auto; }` rule and its comment.
+- Spec check passes. Change 1 is present. The row-direction `.col` rule keeps `flex: 1 0 300px`. The LAYOUT, the markup, the counts, the empty marker and the show-all cap are untouched. The file constraint holds (src/webui.ts only).
+- Rebase: main had moved to 35ba118 when the review started (per-run agent logs, plus the HOME isolation in the orchestrator llm-flag test), while the developer branch was based on 4d79759. The unre-based branch failed the llm-config-flags smoke on this machine through the ambient `~/.pi/agent/se-llm-team.json` (`--provider RCP` in the actual flags). The rebase onto 35ba118 resolved that and had no conflicts. The developer change itself is unchanged.
+- Tests on the rebased branch with the normal HOME: node src/kanban.test.ts, node src/orchestrator.test.ts and node src/webui.test.ts all green. No test update was needed.
+- Independent browser check (headless Chrome through Playwright, startWebUi on a temp board with 5 cards in to-do and 1 in doing): the new rule gives to-do 391px, doing 117px, every empty stacked column 62px, and the side columns 62px high and 300px wide. Re-injecting `flex: 1 0 300px` for `.pair .col` floors doing and every empty stacked column at 300px. This matches the developer measurement and the acceptance.
+- Merge check: `git merge-tree --write-tree main HEAD` is clean. The merge with feat/72-issuer-attribute-on auto-merges src/webui.ts without a conflict. The only conflict between those branches is src/orchestrator.test.ts, and that conflict is #72 against main, not this task.
+- No fixes were made during the review. No open questions.
