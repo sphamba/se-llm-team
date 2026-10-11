@@ -1,7 +1,7 @@
 ---
 name: "feat: agents list open questions in the task body; PM asks them to the user"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "feat/74-agents-list-open"
 ---
 
@@ -39,3 +39,11 @@ Constraints:
 - No webui changes (displaying open questions in the webui was not requested; add later on request).
 
 # Notes
+
+- [2026-10-11 11:00] All four agent prompts (developer, reviewer, live-tester, merger) now instruct the agent to list user/client clarification questions in a # Open questions section after # Notes, with the user/client-only rule and answer-removal behavior; open-questions edits joined the task-file-edit exception in the three worktree prompts.
+- [2026-10-11 11:00] live-tester step 5: the follow-up flow now tells the PM subagent to pass open questions as the kanban_create openQuestions parameter, so they land in the follow-up task body.
+- [2026-10-11 11:00] src/kanban.ts: parseTask carries the section as Task.openQuestions ("" when absent); createTask takes optional openQuestions appended as "# Open questions\n..." after # Notes (absent keeps the body byte-identical); updateTask accepts an openQuestions patch that replaces the section (appends it at the end when missing, empty string clears it).
+- [2026-10-11 11:00] src/index.ts: kanban_create and kanban_update expose the optional openQuestions parameter; kanban_get description mentions open questions.
+- [2026-10-11 11:00] skills/se-llm-team/SKILL.md: board section documents the optional # Open questions section and the openQuestions field; step 3 creates follow-up tasks with openQuestions; step 6 asks backlog open questions to the user (step-2 interview style), folds answers into the Specs with kanban_update and rewrites the section before promoting.
+- [2026-10-11 11:00] src/kanban.test.ts: parseTask carries openQuestions (absent, empty, with content); createTask writes the section when given and keeps the body byte-identical when not; the section survives setState/appendNote/updateTask summary-specs patches; updateTask replaces, appends and clears the section.
+- [2026-10-11 11:00] Full suite green: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts. Typecheck: no new type errors vs the pre-change baseline (the two strict-mode complaints in replaceSections/createTask priority are pre-existing at HEAD 401d398; the repo ships no tsconfig or node_modules, node type-stripping runs the suites). No webui changes (the /api/tasks payload already carries the raw body).
