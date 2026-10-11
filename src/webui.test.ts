@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, setState } from "./kanban.ts";
-import { loadWebUiConfig, startWebUi } from "./webui.ts";
+import { loadWebUiConfig, renderLogChunk, startWebUi } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing", "done"];
@@ -31,6 +31,32 @@ const realHome = process.env.HOME;
 process.env.HOME = home;
 assert.equal(loadWebUiConfig(root).enabled, false);
 process.env.HOME = realHome;
+
+// renderLogChunk: JSONL events render as readable lines, non-JSON lines pass through,
+// a partial trailing record (byte boundary split) drops
+const jsonl = [
+	JSON.stringify({ type: "session", version: 3, id: "s", timestamp: "now", cwd: "/r" }),
+	JSON.stringify({ type: "message_start", message: { role: "user", content: "Run the checks", timestamp: 1 } }),
+	JSON.stringify({ type: "message_end", message: { role: "user", content: "Run the checks", timestamp: 1 } }),
+	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } }),
+	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "Read the specs first." } }),
+	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_start", contentIndex: 1 } }),
+	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: "Starting the run." } }),
+	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "toolcall_end", contentIndex: 2, toolCall: { type: "toolCall", id: "t1", name: "bash", arguments: { command: "git status --short" } } } }),
+	JSON.stringify({ type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: { command: "git status --short" } }),
+	JSON.stringify({ type: "tool_execution_end", toolCallId: "t1", toolName: "bash", result: { content: [{ type: "text", text: "boom: exit 1" }] }, isError: true, durationMs: 5 }),
+	"pi: diagnostic that never was JSON",
+].join("\n") + "\n";
+const rendered = renderLogChunk(jsonl);
+assert.ok(rendered.includes("── thinking ──\n"), "thinking start renders a thinking line");
+assert.ok(rendered.includes("Read the specs first.\n"), "thinking delta renders");
+assert.ok(rendered.includes("Starting the run.\n"), "text delta renders as text");
+assert.equal(rendered.split("[tool] bash: git status --short").length - 1, 1, "one tool line per call: toolcall_end and execution start deduped by id");
+assert.ok(rendered.includes("[tool] bash failed: boom: exit 1\n"), "failed tool execution renders an error line");
+assert.ok(rendered.includes("pi: diagnostic that never was JSON\n"), "non-JSON line passes through unchanged");
+assert.ok(rendered.includes("[prompt] Run the checks\n"), "user message_end renders the prompt");
+assert.ok(!rendered.includes('"type"'), "parsed JSON records never leak raw JSON");
+assert.equal(renderLogChunk(jsonl + "partial-without-newline"), rendered, "a partial trailing record is dropped");
 
 // startWebUi on port 0 against a temp board with one task
 const task = createTask(root, { name: "feat: webui smoke", summary: "Dashboard smoke", specs: "Render the board" });
@@ -69,7 +95,7 @@ mkdirSync(join(root, ".kanban", ".pids"), { recursive: true });
 writeFileSync(join(root, ".kanban", ".pids", `${slug}.pid`), String(process.pid));
 mkdirSync(join(root, ".kanban", ".logs"), { recursive: true });
 const logFile = join(root, ".kanban", ".logs", `${slug}.developer.log`);
-const logText = "H".repeat(40000) + "\nEND\n";
+const logText = Array.from({ length: 626 }, () => "H".repeat(63) + "\n").join(""); // 64-byte lines: 16384-byte chunks never split one
 writeFileSync(logFile, logText);
 const working = (await (await fetch(`${base}/api/tasks`)).json())[0];
 assert.deepEqual(working.agent, { role: "developer", alive: true, log: `${slug}.developer` });
@@ -112,6 +138,18 @@ assert.equal(stale.agent.alive, false);
 // leave the board as the daemon section expects it
 rmSync(join(root, ".kanban", ".pids", `${slug}.pid`));
 setState(root, getTask(root, task.file)!, "backlog");
+
+// /api/agent-log renders a JSONL event log into readable lines
+const jsonlLog = [
+	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "Checking the board." } }),
+	JSON.stringify({ type: "tool_execution_start", toolCallId: "t1", toolName: "read", args: { path: "src/webui.ts" } }),
+	"not json at all",
+].join("\n") + "\n";
+writeFileSync(logFile, jsonlLog);
+const servedLog = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.ok(servedLog.text.includes("Checking the board.\n"), "endpoint renders the thinking line");
+assert.ok(servedLog.text.includes("[tool] read: src/webui.ts\n"), "endpoint renders the tool line");
+assert.ok(servedLog.text.includes("not json at all\n"), "endpoint passes non-JSON lines through");
 
 // a second startWebUi on the taken port reports failure instead of throwing
 assert.equal(await startWebUi(root, { port: ui.port }), null);

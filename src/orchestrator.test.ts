@@ -72,10 +72,14 @@ const roleStub = (root: string) => {
 		`#!/usr/bin/env node
 const { readFileSync, writeFileSync } = require("node:fs");
 const { execSync } = require("node:child_process");
-const prompt = process.argv[4] ?? "";
+const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
 if (!file || !readFileSync(file, "utf8").match(/^state: /m)) process.exit(0);
 if (prompt.includes("Developer agent")) {
+	process.stdout.write(JSON.stringify({ type: "session", version: 3, id: "s", timestamp: 0, cwd: process.cwd() }) + "\\n");
+	process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "working" } }) + "\\n");
+	process.stdout.write(JSON.stringify({ type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: { command: "git status" } }) + "\\n");
+	process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant", content: "work" } }) + "\\n");
 	writeFileSync("code.txt", "work\\n");
 	execSync("git add -A && git commit -qm work", { stdio: "ignore" });
 }
@@ -96,7 +100,7 @@ const devStub = (root: string) => {
 		stub,
 		`#!/usr/bin/env node
 const { readFileSync, writeFileSync } = require("node:fs");
-const prompt = process.argv[4] ?? "";
+const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
 if (!prompt.includes("Developer agent") || !file || !readFileSync(file, "utf8").match(/^state: /m)) process.exit(0);
 writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: to-review"));
@@ -225,6 +229,12 @@ assert.equal(
 	"refs/heads/meta/kanban",
 	"only meta/kanban is pushed to origin",
 );
+// --mode json: the agent log carries the full JSONL event stream (message, thinking, tool
+// events), not print mode's final text only
+const devLogA = readFileSync(join(kanbanDir(rootA), ".logs", `${taskA.file.replace(/\.md$/, "")}.developer.log`), "utf8");
+for (const record of ['"type":"message_update"', '"type":"tool_execution_start"', '"type":"message_end"']) {
+	assert.ok(devLogA.includes(record), `developer log carries JSONL ${record}`);
+}
 a.daemon.kill("SIGTERM");
 
 // --- part B: dead agents get moved forward by the liveness poll, capped at 5 respawns ---
@@ -371,7 +381,7 @@ writeFileSync(
 	lingerStub,
 	`#!/usr/bin/env node
 const { readFileSync, writeFileSync, appendFileSync } = require("node:fs");
-const prompt = process.argv[4] ?? "";
+const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
 if (!prompt.includes("Live-tester") || !file) process.exit(0);
 writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, 'state: "done"'));
