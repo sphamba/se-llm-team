@@ -1,7 +1,7 @@
 ---
 name: "fix: kanban_set_state and kanban_set_worktree accept an unsupported field"
 priority: "low"
-state: "doing"
+state: "reviewing"
 worktree: "fix/112-kanban-set-state"
 issuer: "#85"
 ---
@@ -29,5 +29,9 @@ Acceptance:
 - The existing node suites stay green (extension, kanban, webui, orchestrator).
 
 # Notes
+
+- fix/112-kanban-set-state commit 5b02f70: added { additionalProperties: false } as the second Type.Object argument to kanban_set_state and kanban_set_worktree registrations in index.ts (the #85 kanban_update pattern). src/kanban.ts untouched.
+- src/extension.test.ts extended: a strict() helper covers both tools with pi's real typebox validator (Compile path) - additionalProperties false, unknown "notes" field fails validation, error names the offending field via keyword additionalProperties; valid calls verified through execute (state change response, worktree set, empty-string worktree clear).
+- All suites green: extension, kanban, webui, index, orchestrator (orchestrator run with SE_LLM_TEAM_NO_WEBUI=1).
 
 # Open questions
