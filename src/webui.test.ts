@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, setState } from "./kanban.ts";
-import { boardOf, buildShell, cardHtml, flipDiff, LAYOUT, loadWebUiConfig, LOG_CHUNK, mergeBoards, pairLayout, renderLogChunk, spinnerHtml, startWebUi, syncBoard, tabNames, tabsHtml } from "./webui.ts";
+import { agentLabel, boardOf, buildShell, cardHtml, flipDiff, LAYOUT, loadWebUiConfig, LOG_CHUNK, mergeBoards, pairLayout, renderLogChunk, spinnerHtml, startWebUi, syncBoard, tabNames, tabsHtml } from "./webui.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing", "to-merge", "merging", "done"];
@@ -545,6 +545,15 @@ assert.deepEqual(
 	"indexed runs are their own entries, a legacy file ties first within its role, mtime orders across roles, the newest run of the live role is the live one",
 );
 assert.deepEqual(history.agent, { role: "developer", alive: true, log: `${slug}.developer.1` }, "the agent handle points at the live run, never the legacy file");
+
+// 000108: a run label renders 1-based on the payload's 0-based run index; a legacy unsuffixed log
+// (run null) and a solo run stay unnumbered, disk names and handles unchanged
+const devRuns = history.agents.filter((a) => a.role === "developer");
+assert.equal(agentLabel(devRuns[1], { developer: 3 }), "Developer 1", "run index 0 labels 1 when the role has several runs");
+assert.equal(agentLabel(devRuns[2], { developer: 3 }), "Developer 2", "run index 1 labels 2");
+assert.equal(agentLabel(devRuns[0], { developer: 3 }), "Developer", "a legacy unsuffixed run keeps its unnumbered label");
+assert.equal(agentLabel({ role: "reviewer", run: 0 }, { reviewer: 1 }), "Reviewer", "a solo run keeps its unnumbered label");
+assert.ok(page.includes(String(agentLabel)), "the page ships the tested agentLabel source");
 
 // a run-suffixed handle resolves to its own indexed file, a plain handle to the legacy file
 const get = (file: string) => fetch(`${base}/api/agent-log?file=${encodeURIComponent(file)}`);

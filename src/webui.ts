@@ -477,6 +477,12 @@ export function mergeBoards(boards, rows) {
 	for (const [name, tasks] of rows) if (tasks) boardOf(boards, name).tasks = tasks;
 }
 
+// a run label on the detail card: the role capitalized, 1-based when the role has several runs
+// (payload run 0 reads "1"), unnumbered for a solo run or a legacy unsuffixed log (a.run == null)
+export function agentLabel(a, count) {
+	return a.role[0].toUpperCase() + a.role.slice(1) + (count[a.role] > 1 && a.run != null ? " " + (a.run + 1) : "");
+}
+
 // board layout, left to right: a string is a single column, an array is a stacked pair with the
 // first state on top. backlog and done stay single side columns, the states between them stack two
 // by two in pipeline order (to-do over doing, to-review over reviewing, ...), so the queued
@@ -785,6 +791,7 @@ ${tabNames}
 ${tabsHtml}
 ${boardOf}
 ${mergeBoards}
+${agentLabel}
 // tabs: one per registered project, the active one renders that project's board
 function renderTabs() {
 	const el = document.getElementById("tabs");
@@ -882,18 +889,17 @@ function markActiveAgent() {
 }
 const atBottom = () => { const p = logPane(); return p.scrollTop + p.clientHeight >= p.scrollHeight - 4; };
 // every run as one button, oldest leftmost (payload order is log mtime order), the live run
-// rightmost; a role with several runs labels them by index, so two reviewer runs never read alike
+// rightmost; a role with several runs labels them 1-based, so two reviewer runs never read alike
 function renderAgent(t) {
 	const el = document.getElementById("m-agent");
 	el.innerHTML = "";
-	const cap = s => s[0].toUpperCase() + s.slice(1);
 	const runs = (t.agents || []).slice();
 	const live = runs.find(a => a.alive);
 	if (live) { runs.splice(runs.indexOf(live), 1); runs.push(live); }
 	if (!runs.length) return;
 	const count = {};
 	for (const a of runs) count[a.role] = (count[a.role] || 0) + 1;
-	const label = a => cap(a.role) + (count[a.role] > 1 && a.run != null ? " " + a.run : "");
+	const label = a => agentLabel(a, count);
 	const btns = runs.map(a => !a.alive
 		? '<button class="agent-btn agent-past" data-handle="' + esc(a.handle) + '"><span class="check">\u2713</span>' + esc(label(a)) + "</button>"
 		: '<button class="agent-btn agent-live" data-handle="' + esc(a.handle) + '"><span class="spin"></span>' + esc(label(a)) + "</button>");
