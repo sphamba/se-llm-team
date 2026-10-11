@@ -957,7 +957,8 @@ function openTask(file) {
 	document.getElementById("m-attrs").innerHTML =
 		"<div><span>number</span>" + numLinkHtml(t.file) + "</div>" +
 		"<div><span>file</span>" + esc(t.file) + "</div>" +
-		"<div><span>priority</span><span class='chip p-" + esc(t.priority) + "'>" + esc(t.priority) + "</span><span class='chip cx'>" + esc(t.complexity || "moderate") + "</span></div>" +
+		"<div><span>priority</span><span class='chip p-" + esc(t.priority) + "'>" + esc(t.priority) + "</span></div>" +
+		"<div><span>complexity</span><span class='chip cx'>" + esc(t.complexity || "moderate") + "</span></div>" +
 		"<div><span>state</span>" + esc(t.state) + "</div>" +
 		"<div><span>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>" +
 		"<div><span>issuer</span>" + esc(t.issuer || "user") + "</div>" +

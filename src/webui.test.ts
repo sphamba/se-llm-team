@@ -388,7 +388,14 @@ assert.deepEqual(listed[0].agents, [], "no role logs yet, empty agent history");
 assert.ok(page.includes('id="m-agent"'), "modal has the agent area");
 assert.ok(!page.includes("<div><span>name</span>"), "the detail card drops the name attribute row the title already shows");
 assert.ok(page.includes('"<div><span>issuer</span>" + esc(t.issuer || "user")'), "the detail card shows the issuer row");
-assert.ok(page.includes("esc(t.complexity || \"moderate\")"), "the detail card shows the complexity badge next to priority");
+assert.ok(
+	page.includes("\"<div><span>complexity</span><span class='chip cx'>\" + esc(t.complexity || \"moderate\")"),
+	"the detail card gives the complexity badge its own labeled row",
+);
+assert.ok(
+	page.includes("\"<div><span>priority</span><span class='chip p-\" + esc(t.priority) + \"'>\" + esc(t.priority) + \"</span></div>\" +"),
+	"the detail card keeps the priority row with only the priority chip",
+);
 assert.ok(page.includes("#m-log.hidden { display: none; }"), "log pane hides");
 assert.ok(page.includes("/api/agent-log"), "page uses the agent log endpoint");
 assert.ok(page.includes('<span class="check">✓</span>'), "past agent buttons render a green checkmark");
