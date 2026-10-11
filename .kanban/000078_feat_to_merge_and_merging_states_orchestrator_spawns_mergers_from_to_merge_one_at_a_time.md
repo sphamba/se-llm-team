@@ -83,4 +83,12 @@ Constraints:
 - kanban_set_state accepts to-merge and merging; parseTask round-trips both; listTasks scope=in-progress returns a merging task.
 - Verdict: all five acceptance criteria met. No functional defect found.
 
+## Review (reviewer, 2f663e3)
+
+- Re-checked Specs items 1 to 8 on 50b42de. No functional defect found.
+- Suite evidence on the branch tip: node src/kanban.test.ts, node src/webui.test.ts and SE_LLM_TEAM_NO_WEBUI=1 node src/orchestrator.test.ts all exit 0 (the orchestrator suite ran twice; the kanban and webui suites must not run with the NO_WEBUI flag).
+- Fix (2f663e3): part Y of src/orchestrator.test.ts read rootY/argv.log as soon as the daemon logged "spawned developer". The spawned stub may not have written the file yet, so the read failed with ENOENT (seen once at src/orchestrator.test.ts:1230). The waitFor condition now waits for the stub's own argv record. The race is pre-existing (main has the same shape at src/orchestrator.test.ts:1118), not introduced by this task.
+- State transition aborted: the task was to-review when this pass started. While it ran, a second reviewer run passed 50b42de, the task moved to to-live-test, and a live-tester started. The live-tester then set done with no merger run, because the RUNNING daemon and agent prompts are the installed pre-000078 extension. The task is done now, so no kanban_set_state was called. Commit 2f663e3 sits on the branch tip; the old merge-on-done path carries it into main.
+- Pipeline observation, outside this task: two reviewer runs were active for the same review round (reviewer.1, this pass, and reviewer.2). The running daemon is the installed extension, so this task's code does not cause it.
+
 ## Open questions
