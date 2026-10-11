@@ -255,13 +255,23 @@ function serve(root: string, req: IncomingMessage, res: ServerResponse): void {
 			}
 			let text = "";
 			try {
-				text = readRange(log, head, tail);
-				if (head > 0 && readRange(log, head - 1, head) !== "\n") {
-					// head lands mid-record: drop the partial head line, only whole records render
-					const nl = text.indexOf("\n");
-					text = nl === -1 ? "" : text.slice(nl + 1);
+				// a finished log's tail is terminal records that render to nothing (assistant
+				// message_end, turn_end, agent_end, agent_settled): walk the window back until a
+				// chunk renders, so a fresh open or history page never lands on an empty pane; an
+				// offset poll keeps its window, the client already consumed the region below its
+				// offset and walking back would re-serve it (live watching stays delta-streamed)
+				const walk = off == null || q.get("before") === "1";
+				for (;;) {
+					text = readRange(log, head, tail);
+					if (head > 0 && readRange(log, head - 1, head) !== "\n") {
+						// head lands mid-record: drop the partial head line, only whole records render
+						const nl = text.indexOf("\n");
+						text = nl === -1 ? "" : text.slice(nl + 1);
+					}
+					text = renderLogChunk(text);
+					if (text || head === 0 || !walk) break;
+					head = Math.max(0, head - LOG_CHUNK);
 				}
-				text = renderLogChunk(text);
 			} catch {
 				// log vanished mid-request
 			}

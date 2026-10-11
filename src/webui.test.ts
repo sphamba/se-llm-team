@@ -186,6 +186,42 @@ writeFileSync(logFile, JSON.stringify({ type: "session", id: "s" }) + "\n" + big
 const splitLog = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
 assert.equal(splitLog.text, "[prompt] tail\n", "a record split at the chunk head drops its partial line, later records still render");
 
+// a finished log: the tail is terminal records (assistant message_end, turn_end, agent_end,
+// agent_settled) that render to nothing, so an unrenderable tail chunk walks back instead of
+// serving an empty pane
+const pad = "z".repeat(40000); // one assistant message_end record bigger than LOG_CHUNK
+const terminalLog = [
+	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "final output line" } }),
+	JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: pad }], timestamp: 2 } }),
+	JSON.stringify({ type: "turn_end", timestamp: 3 }),
+	JSON.stringify({ type: "agent_end", timestamp: 4 }),
+	JSON.stringify({ type: "agent_settled", timestamp: 5 }),
+].join("\n") + "\n";
+writeFileSync(logFile, terminalLog);
+const finished = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.ok(finished.text.includes("final output line\n"), "an unrenderable tail chunk walks back to the last chunk with renderable content");
+assert.equal(finished.head, 0);
+assert.equal(finished.tail, terminalLog.length);
+assert.equal(finished.atStart, true);
+assert.ok(!finished.text.includes('"type"'), "walk-back serves rendered text, never raw JSON");
+// an offset poll keeps its window: the client already consumed the region below its offset
+const finishedPoll = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${finished.tail}`)).json();
+assert.equal(finishedPoll.text, "");
+assert.equal(finishedPoll.head, finished.tail);
+
+// a history page inside an unrenderable record walks back to the nearest earlier renderable chunk
+const paddedLog = [
+	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "early delta" } }),
+	JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: pad }], timestamp: 2 } }),
+	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "tail delta" } }),
+].join("\n") + "\n";
+writeFileSync(logFile, paddedLog);
+const padded = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.ok(padded.text.includes("tail delta\n"), "a renderable tail chunk serves without walking back");
+const paddedHist = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${padded.head}&before=1`)).json();
+assert.ok(paddedHist.text.includes("early delta\n"), "a history page inside an unrenderable record walks back to renderable content");
+assert.equal(paddedHist.head, 0);
+
 // a second startWebUi on the taken port reports failure instead of throwing
 assert.equal(await startWebUi(root, { port: ui.port }), null);
 ui.close();
