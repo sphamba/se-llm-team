@@ -3,6 +3,8 @@ name: "feat: webui changes go live on browser reload without a daemon restart"
 priority: "medium"
 state: "backlog"
 worktree: ""
+complexity: moderate
+blockedBy: "#122, #133"
 ---
 
 # Summary
