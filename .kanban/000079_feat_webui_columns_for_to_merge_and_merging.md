@@ -1,8 +1,8 @@
 ---
 name: "feat: webui columns for to-merge and merging"
 priority: "high"
-state: "to-merge"
-worktree: "feat/79-webui-columns-for"
+state: "done"
+worktree: ""
 ---
 
 # Summary

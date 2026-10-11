@@ -1,7 +1,7 @@
 ---
 name: "fix: modal overlay covers the hub repo tab bar; a tab click only closes the modal"
 priority: "low"
-state: "doing"
+state: "reviewing"
 worktree: "fix/91-modal-overlay-covers"
 ---
 
@@ -29,3 +29,6 @@ Acceptance:
 Provenance: surfaced by the live test of task #39, which PASSED every spec point; this is the only issue found and the feature is otherwise complete.
 
 # Notes
+- Fixed in worktree fix/91-modal-overlay-covers (commit 7b52dc0). Chose the stacking-context direction: `#modal` is the only positioned element (position: fixed, z-index auto), so `#tabs` now has `position: relative; z-index: 1`, keeping the tab bar above the overlay, undimmed and clickable while a modal is open. `switchTab` already calls `closeModal()`, so a single click on a tab switches and closes the modal. Without a modal, tab behavior is unchanged (same click path, only paint order above the hidden overlay differs).
+- Added one assertion to src/webui.test.ts that the shipped PAGE carries the `#tabs { position: relative; z-index: 1;` rule. All suites green: webui.test.ts, kanban.test.ts, orchestrator.test.ts. No separate typecheck exists in the repo (checks run via node directly, see README Checks).
+- Did not change the header/theme button stacking (spec only covers the tab bar); those stay under the overlay as before.

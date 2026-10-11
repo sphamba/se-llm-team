@@ -1,7 +1,7 @@
 ---
 name: "docs: SPECS.md and the PM skill still list only 8 states; add to-merge/merging and the merger flow"
 priority: "medium"
-state: "reviewing"
+state: "to-merge"
 worktree: "docs/104-specs-md-and"
 issuer: "#78"
 ---
@@ -31,3 +31,7 @@ Changes (commit a77b013 in docs/104-specs-md-and):
 - skills/se-llm-team/SKILL.md: States line now lists all 10 states, with a sentence that the Merger owns the to-merge/merging transitions and the Project manager never moves tasks into or out of them.
 
 Dedup held: #79 (webui columns), #95 (poll rewrite), #102 (merger hardcoded main) untouched.
+
+Review (no fixes): all spec items verified against the worktree code and agent prompts. 10-state list matches README.md line 55; live-testing -> to-merge fallback matches DEAD_TRANSITIONS ("live-testing": "to-merge", merging: "to-merge") in src/orchestrator.ts; the to-merge bullet matches sweepToMerge (global merger pid check, spawn then setState merging); the Merger section matches agents/merger.md (two-step merge, main wins unless Specs say otherwise, failed merge requeues with git merge --abort); the Live-tester section matches agents/live-tester.md; SKILL.md states line plus the Merger-ownership sentence are accurate (merger.md has the merger set to-merge -> merging and merging -> done itself). No other stale state/flow wording in SKILL.md.
+
+Observation for a follow-up, outside this task's spec: the SPECS.md liveness bullet ("If dead, kill the agent, and respawn at same state") still describes the old respawn-in-place behavior; poll() now bounces dead-agent tasks via DEAD_TRANSITIONS (doing -> to-do, reviewing -> to-review, live-testing -> to-merge, merging -> to-merge) and the sweep respawns for the new state, so the bullet contradicts the live-testing fallback documented two bullets above. Not fixed here: #95 (doing, critical) rewrites exactly that poll machinery and rebases first.
