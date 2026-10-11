@@ -1,7 +1,7 @@
 ---
 name: "fix: modal overlay covers the hub repo tab bar; a tab click only closes the modal"
 priority: "low"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/91-modal-overlay-covers"
 ---
 
@@ -32,3 +32,5 @@ Provenance: surfaced by the live test of task #39, which PASSED every spec point
 - Fixed in worktree fix/91-modal-overlay-covers (commit 7b52dc0). Chose the stacking-context direction: `#modal` is the only positioned element (position: fixed, z-index auto), so `#tabs` now has `position: relative; z-index: 1`, keeping the tab bar above the overlay, undimmed and clickable while a modal is open. `switchTab` already calls `closeModal()`, so a single click on a tab switches and closes the modal. Without a modal, tab behavior is unchanged (same click path, only paint order above the hidden overlay differs).
 - Added one assertion to src/webui.test.ts that the shipped PAGE carries the `#tabs { position: relative; z-index: 1;` rule. All suites green: webui.test.ts, kanban.test.ts, orchestrator.test.ts. No separate typecheck exists in the repo (checks run via node directly, see README Checks).
 - Did not change the header/theme button stacking (spec only covers the tab bar); those stay under the overlay as before.
+- Review of commit 7b52dc0 against the Specs: no issues found, no fixes made. Verified in code: #modal is the only other positioned element (position: fixed, z-index auto), so #tabs at position: relative; z-index: 1 paints and hit-tests above the overlay; switchTab already calls closeModal(), so one tab click switches and closes; #modal.hidden { display: none } keeps no-modal behavior unchanged (relative without offsets moves nothing). Re-ran all suites in the worktree: webui.test.ts, kanban.test.ts, orchestrator.test.ts all green. Worktree clean at 7b52dc0.
+- Non-blocking observation: a very tall #m-box (max-height: 82vh) could visually reach the tab-bar zone on short viewports and the bar would paint above it, but the modal box stays scrollable and the overlay still covers everything else; acceptable for this fix.

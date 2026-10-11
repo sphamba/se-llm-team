@@ -1,7 +1,7 @@
 ---
 name: "fix: pnpm pin makes every pnpm invocation write an untracked pnpm-lock.yaml"
 priority: "low"
-state: "to-merge"
+state: "merging"
 worktree: "fix/89-pnpm-pin-makes"
 ---
 

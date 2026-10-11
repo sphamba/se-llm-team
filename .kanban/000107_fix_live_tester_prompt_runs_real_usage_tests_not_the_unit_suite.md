@@ -1,7 +1,7 @@
 ---
 name: "fix: live-tester prompt runs real usage tests, not the unit suite"
 priority: "medium"
-state: "live-testing"
+state: "to-merge"
 worktree: "fix/107-live-tester-prompt"
 ---
 
@@ -32,3 +32,4 @@ Constraints:
 - Edited agents/live-tester.md only (commit 0e12f13 in fix/107-live-tester-prompt): the intro now states the rule explicitly (live test runs real usage tests only, never any *.test.ts file, never the three node suites, developer/reviewer own those), and step 2 tells the live tester to exercise the real interface (browser, CLI, daemon/server) and to treat Specs acceptance lines that name the suites as the developer/reviewer gate, not the live test. Rest of the prompt unchanged.
 - Suites re-run in the worktree: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts all pass (webui needs >120s; passes within 240s). Prompt-only change, no test edits.
 - Review (2026-10-11): pass, no fixes. Checked against the Specs: the intro states the rule (real usage tests only, never any *.test.ts file, never the three node suites, developer/reviewer own those), step 2 routes Specs acceptance lines that name the suites to the developer/reviewer gate, and the diff touches only those two lines of agents/live-tester.md (rest of the prompt intact). Verified nothing asserts the live-tester prompt text, and that spawnAgent resolves all placeholders the prompt uses (no new placeholders needed). Re-ran the three suites in the worktree: all pass. No open questions.
+- Live test (2026-10-11): pass, no findings. Ran the real user flow end to end: a throwaway git board with a task in to-live-test and .kanban/se-llm-team.json pointing agent at a stub that records its argv, then the real daemon `node src/orchestrator.ts --root <tmp> --rescan-seconds 1`. The daemon spawned the live-tester (log: `spawned live-tester ...`) and the stub captured the rendered `-p` prompt. The rendered prompt contains the new intro rule (real usage tests only, never any *.test.ts file, never the three node suites, developer/reviewer own those) and the step 2 line (exercise the real interface browser/CLI/daemon, do not run the unit suite, Specs acceptance lines naming the suites are the developer/reviewer gate). The probe task's Specs named node src/kanban.test.ts, so the acceptance-routing line is exercised. No unresolved {{PLACEHOLDER}} tokens: TASK_FILE, WORKTREE, ROOT and NAME all substituted. `git diff main...HEAD --name-only` shows only agents/live-tester.md; developer.md, reviewer.md, merger.md untouched; --unified=0 shows exactly the two intended lines changed. Per the rule under test, the live test did not run the unit suites; the reviewer already re-ran all three green on this branch. No open questions.
