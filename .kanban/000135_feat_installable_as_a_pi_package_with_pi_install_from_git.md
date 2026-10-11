@@ -1,8 +1,9 @@
 ---
 name: "feat: installable as a pi package with pi install from git"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "live-testing"
+worktree: "feat/135-installable-as-a"
+complexity: "simple"
 ---
 
 # Summary
@@ -35,3 +36,11 @@ The repo is a pi coding agent extension today via the local symlink ~/.pi/agent/
 simple. package.json manifest + README section, no logic.
 
 # Notes
+
+- Verified the spec against pi docs/packages.md: host-provided packages are declared in peerDependencies with a "*" range and not bundled; the `pi` manifest carries explicit paths relative to the package root.
+- Confirmed index.ts imports @earendil-works/pi-ai (StringEnum) and typebox (Type) as runtime values, @earendil-works/pi-coding-agent as types only.
+- package.json: added `pi: { extensions: ["./index.ts"], skills: ["./skills"] }` and peerDependencies for the three host-provided packages. Kept name, private, type: module and the pnpm packageManager pin.
+- README.md: reworked Setup to lead with `pi install git:github.com/sphamba/se-llm-team` (https URL form noted), what the package provides, the node >= 24 type-stripping note, and kept the symlink path as the local dev alternative (extensions + skill symlinks).
+- Left agents/*.md out of the manifest (not a pi resource type; the orchestrator reads them at runtime) and did not add a dependencies field. Local symlinks untouched.
+- Checks: node index.test.ts, src/extension.test.ts, src/kanban.test.ts, src/orchestrator.test.ts, src/webui.test.ts all pass. No tests assert on package.json.
+- Review (no fixes): diff main...HEAD touches only package.json and README.md. Verified against pi docs/packages.md and docs/skills.md: git: source and https URL form are correct; the `pi` manifest carries explicit paths relative to the package root (index.ts at root, skills/ at root, both exist); skills are discovered recursively from a declared dir, so `./skills` finds skills/se-llm-team/SKILL.md; peerDependencies list exactly the three host-provided packages with "*" and none are in dependencies; index.ts imports match (@earendil-works/pi-ai StringEnum and typebox Type as runtime values, @earendil-works/pi-coding-agent types only). Kept name, private, type: module, pnpm pin. Re-ran index.test.ts and src/extension.test.ts, all pass. agents/*.md correctly left out of the manifest.
