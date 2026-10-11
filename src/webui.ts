@@ -1,5 +1,6 @@
-import { closeSync, openSync, readFileSync, readdirSync, readSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readdirSync, readSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { kanbanDir, listAll, PRIORITY_RANK, splitFrontmatter, STATES, taskFiles, taskSlug, type Task } from "./kanban.ts";
 import { agentAlive } from "./pid.ts";
 
@@ -83,14 +84,32 @@ function logDirFiles(root: string): string[] {
 	}
 }
 
-// the indexed run numbers of one role log, ascending: `<slug>.<role>.<n>.log`; a legacy
-// unsuffixed file yields "log" here and the digit check drops it
+// the physical file of a run log base ("<slug>.<role>" or "<slug>.<role>.<n>"): the plain .log
+// while it exists (a live run's, or a finished one the sweep has not gzipped yet), else the
+// sweep's .log.gz replacement
+function runLogPath(dir: string, base: string): string {
+	const plain = join(dir, `${base}.log`);
+	return existsSync(plain) ? plain : `${plain}.gz`;
+}
+
+// the full text of a log path: a .gz log is a finished, immutable run, decompressed whole per
+// read; plain logs read as utf8 (the chunked payload streams a live tail by byte range)
+function logText(path: string): string | null {
+	try {
+		return path.endsWith(".gz") ? gunzipSync(readFileSync(path)).toString("utf8") : readFileSync(path, "utf8");
+	} catch {
+		return null;
+	}
+}
+
+// the indexed run numbers of one role log, ascending: `<slug>.<role>.<n>.log` and the sweep's
+// .log.gz replacement; a legacy unsuffixed file yields "log" here and the digit check drops it
 function indexRuns(files: string[], base: string): number[] {
 	return files
-		.filter((f) => f.startsWith(`${base}.`) && f.endsWith(".log"))
-		.map((f) => f.slice(base.length + 1, -4))
-		.filter((n) => /^\d+$/.test(n))
-		.map(Number)
+		.filter((f) => f.startsWith(`${base}.`))
+		.map((f) => f.slice(base.length + 1).match(/^(\d+)\.log(?:\.gz)?$/))
+		.filter((m): m is RegExpMatchArray => !!m)
+		.map((m) => Number(m[1]))
 		.sort((a, b) => a - b);
 }
 
@@ -101,18 +120,19 @@ function indexRuns(files: string[], base: string): number[] {
 // state-mapped role is the live agent
 function agentHistory(root: string, t: Task, files: string[]): AgentEntry[] {
 	const slug = taskSlug(t.file);
+	const dir = join(kanbanDir(root), ".logs");
 	const liveRole = AGENT_ROLE[t.state];
 	const live = !!liveRole && agentAlive(root, slug);
 	const entries: (AgentEntry & { mtime: number })[] = [];
 	for (const role of LOG_ROLES) {
 		const base = `${slug}.${role}`;
 		const runs: { run: number | null; handle: string }[] = [];
-		if (files.includes(`${base}.log`)) runs.push({ run: null, handle: base });
+		if (files.includes(`${base}.log`) || files.includes(`${base}.log.gz`)) runs.push({ run: null, handle: base });
 		for (const n of indexRuns(files, base)) runs.push({ run: n, handle: `${base}.${n}` });
 		if (!runs.length) continue;
 		const newest = runs[runs.length - 1].handle;
 		for (const r of runs) {
-			const path = join(kanbanDir(root), ".logs", `${r.handle}.log`);
+			const path = runLogPath(dir, r.handle);
 			let mtime = 0;
 			try {
 				mtime = statSync(path).mtimeMs;
@@ -132,26 +152,27 @@ function agentHistory(root: string, t: Task, files: string[]): AgentEntry[] {
 function agentLogPath(root: string, handle: string): string | null {
 	const m = handle.match(/^(.+)\.(developer|reviewer|live-tester|merger)(?:\.(\d+))?$/);
 	if (!m || !taskFiles(root).includes(`${m[1]}.md`)) return null;
-	return join(kanbanDir(root), ".logs", m[3] === undefined ? `${m[1]}.${m[2]}.log` : `${m[1]}.${m[2]}.${m[3]}.log`);
+	return runLogPath(join(kanbanDir(root), ".logs"), m[3] === undefined ? `${m[1]}.${m[2]}` : `${m[1]}.${m[2]}.${m[3]}`);
 }
 
 // the Agent tool's tool result names the background agent and its .output transcript; ids are in
 // log order, so a subagent's number is its index here. Paths come from the log, never the client:
 // resolve first, then only pi's own subagent dir and .output transcripts pass
 // parsing a parent log is not free (a live-tester log can pass 50 MB), and every panel open asks
-// for the list: memoize per path until the file size changes. A log only ever grows
+// for the list: memoize per path until the file size changes. A plain log only ever grows; a .gz
+// log is the sweep's finished-run output and never changes, so its compressed size keys the cache
 const subsCache = new Map<string, { size: number; subs: { id: string; path: string }[] }>();
 function subagentLogs(log: string): { id: string; path: string }[] {
-	let text = "";
 	let size = 0;
 	try {
 		size = statSync(log).size;
 		const hit = subsCache.get(log);
 		if (hit && hit.size === size) return hit.subs;
-		text = readFileSync(log, "utf8");
 	} catch {
 		return []; // parent log gone or not written yet
 	}
+	const text = logText(log);
+	if (text === null) return []; // unreadable: a corrupt .gz parses as no subs
 	const subs: { id: string; path: string }[] = [];
 	for (const line of text.split("\n")) {
 		if (!line.includes('"tool_execution_end"')) continue; // cheap filter before JSON.parse
@@ -188,9 +209,10 @@ function tsMs(v: unknown): number | null {
 // per-file usage stats, memoized by size like subsCache: tokens sums the provider-reported
 // message.usage.totalTokens over the usage-bearing records (turn_end in a run log, assistant in a
 // subagent transcript, cache reads included), duration is the last record timestamp minus the
-// first. A log only ever grows, so a size match means the parse is current; a live log re-parses
-// per poll. Ceiling: a full re-read per growth, split-line the incremental scan when a live log
-// passes tens of MB
+// first. A plain log only ever grows, so a size match means the parse is current; a live log
+// re-parses per poll. A .gz log is immutable, so its compressed size keys the same cache.
+// Ceiling: a full re-read per growth, split-line the incremental scan when a live log passes
+// tens of MB
 const statsCache = new Map<string, { size: number; tokens: number | null; duration: number | null }>();
 function logStats(path: string): { tokens: number | null; duration: number | null } {
 	let size = 0;
@@ -201,29 +223,27 @@ function logStats(path: string): { tokens: number | null; duration: number | nul
 	} catch {
 		return { tokens: null, duration: null }; // log gone or not written yet
 	}
+	const text = logText(path);
+	if (text === null) return { tokens: null, duration: null }; // unreadable: a corrupt .gz
 	let tokens: number | null = null;
 	let first: number | null = null;
 	let last: number | null = null;
-	try {
-		for (const line of readFileSync(path, "utf8").split("\n")) {
-			if (!line.includes('"timestamp"') && !line.includes('"totalTokens"')) continue; // cheap filter before JSON.parse
-			let rec: any;
-			try {
-				rec = JSON.parse(line);
-			} catch {
-				continue;
-			}
-			if ((rec?.type === "turn_end" || rec?.type === "assistant") && typeof rec?.message?.usage?.totalTokens === "number" && Number.isFinite(rec.message.usage.totalTokens)) {
-				tokens = (tokens ?? 0) + rec.message.usage.totalTokens;
-			}
-			const ts = tsMs(rec?.timestamp) ?? tsMs(rec?.message?.timestamp);
-			if (ts != null) {
-				first ??= ts;
-				last = ts;
-			}
+	for (const line of text.split("\n")) {
+		if (!line.includes('"timestamp"') && !line.includes('"totalTokens"')) continue; // cheap filter before JSON.parse
+		let rec: any;
+		try {
+			rec = JSON.parse(line);
+		} catch {
+			continue;
 		}
-	} catch {
-		return { tokens: null, duration: null }; // log vanished mid-read
+		if ((rec?.type === "turn_end" || rec?.type === "assistant") && typeof rec?.message?.usage?.totalTokens === "number" && Number.isFinite(rec.message.usage.totalTokens)) {
+			tokens = (tokens ?? 0) + rec.message.usage.totalTokens;
+		}
+		const ts = tsMs(rec?.timestamp) ?? tsMs(rec?.message?.timestamp);
+		if (ts != null) {
+			first ??= ts;
+			last = ts;
+		}
 	}
 	const stats = { tokens, duration: first != null && last != null ? Math.max(0, last - first) : null };
 	statsCache.set(path, { size, ...stats });
@@ -501,6 +521,12 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 	}
 	const n = parseInt(q.get("offset") ?? "", 10);
 	const off = Number.isInteger(n) && n >= 0 ? n : null;
+	// a .gz log is a finished, immutable run: decompressed whole and the walk indexes the
+	// decompressed text (byte offsets cannot seek into a gzip stream); a plain log reads by
+	// byte range so a live tail streams without loading the file
+	let full: string | null = null;
+	if (target.endsWith(".gz")) full = logText(target) ?? ""; // corrupt or vanished: empty windows, never the compressed bytes
+	let text = "";
 	let head: number, tail: number;
 	if (q.get("before") === "1") {
 		tail = off ?? 0;
@@ -508,16 +534,22 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 	} else {
 		let size = 0;
 		try {
-			size = statSync(target).size;
+			size = full !== null ? full.length : statSync(target).size;
 		} catch {
 			// agent spawned but no output yet
 		}
 		head = off ? Math.min(off, size) : Math.max(0, size - LOG_CHUNK);
 		tail = size;
 	}
-	let text = "";
 	let next = tail;
 	try {
+		const window = (start: number, end: number): [string, number] => {
+			if (full === null) return readRange(target, start, end);
+			if (end <= start) return ["", start];
+			const slice = full.slice(start, end);
+			const nl = slice.lastIndexOf("\n");
+			return [slice, nl === -1 ? start : start + nl + 1];
+		};
 		// a finished log's tail is terminal records that render to nothing (assistant
 		// message_end, turn_end, agent_end, agent_settled): walk the window back until a
 		// chunk renders, so a fresh open or history page never lands on an empty pane; an
@@ -525,13 +557,13 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 		// offset and walking back would re-serve it (live watching stays delta-streamed)
 		const walk = off == null || q.get("before") === "1";
 		for (;;) {
-			const [raw, boundary] = readRange(target, head, tail);
+			const [raw, boundary] = window(head, tail);
 			// a forward poll reports a tail on a record boundary: the client's next offset then
 			// starts at a whole record, so a record split across two windows is re-read from its
 			// start and renders once when its newline arrives, never just as a stripped head line
 			if (q.get("before") !== "1") next = boundary;
 			text = raw;
-			if (head > 0 && readRange(target, head - 1, head)[0] !== "\n") {
+			if (head > 0 && window(head - 1, head)[0] !== "\n") {
 				// head lands mid-record: drop the partial head line, only whole records render
 				const nl = text.indexOf("\n");
 				text = nl === -1 ? "" : text.slice(nl + 1);

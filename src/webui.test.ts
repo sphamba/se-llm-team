@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, PRIORITY_RANK, setState } from "./kanban.ts";
 import { startHub } from "./hub.ts";
 import { agentLabel, boardOf, buildShell, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_CHUNK, mergeBoards, numLinkHtml, pairLayout, relationPaths, renderLogChunk, spinnerHtml, syncBoard, tabNames, tabsHtml } from "./webui.ts";
+import { gzipSync } from "node:zlib";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-live-test", "live-testing", "to-merge", "merging", "done"];
@@ -832,9 +833,45 @@ appendFileSync(rv0, subPath("11111111-0000-0000-0000-000000000000", out3) + "\n"
 const subTwo = await (await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=3`)).json();
 assert.ok(subTwo.text.includes("[prompt] walk back to me\n") && subTwo.head === 0, "a subagent tail that renders nothing walks back to the prompt, never an empty pane");
 
+// 000123 finished runs: the sweep replaces a finished run's plain .log with .log.gz and the
+// read path decompresses transparently - the history entry, its stats, its subs and the
+// chunked payload all keep working on the gzipped file
+writeFileSync(`${dev0}.gz`, gzipSync(Buffer.from([
+	JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "from the gzipped run" } }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 29000 } }, timestamp: Date.parse("2026-10-11T09:36:24.121Z") }),
+].join("\n") + "\n")));
+rmSync(dev0);
+const gzEntry = (await (await fetch(`${base}/api/tasks`)).json())[0].agents.find((a) => a.handle === `${slug}.developer.0`);
+assert.ok(gzEntry, "a gzipped run stays in the agent history");
+assert.equal(gzEntry.tokens, 29000, "the gzipped run's stats parse from the decompressed records");
+assert.ok((await (await get(`${slug}.developer.0`)).json()).text.includes("from the gzipped run\n"), "/api/agent-log serves the gzipped run with renderable content");
+// the unrenderable tail walk-back indexes the decompressed text the same way
+writeFileSync(`${dev0}.gz`, gzipSync(Buffer.from(terminalLog)));
+const gzWalk = await (await get(`${slug}.developer.0`)).json();
+assert.ok(gzWalk.text.includes("final output line\n") && gzWalk.head === 0, "an unrenderable tail of a gzipped log walks back on the decompressed text");
+assert.equal((await (await fetch(`${base}/api/agent-log?file=${encodeURIComponent(`${slug}.developer.0`)}&offset=${gzWalk.tail}`)).json()).text, "", "a poll of a finished gzipped log is a no-op");
+// subagent matching parses decompressed records: a gzipped parent log still enumerates its subs
+writeFileSync(`${rv0}.gz`, gzipSync(readFileSync(rv0)));
+rmSync(rv0);
+const gzSubList = await (await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=list`)).json();
+assert.deepEqual(gzSubList.map((s: any) => s.id), [
+	"aaaaaaaa-0000-0000-0000-000000000000",
+	"bbbbbbbb-0000-0000-0000-000000000000",
+	"ffffffff-0000-0000-0000-000000000000",
+	"11111111-0000-0000-0000-000000000000",
+], "a gzipped parent log still enumerates its subagent transcripts");
+// the legacy unsuffixed log gzips too and its plain handle keeps resolving
+writeFileSync(`${logFile}.gz`, gzipSync(Buffer.from("LEGACY\n")));
+rmSync(logFile);
+assert.ok(
+	(await (await fetch(`${base}/api/tasks`)).json())[0].agents.some((a) => a.handle === `${slug}.developer`),
+	"a gzipped legacy log stays in the history",
+);
+assert.equal((await (await get(`${slug}.developer`)).json()).text, "LEGACY\n", "the plain handle serves the gzipped legacy log");
+
 // restore the board for the daemon section below
 rmSync(join(root, ".kanban", ".pids", `${slug}.pid`));
-for (const f of [dev0, dev1, lt0, lt1, rv0, mg0, mg1]) rmSync(f, { force: true });
+for (const f of [dev0, dev1, lt0, lt1, rv0, mg0, mg1, `${dev0}.gz`, `${rv0}.gz`, `${logFile}.gz`]) rmSync(f, { force: true });
 rmSync(subDir, { recursive: true, force: true });
 setState(root, getTask(root, task.file)!, "backlog");
 

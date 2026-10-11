@@ -2,6 +2,7 @@ import { spawn, execFileSync, execSync } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import {
 	COMPLEXITIES,
 	getTask,
@@ -203,15 +204,17 @@ function renderPrompt(root: string, role: string, task: Task, worktreeDir?: stri
 }
 
 // next per-run index for a task+role log: 1 + the max existing `<slug>.<role>.<n>.log` index;
-// a legacy unsuffixed `<slug>.<role>.log` never counts, so the first indexed run is 0
-function nextRunIndex(root: string, slug: string, role: string): number {
+// a legacy unsuffixed `<slug>.<role>.log` never counts, so the first indexed run is 0. The
+// sweep's .log.gz replacements count too: a gzipped run keeps its index, so a fresh spawn
+// never re-creates a used index and overwrites the gzipped history
+export function nextRunIndex(root: string, slug: string, role: string): number {
 	const prefix = `${slug}.${role}.`;
 	let max = -1;
 	try {
 		for (const f of readdirSync(join(kanbanDir(root), ".logs"))) {
-			if (!f.startsWith(prefix) || !f.endsWith(".log")) continue;
-			const n = f.slice(prefix.length, -4);
-			if (/^\d+$/.test(n)) max = Math.max(max, parseInt(n, 10));
+			if (!f.startsWith(prefix)) continue;
+			const m = f.slice(prefix.length).match(/^(\d+)\.log(?:\.gz)?$/);
+			if (m) max = Math.max(max, parseInt(m[1], 10));
 		}
 	} catch {
 		/* no .logs dir yet: first run is 0 */
@@ -255,9 +258,9 @@ export function compactLogLine(line: string): string | null {
 	}
 }
 
-// raw agent logs are compacted retro-actively, at run end (poll) and via --compact-logs:
-// the log fd belongs to the child, so the write-time pipe (whose read end lived in the
-// daemon and died with it, EPIPE-killing the agent) cannot come back
+// raw agent logs are compacted retro-actively, in every sweep, at run end (poll) and via
+// --compact-logs: the log fd belongs to the child, so the write-time pipe (whose read end
+// lived in the daemon and died with it, EPIPE-killing the agent) cannot come back
 
 function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: string, pidName?: string): void {
 	const slug = taskSlug(task.file);
@@ -287,11 +290,15 @@ function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: st
 	}
 }
 
-// retro-compact pass, wired at detected run ends (poll) and one-time via --compact-logs:
-// rewrite finished agent logs through the same compactor, in place via temp file + rename. A
-// log whose writer may still be alive is skipped: the liveness of the pid each guard file
-// names, so a finished run's stale pidfile no longer blocks its rewrite. Non role-log names
-// (orchestrator.log, counters, armed markers) never match the pattern.
+// retro-compact pass, wired into every sweep, at detected run ends (poll) and one-time via
+// --compact-logs: rewrite finished agent logs through the compactor into <name>.log.gz and
+// drop the plain file, so a finished run's raw JSONL stops growing the disk. A log whose
+// writer may still be alive is skipped: the liveness of the pid each guard file names, so a
+// finished run's stale pidfile no longer blocks the pass. Non role-log names
+// (orchestrator.log, counters, armed markers) and already-gzipped logs never match the
+// pattern, so the pass is idempotent. The .gz is renamed into place before the plain file is
+// removed: a crash between the two leaves both, and the next pass re-gzips the plain file
+// over the old .gz
 export function compactFinishedLogs(root: string): { files: number; before: number; after: number } {
 	const result = { files: 0, before: 0, after: 0 };
 	let names: string[];
@@ -309,14 +316,15 @@ export function compactFinishedLogs(root: string): { files: number; before: numb
 		const path = join(kanbanDir(root), ".logs", name);
 		const before = readFileSync(path, "utf8");
 		const after = before.split("\n").map(compactLogLine).filter((l) => l !== null).join("\n");
-		if (after === before) continue;
-		const tmp = `${path}.compact-tmp`;
+		const tmp = `${path}.gz.compact-tmp`;
 		try {
-			writeFileSync(tmp, after);
-			renameSync(tmp, path);
+			const gz = gzipSync(Buffer.from(after, "utf8"));
+			writeFileSync(tmp, gz);
+			renameSync(tmp, `${path}.gz`);
+			rmSync(path);
 			result.files++;
 			result.before += Buffer.byteLength(before);
-			result.after += Buffer.byteLength(after);
+			result.after += gz.length;
 		} catch {
 			try {
 				rmSync(tmp, { force: true });
@@ -993,6 +1001,8 @@ function rescan(root: string, cfg: Config): void {
 	}
 	janitorPids(root, tasks);
 	autoSchedule(root, cfg, tasks);
+	// every sweep: finished agents' logs compact into .log.gz (idempotent; live pids are skipped)
+	compactFinishedLogs(root);
 }
 
 // the working states with an agent out: next is the one-state-back bounce target when the

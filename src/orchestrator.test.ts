@@ -8,7 +8,8 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readHubRegistry, startHub } from "./hub.ts";
 import { createTask, kanbanDir, parseTask, setState, setWorktree } from "./kanban.ts";
-import { compactFinishedLogs, compactLogLine, loadConfig, poll, removeTask, waitForBoardCommits } from "./orchestrator.ts";
+import { compactFinishedLogs, compactLogLine, loadConfig, nextRunIndex, poll, removeTask, waitForBoardCommits } from "./orchestrator.ts";
+import { gunzipSync } from "node:zlib";
 import { pidAlive } from "./pid.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -281,16 +282,12 @@ assert.equal(
 );
 // --mode json: the agent log carries the full JSONL event stream (message, thinking, tool
 // events), not print mode's final text only; per-run naming: the first indexed run is 0.
-// The run ended while the pipeline moved on, so its raw log was retro-compacted (the fd
-// redirect removed the write-time pipe): wait for the dead weight to be stripped
+// The run ended while the pipeline moved on, so the sweep compacted its raw log into .log.gz
+// (the fd redirect removed the write-time pipe): wait for the gz, then read it decompressed
 const logsA = join(kanbanDir(rootA), ".logs");
-await waitFor(
-	() => !readFileSync(join(logsA, `${slugA}.developer.0.log`), "utf8").includes('"usage"'),
-	30000,
-	"retro compaction of the finished developer log",
-	a.output,
-);
-const devLogA = readFileSync(join(logsA, `${slugA}.developer.0.log`), "utf8");
+const logOnDisk = (base: string) => existsSync(join(logsA, `${base}.log`)) || existsSync(join(logsA, `${base}.log.gz`));
+await waitFor(() => existsSync(join(logsA, `${slugA}.developer.0.log.gz`)), 30000, "sweep compaction+gzip of the finished developer log", a.output);
+const devLogA = gunzipSync(readFileSync(join(logsA, `${slugA}.developer.0.log.gz`))).toString();
 for (const record of ['"type":"message_update"', '"type":"tool_execution_start"', '"type":"message_end"']) {
 	assert.ok(devLogA.includes(record), `developer log carries JSONL ${record}`);
 }
@@ -301,8 +298,11 @@ assert.ok(devLogA.includes('"text_delta"'), "streamed text deltas survive the co
 assert.equal(devLogA.split('"result echo"').length - 1, 1, "toolResult message_start dropped, its message_end kept");
 assert.ok(devLogA.includes('"willRetry":false') && !devLogA.includes('"full replay"'), "agent_end messages dropped, the rest of the record kept");
 assert.ok(devLogA.includes("stub stderr diagnostic: not json"), "non-JSON stderr passes through the compactor");
-assert.ok(existsSync(join(logsA, `${slugA}.reviewer.0.log`)) && existsSync(join(logsA, `${slugA}.live-tester.0.log`)), "reviewer and live-tester runs got indexed log files");
-assert.equal(readFileSync(join(logsA, `${slugA}.developer.log`), "utf8"), "legacy\n", "legacy unsuffixed log never renamed or rewritten");
+assert.ok(logOnDisk(`${slugA}.reviewer.0`) && logOnDisk(`${slugA}.live-tester.0`), "reviewer and live-tester runs got indexed log files");
+const legacyA = existsSync(join(logsA, `${slugA}.developer.log`))
+	? readFileSync(join(logsA, `${slugA}.developer.log`), "utf8")
+	: gunzipSync(readFileSync(join(logsA, `${slugA}.developer.log.gz`))).toString();
+assert.equal(legacyA, "legacy\n", "legacy unsuffixed log content survives the sweep; spawns never renamed or rewrote it");
 // the reviewer's approval (to-live-test) is a successful run: counted once per task
 assert.equal(readFileSync(join(logsA, `${slugA}.reviewer-runs.count`), "utf8").trim(), "1", "reviewer approval counted as one successful run");
 a.daemon.kill("SIGTERM");
@@ -329,12 +329,13 @@ await waitFor(() => bouncesB() >= 6, 90000, "six unconditional bounces past the 
 assert.ok(b.output().includes("doing -> to-do"), "poll moved the dead developer back to to-do");
 // under the cap each respawn was immediate: the first six runs kept pace with the 3s poll
 for (let n = 0; n <= 5; n++) {
-	assert.ok(existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.${n}.log`)), `developer run ${n} logged`);
+// the sweep may have gzipped a finished run's log; either form counts as logged
+	assert.ok(existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.${n}.log`)) || existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.${n}.log.gz`)), `developer run ${n} logged`);
 }
 // the cooldown log fired once at cap+1, and the deferred spawn has not fired yet
 await waitFor(() => b.output().includes("respawn waits for the idle cooldown"), 30000, "cooldown log at cap+1", b.output);
 assert.equal(b.output().split("respawn waits for the idle cooldown").length - 1, 1, "cooldown log fired exactly once");
-assert.ok(!existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.6.log`)), "no fresh spawn while the idle cooldown runs");
+assert.ok(!existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.6.log`)) && !existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.6.log.gz`)), "no fresh spawn while the idle cooldown runs");
 // the death counter survived the cooldown wait: a bounce clears the pidfile first, so the
 // completed-run counter clear does not misfire on the waiting task
 assert.equal(readFileSync(join(kanbanDir(rootB), ".logs", `${slugB}.dead.count`), "utf8").trim(), "6", "death counter intact during the cooldown wait");
@@ -342,7 +343,7 @@ assert.equal(readFileSync(join(kanbanDir(rootB), ".logs", `${slugB}.dead.count`)
 const taskBPath = join(kanbanDir(rootB), taskB.file);
 const aged = new Date(Date.now() - 6 * 60_000);
 utimesSync(taskBPath, aged, aged);
-await waitFor(() => existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.6.log`)), 30000, "fresh spawn after the idle cooldown", b.output);
+await waitFor(() => existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.6.log`)) || existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.6.log.gz`)), 30000, "fresh spawn after the idle cooldown", b.output);
 // the 7th death bounced again with no second cooldown log
 assert.equal(b.output().split("respawn waits for the idle cooldown").length - 1, 1, "still one cooldown log past the cap");
 // the dead live-tester advances live-testing -> to-merge, the sweep spawns a merger for it
@@ -466,10 +467,17 @@ assert.equal(parseTask(rootE, taskE.file).worktree, "fix/1-review-without-worktr
 // the fresh spawn defers; died runs never count as successful runs
 await waitFor(() => e.output().includes("respawn waits for the idle cooldown"), 90000, "reviewer respawn cooldown", e.output);
 const slugE = taskE.file.replace(/\.md$/, "");
-const reviewerLogsE = readdirSync(join(kanbanDir(rootE), ".logs")).filter((f) => f.startsWith(`${slugE}.reviewer.`) && f.endsWith(".log")).sort();
+// the sweep may have gzipped a finished run; count the run indexes, either file form
+const runIdx = (root: string, base: string) =>
+	readdirSync(join(kanbanDir(root), ".logs"))
+		.filter((f) => f.startsWith(`${base}.`))
+		.map((f) => f.slice(base.length + 1).match(/^(\d+)\.log(?:\.gz)?$/)?.[1])
+		.filter(Boolean)
+		.sort();
+const reviewerLogsE = runIdx(rootE, `${slugE}.reviewer`);
 assert.deepEqual(
 	reviewerLogsE,
-	[0, 1, 2, 3, 4, 5].map((n) => `${slugE}.reviewer.${n}.log`),
+	[0, 1, 2, 3, 4, 5].map(String),
 	"each reviewer run wrote its own indexed log",
 );
 assert.ok(!existsSync(join(kanbanDir(rootE), ".logs", `${slugE}.reviewer-runs.count`)), "died reviewer runs never counted as successful");
@@ -678,8 +686,7 @@ await waitFor(
 );
 assert.notEqual(parseTask(rootK, taskK.file).state, "done", "the conflicting merge never reaches done");
 // per-run merger logs: the two merger runs got their own indexed files
-const mergerLogsK = readdirSync(join(kanbanDir(rootK), ".logs")).filter((f) => f.startsWith(`${slugK}.merger.`) && f.endsWith(".log")).sort();
-assert.deepEqual(mergerLogsK, [`${slugK}.merger.0.log`, `${slugK}.merger.1.log`], "merger runs got indexed log files");
+assert.deepEqual(runIdx(rootK, `${slugK}.merger`), ["0", "1"], "merger runs got indexed log files");
 k.daemon.kill("SIGTERM");
 
 // --- part K2: at most one merger runs at a time, even with several tasks in to-merge ---
@@ -1470,8 +1477,7 @@ const runsAA = () => {
 await waitFor(() => aa.output().includes(`${taskAA.file}: reviewer succeeded 2+ times, moving to to-live-test`), 60000, "reviewer cap refusal logged", aa.output);
 assert.equal(aa.output().split("spawned reviewer").length - 1, 2, "exactly two reviewer spawns before the refusal");
 assert.equal(runsAA(), 0, "the counter cleared on the forced to-live-test advance");
-const reviewerLogsAA = readdirSync(join(kanbanDir(rootAA), ".logs")).filter((f) => f.startsWith(`${slugAA}.reviewer.`) && f.endsWith(".log")).sort();
-assert.deepEqual(reviewerLogsAA, [`${slugAA}.reviewer.0.log`, `${slugAA}.reviewer.1.log`], "two indexed reviewer run logs, no third");
+assert.deepEqual(runIdx(rootAA, `${slugAA}.reviewer`), ["0", "1"], "two indexed reviewer run logs, no third");
 // the pipeline continues from the forced advance: the live-tester runs and the task completes
 await waitFor(() => parseTask(rootAA, taskAA.file).state === "done" && parseTask(rootAA, taskAA.file).worktree === "", 60000, "pipeline after the cap refusal", aa.output);
 assert.equal(runsAA(), 0, "counter still cleared after the pipeline completed");
@@ -1541,7 +1547,7 @@ assert.ok(parsedAB.some((p: any) => p.type === "message_end" && p.message?.role 
 assert.equal(parsedAB.find((p: any) => p.type === "message_update" && p.assistantMessageEvent.type === "toolcall_delta") !== undefined, true, "toolcall deltas survive");
 console.log("orchestrator.test.ts: ... + log compactor rules smoke passed");
 
-// --- part AC: the retro sweep rewrites finished logs, never logs with a pidfile ---
+// --- part AC: every sweep compacts finished logs into .log.gz, never logs with a live pid ---
 const rootAC = fixture();
 cleaned.push(rootAC);
 mkdirSync(join(kanbanDir(rootAC), ".logs"), { recursive: true });
@@ -1559,18 +1565,21 @@ writeFileSync(logAC("push-failures.count"), "3");
 writeFileSync(join(kanbanDir(rootAC), ".pids", `${slugRunAC}.pid`), String(process.pid));
 writeFileSync(join(kanbanDir(rootAC), ".pids", "merger.pid"), String(process.pid));
 const retroAC = compactFinishedLogs(rootAC);
-assert.equal(retroAC.files, 1, "only the finished log rewritten; running and merger logs skipped");
-assert.ok(retroAC.after < retroAC.before, "the rewrite shrank the log");
-const doneAfterAC = readFileSync(logAC(`${slugDoneAC}.developer.0.log`), "utf8");
-assert.ok(!doneAfterAC.includes('"usage"') && !doneAfterAC.includes('"sections"'), "rewritten slim");
-assert.ok(doneAfterAC.includes('"type":"tool_execution_end"'), "tool results survive the rewrite");
+assert.equal(retroAC.files, 1, "only the finished log compacted+gzipped; running and merger logs skipped");
+assert.ok(retroAC.after < retroAC.before, "the gzip shrank the log");
+assert.ok(!existsSync(logAC(`${slugDoneAC}.developer.0.log`)), "the plain file is replaced by the .log.gz");
+const doneAfterAC = gunzipSync(readFileSync(logAC(`${slugDoneAC}.developer.0.log.gz`))).toString();
+assert.ok(!doneAfterAC.includes('"usage"') && !doneAfterAC.includes('"sections"'), "gzipped slim");
+assert.ok(doneAfterAC.includes('"type":"tool_execution_end"'), "tool results survive the compaction");
 assert.equal(doneAfterAC.split("\n").length, compactorFixture().split("\n").length - 3, "exactly the three dead records dropped");
-assert.equal(readFileSync(logAC(`${slugRunAC}.developer.0.log`), "utf8"), compactorFixture(), "running log untouched");
+assert.equal(readFileSync(logAC(`${slugRunAC}.developer.0.log`), "utf8"), compactorFixture(), "running log stays plain and appendable");
+assert.ok(!existsSync(`${logAC(`${slugRunAC}.developer.0.log`)}.gz`), "no gz for a live agent's log");
 assert.equal(readFileSync(logAC(`${slugMergAC}.merger.0.log`), "utf8"), compactorFixture(), "merger log untouched while the merger pidfile exists");
 assert.equal(readFileSync(logAC("orchestrator.log"), "utf8"), "daemon log\n", "orchestrator.log skipped");
 assert.equal(readFileSync(logAC(`${slugDoneAC}.reviewer-armed`), "utf8"), "123", "armed marker skipped");
 assert.equal(readFileSync(logAC("push-failures.count"), "utf8"), "3", "counter skipped");
-assert.equal(compactFinishedLogs(rootAC).files, 0, "a second pass is a no-op");
+assert.equal(compactFinishedLogs(rootAC).files, 0, "already-gzipped logs never match: a second pass is a no-op");
+assert.equal(nextRunIndex(rootAC, slugDoneAC, "developer"), 1, "a gzipped run still counts, so a fresh spawn never reuses the index");
 console.log("orchestrator.test.ts: ... + retro sweep smoke passed");
 
 // --- part AF: a live agent pid defers the sweep spawn, so a to-do rewrite cannot twin it ---
