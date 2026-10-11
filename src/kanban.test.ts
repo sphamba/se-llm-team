@@ -224,6 +224,34 @@ assert.equal(listTasks(qRoot, "backlog").find((t) => t.file === tn.file)?.openQu
 assert.equal(listTasks(root, "in-progress").find((t) => t.file === t4.file)?.openQuestions, "");
 rmSync(qRoot, { recursive: true, force: true });
 
+// body-level "^# " headings that are not one of the four section names are content:
+// they neither open nor end a section, so a spec structured as "# 1. ..." stays whole
+const hRoot = mkdtempSync(join(tmpdir(), "kanban-headings-"));
+const th = createTask(hRoot, { name: "feat: heading spec", summary: "s", specs: "# 1. Part\npart text\n\n# Complexity\nmore" });
+assert.equal(th.specs, "# 1. Part\npart text\n\n# Complexity\nmore");
+assert.equal(parseTask(hRoot, th.file).specs, "# 1. Part\npart text\n\n# Complexity\nmore");
+// a specs update replaces the whole region including the stray headings: no old text
+// strands below them and exactly one "# Specs" header remains
+updateTask(hRoot, th, { specs: "brand-new specs" });
+const afterTh = readFileSync(join(hRoot, ".kanban", th.file), "utf8");
+assert.equal(parseTask(hRoot, th.file).specs, "brand-new specs");
+assert.ok(!afterTh.includes("part text") && !afterTh.includes("# Complexity"));
+assert.equal((afterTh.match(/^# Specs$/gm) ?? []).length, 1);
+assert.ok(afterTh.includes("# Notes"));
+// a stray-heading-free file still updates byte-for-byte
+updateTask(hRoot, th, { specs: "brand-new specs" });
+assert.equal(readFileSync(join(hRoot, ".kanban", th.file), "utf8"), afterTh);
+// a stray heading inside Notes does not truncate the notes text
+writeFileSync(join(hRoot, ".kanban", th.file), afterTh.replace(/^# Notes$/m, "# Notes\n# Side heading\nnote body"));
+assert.equal(parseTask(hRoot, th.file).notes, "# Side heading\nnote body");
+// a near-miss name like "# Specs detail" neither opens nor ends a section
+const sdFile = "000100_specs_detail.md";
+writeFileSync(join(hRoot, ".kanban", sdFile), '---\nname: "specs detail"\n---\n\n# Summary\ns\n\n# Specs\nspec line\n\n# Specs detail\ndetail line\n\n# Notes\n');
+const sd = parseTask(hRoot, sdFile);
+assert.equal(sd.specs, "spec line\n\n# Specs detail\ndetail line");
+assert.equal(sd.notes, "");
+rmSync(hRoot, { recursive: true, force: true });
+
 // issuer: "user" by default, "#<num>" when passed, quoted in the frontmatter so it is not a YAML comment
 const ti = createTask(root, { name: "feat: issued", summary: "s", issuer: "#42" });
 assert.equal(ti.issuer, "#42");

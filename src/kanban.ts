@@ -95,6 +95,19 @@ function hasConflictMarkers(raw: string): boolean {
 	return /^<{7} /m.test(raw) && /^>{7} /m.test(raw);
 }
 
+// the four canonical body sections; only these names open or end one. Any other "^# "
+// body line is ordinary content of the enclosing section (and is replaced when that
+// section is rewritten), so spec text structured as "# 1. ..." stays readable and
+// whole-region replaceable
+const SECTION_NAMES = ["summary", "specs", "notes", "open questions"] as const;
+
+function sectionName(line: string): string | undefined {
+	const h = line.match(/^# (.+)$/);
+	if (!h) return undefined;
+	const name = h[1].trim().toLowerCase();
+	return (SECTION_NAMES as readonly string[]).includes(name) ? name : undefined;
+}
+
 // frontmatter attrs + body; null when the frontmatter block is missing
 export function splitFrontmatter(raw: string): { attrs: Record<string, string>; body: string } | null {
 	const m = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
@@ -119,10 +132,10 @@ export function parseTask(root: string, file: string): Task {
 	const sections: Record<string, string> = {};
 	let current = "";
 	for (const line of body.split("\n")) {
-		const h = line.match(/^# (.+)$/);
-		if (h) {
-			current = h[1].trim().toLowerCase();
-			sections[current] = "";
+		const name = sectionName(line);
+		if (name) {
+			current = name;
+			sections[name] = "";
 		} else if (current) {
 			sections[current] += line + "\n";
 		}
@@ -230,8 +243,8 @@ function replaceSections(root: string, task: Task, updates: Record<string, strin
 	const lines = body.split("\n");
 	const headers: { index: number; name: string }[] = [];
 	lines.forEach((line, index) => {
-		const h = line.match(/^# (.+)$/);
-		if (h) headers.push({ index, name: h[1].trim().toLowerCase() });
+		const name = sectionName(line);
+		if (name) headers.push({ index, name });
 	});
 	const jobs = Object.entries(updates)
 		.map(([name, value]) => ({ name, value, header: headers.findLast((h) => h.name === name) }))
