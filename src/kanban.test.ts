@@ -179,5 +179,44 @@ assert.match(rawAfter, /^state: "to-do"$/m);
 assert.match(rawAfter, /^custom-attr: "keep me"$/m);
 assert.match(rawAfter, /# Design\nextra section/);
 
+// open questions: parsed, created, cleared and re-filled without duplicating the section
+assert.equal(t1.openQuestions, ""); // absent section reads as empty
+const qRoot = mkdtempSync(join(tmpdir(), "kanban-openq-"));
+const tq = createTask(qRoot, { name: "feat: open questions", summary: "s", specs: "spec", openQuestions: "- [user] Which colour?" });
+assert.equal(tq.openQuestions, "- [user] Which colour?");
+assert.match(readFileSync(join(qRoot, ".kanban", tq.file), "utf8"), /# Notes\n\n# Open questions\n- \[user\] Which colour\?\n$/);
+const tn = createTask(qRoot, { name: "feat: no questions", summary: "s" });
+assert.equal(tn.openQuestions, "");
+// without openQuestions the body is byte-identical to the pre-change format
+assert.equal(
+	readFileSync(join(qRoot, ".kanban", tn.file), "utf8"),
+	`---\nname: "feat: no questions"\npriority: "medium"\nstate: "backlog"\nworktree: ""\n---\n\n# Summary\ns\n\n# Specs\n\n\n# Notes\n`,
+);
+// an empty/whitespace openQuestions reads as absent: no section
+const te = createTask(qRoot, { name: "feat: empty questions", summary: "s", openQuestions: "  " });
+assert.equal(te.openQuestions, "");
+assert.ok(!readFileSync(join(qRoot, ".kanban", te.file), "utf8").includes("# Open questions"));
+// state changes, note appends and spec rewrites leave the section alone
+setState(qRoot, tq, "to-do");
+appendNote(qRoot, tq, "note");
+updateTask(qRoot, tq, { specs: "spec v2" });
+assert.equal(parseTask(qRoot, tq.file).openQuestions, "- [user] Which colour?");
+assert.match(parseTask(qRoot, tq.file).notes, /note/);
+assert.match(readFileSync(join(qRoot, ".kanban", tq.file), "utf8"), /# Open questions\n- \[user\] Which colour\?\n$/);
+// answering clears the section in place; a new question re-fills it, never a second header
+updateTask(qRoot, tq, { openQuestions: "" });
+assert.equal(parseTask(qRoot, tq.file).openQuestions, "");
+assert.equal((readFileSync(join(qRoot, ".kanban", tq.file), "utf8").match(/^# Open questions$/gm) ?? []).length, 1);
+updateTask(qRoot, tq, { openQuestions: "- [user] Second question?" });
+assert.equal(parseTask(qRoot, tq.file).openQuestions, "- [user] Second question?");
+assert.equal((readFileSync(join(qRoot, ".kanban", tq.file), "utf8").match(/^# Open questions$/gm) ?? []).length, 1);
+// updateTask creates the section when the task has none
+updateTask(qRoot, tn, { openQuestions: "- [user] Fresh question?" });
+assert.equal(parseTask(qRoot, tn.file).openQuestions, "- [user] Fresh question?");
+// kanban_list refs carry the field
+assert.equal(listTasks(qRoot, "backlog").find((t) => t.file === tn.file)?.openQuestions, "- [user] Fresh question?");
+assert.equal(listTasks(root, "in-progress").find((t) => t.file === t4.file)?.openQuestions, "");
+rmSync(qRoot, { recursive: true, force: true });
+
 rmSync(root, { recursive: true, force: true });
 console.log("kanban.test.ts: all assertions passed");
