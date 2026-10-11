@@ -1,7 +1,7 @@
 ---
 name: "fix: agent logs carry only the final output - stream the full JSONL event log"
 priority: "high"
-state: "to-do"
+state: "reviewing"
 worktree: "fix/agent-logs-carry-only-the-final-output-stream-the-full-jsonl-event-log"
 ---
 
@@ -27,3 +27,11 @@ Tests:
 Schedule note: queues behind 000051 (src/orchestrator.ts) and 000036 (src/webui.ts) - both own one of this task's files.
 
 # Notes
+
+- Implemented in 4 commits on fix/agent-logs-carry-only-the-final-output-stream-the-full-jsonl-event-log (1687aec spawn --mode json, d8741db webui JSONL parser, 0ef6476 tests, 539c08b README).
+- src/orchestrator.ts spawnAgent: spawn args are now [agent, "--approve", "--mode", "json", "-p", prompt]; detached spawn, direct fd write and pid tracking unchanged, stderr still appends to the same log.
+- src/webui.ts: added exported renderLogChunk(chunk), applied in the /api/agent-log handler. Renders thinking_start as a "── thinking ──" separator, buffers thinking_delta/text_delta into pending text, renders toolcall_end and tool_execution_start as one "[tool] name: arg-summary" line per call (deduped by toolCall id within the chunk), failed tool_execution_end as "[tool] name failed: <err>", and user message_end as "[prompt] <text>". Byte-based chunking kept; a partial trailing record (no newline) is dropped; lines that fail JSON.parse pass through unchanged.
+- Arg summary keys: command, path, file_path, pattern, url, query, else the first string value; capped at 160 chars.
+- Tests: orchestrator.test.ts asserts the spawned developer log carries message_update, tool_execution_start and message_end records; webui.test.ts covers renderLogChunk (thinking/tool/text/prompt rendering, dedupe, passthrough, partial-drop) and the /api/agent-log endpoint. All suite tests pass (node --test), including kanban.test.ts.
+- Verified parser event names against pi docs (docs/json.md, docs/message-types.md): message_update/assistantMessageEvent, toolcall_end carrying the complete ToolCall (id, name, arguments), tool_execution_start (toolCallId, toolName, args).
+- Schedule blockers 000051 and 000036 are done and merged; branch merges into main cleanly (git merge-tree reports 0 conflicts).

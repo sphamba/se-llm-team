@@ -1,7 +1,7 @@
 ---
 name: "fix: orchestrator auto-push of meta/kanban fails silently on every mirror commit"
 priority: "medium"
-state: "live-testing"
+state: "done"
 worktree: "fix/orchestrator-auto-push-of-meta-kanban-fails-silently-on-every-mirror-commit"
 ---
 
@@ -36,3 +36,8 @@ Related but distinct: 000034 (the mirror feature), 000044 (branch-to-tree reconc
 - Review checked the counter file cannot leak: `.kanban/.logs/push-failures.count` stays out of the board mirror because taskFiles picks only .md files directly in .kanban/ and .kanban/ is gitignored. In the catch path log() runs before bumpCounter(), so .logs/ exists before the first counter write.
 - Review re-ran the checks in the worktree: node src/orchestrator.test.ts (all smoke parts, including the new push warning smoke), node src/kanban.test.ts, node src/webui.test.ts. All pass.
 - Uncovered by tests (accepted, 1-line logic): no direct test of the reset-on-success path. To test it, switch origin from the non-repo path to a bare repo mid-test and assert a second warning streak.
+- Live test (2026-10-11 ~09:05-09:13 CEST): stopped the pre-fix daemon and ran the fix code from the worktree (node src/orchestrator.ts --root /home/phamba/repos/se-llm-team) against the real repo and shared board, matching the post-merge daemon configuration. Drove 4 consecutive failed auto-pushes with 4 scratch tasks (one create mirror commit each, 10s scan): .kanban/.logs/push-failures.count went 1, 2, 3, 4; each failure logged the non-fatal line with full stderr (git@github.com Permission denied (publickey), fatal: Could not read from remote repository); the WARNING fired exactly once at the 3rd consecutive failure and did not repeat on the 4th. Verified the counter file is gitignored and absent from the meta/kanban mirror (only .md files on the mirror). README "Board mirror to origin" section present and accurate in the worktree.
+- Live test supporting checks: node src/orchestrator.test.ts (all smoke parts, including the new push warning smoke) and node src/kanban.test.ts pass in the worktree. Pipeline work continued normally under the fix daemon (reviewer and developer spawns succeeded).
+- Live test found no defect in the change. Two issues found around it, reported to the PM: (1) no supported way to remove a mistaken task from the board (no delete tool; manual file deletion self-heals back from the mirror, and a daemon restart before the next mirror commit restores deleted files); (2) the push-warning counter fires only on exactly 3, so a stale counter above 3 (backup restore, leftover artifact) keeps the warning silent forever where pushes never succeed; the merge-attempts counter avoids this with a >= cap check.
+- Reset-on-success path not exercised live (no deploy key, pushes never succeed here), accepted per the note above.
+- Environment restored after the test: scratch tasks removed from both the tree and the mirror (mirror cleanup done with the daemon's own plumbing pattern, commit b94d3222), counter artifact deleted so the post-merge daemon starts a fresh failure streak, original daemon restarted from the extension path with the web UI back on port 4242.
