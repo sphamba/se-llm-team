@@ -329,6 +329,14 @@ assert.equal(b.output().split("respawn waits for the idle cooldown").length - 1,
 await waitFor(() => b.output().includes("live-testing -> to-merge"), 30000, "poll advanced the dead live-tester to to-merge", b.output);
 await waitFor(() => b.output().includes("merging -> to-merge"), 30000, "poll requeued the dead merger's task to to-merge", b.output);
 assert.equal(parseTask(rootB, taskB2.file).state, "to-merge", "requeued task waits for the idle cooldown");
+// a completed run re-arms the streak: a stale pidfile on a task outside the mapped states
+// clears the counter, so a second streak past the cap gets its own cooldown log, not silence
+setState(rootB, taskB, "backlog");
+writeFileSync(join(kanbanDir(rootB), ".pids", `${slugB}.pid`), "999999999");
+await waitFor(() => b.output().includes("cleared the dead-agent counter"), 30000, "completed run cleared the dead counter", b.output);
+setState(rootB, taskB, "to-do");
+await waitFor(() => b.output().split("respawn waits for the idle cooldown").length - 1 >= 2, 90000, "second streak cooldown log", b.output);
+assert.equal(b.output().split("respawn waits for the idle cooldown").length - 1, 2, "second death streak logged its own cooldown message");
 b.daemon.kill("SIGTERM");
 
 // --- part C: lock lifecycle: singleton, self-heal while running, release on stop ---
@@ -496,12 +504,29 @@ const g = await runDaemon(rootG);
 // "fix: defer merge while alive" caps at 4 words then drops the type word: defer-merge-while
 const wtG = join(rootG, ".worktrees", "fix/1-defer-merge-while");
 await waitFor(() => parseTask(rootG, taskG.file).state === "to-merge", 30000, "live-tester set to-merge", g.output);
-// the stub lingers 5s and the daemon rescans every 1s, so sweeps ran while the pid was alive:
-// no merger spawn, no done mirror commit
-await new Promise((r) => setTimeout(r, 2000));
-assert.ok(existsSync(wtG), "worktree kept while the live-tester pid is alive");
-assert.ok(!g.output().includes("spawned merger"), "no merger spawned while the live-tester pid is alive");
-assert.ok(!mirrorSubjects(rootG).includes(`kanban: done ${taskG.file}`), "no done mirror commit while the live-tester pid is alive");
+// the stub lingers 5s before exiting, but its node startup eats into that window, so a fixed
+// sleep can land after the stub's death and the whole merger chain on a loaded machine. Poll
+// until the registered pid is actually dead instead, asserting the defer continuously while
+// it lives: every sweep in the window must defer
+const livePidG = () => {
+	try {
+		return parseInt(readFileSync(join(kanbanDir(rootG), ".pids", `${taskG.file.replace(/\.md$/, "")}.pid`), "utf8").trim(), 10);
+	} catch {
+		return 0; // pid file cleared once the poll saw the agent dead: the defer window is over
+	}
+};
+await waitFor(
+	() => {
+		if (!pidAlive(livePidG())) return true;
+		assert.ok(existsSync(wtG), "worktree kept while the live-tester pid is alive");
+		assert.ok(!g.output().includes("spawned merger"), "no merger spawned while the live-tester pid is alive");
+		assert.ok(!mirrorSubjects(rootG).includes(`kanban: done ${taskG.file}`), "no done mirror commit while the live-tester pid is alive");
+		return false;
+	},
+	30000,
+	"live-tester pid death",
+	g.output,
+);
 // once the agent exits, the to-merge sweep spawns the merger, the merge completes and the
 // done mirror commit folds in the report
 await waitFor(() => !existsSync(wtG), 30000, "merge after agent death", g.output);

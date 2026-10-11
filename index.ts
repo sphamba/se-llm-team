@@ -61,6 +61,7 @@ export default function (pi: ExtensionAPI) {
 		// with a validation error instead of dropping it and reporting a false create
 		parameters: Type.Object({
 			name: Type.String({ description: "Task name with type prefix, e.g. 'feat: nice thing'" }),
+			shortName: Type.Optional(Type.String({ description: "Max 5 lowercase words joined by hyphens, e.g. 'this-is-a-short-name'; names the task file and the branch/worktree. Set at creation only, never updatable" })),
 			priority: Type.Optional(StringEnum(["low", "medium", "high", "critical"] as const)),
 			complexity: Type.Optional(StringEnum(["simple", "moderate", "complex"] as const)),
 			issuer: Type.Optional(Type.String({ description: "'user' (default) or '#<num>' when created after live-testing of task #<num>, e.g. '#42'" })),

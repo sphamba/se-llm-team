@@ -3,7 +3,7 @@ import { execSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendNote, createTask, getTask, listAll, listTasks, parseTask, setState, setWorktree, slugFile, slugWorktree, taskNum, updateTask } from "./kanban.ts";
+import { appendNote, createTask, getTask, listAll, listTasks, parseTask, setState, setWorktree, slugFile, slugWorktree, taskFiles, taskNum, updateTask } from "./kanban.ts";
 
 const root = mkdtempSync(join(tmpdir(), "kanban-test-"));
 const fail = (msg: string) => {
@@ -22,6 +22,9 @@ assert.equal(
 assert.equal(slugWorktree("feat: nice thing", 42), "feat/42-nice-thing");
 assert.equal(slugWorktree("nice thing", "000042_nice_thing.md"), "task/42-nice-thing");
 assert.equal(slugWorktree("feat: nice thing"), "feat/nice-thing"); // no file, no number
+assert.equal(slugWorktree("feat: nice thing", "000042_nice_thing.md", "this-is-a-short-name"), "feat/42-this-is-a-short-name");
+assert.equal(slugWorktree("feat: nice thing", 42, "this-is-a-short-name"), "feat/42-this-is-a-short-name");
+assert.equal(slugWorktree("nice thing", "000042_nice_thing.md", "this-is-a-short-name"), "task/42-this-is-a-short-name");
 
 // taskNum: leading digits, safe fallback for non-numbered names
 assert.equal(taskNum("000042_fix_thing.md"), 42);
@@ -296,6 +299,31 @@ assert.equal(listTasks(bRoot, "backlog").find((t) => t.file === tb2.file)?.block
 assert.equal(getTask(bRoot, tb2.file)?.blockedBy, "#42");
 assert.equal(getTask(bRoot, tb.file)?.blockedBy, "");
 rmSync(bRoot, { recursive: true, force: true });
+
+// shortName: drives the file and branch/worktree names, quoted in the frontmatter; set at creation only
+const sRoot = mkdtempSync(join(tmpdir(), "kanban-shortname-"));
+const ts = createTask(sRoot, { name: "feat: this is a short name", shortName: "this-is-a-short-name", summary: "s" });
+assert.equal(ts.file, "000001_this_is_a_short_name.md"); // the file slug is the shortName; the type prefix does not enter it
+assert.equal(ts.shortName, "this-is-a-short-name");
+assert.match(readFileSync(join(sRoot, ".kanban", ts.file), "utf8"), /^shortName: "this-is-a-short-name"$/m);
+assert.equal(parseTask(sRoot, ts.file).shortName, "this-is-a-short-name"); // the quoted value round-trips
+assert.equal(listTasks(sRoot, "backlog").find((t) => t.file === ts.file)?.shortName, "this-is-a-short-name"); // kanban_list carries it
+assert.equal(getTask(sRoot, ts.file)?.shortName, "this-is-a-short-name"); // kanban_get carries it
+// without shortName the truncation slug applies unchanged
+const tns = createTask(sRoot, { name: "feat: plain task", summary: "s" });
+assert.equal(tns.file, "000002_plain_task.md");
+assert.equal(tns.shortName, "");
+// strict validation rejects anything but a clean hyphenated slug, max 5 words
+assert.throws(() => createTask(sRoot, { name: "feat: upper", shortName: "This-Is-Invalid", summary: "s" }));
+assert.throws(() => createTask(sRoot, { name: "feat: six words", shortName: "one-two-three-four-five-six", summary: "s" }));
+assert.throws(() => createTask(sRoot, { name: "feat: chars", shortName: "has_underscore", summary: "s" }));
+assert.throws(() => createTask(sRoot, { name: "feat: lead", shortName: "-leading-hyphen", summary: "s" }));
+assert.throws(() => createTask(sRoot, { name: "feat: trail", shortName: "trailing-hyphen-", summary: "s" }));
+assert.equal(taskFiles(sRoot).length, 2); // rejected creates wrote no files
+// updateTask has no shortName parameter: the file name derives from it, so it never changes
+assert.equal(updateTask(sRoot, ts, { summary: "s2" }), undefined);
+assert.equal(parseTask(sRoot, ts.file).shortName, "this-is-a-short-name");
+rmSync(sRoot, { recursive: true, force: true });
 
 rmSync(root, { recursive: true, force: true });
 console.log("kanban.test.ts: all assertions passed");
