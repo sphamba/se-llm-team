@@ -16,14 +16,19 @@ export const STATES = [
 export type TaskState = (typeof STATES)[number];
 export type Priority = "low" | "medium" | "high" | "critical";
 export type Scope = "backlog" | "in-progress" | "done";
+export const COMPLEXITIES = ["simple", "moderate", "complex"] as const;
+export type Complexity = (typeof COMPLEXITIES)[number];
 
 export interface Task {
 	file: string;
 	name: string;
+	shortName: string;
 	priority: string;
 	state: TaskState;
 	worktree: string;
 	issuer: string;
+	complexity: string;
+	blockedBy: string;
 	summary: string;
 	specs: string;
 	notes: string;
@@ -35,9 +40,12 @@ export interface TaskRef {
 	file: string;
 	num: number;
 	name: string;
+	shortName: string;
 	priority: string;
 	state: TaskState;
 	issuer: string;
+	complexity: string;
+	blockedBy: string;
 	summary: string;
 	openQuestions: string;
 }
@@ -109,10 +117,13 @@ export function parseTask(root: string, file: string): Task {
 	return {
 		file,
 		name: attrs.name ?? file.replace(/\.md$/, ""),
+		shortName: attrs.shortName ?? "",
 		priority: attrs.priority ?? "medium",
 		state: (STATES as readonly string[]).includes(attrs.state) ? (attrs.state as TaskState) : "backlog",
 		worktree: attrs.worktree ?? "",
 		issuer: attrs.issuer ?? "user",
+		complexity: (COMPLEXITIES as readonly string[]).includes(attrs.complexity) ? attrs.complexity : "moderate",
+		blockedBy: attrs.blockedBy ?? "",
 		summary: trim(sections["summary"]),
 		specs: trim(sections["specs"]),
 		notes: trim(sections["notes"]),
@@ -133,7 +144,7 @@ export function listTasks(root: string, scope: Scope, priority?: Priority | stri
 			scope === "backlog" ? t.state === "backlog" : scope === "done" ? t.state === "done" : IN_PROGRESS.has(t.state),
 		)
 		.filter((t) => priority === undefined || t.priority === priority)
-		.map(({ file, name, priority, state, issuer, summary, openQuestions }) => ({ file, num: taskNum(file), name, priority, state, issuer, summary, openQuestions }));
+		.map(({ file, name, shortName, priority, state, issuer, complexity, blockedBy, summary, openQuestions }) => ({ file, num: taskNum(file), name, shortName, priority, state, issuer, complexity, blockedBy, summary, openQuestions }));
 }
 
 export function getTask(root: string, file: string): Task | undefined {
@@ -157,10 +168,11 @@ export function slugFile(name: string): string {
 	return slugParts(name).words.join("_");
 }
 
-// branch/worktree {typeDir}/{num}-{shortSlug} with the non-padded number from the task file
-export function slugWorktree(name: string, file?: string | number): string {
+// branch/worktree {typeDir}/{num}-{shortSlug} with the non-padded number from the task file;
+// shortName, the creation slug, replaces the name-derived slug when present
+export function slugWorktree(name: string, file?: string | number, shortName?: string): string {
 	const { type, words } = slugParts(name);
-	const slug = words.join("-");
+	const slug = shortName || words.join("-");
 	const num = typeof file === "number" ? file : file ? parseInt(file, 10) : Number.NaN;
 	if (Number.isNaN(num)) return type ? `${type}/${slug}` : slug;
 	return `${type ?? "task"}/${num}-${slug}`;
@@ -236,7 +248,7 @@ function replaceSections(root: string, task: Task, updates: Record<string, strin
 export function updateTask(
 	root: string,
 	task: Task,
-	patch: { name?: string; priority?: string; summary?: string; specs?: string; openQuestions?: string },
+	patch: { name?: string; priority?: string; complexity?: string; blockedBy?: string; summary?: string; specs?: string; openQuestions?: string },
 ): void {
 	const current = parseTask(root, task.file);
 	const rawTask = readFileSync(join(kanbanDir(root), task.file), "utf8");
@@ -246,6 +258,8 @@ export function updateTask(
 	const attrs: Record<string, string> = {};
 	if (patch.name !== undefined) attrs.name = patch.name;
 	if (patch.priority !== undefined) attrs.priority = patch.priority;
+	if (patch.complexity !== undefined) attrs.complexity = patch.complexity;
+	if (patch.blockedBy !== undefined) attrs.blockedBy = patch.blockedBy;
 	if (Object.keys(attrs).length) updateAttrs(root, task, attrs);
 	const sections: Record<string, string> = {};
 	if (patch.summary !== undefined) sections.summary = patch.summary;
@@ -270,25 +284,40 @@ export function appendNote(root: string, task: Task, note: string): void {
 	}
 }
 
+// strict creation slug: lowercase letters/digits, single hyphens between words
+const SHORTNAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
 export function createTask(
 	root: string,
-	input: { name: string; priority?: Priority | string; summary: string; specs?: string; openQuestions?: string; issuer?: string },
+	input: { name: string; shortName?: string; priority?: Priority | string; complexity?: string; summary: string; specs?: string; openQuestions?: string; issuer?: string; blockedBy?: string },
 ): Task {
 	const priority = (["low", "medium", "high", "critical"] as const).includes(input.priority as Priority)
 		? input.priority
 		: "medium";
+	const complexity = (COMPLEXITIES as readonly string[]).includes(input.complexity as string)
+		? (input.complexity as string)
+		: "moderate";
 	// issuer is set at creation only and never changed afterwards; anything but "user" or "#<num>" falls back to "user"
 	const issuer = input.issuer !== undefined && (input.issuer === "user" || /^#\d+$/.test(input.issuer)) ? input.issuer : "user";
+	// shortName is set at creation only: it names the file and the branch, so it cannot change later;
+	// anything invalid is rejected, unlike issuer which falls back
+	const shortName = input.shortName || undefined;
+	if (shortName && !SHORTNAME_RE.test(shortName))
+		throw new Error(`invalid shortName "${shortName}": use lowercase letters and digits with single hyphens between words, no leading or trailing hyphen`);
+	if (shortName && shortName.split("-").length > 5) throw new Error(`invalid shortName "${shortName}": max 5 hyphen-separated words`);
 	const open = (input.openQuestions ?? "").trim();
+	const front: Record<string, string> = { name: input.name, priority, state: "backlog", worktree: "", issuer, complexity };
+	if (shortName) front.shortName = shortName;
+	if (input.blockedBy) front.blockedBy = input.blockedBy;
 	const content =
-		`${serializeFrontmatter({ name: input.name, priority, state: "backlog", worktree: "", issuer })}\n` +
+		`${serializeFrontmatter(front)}\n` +
 		`# Summary\n${input.summary.trim()}\n\n# Specs\n${(input.specs ?? "").trim()}\n\n# Notes\n` +
 		(open ? `\n# Open questions\n${open}\n` : "");
 	mkdirSync(kanbanDir(root), { recursive: true });
 	for (let attempt = 0; attempt < 10; attempt++) {
 		const nums = taskFiles(root).map(taskNum).filter((n) => n > 0);
 		const num = String((nums.length ? Math.max(...nums) : 0) + 1).padStart(6, "0");
-		const file = `${num}_${slugFile(input.name)}.md`;
+		const file = `${num}_${shortName ? shortName.replaceAll("-", "_") : slugFile(input.name)}.md`;
 		try {
 			writeFileSync(join(kanbanDir(root), file), content, { flag: "wx" });
 			return parseTask(root, file);

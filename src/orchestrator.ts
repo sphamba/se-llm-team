@@ -1,8 +1,10 @@
 import { spawn, execFileSync, execSync } from "node:child_process";
-import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from "node:fs";
+import { appendFileSync, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { Transform } from "node:stream";
 import { fileURLToPath } from "node:url";
 import {
+	COMPLEXITIES,
 	getTask,
 	kanbanDir,
 	listAll,
@@ -21,7 +23,12 @@ const DEFAULT_POLL_MINUTES = 1;
 const DEFAULT_AUTO_SCHEDULE_MINUTES = 5;
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const RESPAWN_CAP = 5;
+// final fallback for the per-complexity cap when a Config carries no reviewerCap entry for
+// the task's complexity
 const REVIEWER_RUN_CAP = 3;
+// per-complexity forced-advance caps: successful reviewer runs before to-review moves on to
+// to-live-test; each overridable via the top-level reviewerCap config key
+const DEFAULT_REVIEWER_CAP: Record<string, number> = { simple: 1, moderate: 2, complex: 3 };
 // consecutive failed auto-pushes before the daemon logs its once-only warning (a success
 // resets the count); the per-failure line is easy to miss, the warning names the consequence
 const PUSH_WARN_AFTER = 3;
@@ -38,12 +45,21 @@ interface LlmConfig {
 	thinking?: string;
 }
 
+// a roles entry may also hold per-complexity sub-objects keyed simple/moderate/complex, each
+// an LlmConfig that overrides the role defaults for tasks of that complexity
+interface RoleLlmConfig extends LlmConfig {
+	simple?: LlmConfig;
+	moderate?: LlmConfig;
+	complex?: LlmConfig;
+}
+
 interface Config {
 	agent: string;
 	pollMinutes: number;
 	autoScheduleMinutes: number;
 	llm: LlmConfig;
-	roles: Record<string, LlmConfig>;
+	roles: Record<string, RoleLlmConfig>;
+	reviewerCap: Record<string, number>;
 }
 
 // the provider/model/thinking triple of one config object (global or a roles entry); values
@@ -60,7 +76,7 @@ function cleanLlm(root: string, entry: unknown, where = ""): LlmConfig {
 }
 
 function loadConfig(root: string): Config {
-	let cfg: { agent?: string; pollMinutes?: number; autoScheduleMinutes?: number; provider?: unknown; model?: unknown; thinking?: unknown; roles?: unknown } = {};
+	let cfg: { agent?: string; pollMinutes?: number; autoScheduleMinutes?: number; provider?: unknown; model?: unknown; thinking?: unknown; roles?: unknown; reviewerCap?: unknown } = {};
 	// user-level first, project .kanban/se-llm-team.json overrides it
 	for (const path of [join(process.env.HOME ?? "", ".pi", "agent", "se-llm-team.json"), join(root, ".kanban", "se-llm-team.json")]) {
 		try {
@@ -69,9 +85,33 @@ function loadConfig(root: string): Config {
 			/* optional file */
 		}
 	}
-	const roles: Record<string, LlmConfig> = {};
+	const roles: Record<string, RoleLlmConfig> = {};
 	if (cfg.roles && typeof cfg.roles === "object" && !Array.isArray(cfg.roles)) {
-		for (const [role, entry] of Object.entries(cfg.roles)) roles[role] = cleanLlm(root, entry, ` for role "${role}"`);
+		for (const [role, entry] of Object.entries(cfg.roles)) {
+			const clean: RoleLlmConfig = cleanLlm(root, entry, ` for role "${role}"`);
+			// nested complexity sub-objects are cleaned like role entries; a non-object value
+			// under those keys warns and is ignored
+			const src = (entry ?? {}) as Record<string, unknown>;
+			for (const cx of COMPLEXITIES) {
+				const v = src[cx];
+				if (v === undefined) continue;
+				if (v && typeof v === "object" && !Array.isArray(v)) clean[cx] = cleanLlm(root, v, ` for role "${role}" ${cx}`);
+				else log(root, `non-object complexity override ${JSON.stringify(v)} for role "${role}" ${cx}, ignored`);
+			}
+			roles[role] = clean;
+		}
+	}
+	const reviewerCap: Record<string, number> = { ...DEFAULT_REVIEWER_CAP };
+	if (cfg.reviewerCap && typeof cfg.reviewerCap === "object" && !Array.isArray(cfg.reviewerCap)) {
+		for (const cx of COMPLEXITIES) {
+			const v = (cfg.reviewerCap as Record<string, unknown>)[cx];
+			if (v === undefined) continue;
+			if (typeof v !== "number" || !Number.isInteger(v) || v < 1) {
+				log(root, `invalid reviewerCap.${cx} ${JSON.stringify(v)}, ignored (expected an integer >= 1)`);
+				continue;
+			}
+			reviewerCap[cx] = v;
+		}
 	}
 	return {
 		agent: cfg.agent ?? "pi",
@@ -79,16 +119,19 @@ function loadConfig(root: string): Config {
 		autoScheduleMinutes: cfg.autoScheduleMinutes ?? DEFAULT_AUTO_SCHEDULE_MINUTES,
 		llm: cleanLlm(root, cfg, " (global)"),
 		roles,
+		reviewerCap,
 	};
 }
 
-// per-field precedence: the role entry wins over the global default, an unset field adds no
-// flag. --provider is only valid together with --model, so a provider alone is ignored.
-function llmFlags(root: string, cfg: Config, role: string): string[] {
+// per-field precedence: the role's complexity entry wins over the role default, which wins
+// over the global default; an unset field adds no flag. --provider is only valid together
+// with --model, so a provider alone is ignored.
+function llmFlags(root: string, cfg: Config, role: string, complexity: string): string[] {
 	const roleCfg = cfg.roles[role] ?? {};
-	const provider = roleCfg.provider ?? cfg.llm.provider;
-	const model = roleCfg.model ?? cfg.llm.model;
-	const thinking = roleCfg.thinking ?? cfg.llm.thinking;
+	const cxCfg = (roleCfg as Record<string, LlmConfig | undefined>)[complexity] ?? {};
+	const provider = cxCfg.provider ?? roleCfg.provider ?? cfg.llm.provider;
+	const model = cxCfg.model ?? roleCfg.model ?? cfg.llm.model;
+	const thinking = cxCfg.thinking ?? roleCfg.thinking ?? cfg.llm.thinking;
 	const flags: string[] = [];
 	if (provider && !model) log(root, `provider "${provider}" for role ${role} ignored: --provider requires --model`);
 	else if (provider) flags.push("--provider", provider);
@@ -97,13 +140,14 @@ function llmFlags(root: string, cfg: Config, role: string): string[] {
 	return flags;
 }
 
-function parseArgs(argv: string[]): { root?: string; rescanSeconds?: number; pollMinutes?: number; noWebui?: boolean } {
-	const args: { root?: string; rescanSeconds?: number; pollMinutes?: number; noWebui?: boolean } = {};
+function parseArgs(argv: string[]): { root?: string; rescanSeconds?: number; pollMinutes?: number; noWebui?: boolean; compactLogs?: boolean } {
+	const args: { root?: string; rescanSeconds?: number; pollMinutes?: number; noWebui?: boolean; compactLogs?: boolean } = {};
 	for (let i = 0; i < argv.length; i++) {
 		if (argv[i] === "--root") args.root = resolve(argv[++i]);
 		else if (argv[i] === "--rescan-seconds") args.rescanSeconds = Number(argv[++i]);
 		else if (argv[i] === "--poll-minutes") args.pollMinutes = Number(argv[++i]);
 		else if (argv[i] === "--no-webui") args.noWebui = true;
+		else if (argv[i] === "--compact-logs") args.compactLogs = true;
 	}
 	return args;
 }
@@ -249,26 +293,159 @@ function nextRunIndex(root: string, slug: string, role: string): number {
 	return max + 1;
 }
 
+// one JSONL log line -> the compacted line, or null to drop it. The moderate drop list: the
+// run-opening system prompt echoes (message_start/end with role=system, the ~135 KB sections
+// payload), agent_end's full message replay, and the toolResult message_start (the full tool
+// result echoed a second time); message_update loses its per-record usage envelope. Everything
+// the read path renders survives byte-for-byte: message_update deltas, tool calls, full tool
+// results (the subagent-log matching needs them), turn replays, and non-system message_end
+// records (the user prompt's qualifies).
+export function compactLogLine(line: string): string | null {
+	if (!line.startsWith("{")) return line; // non-JSON stderr passes through unchanged
+	let rec: any;
+	try {
+		rec = JSON.parse(line);
+	} catch {
+		return line; // not JSON either: pass through unchanged
+	}
+	if (!rec || typeof rec.type !== "string") return line;
+	switch (rec.type) {
+		case "message_start":
+		case "message_end":
+			if (rec.message?.role === "system") return null;
+			if (rec.type === "message_start" && rec.message?.role === "toolResult") return null;
+			return line; // kept verbatim
+		case "agent_end":
+			delete rec.messages; // the full message replay; the rest of the record stays
+			return JSON.stringify(rec);
+		case "message_update":
+			if (rec.assistantMessageEvent === undefined) {
+				delete rec.usage;
+				return JSON.stringify(rec);
+			}
+			return JSON.stringify({ type: "message_update", assistantMessageEvent: rec.assistantMessageEvent });
+		default:
+			return line; // kept verbatim, byte-for-byte
+	}
+}
+
+// line-buffered Transform applying compactLogLine per line: chunk boundaries can split a line
+// or a multibyte character mid-way, so lines reassemble at the byte level (\n never occurs
+// inside a UTF-8 sequence); one JSONL record per line, no re-ordering, no merging
+export function logCompactor(): Transform {
+	let buf: Buffer = Buffer.alloc(0);
+	return new Transform({
+		transform(chunk: Buffer, _enc, cb) {
+			buf = buf.length ? Buffer.concat([buf, chunk]) : chunk;
+			for (let i = buf.indexOf(0x0a); i !== -1; i = buf.indexOf(0x0a)) {
+				const out = compactLogLine(buf.subarray(0, i).toString("utf8"));
+				buf = buf.subarray(i + 1);
+				if (out !== null) this.push(out + "\n");
+			}
+			cb();
+		},
+		flush(cb) {
+			if (buf.length) {
+				const out = compactLogLine(buf.toString("utf8"));
+				if (out !== null) this.push(out + "\n");
+			}
+			cb();
+		},
+	});
+}
+
+// one compactor-fed append-only write stream per source (stdout, stderr) on the same log
+// file: a shared sink would let the first feeder to finish (stderr is usually empty) end it
+// while the other still holds backpressured lines - they would wait for a drain that never
+// comes and be lost silently. O_APPEND keeps every line atomic; each pair ends independently.
+export function logFeeders(path: string) {
+	const feeders = [logCompactor(), logCompactor()];
+	const sinks = feeders.map((f) => {
+		const sink = createWriteStream(path, { flags: "a" });
+		// a dead sink (disk full, log removed) stops its feed instead of buffering the child's
+		// output forever; a stream error loses log lines, never the daemon
+		sink.on("error", () => f.destroy());
+		f.on("error", () => {});
+		f.pipe(sink);
+		return sink;
+	});
+	return { feeders, sinks };
+}
+
 function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: string, pidName?: string): void {
 	const slug = task.file.replace(/\.md$/, "");
 	mkdirSync(join(kanbanDir(root), ".logs"), { recursive: true });
-	const out = openSync(logPath(root, `${slug}.${role}.${nextRunIndex(root, slug, role)}`), "a");
+	// stdout and stderr flow through the compactor into the append-only log (the write-time
+	// pipe drops the dead weight the fd redirect logged verbatim); the daemon drains the pipe
+	const { feeders } = logFeeders(logPath(root, `${slug}.${role}.${nextRunIndex(root, slug, role)}`));
 	// --approve trusts the project-local files of the worktree, so the headless session never waits for a trust prompt;
 	// --mode json streams the full JSONL event log (thinking, tool calls, text) instead of print mode's final text only;
 	// the provider/model/thinking flags come from the config, resolved per role
-	const child = spawn(cfg.agent, ["--approve", "--mode", "json", ...llmFlags(root, cfg, role), "-p", renderPrompt(root, role, task, cwd === root ? undefined : cwd)], {
+	const child = spawn(cfg.agent, ["--approve", "--mode", "json", ...llmFlags(root, cfg, role, task.complexity ?? "moderate"), "-p", renderPrompt(root, role, task, cwd === root ? undefined : cwd)], {
 		cwd,
 		detached: true,
-		stdio: ["ignore", out, out],
+		stdio: ["ignore", "pipe", "pipe"],
 	});
-	child.on("error", (err) => log(root, `agent ${role} for ${task.file} failed to start: ${err.message}`));
-	closeSync(out);
+	// end:false on both sources: the child close event is the single end path for both
+	// compactors, so neither feeder nor sink ends before its source drains
+	child.stdout?.on("error", () => {});
+	child.stderr?.on("error", () => {});
+	child.stdout?.pipe(feeders[0], { end: false });
+	child.stderr?.pipe(feeders[1], { end: false });
+	child.on("close", () => feeders.forEach((f) => f.end()));
+	child.on("error", (err) => {
+		// a failed spawn also fires close (verified on this Node), so this end is an idempotent belt
+		// against runtimes where it does not - the leak would be the sink and both pipes
+		feeders.forEach((f) => f.end());
+		log(root, `agent ${role} for ${task.file} failed to start: ${err.message}`);
+	});
 	child.unref();
 	// a failed spawn (ENOENT) reports no pid; a written 0 reads as the caller's process group
 	if (child.pid) {
 		writePid(root, pidName ?? slug, child.pid);
 		log(root, `spawned ${role} pid=${child.pid} for ${task.file} (cwd=${cwd})`);
 	}
+}
+
+// one-time retro sweep (--compact-logs, not wired into normal daemon operation): rewrite
+// finished agent logs through the same compactor, in place via temp file + rename. A log whose
+// writer may still be alive is skipped: non-merger logs while <slug>.pid exists, merger logs
+// while the project-wide merger.pid or a legacy <slug>.merger.pid exists. Non role-log names
+// (orchestrator.log, counters, armed markers) never match the pattern.
+export function compactFinishedLogs(root: string): { files: number; before: number; after: number } {
+	const result = { files: 0, before: 0, after: 0 };
+	let names: string[];
+	try {
+		names = readdirSync(join(kanbanDir(root), ".logs"));
+	} catch {
+		return result;
+	}
+	for (const name of names) {
+		// role-log name pattern: <slug>.<role>.<n>.log and the legacy unsuffixed <slug>.<role>.log
+		const m = name.match(/^(.+)\.(developer|reviewer|live-tester|merger)(\.\d+)?\.log$/);
+		if (!m) continue;
+		const guards = m[2] === "merger" ? ["merger", `${m[1]}.merger`] : [m[1]];
+		if (guards.some((g) => existsSync(pidPath(root, g)))) continue;
+		const path = join(kanbanDir(root), ".logs", name);
+		const before = readFileSync(path, "utf8");
+		const after = before.split("\n").map(compactLogLine).filter((l) => l !== null).join("\n");
+		if (after === before) continue;
+		const tmp = `${path}.compact-tmp`;
+		try {
+			writeFileSync(tmp, after);
+			renameSync(tmp, path);
+			result.files++;
+			result.before += Buffer.byteLength(before);
+			result.after += Buffer.byteLength(after);
+		} catch {
+			try {
+				rmSync(tmp, { force: true });
+			} catch {
+				/* keep the original */
+			}
+		}
+	}
+	return result;
 }
 
 // consumes the armed marker at the state the armed reviewer wrote itself (back to to-review,
@@ -671,7 +848,7 @@ function reconcileBoard(root: string): boolean {
 // is taken), links the shared board into it and records the worktree on the task;
 // null when creation fails
 function ensureWorktree(root: string, task: Task): { wt: string; wtDir: string } | null {
-	const wt = task.worktree || slugWorktree(task.name, task.file);
+	const wt = task.worktree || slugWorktree(task.name, task.file, task.shortName || undefined);
 	const wtDir = join(root, ".worktrees", wt);
 	if (!existsSync(wtDir)) {
 		if (git(root, ["worktree", "add", join(".worktrees", wt), "-b", wt], true) === null) {
@@ -705,10 +882,15 @@ function bootstrapBoard(root: string): void {
 }
 
 function startTodo(root: string, cfg: Config, task: Task): void {
+	const slug = task.file.replace(/\.md$/, "");
+	// a manual to-do rewrite can land while the spawned agent still runs: the live pid is the
+	// guard, the state alone is not, or a second sweep spawns a twin that overwrites the pid file
+	if (pidAlive(agentPid(root, slug))) return;
 	const ensured = ensureWorktree(root, task);
 	if (!ensured) return;
-	spawnAgent(root, cfg, "developer", { ...task, worktree: ensured.wt }, ensured.wtDir);
+	// state before spawn: the next sweep reads doing and defers, with the pid check as the belt
 	setState(root, task, "doing");
+	spawnAgent(root, cfg, "developer", { ...task, worktree: ensured.wt }, ensured.wtDir);
 }
 
 // one failed-merge marker per task: written when the sweep spawns a merger, it survives the
@@ -825,6 +1007,7 @@ function janitorPids(root: string, tasks: Task[]): void {
 	}
 }
 
+
 function rescan(root: string, cfg: Config): void {
 	// root-cause fix ordering: a snapshot commit must never be built from a tree that lacks
 	// branch-only files, so an external mirror-head move is materialized before boardStatus
@@ -870,18 +1053,21 @@ function rescan(root: string, cfg: Config): void {
 				else {
 					const slug = task.file.replace(/\.md$/, "");
 					consumeReviewerRun(root, slug);
-					if (readCounter(root, `${slug}.reviewer-runs`) >= REVIEWER_RUN_CAP) {
+					const cap = cfg.reviewerCap[task.complexity] ?? REVIEWER_RUN_CAP;
+					if (readCounter(root, `${slug}.reviewer-runs`) >= cap) {
 						// re-read before the forced advance: a state changed underneath (PM or user) wins
 						const fresh = getTask(root, task.file);
 						if (fresh && fresh.state === "to-review") {
 							setState(root, fresh, "to-live-test");
 							// clears the count, so a future rework cycle starts fresh
 							writeFileSync(counterPath(root, `${slug}.reviewer-runs`), "0");
-							log(root, "reviewer succeeded 3+ times, moving to to-live-test");
+							log(root, `${task.file}: reviewer succeeded ${cap}+ times, moving to to-live-test`);
 						}
-					} else {
-						spawnAgent(root, cfg, "reviewer", task, ensured.wtDir);
+					} else if (!pidAlive(agentPid(root, slug))) {
+						// the previous agent for this task (usually the developer writing its report) may
+						// still be alive: defer the spawn to a later sweep instead of double-spawning
 						setState(root, task, "reviewing");
+						spawnAgent(root, cfg, "reviewer", task, ensured.wtDir);
 						const pid = agentPid(root, slug);
 						if (pid) writeFileSync(armedPath(root, slug), String(pid));
 					}
@@ -892,9 +1078,13 @@ function rescan(root: string, cfg: Config): void {
 				else {
 					// a reviewer approval is a successful run too; the forced advance arrives with the
 					// marker already consumed at the to-review branch, so it never re-counts
-					consumeReviewerRun(root, task.file.replace(/\.md$/, ""));
-					spawnAgent(root, cfg, "live-tester", task, ensured.wtDir);
-					setState(root, task, "live-testing");
+					const slug = task.file.replace(/\.md$/, "");
+					consumeReviewerRun(root, slug);
+					if (!pidAlive(agentPid(root, slug))) {
+						// the reviewer that approved it may still be alive: defer the spawn to a later sweep
+						setState(root, task, "live-testing");
+						spawnAgent(root, cfg, "live-tester", task, ensured.wtDir);
+					}
 				}
 			} else if (task.state === "to-merge") {
 				sweepToMerge(root, cfg, task);
@@ -944,6 +1134,17 @@ const taskNum = (file: string) => {
 // continuous idle. Module state like lastMirrorHash: one locked daemon per project.
 let idleSince: number | null = null;
 
+// a blockedBy entry ("#<num>") holds the task while its blocker exists and is not done;
+// a ref resolving to no existing task is ignored
+function blockedByUndone(tasks: Task[], task: Task): boolean {
+	if (!task.blockedBy) return false;
+	const states = new Map(tasks.map((t) => [taskNum(t.file), t.state]));
+	return task.blockedBy.split(",").some((ref) => {
+		const num = parseInt(ref.trim().replace(/^#/, ""), 10);
+		return num > 0 && states.get(num) !== undefined && states.get(num) !== "done";
+	});
+}
+
 function autoSchedule(root: string, cfg: Config, tasks: Task[]): void {
 	// conflicted files parse bogus state values: neither promotable nor proof of activity
 	const candidates = tasks.filter((t) => !t.conflicted);
@@ -959,8 +1160,12 @@ function autoSchedule(root: string, cfg: Config, tasks: Task[]): void {
 		return;
 	}
 	if (now - idleSince < cfg.autoScheduleMinutes * 60_000) return;
-	// taskFiles sorts by file name, so the stable sort keeps the oldest first within a rank
-	const next = [...backlog].sort((a, b) => rank(a.priority) - rank(b.priority) || taskNum(a.file) - taskNum(b.file))[0];
+	// taskFiles sorts by file name, so the stable sort keeps the oldest first within a rank;
+	// unfinished blockers hold the task: the failsafe never auto-promotes a blocked task
+	const next = [...backlog]
+		.filter((t) => !blockedByUndone(tasks, t))
+		.sort((a, b) => rank(a.priority) - rank(b.priority) || taskNum(a.file) - taskNum(b.file))[0];
+	if (!next) return;
 	idleSince = null;
 	log(root, `no active task for ${cfg.autoScheduleMinutes}min, promoting ${next.file} to to-do (failsafe)`);
 	try {
@@ -1050,11 +1255,18 @@ function holdsLock(root: string): boolean {
 export function main(argv: string[]): void {
 	const args = parseArgs(argv);
 	if (!args.root) {
-		process.stderr.write("usage: node orchestrator.ts --root <project-dir> [--no-webui]\n");
+		process.stderr.write("usage: node orchestrator.ts --root <project-dir> [--no-webui] [--compact-logs]\n");
 		process.exitCode = 1;
 		return;
 	}
 	const root = args.root;
+	if (args.compactLogs) {
+		const r = compactFinishedLogs(root);
+		const summary = `retro-compacted ${r.files} agent log(s): ${r.before} -> ${r.after} bytes`;
+		log(root, summary);
+		process.stdout.write(summary + "\n");
+		return;
+	}
 	const cfg = loadConfig(root);
 	const pollMinutes = args.pollMinutes ?? cfg.pollMinutes;
 	const rescanSeconds = args.rescanSeconds ?? 10;

@@ -8,9 +8,12 @@ Project root: {{ROOT}}
 
 First, set the state attribute in the task file frontmatter to merging (edit that one line).
 
-Then merge in two steps:
-1. In the worktree {{ROOT}}/.worktrees/{{WORKTREE_NAME}}: merge the main branch into {{WORKTREE_NAME}} (git merge main). Read the task Specs and Notes to understand the intent of both sides. When the two sides disagree, the main branch wins unless the task Specs say otherwise. Complete the merge, stage the resolved files and commit. If the merge was clean (no conflicts), skip the test suites entirely and go straight to step 2: every branch was already developer-reviewed and live-tested, and re-running the suites doubles the merge time for the common case. Only when you had to resolve conflicts (semantic-merge risk) run the project's test suites in the worktree and fix what they expose; commit those fixes on the branch too, so step 2 carries them.
-2. In the project root {{ROOT}}: merge {{WORKTREE_NAME}} into the main branch (git merge --no-edit {{WORKTREE_NAME}}). The main side should be clean now; if conflicts still appear, resolve them the same way and commit.
+Then merge in two steps. At the start of each step, resolve the base branch of the project root checkout (git -C {{ROOT}} branch --show-current). The base branch is the branch that the root has checked out at that moment. Never merge a hardcoded main.
+
+1. Resolve the base branch (git -C {{ROOT}} branch --show-current). In the worktree {{ROOT}}/.worktrees/{{WORKTREE_NAME}}: merge that base branch into {{WORKTREE_NAME}} (git merge <base-branch>). Resolve conflicts there. Read the task Specs and Notes to understand the intent of both sides. When the two sides disagree, the base branch wins unless the task Specs say otherwise. Complete the merge, stage the resolved files and commit. If the merge was clean (no conflicts), skip the test suites entirely and go straight to step 2: every branch was already developer-reviewed and live-tested, and re-running the suites doubles the merge time for the common case. Only when you had to resolve conflicts (semantic-merge risk) run the project's test suites in the worktree and fix what they expose; commit those fixes on the branch too, so step 2 carries them.
+2. Resolve the base branch again (git -C {{ROOT}} branch --show-current). The root checkout may have moved since step 1. In the project root {{ROOT}}: merge {{WORKTREE_NAME}} into that base branch (git merge --no-edit {{WORKTREE_NAME}}). The root side should be clean now; if conflicts still appear, resolve them the same way and commit.
+
+If the project root is in a detached HEAD state (git -C {{ROOT}} branch --show-current prints no branch name), there is no branch to merge into. Do not merge. Report the warning in your final output. Leave a note in the # Notes section of the task file that says the root checkout is detached. Set the state attribute back to to-merge. The Project manager resolves it manually. Never merge into an unexpected place.
 
 When both merges are complete, set the state attribute in the task file frontmatter to done and append what you resolved to the # Notes section of the task file.
 

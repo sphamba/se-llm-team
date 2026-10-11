@@ -3,7 +3,7 @@ import { execSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendNote, createTask, getTask, listAll, listTasks, parseTask, setState, setWorktree, slugFile, slugWorktree, taskNum, updateTask } from "./kanban.ts";
+import { appendNote, createTask, getTask, listAll, listTasks, parseTask, setState, setWorktree, slugFile, slugWorktree, taskFiles, taskNum, updateTask } from "./kanban.ts";
 
 const root = mkdtempSync(join(tmpdir(), "kanban-test-"));
 const fail = (msg: string) => {
@@ -22,6 +22,9 @@ assert.equal(
 assert.equal(slugWorktree("feat: nice thing", 42), "feat/42-nice-thing");
 assert.equal(slugWorktree("nice thing", "000042_nice_thing.md"), "task/42-nice-thing");
 assert.equal(slugWorktree("feat: nice thing"), "feat/nice-thing"); // no file, no number
+assert.equal(slugWorktree("feat: nice thing", "000042_nice_thing.md", "this-is-a-short-name"), "feat/42-this-is-a-short-name");
+assert.equal(slugWorktree("feat: nice thing", 42, "this-is-a-short-name"), "feat/42-this-is-a-short-name");
+assert.equal(slugWorktree("nice thing", "000042_nice_thing.md", "this-is-a-short-name"), "task/42-this-is-a-short-name");
 
 // taskNum: leading digits, safe fallback for non-numbered names
 assert.equal(taskNum("000042_fix_thing.md"), 42);
@@ -34,9 +37,12 @@ assert.equal(t1.file, "000001_nice_thing.md");
 assert.equal(t1.state, "backlog");
 assert.equal(t1.name, "feat: nice thing");
 assert.equal(t1.priority, "high");
+assert.equal(t1.complexity, "moderate"); // default complexity written on every new task
+assert.match(readFileSync(join(root, ".kanban", t1.file), "utf8"), /^complexity: "moderate"$/m);
 const t2 = createTask(root, { name: "fix: other thing", summary: "Fix it" });
 assert.equal(t2.file, "000002_other_thing.md");
 assert.equal(t2.priority, "medium");
+assert.equal(t2.complexity, "moderate");
 // name with colon must round-trip through the quoted frontmatter
 assert.equal(parseTask(root, t1.file).name, "feat: nice thing");
 
@@ -51,10 +57,10 @@ assert.deepEqual(listTasks(root, "backlog").map((t) => ({ file: t.file, priority
 	{ file: t2.file, priority: "medium", state: "backlog" },
 ]);
 
-// listTasks entries carry num
-assert.deepEqual(listTasks(root, "backlog").map((t) => ({ file: t.file, num: t.num })), [
-	{ file: t1.file, num: 1 },
-	{ file: t2.file, num: 2 },
+// listTasks entries carry num and complexity
+assert.deepEqual(listTasks(root, "backlog").map((t) => ({ file: t.file, num: t.num, complexity: t.complexity })), [
+	{ file: t1.file, num: 1, complexity: "moderate" },
+	{ file: t2.file, num: 2, complexity: "moderate" },
 ]);
 
 // priority filter, alone and combined with scope
@@ -187,10 +193,10 @@ assert.equal(tq.openQuestions, "- [user] Which colour?");
 assert.match(readFileSync(join(qRoot, ".kanban", tq.file), "utf8"), /# Notes\n\n# Open questions\n- \[user\] Which colour\?\n$/);
 const tn = createTask(qRoot, { name: "feat: no questions", summary: "s" });
 assert.equal(tn.openQuestions, "");
-// without openQuestions the body is byte-identical to the pre-change format plus the issuer line
+// without openQuestions the body is byte-identical to the pre-change format plus the issuer and complexity lines
 assert.equal(
 	readFileSync(join(qRoot, ".kanban", tn.file), "utf8"),
-	`---\nname: "feat: no questions"\npriority: "medium"\nstate: "backlog"\nworktree: ""\nissuer: "user"\n---\n\n# Summary\ns\n\n# Specs\n\n\n# Notes\n`,
+	`---\nname: "feat: no questions"\npriority: "medium"\nstate: "backlog"\nworktree: ""\nissuer: "user"\ncomplexity: "moderate"\n---\n\n# Summary\ns\n\n# Specs\n\n\n# Notes\n`,
 );
 // an empty/whitespace openQuestions reads as absent: no section
 const te = createTask(qRoot, { name: "feat: empty questions", summary: "s", openQuestions: "  " });
@@ -243,6 +249,81 @@ assert.ok(listTasks(root, "in-progress").some((t) => t.file === ti.file), "to-me
 setState(root, ti, "merging");
 assert.equal(parseTask(root, ti.file).state, "merging");
 assert.ok(listTasks(root, "in-progress").some((t) => t.file === ti.file), "merging counts as in-progress");
+
+// complexity: passed value written and quoted, updatable with replace semantics
+const tcx = createTask(root, { name: "feat: complex work", summary: "s", complexity: "complex" });
+assert.equal(tcx.complexity, "complex");
+assert.match(readFileSync(join(root, ".kanban", tcx.file), "utf8"), /^complexity: "complex"$/m);
+assert.equal(parseTask(root, tcx.file).complexity, "complex"); // the quoted value round-trips
+updateTask(root, tcx, { complexity: "simple" });
+assert.equal(parseTask(root, tcx.file).complexity, "simple");
+assert.match(readFileSync(join(root, ".kanban", tcx.file), "utf8"), /^complexity: "simple"$/m);
+// state transitions and section rewrites never touch it
+setState(root, tcx, "to-do");
+updateTask(root, tcx, { summary: "s2" });
+assert.equal(parseTask(root, tcx.file).complexity, "simple");
+// unknown and absent values resolve as "moderate" at parse (attribute-less pre-change files too)
+writeFileSync(join(root, ".kanban", "000091_banana.md"), '---\nname: "banana"\ncomplexity: "banana"\n---\n# Summary\nx\n');
+assert.equal(getTask(root, "000091_banana.md")?.complexity, "moderate");
+assert.equal(getTask(root, "000090_legacy.md")?.complexity, "moderate");
+// kanban_list refs carry complexity
+assert.equal(listTasks(root, "in-progress").find((t) => t.file === tcx.file)?.complexity, "simple");
+
+// blockedBy: parsed, created, replaced, cleared and listed; absent reads as empty
+assert.equal(t1.blockedBy, ""); // absent attribute reads as empty
+const bRoot = mkdtempSync(join(tmpdir(), "kanban-blocked-"));
+const tb = createTask(bRoot, { name: "feat: blocked task", summary: "s", blockedBy: "#42, #43" });
+assert.equal(tb.blockedBy, "#42, #43");
+// quoted in the frontmatter so the refs are not read as YAML comments
+assert.match(readFileSync(join(bRoot, ".kanban", tb.file), "utf8"), /^blockedBy: "#42, #43"$/m);
+const tnb = createTask(bRoot, { name: "feat: unblocked task", summary: "s" });
+assert.equal(tnb.blockedBy, "");
+// without blockedBy the file matches the default format: the complexity attribute is
+// always written, blockedBy only when provided
+assert.equal(
+	readFileSync(join(bRoot, ".kanban", tnb.file), "utf8"),
+	`---\nname: "feat: unblocked task"\npriority: "medium"\nstate: "backlog"\nworktree: ""\nissuer: "user"\ncomplexity: "moderate"\n---\n\n# Summary\ns\n\n# Specs\n\n\n# Notes\n`,
+);
+// updateTask replaces the whole list; omitted stays unchanged
+updateTask(bRoot, tb, { blockedBy: "#44" });
+assert.equal(parseTask(bRoot, tb.file).blockedBy, "#44");
+setState(bRoot, tb, "to-do"); // attribute rewrite keeps the list
+assert.equal(parseTask(bRoot, tb.file).blockedBy, "#44");
+updateTask(bRoot, tb, { summary: "s2" }); // section rewrite keeps the list
+assert.equal(parseTask(bRoot, tb.file).blockedBy, "#44");
+updateTask(bRoot, tb, { blockedBy: "" });
+assert.equal(parseTask(bRoot, tb.file).blockedBy, "");
+// kanban_list refs and kanban_get carry the field
+const tb2 = createTask(bRoot, { name: "feat: blocked again", summary: "s", blockedBy: "#42" });
+assert.equal(listTasks(bRoot, "backlog").find((t) => t.file === tb2.file)?.blockedBy, "#42");
+assert.equal(getTask(bRoot, tb2.file)?.blockedBy, "#42");
+assert.equal(getTask(bRoot, tb.file)?.blockedBy, "");
+rmSync(bRoot, { recursive: true, force: true });
+
+// shortName: drives the file and branch/worktree names, quoted in the frontmatter; set at creation only
+const sRoot = mkdtempSync(join(tmpdir(), "kanban-shortname-"));
+const ts = createTask(sRoot, { name: "feat: this is a short name", shortName: "this-is-a-short-name", summary: "s" });
+assert.equal(ts.file, "000001_this_is_a_short_name.md"); // the file slug is the shortName; the type prefix does not enter it
+assert.equal(ts.shortName, "this-is-a-short-name");
+assert.match(readFileSync(join(sRoot, ".kanban", ts.file), "utf8"), /^shortName: "this-is-a-short-name"$/m);
+assert.equal(parseTask(sRoot, ts.file).shortName, "this-is-a-short-name"); // the quoted value round-trips
+assert.equal(listTasks(sRoot, "backlog").find((t) => t.file === ts.file)?.shortName, "this-is-a-short-name"); // kanban_list carries it
+assert.equal(getTask(sRoot, ts.file)?.shortName, "this-is-a-short-name"); // kanban_get carries it
+// without shortName the truncation slug applies unchanged
+const tns = createTask(sRoot, { name: "feat: plain task", summary: "s" });
+assert.equal(tns.file, "000002_plain_task.md");
+assert.equal(tns.shortName, "");
+// strict validation rejects anything but a clean hyphenated slug, max 5 words
+assert.throws(() => createTask(sRoot, { name: "feat: upper", shortName: "This-Is-Invalid", summary: "s" }));
+assert.throws(() => createTask(sRoot, { name: "feat: six words", shortName: "one-two-three-four-five-six", summary: "s" }));
+assert.throws(() => createTask(sRoot, { name: "feat: chars", shortName: "has_underscore", summary: "s" }));
+assert.throws(() => createTask(sRoot, { name: "feat: lead", shortName: "-leading-hyphen", summary: "s" }));
+assert.throws(() => createTask(sRoot, { name: "feat: trail", shortName: "trailing-hyphen-", summary: "s" }));
+assert.equal(taskFiles(sRoot).length, 2); // rejected creates wrote no files
+// updateTask has no shortName parameter: the file name derives from it, so it never changes
+assert.equal(updateTask(sRoot, ts, { summary: "s2" }), undefined);
+assert.equal(parseTask(sRoot, ts.file).shortName, "this-is-a-short-name");
+rmSync(sRoot, { recursive: true, force: true });
 
 rmSync(root, { recursive: true, force: true });
 console.log("kanban.test.ts: all assertions passed");
