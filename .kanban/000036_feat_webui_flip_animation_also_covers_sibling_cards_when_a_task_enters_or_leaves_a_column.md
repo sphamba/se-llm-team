@@ -1,8 +1,8 @@
 ---
 name: "feat: webui FLIP animation also covers sibling cards when a task enters or leaves a column"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/webui-flip-animation-also-covers-sibling-cards-when-a-task-enters-or-leaves-a-column"
 ---
 
 # Summary
