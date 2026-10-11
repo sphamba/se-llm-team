@@ -1,8 +1,8 @@
 ---
 name: "feat: orchestrator auto-schedule skips tasks with unanswered open questions"
 priority: "medium"
-state: "to-merge"
-worktree: "feat/75-orchestrator-auto-schedule"
+state: "done"
+worktree: ""
 ---
 
 # Summary

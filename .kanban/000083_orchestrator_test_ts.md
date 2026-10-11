@@ -1,8 +1,8 @@
 ---
 name: "test: orchestrator.test.ts late task-create commit wait is flaky"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "test/83-orchestrator-test-ts"
 ---
 
 # Summary

@@ -1,8 +1,8 @@
 ---
 name: "fix: reviewer-cap forced-advance log line omits the task file"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "fix/97-reviewer-cap-forced"
 ---
 
 # Summary
@@ -20,3 +20,8 @@ FIX: Append the task file (or slug) to that log message, so the forced advance i
 This is a minor observability/log-quality fix; no behavior change beyond the log text.
 
 # Notes
+
+- Appended `${slug}` to the forced-advance log line in the to-review branch of rescan (src/orchestrator.ts:719): `reviewer succeeded 3+ times, moving ${slug} to to-live-test`. slug was already in scope; no other change. Committed f308118 in fix/97-reviewer-cap-forced.
+- Verified with a clean transpile of src/orchestrator.ts (zero diagnostics); repo has no tsconfig/node_modules in the worktree, so a full project type check was not possible.
+
+# Open questions

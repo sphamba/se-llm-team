@@ -1,7 +1,7 @@
 ---
 name: "fix: orchestrator_start bootstraps at the git root instead of refusing"
 priority: "critical"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/106-orchestrator-start-bootstraps"
 ---
 
@@ -42,3 +42,15 @@ Constraints:
 - Verified green: node index.test.ts, node src/kanban.test.ts, SE_LLM_TEAM_NO_WEBUI=1 node src/orchestrator.test.ts, node src/webui.test.ts.
 - Known limit, conformant with the spec's prescribed command: --show-toplevel inside a linked git worktree resolves the worktree root, not the main checkout (git-common-dir would be the main root). Orchestrated worktrees have .kanban symlinked to the main board, so the lock dedupes there. A follow-up task could fold worktrees into the main root if the PM wants that.
 - Not changed on purpose: README Checks still lists only src/kanban.test.ts (pre-existing staleness), and orchestrator_wait still uses ctx.cwd (the specs name exactly four tools).
+
+## 2026-10-11, reviewer
+- No fixes made. Commit e763866 matches the Specs: resolveRoot is exported and used by all four orchestrator tools, the refusal text is exact, and the spawn passes --root <resolved root>.
+- All suites green: node index.test.ts, node src/kanban.test.ts, SE_LLM_TEAM_NO_WEBUI=1 node src/orchestrator.test.ts (exit 0), node src/webui.test.ts.
+- End-to-end check with the real tool, no stubs (pi packages resolved from the pi install), in a throwaway git repo: orchestrator_start spawned the daemon at the repo root, and the daemon wrote .kanban/.orchestrator.lock and .kanban/.logs/orchestrator.log with root=<repo>. A separate daemon run on a fresh git root booted an empty board, and the first createTask mirrored "kanban: create ..." onto refs/heads/meta/kanban. Test daemons were stopped and temp dirs removed.
+- The daemon uses no process.cwd(), so the spawn cwd is irrelevant. The root comes only from --root.
+- waitForBoardCommits resolves git-common-dir itself, so orchestrator_wait works from a subdirectory although it still passes ctx.cwd. The four-tool scope holds.
+- .worktrees/.../.kanban is a symlink to the main board, so the linked-worktree caveat in the earlier Notes is correct for orchestrated worktrees.
+- The kept mkdir of .logs/.pids is not the board mkdir that Specs item 2 excludes, because openSync of the log needs .logs before the spawn. Accepted.
+- The non-git assertion in index.test.ts assumes that the temp dir is not inside a git repo (true on a normal tmpdir). Not a product defect.
+- index.test.ts is absent from README Checks, but that matches the existing staleness (orchestrator.test.ts and webui.test.ts are also absent). The Specs constrain the change to index.ts plus its test, so no README edit was made.
+- Known limits already noted above stand and do not block: kanban_* tools stay on ctx.cwd (spec-scoped), and linked worktrees resolve to the worktree root.

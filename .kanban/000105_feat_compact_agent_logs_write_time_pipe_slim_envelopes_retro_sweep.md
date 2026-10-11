@@ -1,8 +1,8 @@
 ---
 name: "feat: compact agent logs; write-time pipe, slim envelopes, retro sweep"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/105-compact-agent-logs"
 ---
 
 # Summary

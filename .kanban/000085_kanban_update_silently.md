@@ -1,8 +1,8 @@
 ---
 name: "fix: kanban_update silently ignores an unsupported parameter and reports success"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/85-kanban-update-silently"
 ---
 
 # Summary

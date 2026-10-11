@@ -1,8 +1,8 @@
 ---
 name: "docs: SPECS.md and the PM skill still list only 8 states; add to-merge/merging and the merger flow"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "docs/104-specs-md-and"
 issuer: "#78"
 ---
 
@@ -24,3 +24,10 @@ Dedup: #79 is webui columns for the new states, #95 is the poll rewrite, #102 is
 Evidence: docs review only; no code change expected.
 
 # Notes
+Verified the flow against src/orchestrator.ts, agents/merger.md and agents/live-tester.md before writing.
+
+Changes (commit a77b013 in docs/104-specs-md-and):
+- SPECS.md: state attribute list now carries the 10 states (added to-merge, merging). Orchestrator section: to-live-test no-state-update fallback is now to-merge (was done), plus a new to-merge bullet (at most one Merger at a time project-wide, move to merging, two-step merge, failed merge requeues to to-merge and aborts dirty merges). Live-tester section: sets to-merge whatever the test result (was done). New ## Merger agent section mirroring agents/merger.md.
+- skills/se-llm-team/SKILL.md: States line now lists all 10 states, with a sentence that the Merger owns the to-merge/merging transitions and the Project manager never moves tasks into or out of them.
+
+Dedup held: #79 (webui columns), #95 (poll rewrite), #102 (merger hardcoded main) untouched.

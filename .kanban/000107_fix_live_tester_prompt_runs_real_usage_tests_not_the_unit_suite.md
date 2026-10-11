@@ -1,7 +1,7 @@
 ---
 name: "fix: live-tester prompt runs real usage tests, not the unit suite"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/107-live-tester-prompt"
 ---
 
@@ -29,3 +29,6 @@ Constraints:
 - File: agents/live-tester.md only. Do not touch agents/developer.md, agents/reviewer.md, agents/merger.md - they own the suites.
 
 # Notes
+- Edited agents/live-tester.md only (commit 0e12f13 in fix/107-live-tester-prompt): the intro now states the rule explicitly (live test runs real usage tests only, never any *.test.ts file, never the three node suites, developer/reviewer own those), and step 2 tells the live tester to exercise the real interface (browser, CLI, daemon/server) and to treat Specs acceptance lines that name the suites as the developer/reviewer gate, not the live test. Rest of the prompt unchanged.
+- Suites re-run in the worktree: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts all pass (webui needs >120s; passes within 240s). Prompt-only change, no test edits.
+- No open questions.

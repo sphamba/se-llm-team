@@ -1,8 +1,8 @@
 ---
 name: "feat: complexity task attribute; per-complexity LLM config roles.<type>.<complexity>.<key>"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/98-complexity-task-attribute"
 ---
 
 # Summary

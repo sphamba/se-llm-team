@@ -1,8 +1,8 @@
 ---
 name: "feat: hub registration carries the root branch; duplicate project tabs append it"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/103-hub-registration-carries"
 ---
 
 # Summary
