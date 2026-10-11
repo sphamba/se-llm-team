@@ -1223,7 +1223,14 @@ writeFileSync(
 const taskY = createTask(rootY, { name: "fix: bad llm config", summary: "Bad llm config smoke", specs: "n/a" });
 setState(rootY, taskY, "to-do");
 const y = await runDaemon(rootY, join(HERE, "orchestrator.ts"), homeY);
-await waitFor(() => y.output().includes("spawned developer"), 30000, "developer spawned despite bad llm config", y.output);
+// wait for the stub's own record, not just the spawn log: the child may not have written argv.log yet
+await waitFor(() => {
+	try {
+		return readFileSync(join(rootY, "argv.log"), "utf8").includes('"developer"');
+	} catch {
+		return false;
+	}
+}, 30000, "developer spawned despite bad llm config", y.output);
 assert.ok(y.output().includes('unknown thinking level "banana" (global)'), "global thinking typo warned about");
 assert.ok(y.output().includes('unknown thinking level "wild" for role "reviewer"'), "role thinking typo warned about");
 assert.ok(y.output().includes('provider "lonely-provider" for role developer ignored'), "provider without model warned about");
