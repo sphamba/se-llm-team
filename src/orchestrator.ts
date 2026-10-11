@@ -20,6 +20,7 @@ import { loadWebUiConfig } from "./webui.ts";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_POLL_MINUTES = 1;
 const DEFAULT_AUTO_SCHEDULE_MINUTES = 5;
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const RESPAWN_CAP = 5;
 const MERGE_ATTEMPT_CAP = 3;
 // consecutive failed auto-pushes before the daemon logs its once-only warning (a success
@@ -32,14 +33,35 @@ const KANBAN_REF = "refs/heads/meta/kanban";
 // update-ref: rescan reconciles whenever the branch head differs from it
 let lastMirrorHash: string | null = null;
 
+interface LlmConfig {
+	provider?: string;
+	model?: string;
+	thinking?: string;
+}
+
 interface Config {
 	agent: string;
 	pollMinutes: number;
 	autoScheduleMinutes: number;
+	llm: LlmConfig;
+	roles: Record<string, LlmConfig>;
+}
+
+// the provider/model/thinking triple of one config object (global or a roles entry); values
+// of the wrong type and unknown thinking levels are dropped with a warning, never fatal
+function cleanLlm(root: string, entry: unknown, where = ""): LlmConfig {
+	const source = (entry ?? {}) as { provider?: unknown; model?: unknown; thinking?: unknown };
+	const clean: LlmConfig = {};
+	if (typeof source.provider === "string" && source.provider) clean.provider = source.provider;
+	if (typeof source.model === "string" && source.model) clean.model = source.model;
+	if (source.thinking === undefined) return clean;
+	if (typeof source.thinking === "string" && THINKING_LEVELS.includes(source.thinking)) clean.thinking = source.thinking;
+	else log(root, `unknown thinking level ${JSON.stringify(source.thinking)}${where}, ignored (expected ${THINKING_LEVELS.join("|")})`);
+	return clean;
 }
 
 function loadConfig(root: string): Config {
-	let cfg: { agent?: string; pollMinutes?: number; autoScheduleMinutes?: number } = {};
+	let cfg: { agent?: string; pollMinutes?: number; autoScheduleMinutes?: number; provider?: unknown; model?: unknown; thinking?: unknown; roles?: unknown } = {};
 	// user-level first, project .kanban/se-llm-team.json overrides it
 	for (const path of [join(process.env.HOME ?? "", ".pi", "agent", "se-llm-team.json"), join(root, ".kanban", "se-llm-team.json")]) {
 		try {
@@ -48,11 +70,32 @@ function loadConfig(root: string): Config {
 			/* optional file */
 		}
 	}
+	const roles: Record<string, LlmConfig> = {};
+	if (cfg.roles && typeof cfg.roles === "object" && !Array.isArray(cfg.roles)) {
+		for (const [role, entry] of Object.entries(cfg.roles)) roles[role] = cleanLlm(root, entry, ` for role "${role}"`);
+	}
 	return {
 		agent: cfg.agent ?? "pi",
 		pollMinutes: cfg.pollMinutes ?? DEFAULT_POLL_MINUTES,
 		autoScheduleMinutes: cfg.autoScheduleMinutes ?? DEFAULT_AUTO_SCHEDULE_MINUTES,
+		llm: cleanLlm(root, cfg, " (global)"),
+		roles,
 	};
+}
+
+// per-field precedence: the role entry wins over the global default, an unset field adds no
+// flag. --provider is only valid together with --model, so a provider alone is ignored.
+function llmFlags(root: string, cfg: Config, role: string): string[] {
+	const roleCfg = cfg.roles[role] ?? {};
+	const provider = roleCfg.provider ?? cfg.llm.provider;
+	const model = roleCfg.model ?? cfg.llm.model;
+	const thinking = roleCfg.thinking ?? cfg.llm.thinking;
+	const flags: string[] = [];
+	if (provider && !model) log(root, `provider "${provider}" for role ${role} ignored: --provider requires --model`);
+	else if (provider) flags.push("--provider", provider);
+	if (model) flags.push("--model", model);
+	if (thinking) flags.push("--thinking", thinking);
+	return flags;
 }
 
 function parseArgs(argv: string[]): { root?: string; rescanSeconds?: number; pollMinutes?: number; noWebui?: boolean } {
@@ -132,13 +175,14 @@ function renderPrompt(root: string, role: string, task: Task, worktreeDir?: stri
 		.replaceAll("{{PRIORITY}}", task.priority);
 }
 
-function spawnAgent(root: string, agent: string, role: string, task: Task, cwd: string, pidName?: string): void {
+function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: string, pidName?: string): void {
 	const slug = task.file.replace(/\.md$/, "");
 	mkdirSync(join(kanbanDir(root), ".logs"), { recursive: true });
 	const out = openSync(logPath(root, `${slug}.${role}`), "a");
 	// --approve trusts the project-local files of the worktree, so the headless session never waits for a trust prompt;
-	// --mode json streams the full JSONL event log (thinking, tool calls, text) instead of print mode's final text only
-	const child = spawn(agent, ["--approve", "--mode", "json", "-p", renderPrompt(root, role, task, cwd === root ? undefined : cwd)], {
+	// --mode json streams the full JSONL event log (thinking, tool calls, text) instead of print mode's final text only;
+	// the provider/model/thinking flags come from the config, resolved per role
+	const child = spawn(cfg.agent, ["--approve", "--mode", "json", ...llmFlags(root, cfg, role), "-p", renderPrompt(root, role, task, cwd === root ? undefined : cwd)], {
 		cwd,
 		detached: true,
 		stdio: ["ignore", out, out],
@@ -495,7 +539,7 @@ function bootstrapBoard(root: string): void {
 function startTodo(root: string, cfg: Config, task: Task): void {
 	const ensured = ensureWorktree(root, task);
 	if (!ensured) return;
-	spawnAgent(root, cfg.agent, "developer", { ...task, worktree: ensured.wt }, ensured.wtDir);
+	spawnAgent(root, cfg, "developer", { ...task, worktree: ensured.wt }, ensured.wtDir);
 	setState(root, task, "doing");
 }
 
@@ -533,7 +577,7 @@ function mergeDone(root: string, cfg: Config, task: Task): boolean {
 	const next = bumpCounter(root, `${slug}.merge-attempts`);
 	log(root, `merge conflict for ${branch}, spawning merger (attempt ${next})`);
 	appendNote(root, task, `Merge conflict for branch ${branch}, merger spawned (attempt ${next}).`);
-	spawnAgent(root, cfg.agent, "merger", task, root, `${slug}.merger`);
+	spawnAgent(root, cfg, "merger", task, root, `${slug}.merger`);
 	return false;
 }
 
@@ -579,14 +623,14 @@ function rescan(root: string, cfg: Config): void {
 				// a failed spawn would bounce or strand the task; leave the state for the next rescan to retry
 				if (!ensured) log(root, `${task.file}: worktree could not be created, reviewer not spawned (state unchanged)`);
 				else {
-					spawnAgent(root, cfg.agent, "reviewer", task, ensured.wtDir);
+					spawnAgent(root, cfg, "reviewer", task, ensured.wtDir);
 					setState(root, task, "reviewing");
 				}
 			} else if (task.state === "to-live-test") {
 				const ensured = ensureWorktree(root, task);
 				if (!ensured) log(root, `${task.file}: worktree could not be created, live-tester not spawned (state unchanged)`);
 				else {
-					spawnAgent(root, cfg.agent, "live-tester", task, ensured.wtDir);
+					spawnAgent(root, cfg, "live-tester", task, ensured.wtDir);
 					setState(root, task, "live-testing");
 				}
 			} else if (task.state === "done") {

@@ -991,3 +991,98 @@ assert.equal((await fetch(`http://127.0.0.1:${portW}/api/tasks?project=${deadNam
 assert.equal(parseInt(readFileSync(join(homeW, ".pi", "agent", "se-llm-team-hub.lock"), "utf8").trim(), 10), survProc.pid, "the stale hub lock was stolen by the survivor");
 survProc.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + hub failover smoke passed");
+
+// --- part X: provider/model/thinking config flags, with per-role overrides ---
+// the llm flags sit between "--mode json" and "-p", in resolution order provider, model, thinking
+const llmArgs = (argv: string[]) => argv.slice(argv.indexOf("--mode") + 2, argv.indexOf("-p"));
+// stub agent that records every spawn (role + argv) and drives the pipeline; the developer
+// commits so the done merge is a real one and the merger path can run on a conflicting branch
+const argvStub = (root: string) => {
+	const stub = join(root, "argv-agent.cjs");
+	writeFileSync(
+		stub,
+		`#!/usr/bin/env node
+const { readFileSync, writeFileSync, appendFileSync } = require("node:fs");
+const { execSync } = require("node:child_process");
+const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
+const role = prompt.includes("Developer agent") ? "developer"
+	: prompt.includes("Reviewer agent") ? "reviewer"
+	: prompt.includes("Live-tester") ? "live-tester"
+	: prompt.includes("Merger agent") ? "merger" : "";
+appendFileSync(${JSON.stringify(join(root, "argv.log"))}, JSON.stringify({ role, argv: process.argv }) + "\\n");
+const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
+if (!file || !readFileSync(file, "utf8").match(/^state: /m)) process.exit(0);
+if (role === "developer") {
+	writeFileSync("code.txt", "work\\n");
+	execSync("git add -A && git commit -qm work", { stdio: "ignore" });
+}
+const next = role === "developer" ? "to-review" : role === "reviewer" ? "to-live-test" : role === "live-tester" ? "done" : null;
+if (next) writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: " + next));
+`,
+	);
+	chmodSync(stub, 0o755);
+	return stub;
+};
+
+const rootX = fixture();
+cleaned.push(rootX);
+mkdirSync(kanbanDir(rootX), { recursive: true });
+writeFileSync(
+	join(kanbanDir(rootX), "se-llm-team.json"),
+	JSON.stringify({
+		agent: argvStub(rootX),
+		pollMinutes: 0.05,
+		model: "global-model",
+		thinking: "high",
+		roles: {
+			developer: { model: "dev-model", thinking: "low" },
+			reviewer: { provider: "prov", model: "rev-model" },
+			merger: { provider: "mprov", model: "merge-model" },
+		},
+	}),
+);
+const taskX = createTask(rootX, { name: "feat: llm flags", summary: "LLM config smoke", specs: "n/a" });
+setState(rootX, taskX, "to-do");
+
+const x = await runDaemon(rootX);
+await waitFor(() => parseTask(rootX, taskX.file).state === "done" && parseTask(rootX, taskX.file).worktree === "", 60000, "pipeline with llm config", x.output);
+const xSpawns = () => readFileSync(join(rootX, "argv.log"), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as { role: string; argv: string[] });
+const xFlags = (role: string) => llmArgs(xSpawns().find((s) => s.role === role)!.argv);
+assert.deepEqual(xFlags("developer"), ["--model", "dev-model", "--thinking", "low"], "role entry overrides both global fields");
+assert.deepEqual(xFlags("reviewer"), ["--provider", "prov", "--model", "rev-model", "--thinking", "high"], "role provider+model keeps the global thinking");
+assert.deepEqual(xFlags("live-tester"), ["--model", "global-model", "--thinking", "high"], "no role entry: the global fields apply");
+
+// a conflicting branch under the same running daemon makes the merger path run and record
+execSync("git checkout -qb fix/llm-conflict", { cwd: rootX, shell: "/bin/bash" });
+writeFileSync(join(rootX, "README.md"), "branch\n");
+execSync("git commit -qam branch", { cwd: rootX, shell: "/bin/bash" });
+execSync("git checkout -q main", { cwd: rootX, shell: "/bin/bash" });
+writeFileSync(join(rootX, "README.md"), "main\n");
+execSync("git commit -qam main", { cwd: rootX, shell: "/bin/bash" });
+const taskX2 = createTask(rootX, { name: "fix: llm merger", summary: "LLM merger smoke", specs: "n/a" });
+setState(rootX, taskX2, "done");
+setWorktree(rootX, taskX2, "fix/llm-conflict");
+await waitFor(() => xSpawns().some((s) => s.role === "merger"), 30000, "merger spawned under the llm config", x.output);
+assert.deepEqual(xFlags("merger"), ["--provider", "mprov", "--model", "merge-model", "--thinking", "high"], "merger role override applies");
+x.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + llm config flags smoke passed");
+
+// --- part Y: bad llm config values warn and are dropped, the daemon keeps running ---
+const rootY = fixture();
+cleaned.push(rootY);
+mkdirSync(kanbanDir(rootY), { recursive: true });
+writeFileSync(
+	join(kanbanDir(rootY), "se-llm-team.json"),
+	JSON.stringify({ agent: argvStub(rootY), pollMinutes: 0.05, provider: "lonely-provider", thinking: "banana", roles: { developer: "not-an-object", reviewer: { thinking: "wild" } } }),
+);
+const taskY = createTask(rootY, { name: "fix: bad llm config", summary: "Bad llm config smoke", specs: "n/a" });
+setState(rootY, taskY, "to-do");
+const y = await runDaemon(rootY);
+await waitFor(() => y.output().includes("spawned developer"), 30000, "developer spawned despite bad llm config", y.output);
+assert.ok(y.output().includes('unknown thinking level "banana" (global)'), "global thinking typo warned about");
+assert.ok(y.output().includes('unknown thinking level "wild" for role "reviewer"'), "role thinking typo warned about");
+assert.ok(y.output().includes('provider "lonely-provider" for role developer ignored'), "provider without model warned about");
+const yDev = JSON.parse(readFileSync(join(rootY, "argv.log"), "utf8").trim().split("\n").find((l) => l.includes('"developer"'))!) as { role: string; argv: string[] };
+assert.deepEqual(llmArgs(yDev.argv), [], "bad config values add no flags");
+y.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + bad llm config smoke passed");
