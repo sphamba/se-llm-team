@@ -172,7 +172,9 @@ function subagentLogs(log: string): { id: string; path: string }[] {
 // non-JSON: stderr diagnostics and legacy print-mode final text. One tool line per call: the
 // streamed toolcall_end and the execution start both carry name + args, so dedupe by id within
 // the chunk. An assistant message_end repeats its streamed text deltas, so only the user prompt
-// (the run's opening message) renders from message_end.
+// (the run's opening message) renders from message_end. A subagent .output transcript is sidechain
+// session records (user/assistant/toolResult) instead: prompt, thinking and text render like their
+// event-stream equivalents, and toolcall blocks and toolResults join the same one-line-per-call dedupe.
 const ARG_KEYS = ["command", "path", "file_path", "pattern", "url", "query"];
 const cap = (s: string, max = 160) => (s.length > max ? s.slice(0, max - 3) + "..." : s);
 
@@ -257,6 +259,45 @@ export function renderLogChunk(text: string): string {
 			if (msg?.role === "user" && typeof msg.content === "string" && msg.content.trim()) {
 				flush();
 				out.push("[prompt] " + cap(msg.content.replace(/\s+/g, " ").trim()) + "\n");
+			}
+		} else if (rec.isSidechain === true && rec.message && typeof rec.message === "object") {
+			const msg = rec.message;
+			if (msg.role === "user") {
+				const text = typeof msg.content === "string" ? msg.content : "";
+				if (text.trim()) {
+					flush();
+					out.push("[prompt] " + cap(text.replace(/\s+/g, " ").trim()) + "\n");
+				}
+			} else if (msg.role === "assistant") {
+				const blocks = Array.isArray(msg.content) ? msg.content : [];
+				for (const block of blocks) {
+					if (block?.type === "toolCall") {
+						const id = block.id;
+						if (typeof id === "string" && !seenTools.has(id)) {
+							seenTools.add(id);
+							flush();
+							const summary = argSummary(block.arguments);
+							out.push("[tool] " + (block.name ?? "?") + (summary ? ": " + summary : "") + "\n");
+						}
+					} else if (block?.type === "thinking" && typeof block.thinking === "string" && block.thinking) {
+						flush();
+						out.push("── thinking ──\n");
+						pending += block.thinking;
+					} else if (block?.type === "text" && typeof block.text === "string" && block.text) {
+						flush();
+						pending += block.text;
+					}
+				}
+			} else if (msg.role === "toolResult") {
+				// the toolcall block of the same call usually shares the chunk and renders the args,
+				// so the result text surfaces only for a call whose toolcall fell in an earlier chunk
+				const id = msg.toolCallId;
+				if (typeof id === "string" && !seenTools.has(id)) {
+					seenTools.add(id);
+					flush();
+					const text = textOf(msg);
+					out.push("[tool] " + (msg.toolName ?? "?") + (msg.isError === true ? " failed" : "") + (text ? ": " + text : "") + "\n");
+				}
 			}
 		}
 	}
