@@ -2,7 +2,7 @@
 name: "fix: kanban tool responses carry only zero-padded numbers - include the short #NN form"
 priority: "medium"
 state: "done"
-worktree: "fix/kanban-tool-responses-carry-only-zero-padded-numbers-include-the-short-nn-form"
+worktree: ""
 ---
 
 # Summary
@@ -25,6 +25,8 @@ Constraints:
 
 # Notes
 - [2026-10-11 07:18] Merge conflict for branch fix/kanban-tool-responses-carry-only-zero-padded-numbers-include-the-short-nn-form, merger spawned (attempt 1).
+
+- [2026-10-11 09:22] Merger: the in-progress merge when this session started was not this branch. MERGE_HEAD was fix/orchestrator-auto-push-of-meta-kanban-fails-silently-on-every-mirror-commit (57f3e4e); it conflicted in src/orchestrator.test.ts. The working tree held a full resolution (main's part S no-webui smoke kept; the branch's push-warning smoke appended as part T, rootS -> rootT). Another session committed it as a293470 during verification; no action from this session. With the tree clean, this branch's merge was re-attempted and applied with no conflicts (merge base 458dd48; no main-side commits touched index.ts, src/kanban.ts, or src/kanban.test.ts after the base). Merged as f43aef8. Verified the merged tree: taskNum at src/kanban.ts:56, all four kanban tool responses carry file + (#NN), kanban_list entries carry num, node src/kanban.test.ts passes.
 
 - [2026-10-11 09:17] Live test passed with one finding (pre-existing, not from this change). Ran the worktree extension (commit 24d3719) like a user: pi -p (RCP/GLM 5.3 Flash) in a scratch git repo, only kanban tools enabled via -e <worktree>/index.ts -t 'kanban_*'. kanban_create returned "Created 000001_fix_raw_capture.md (#1)"; second create numbered 000002 (#2) (max+1 numbering intact); kanban_list entries carry num: 1 and the tool description reads "Returns file, num (#NN), name, priority, state and summary"; kanban_update returned "Updated ... (#1)"; kanban_set_state returned "000001_... (#1): state -> to-do"; kanban_get kept the full detail with file present. kanban_set_worktree errored with ReferenceError "setWorktree is not defined" whenever called: index.ts:126 calls setWorktree but never imports it from src/kanban.ts. Verified pre-existing: main checkout index.ts has the identical missing import, so the tool has been broken on main too and the failure is unrelated to the #NN change (the branch's diff only touched the response text). All other acceptance points met; state -> done, one finding reported to the PM.
 
