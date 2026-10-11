@@ -250,12 +250,14 @@ function replaceSections(root: string, task: Task, updates: Record<string, strin
 	writeFileSync(path, (fm ? raw.slice(0, raw.length - body.length) : "") + out.join("\n"));
 }
 
-// "#42, #43" -> [42, 43]; deduped, malformed parts are ignored like before the guard
+// "#42, #43" -> [42, 43]; parses refs with or without the leading # and ignores malformed
+// parts, matching the promotion failsafe's blockedBy parse so the guard checks every ref
+// the failsafe honors
 function blockedNums(blockedBy: string): number[] {
 	const nums: number[] = [];
 	for (const part of blockedBy.split(",")) {
-		const ref = part.trim().match(/^#(\d+)$/);
-		if (ref && !nums.includes(parseInt(ref[1], 10))) nums.push(parseInt(ref[1], 10));
+		const num = parseInt(part.trim().replace(/^#/, ""), 10);
+		if (num > 0 && !nums.includes(num)) nums.push(num);
 	}
 	return nums;
 }

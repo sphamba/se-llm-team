@@ -317,6 +317,12 @@ assert.throws(
 	new RegExp(`cannot set blockedBy: #${aNum} is already blocked by #${bNum}`),
 );
 assert.equal(parseTask(cRoot, cb.file).blockedBy, ""); // the rejected write changed nothing
+// the guard parses refs without the leading # too (the failsafe honors both forms)
+assert.throws(
+	() => updateTask(cRoot, cb, { blockedBy: `${aNum}` }),
+	new RegExp(`cannot set blockedBy: #${aNum} is already blocked by #${bNum}`),
+);
+assert.equal(parseTask(cRoot, cb.file).blockedBy, "");
 // a task cannot block itself
 assert.throws(() => updateTask(cRoot, ca, { blockedBy: `#${aNum}` }), /blocks itself/);
 // clearing stays allowed
