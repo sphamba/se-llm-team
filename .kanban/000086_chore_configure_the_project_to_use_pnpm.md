@@ -1,8 +1,8 @@
 ---
 name: "chore: configure the project to use pnpm"
 priority: "critical"
-state: "backlog"
-worktree: ""
+state: "live-testing"
+worktree: "chore/86-configure-the-project"
 ---
 
 # Summary
@@ -34,3 +34,16 @@ Constraints:
 - package.json and README.md are untouched by every active lane, so this task is clean to run in parallel; a minor merge is still expected if other tasks grow.
 
 # Notes
+
+- Commit 56aad4a on chore/86-configure-the-project: `packageManager: "pnpm@12.11.2"` (npm `latest` at implementation time, resolved with `npm view pnpm version`) plus `engines.pnpm: ">=12.11.2"`, consistent with the pin. README.md has a new "Package manager" section (`corepack enable`, `corepack prepare pnpm@12.11.2 --activate`) noting there are no dependencies and that the checks still run via node.
+- Verified `corepack pnpm --version` reports 12.11.2 in the worktree, so corepack resolves the pin. pnpm 12 writes an env lockfile (`pnpm-lock.yaml`, `packageManagerDependencies`) on any invocation because of the `packageManager` pin; it is untracked and was deleted, no lockfile is committed (per spec item 4).
+- Ran node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts: all pass. The repo has no tsconfig and no real tsc (the global `tsc` is the npm placeholder), so typecheck is covered by Node 24 loading the TS sources directly.
+
+Reviewer 2026-10-11: no fixes needed.
+- Reviewed commit 56aad4a (`git diff main...HEAD`): only package.json and README.md change, matching the Constraints. No dependencies, scripts, or lockfile added.
+- Pin verified against the registry independently: `npm view pnpm version` and `npm view pnpm dist-tags.latest` both return 12.11.2, so the pin is the current latest stable.
+- Corepack verified in the worktree: `corepack pnpm --version` returns 12.11.2; `corepack prepare pnpm@12.11.2 --activate` exits 0 in an isolated COREPACK_HOME.
+- All three suites re-run by the reviewer and pass: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts.
+- Worktree left clean; the pnpm-generated pnpm-lock.yaml created during review was removed.
+- Observations, not fixed (out of scope): the README Checks section predates this task and lists only node src/kanban.test.ts, while the full suite has three files; any pnpm invocation generates the pnpm 12 env lockfile (packageManagerDependencies) as a side effect of the pin.
+- Verdict: acceptance criteria met. No code change by the reviewer, state -> to-live-test.

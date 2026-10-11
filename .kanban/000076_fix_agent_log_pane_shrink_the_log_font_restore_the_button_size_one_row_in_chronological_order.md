@@ -1,8 +1,8 @@
 ---
 name: "fix: agent log pane; shrink the log font, restore the button size, one row in chronological order"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/76-agent-log-pane"
 ---
 
 # Summary
