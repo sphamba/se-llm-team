@@ -1,8 +1,8 @@
 ---
 name: "fix: push-warning counter fires only on exact equality - stale counter above 3 keeps the warning silent forever"
 priority: "low"
-state: "merging"
-worktree: "fix/65-push-warning-counter"
+state: "done"
+worktree: ""
 ---
 
 # Summary

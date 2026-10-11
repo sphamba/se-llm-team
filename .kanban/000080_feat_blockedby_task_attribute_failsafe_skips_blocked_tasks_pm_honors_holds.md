@@ -1,7 +1,7 @@
 ---
 name: "feat: blockedBy task attribute; failsafe skips blocked tasks; PM honors holds"
 priority: "medium"
-state: "live-testing"
+state: "to-merge"
 worktree: "feat/80-blockedby-task-attribute"
 ---
 
@@ -57,3 +57,8 @@ Constraints:
   - Full suite green in this worktree: kanban.test.ts, orchestrator.test.ts (all 20 parts incl. the new blockedBy failsafe smoke), webui.test.ts. The roundtrip asserts byte-identical output without blockedBy.
   - Holds resolved: 000074 and 000078 are merged into the branch base d93e444; 000075 has since merged on main and git merge-tree reports 0 conflicts (the #75 change edits the backlog filter line, this change edits the promotion pick ~10 lines below). No remaining hold.
   - Note: the global tsc on this machine is a stub shim, so the typecheck claim is not locally reproducible; the project's declared checks (the three node suites) pass. Acceptance met -> to-live-test.
+
+- [2026-10-11 17:22] Live-tested the branch in the worktree. No defects found. All three declared suites pass: node src/kanban.test.ts, node src/orchestrator.test.ts (all 20 parts, incl. the blockedBy failsafe smoke), node src/webui.test.ts.
+  - User flows exercised against the worktree kanban.ts: create without blockedBy omits the attribute and keeps the known frontmatter order; create with blockedBy "#1, #3" writes `blockedBy: "#1, #3"`; getTask and listTasks expose it (absent reads as ""); kanban_update replaces the whole list; an empty value clears it (`blockedBy: ""`); an omitted blockedBy stays unchanged; unknown attrs survive a blockedBy rewrite; malformed refs ("#0, #999, junk") round-trip without a crash.
+  - Failsafe: the daemon smoke holds a critical task despite priority while its blocker is not done, ignores ghost refs, promotes unblocked tasks normally, and promotes the blocked task once its blocker reaches done.
+  - PM guidance present in skills/se-llm-team/SKILL.md step 6: never promote a task whose blockers are not done, prune done refs with kanban_update, no auto-clear. Acceptance met -> to-merge.

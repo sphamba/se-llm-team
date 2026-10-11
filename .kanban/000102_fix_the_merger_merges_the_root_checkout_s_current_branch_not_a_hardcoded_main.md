@@ -1,7 +1,7 @@
 ---
 name: "fix: the merger merges the root checkout's current branch, not a hardcoded main"
 priority: "medium"
-state: "live-testing"
+state: "to-merge"
 worktree: "fix/102-the-merger-merges"
 ---
 
@@ -38,3 +38,6 @@ Constraints:
 - Review pass: diff main...HEAD touches only agents/merger.md and README.md, as the constraints require. Both merge steps now resolve the base with `git -C {{ROOT}} branch --show-current` (step 2 re-resolves, since the root may have moved), the detached-HEAD path refuses, leaves a Note, and requeues to to-merge, and the `git merge --abort` requeue path is unchanged. README merging-state wording matches. Diff vs main for src/ is empty, as spec item 4 requires. Reran all three suites in the worktree: kanban.test.ts, orchestrator.test.ts, webui.test.ts (without SE_LLM_TEAM_NO_WEBUI) all green.
 - Review finding (cosmetic, left out of scope): src/orchestrator.ts comments at :606, :641, :661 still say the merger merges main ("merges main into the branch worktree and then the branch into main", "merged the branch into main before setting", "content is already in main"). Constraints limit this task to agents/merger.md and README.md and spec item 4 forbids an orchestrator.ts change, so these prose comments stay; they describe behavior that is now branch-agnostic and should be reworded in a future docs pass.
 - Review verdict: no fixes needed, ready for live test.
+- Live test (pass): ran the worktree's orchestrator (`node src/orchestrator.ts --root <fixture> --no-webui`) so it read this branch's agents/merger.md, against two throwaway git roots. Fixture A: root checked out on branch `alt` (not main; `main` had an unmerged main-only commit, `alt` had an alt-only commit, the task branch `fix/1-demo` had a task commit). The spawned merger ran step 1 as `cd .worktrees/fix/1-demo && git merge alt --no-edit` and step 2 as `cd <root> && git merge --no-edit fix/1-demo`; both resolved `alt` at step start (`git -C <root> branch --show-current`). Result: `alt` gained the task commit, `main` stayed untouched, the orchestrator logged `merged fix/1-demo` and removed the worktree and branch, state `done`. Fixture B: root detached at `alt`'s tip. The merger ran no merge (log has only `branch --show-current`/status checks), left a Note that the root checkout is detached, set the state back to `to-merge`, and left every ref unchanged. No issue found.
+- Suites rerun in the worktree: `node src/kanban.test.ts` (all assertions passed), `node src/orchestrator.test.ts` (exit 0, 16 smokes passed), `node src/webui.test.ts` with `SE_LLM_TEAM_NO_WEBUI` unset (all assertions passed).
+- Live-test verdict: pass. No new tasks needed.

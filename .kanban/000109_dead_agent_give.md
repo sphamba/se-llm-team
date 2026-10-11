@@ -1,7 +1,7 @@
 ---
 name: "fix: dead-agent give-up log fires only on exact equality - a second death streak stays silent"
 priority: "low"
-state: "doing"
+state: "live-testing"
 worktree: "fix/109-dead-agent-give"
 issuer: "#65"
 ---
@@ -21,3 +21,18 @@ Suggested fix: keep a once-per-streak marker (like the push-warned marker from 0
 Priority low, type fix.
 
 # Notes
+
+Implemented in worktree fix/109-dead-agent-give (commit 6127996):
+
+- src/orchestrator.ts, poll loop: reset the `${slug}.dead` counter to 0 when the poll sees the agent pid alive (first alive sighting ends the death streak). Same reset-on-success pattern as the push-failures counter from task 000065. The give-up log keeps its `=== RESPAWN_CAP + 1` equality gate, which now fires once per streak.
+- src/orchestrator.test.ts, part B: after the first give-up, inject a live pid into the task's pidfile, wait for the counter file to read 0 (proves the reset), remove the pidfile, then wait for a second "giving up" line and assert exactly two occur.
+- `node src/orchestrator.test.ts` passes fully, including the new second-streak assertions.
+- Not resetting on a poll-driven respawn (setState in the poll): that would zero the counter on each of the 5 in-streak respawns and the cap would never fire.
+
+Review (no fixes needed):
+- Verified the reset writes "0" only when the counter is > 0 (no redundant write per poll), and that the reset key stays `${slug}.dead` even in the merging state where the observed pid is the merger's - consistent with the bump key.
+- Verified `agentPid` returns 0 for a missing pidfile, so the test's pidfile removal cleanly starts the second streak.
+- Verified the test's `/giving up/g` count is unambiguous: that phrase appears only in the dead-agent give-up log. The exact-2 assertion also proves no over-logging within a streak.
+- Re-ran `node src/orchestrator.test.ts` in the worktree: all parts pass, including the new second-streak assertions.
+
+# Open questions

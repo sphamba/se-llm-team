@@ -1,7 +1,7 @@
 ---
 name: "feat: complexity task attribute; per-complexity LLM config roles.<type>.<complexity>.<key>"
 priority: "medium"
-state: "doing"
+state: "to-live-test"
 worktree: "feat/98-complexity-task-attribute"
 ---
 
@@ -36,3 +36,7 @@ Constraints:
 - 2026-10-11: index.ts: kanban_create and kanban_update gained an optional complexity (Type.StringEnum simple/moderate/complex), passed through verbatim. README.md: config table rows for complexity and reviewerCap, nested example, default statement.
 - 2026-10-11: Tests: src/kanban.test.ts gained a complexity section (default and passed values, quoted round-trip, update replace, state/section rewrites preserve it, unknown and absent values resolve as moderate, refs carry it) and complexity in the create/list assertions. src/orchestrator.test.ts: part X gained a complex task whose developer spawns with the nested model while unset nested fields keep the role default (spawn attribution by task file), part Y gained a non-object nested complexity value that warns, part AA updated to the moderate cap 2 with the new log line, and a new part AB covers the simple default 1, a configured moderate override 1, and an invalid complex 0 that warns and falls back to 3.
 - 2026-10-11: node src/kanban.test.ts and node src/webui.test.ts pass. node src/orchestrator.test.ts hit an environmental failure in part E: a sibling agent ran rm -rf /tmp/orch-smoke-* and deleted the running fixture; the suite stalled after "orchestrator lock was missing, re-acquired". Rerun pending once the sibling load settles.
+- 2026-10-11: Full suite green: node src/kanban.test.ts, node src/orchestrator.test.ts, node src/webui.test.ts all pass, including the new per-complexity parts. One test fix along the way: the merger wait in part X now filters spawns by task file (taskX's own merger spawn satisfied the unfiltered wait). Committed on feat/98-complexity-task-attribute: a210df8, 3ca7f9d, 63b2ae4 on top of d93e444.
+- 2026-10-11: Review (feat/98-complexity-task-attribute, no fixes needed): diff checked against all six spec changes line by line. parseTask coerces a missing/unknown complexity to "moderate" with the same includes() pattern as priority; createTask writes it double-quoted (exact-content test proves it) and never rewrites existing files; updateTask replaces only when provided; kanban_create/kanban_update carry the StringEnum and pass params verbatim; loadConfig cleans nested simple/moderate/complex sub-objects through cleanLlm and warns on a non-object value; llmFlags resolves per field roles.<role>.<complexity>.X ?? roles.<role>.X ?? llm.X with the single spawnAgent call site passing task.complexity ?? "moderate"; reviewerCap defaults 1/2/3, an invalid value warns and keeps the default, and the forced-advance log names the task file and the cap (folds in #97). README rows, nested example and default statement present. webui untouched (badge is the webui task). Verified in this session: all three suites green, including parts X/Y/AA/AB. main has advanced to b72a00a since the branch (d93e444); git merge-tree main HEAD merges clean with no conflict markers, so no rebase needed. Ad hoc tsc typecheck not runnable (no installable TypeScript, per #94); the type changes are additive (RoleLlmConfig extends LlmConfig, Record casts sound) and hand-verified.
+
+# Open questions

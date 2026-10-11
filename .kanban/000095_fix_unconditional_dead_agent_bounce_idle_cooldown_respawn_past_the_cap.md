@@ -1,7 +1,7 @@
 ---
 name: "fix: unconditional dead-agent bounce; idle-cooldown respawn past the cap"
 priority: "critical"
-state: "doing"
+state: "reviewing"
 worktree: "fix/95-unconditional-dead-agent"
 ---
 
@@ -26,3 +26,10 @@ Constraints:
 - HOLD behind #87 (to-do, rewrites src/orchestrator.ts + src/orchestrator.test.ts). This task takes precedence over #78 on the poll/DEAD_TRANSITIONS machinery (critical over medium): #78's live-testing->to-merge mapping rebases on this fix and is sequenced after it.
 
 # Notes
+- Implemented on the worktree branch (commit 4934ea6), only src/orchestrator.ts + src/orchestrator.test.ts touched.
+- poll(): the DEAD_TRANSITIONS bounce is now unconditional (no RESPAWN_CAP freeze); the counter bump moved after the setState and the give-up log became a cooldown log "agent died 5+ times; respawn waits for the idle cooldown (state <next>)", fired once at cap+1.
+- New deadCooldownActive(root, cfg, task) helper: counter > RESPAWN_CAP AND (now - task file mtime) < cfg.autoScheduleMinutes -> defer. Gates all four fresh-agent respawn paths: the to-do developer, the to-review reviewer, the to-live-test live-tester and sweepToMerge's merger (checked before ensureWorktree/setWorktree, which bump the mtime and would restart the clock).
+- Counter clear for completed runs: in the no-transition branch, only when the pid file existed with a dead pid (hadPid) and counter > 0. A completed run leaves its stale pidfile behind while a bounce clears it first, so a past-cap task waiting out its cooldown in the bounced state keeps its counter; a run that advanced the task out of the mapped state clears it.
+- Adaptations to the live code (already merged #78): DEAD_TRANSITIONS maps live-testing -> to-merge and merging -> to-merge (not the spec's live-testing -> done), mergeDone is replaced by the sweepToMerge merger flow, so the cooldown gate covers sweepToMerge's spawn and "deferral while agent pids are alive" is kept via the existing pidAlive checks.
+- Tests: part B rewritten (6 unconditional bounces, cooldown log exactly once, no spawn during the cooldown, counter intact at 6 during the wait, aged mtime releases the spawn, 7th death bounces with no second log; taskB2 live-testing -> to-merge + dead merger requeue kept); parts E/I/R switched from the give-up log to the cooldown log (I now asserts the task parked in to-do, not frozen in doing; R writes done after the cooldown log, safe because the sweep defers the respawn); new part AB: a hand-written stale counter (3) clears on the first completed run and the pipeline still finishes.
+- Acceptance: node src/kanban.test.ts, node src/webui.test.ts, node src/orchestrator.test.ts all pass (orchestrator suite: 17 smoke parts, 4 consecutive clean runs; one earlier run hit part T's 30s mirror-commit timeout, a code path this diff does not touch - backlog tasks short-circuit every new check - and passed on every rerun).
