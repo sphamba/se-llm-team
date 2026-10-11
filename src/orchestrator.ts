@@ -1,5 +1,5 @@
 import { spawn, execFileSync, execSync } from "node:child_process";
-import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, realpathSync, readFileSync, readlinkSync, rmSync, symlinkSync, watch, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, readFileSync, readlinkSync, rmSync, symlinkSync, watch, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -23,6 +23,7 @@ const DEFAULT_AUTO_SCHEDULE_MINUTES = 5;
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const RESPAWN_CAP = 5;
 const MERGE_ATTEMPT_CAP = 3;
+const REVIEWER_RUN_CAP = 3;
 // consecutive failed auto-pushes before the daemon logs its once-only warning (a success
 // resets the count); the per-failure line is easy to miss, the warning names the consequence
 const PUSH_WARN_AFTER = 3;
@@ -112,6 +113,10 @@ function parseArgs(argv: string[]): { root?: string; rescanSeconds?: number; pol
 const logPath = (root: string, name: string) => join(kanbanDir(root), ".logs", `${name}.log`);
 const pidPath = (root: string, name: string) => join(kanbanDir(root), ".pids", `${name}.pid`);
 const counterPath = (root: string, name: string) => join(kanbanDir(root), ".logs", `${name}.count`);
+// one-shot marker that the last spawn from the to-review path was a reviewer; the value is
+// that spawn's pid, so a later developer spawn (pidfile overwrite) or a poll-cleared pidfile
+// (died run) reads as a mismatch and never counts as a reviewer success
+const armedPath = (root: string, slug: string) => join(kanbanDir(root), ".logs", `${slug}.reviewer-armed`);
 
 function log(root: string, message: string): void {
 	mkdirSync(join(kanbanDir(root), ".logs"), { recursive: true });
@@ -175,10 +180,27 @@ function renderPrompt(root: string, role: string, task: Task, worktreeDir?: stri
 		.replaceAll("{{PRIORITY}}", task.priority);
 }
 
+// next per-run index for a task+role log: 1 + the max existing `<slug>.<role>.<n>.log` index;
+// a legacy unsuffixed `<slug>.<role>.log` never counts, so the first indexed run is 0
+function nextRunIndex(root: string, slug: string, role: string): number {
+	const prefix = `${slug}.${role}.`;
+	let max = -1;
+	try {
+		for (const f of readdirSync(join(kanbanDir(root), ".logs"))) {
+			if (!f.startsWith(prefix) || !f.endsWith(".log")) continue;
+			const n = f.slice(prefix.length, -4);
+			if (/^\d+$/.test(n)) max = Math.max(max, parseInt(n, 10));
+		}
+	} catch {
+		/* no .logs dir yet: first run is 0 */
+	}
+	return max + 1;
+}
+
 function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: string, pidName?: string): void {
 	const slug = task.file.replace(/\.md$/, "");
 	mkdirSync(join(kanbanDir(root), ".logs"), { recursive: true });
-	const out = openSync(logPath(root, `${slug}.${role}`), "a");
+	const out = openSync(logPath(root, `${slug}.${role}.${nextRunIndex(root, slug, role)}`), "a");
 	// --approve trusts the project-local files of the worktree, so the headless session never waits for a trust prompt;
 	// --mode json streams the full JSONL event log (thinking, tool calls, text) instead of print mode's final text only;
 	// the provider/model/thinking flags come from the config, resolved per role
@@ -195,6 +217,23 @@ function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: st
 		writePid(root, pidName ?? slug, child.pid);
 		log(root, `spawned ${role} pid=${child.pid} for ${task.file} (cwd=${cwd})`);
 	}
+}
+
+// consumes the armed marker at the state the armed reviewer wrote itself (back to to-review,
+// or forward to to-live-test on approval): a pid match counts one successful reviewer run; a
+// mismatch (died run: the poll clears the pidfile first, or a later developer spawn overwrote
+// it) only drops the marker
+function consumeReviewerRun(root: string, slug: string): void {
+	const path = armedPath(root, slug);
+	let armed = 0;
+	try {
+		armed = parseInt(readFileSync(path, "utf8").trim(), 10) || 0;
+	} catch {
+		return; // no reviewer armed: the arrival came from the developer or the board
+	}
+	rmSync(path);
+	const pid = agentPid(root, slug);
+	if (armed > 0 && armed === pid) bumpCounter(root, `${slug}.reviewer-runs`);
 }
 
 function git(root: string, args: string[], allowFailure = false): string | null {
@@ -631,13 +670,31 @@ function rescan(root: string, cfg: Config): void {
 				// a failed spawn would bounce or strand the task; leave the state for the next rescan to retry
 				if (!ensured) log(root, `${task.file}: worktree could not be created, reviewer not spawned (state unchanged)`);
 				else {
-					spawnAgent(root, cfg, "reviewer", task, ensured.wtDir);
-					setState(root, task, "reviewing");
+					const slug = task.file.replace(/\.md$/, "");
+					consumeReviewerRun(root, slug);
+					if (readCounter(root, `${slug}.reviewer-runs`) >= REVIEWER_RUN_CAP) {
+						// re-read before the forced advance: a state changed underneath (PM or user) wins
+						const fresh = getTask(root, task.file);
+						if (fresh && fresh.state === "to-review") {
+							setState(root, fresh, "to-live-test");
+							// clears the count, so a future rework cycle starts fresh
+							writeFileSync(counterPath(root, `${slug}.reviewer-runs`), "0");
+							log(root, "reviewer succeeded 3+ times, moving to to-live-test");
+						}
+					} else {
+						spawnAgent(root, cfg, "reviewer", task, ensured.wtDir);
+						setState(root, task, "reviewing");
+						const pid = agentPid(root, slug);
+						if (pid) writeFileSync(armedPath(root, slug), String(pid));
+					}
 				}
 			} else if (task.state === "to-live-test") {
 				const ensured = ensureWorktree(root, task);
 				if (!ensured) log(root, `${task.file}: worktree could not be created, live-tester not spawned (state unchanged)`);
 				else {
+					// a reviewer approval is a successful run too; the forced advance arrives with the
+					// marker already consumed at the to-review branch, so it never re-counts
+					consumeReviewerRun(root, task.file.replace(/\.md$/, ""));
 					spawnAgent(root, cfg, "live-tester", task, ensured.wtDir);
 					setState(root, task, "live-testing");
 				}

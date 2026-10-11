@@ -239,11 +239,16 @@ assert.equal(
 	"only meta/kanban is pushed to origin",
 );
 // --mode json: the agent log carries the full JSONL event stream (message, thinking, tool
-// events), not print mode's final text only
-const devLogA = readFileSync(join(kanbanDir(rootA), ".logs", `${taskA.file.replace(/\.md$/, "")}.developer.log`), "utf8");
+// events), not print mode's final text only; per-run naming: the first indexed run is 0
+const slugA = taskA.file.replace(/\.md$/, "");
+const logsA = join(kanbanDir(rootA), ".logs");
+const devLogA = readFileSync(join(logsA, `${slugA}.developer.0.log`), "utf8");
 for (const record of ['"type":"message_update"', '"type":"tool_execution_start"', '"type":"message_end"']) {
 	assert.ok(devLogA.includes(record), `developer log carries JSONL ${record}`);
 }
+assert.ok(existsSync(join(logsA, `${slugA}.reviewer.0.log`)) && existsSync(join(logsA, `${slugA}.live-tester.0.log`)), "reviewer and live-tester runs got indexed log files");
+// the reviewer's approval (to-live-test) is a successful run: counted once per task
+assert.equal(readFileSync(join(logsA, `${slugA}.reviewer-runs.count`), "utf8").trim(), "1", "reviewer approval counted as one successful run");
 a.daemon.kill("SIGTERM");
 
 // --- part B: dead agents get moved forward by the liveness poll, capped at 5 respawns ---
@@ -259,6 +264,10 @@ const readB = () => parseTask(rootB, taskB.file);
 await waitFor(() => b.output().includes("giving up"), 60000, "respawn cap", b.output);
 assert.equal(readB().state, "doing");
 assert.ok(b.output().includes("doing -> to-do"), "poll moved the dead developer back to to-do");
+// same-role reruns get their own run log: the respawned developer writes 1, not 0 again
+const slugB = taskB.file.replace(/\.md$/, "");
+assert.ok(existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.0.log`)), "first developer run logged as 0");
+assert.ok(existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.1.log`)), "developer rerun logged as 1");
 b.daemon.kill("SIGTERM");
 
 // --- part C: lock lifecycle: singleton, self-heal while running, release on stop ---
@@ -362,6 +371,16 @@ assert.ok(existsSync(wtE), "worktree dir created for a to-review task with no wo
 assert.ok(lstatSync(join(wtE, ".kanban")).isSymbolicLink(), "worktree board is a symlink to the shared board");
 assert.ok(e.output().includes(`(cwd=${wtE})`), `reviewer spawn log shows an existing cwd: ${e.output()}`);
 assert.equal(parseTask(rootE, taskE.file).worktree, "fix/1-review-without-worktree", "worktree recorded on the task");
+// the dead reviewer respawns per the dead counter; died runs never count as successful runs
+await waitFor(() => e.output().includes("giving up"), 90000, "reviewer respawn cap", e.output);
+const slugE = taskE.file.replace(/\.md$/, "");
+const reviewerLogsE = readdirSync(join(kanbanDir(rootE), ".logs")).filter((f) => f.startsWith(`${slugE}.reviewer.`) && f.endsWith(".log")).sort();
+assert.deepEqual(
+	reviewerLogsE,
+	[0, 1, 2, 3, 4, 5].map((n) => `${slugE}.reviewer.${n}.log`),
+	"each reviewer run wrote its own indexed log",
+);
+assert.ok(!existsSync(join(kanbanDir(rootE), ".logs", `${slugE}.reviewer-runs.count`)), "died reviewer runs never counted as successful");
 e.daemon.kill("SIGTERM");
 
 // a to-live-test task whose worktree cannot be created stays in to-live-test, never reaches done
@@ -535,6 +554,9 @@ await new Promise((r) => setTimeout(r, 3500));
 assert.equal(attemptsK(), 4, "counter unchanged past the cap");
 assert.equal(giveUpsK(), 1, "give-up not logged again past the cap");
 assert.equal(parseTask(rootK, taskK.file).state, "done", "stuck task stays done for manual resolution");
+// per-run merger logs: three merger spawns, three indexed files
+const mergerLogsK = readdirSync(join(kanbanDir(rootK), ".logs")).filter((f) => f.startsWith(`${slugK}.merger.`) && f.endsWith(".log")).sort();
+assert.deepEqual(mergerLogsK, [`${slugK}.merger.0.log`, `${slugK}.merger.1.log`, `${slugK}.merger.2.log`], "merger runs got indexed log files");
 k.daemon.kill("SIGTERM");
 
 // --- part L: bootstrap materializes board files missing from .kanban/ from the mirror branch ---
@@ -1120,3 +1142,51 @@ await waitFor(() => mirrorSubjects(rootZ).includes(`kanban: done ${taskZ.file}`)
 assert.ok(showTip(rootZ, taskZ.file)!.includes("- in-flight note"), "the done mirror commit carries the in-flight note");
 z2.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + restart preserves in-flight board state smoke passed");
+
+// --- part AA: the reviewer successful-run cap: 3 successful runs, the 4th spawn is refused ---
+// a reviewer run is successful when it sets the task state itself (back to to-review after
+// changes, or forward to to-live-test on approval); died runs go through the dead counter
+const loopStub = (root: string) => {
+	const stub = join(root, "loop-agent.cjs");
+	writeFileSync(
+		stub,
+		`#!/usr/bin/env node
+const { readFileSync, writeFileSync } = require("node:fs");
+const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
+const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
+if (!file || !readFileSync(file, "utf8").match(/^state: /m)) process.exit(0);
+const next = prompt.includes("Reviewer agent") ? "to-review" : prompt.includes("Live-tester") ? "done" : null;
+if (next) writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: " + next));
+`,
+	);
+	chmodSync(stub, 0o755);
+	return stub;
+};
+
+const rootAA = fixture();
+cleaned.push(rootAA);
+mkdirSync(kanbanDir(rootAA), { recursive: true });
+writeFileSync(join(kanbanDir(rootAA), "se-llm-team.json"), JSON.stringify({ agent: loopStub(rootAA), pollMinutes: 0.05 }));
+const taskAA = createTask(rootAA, { name: "fix: reviewer cap", summary: "Reviewer run cap smoke", specs: "n/a" });
+setState(rootAA, taskAA, "to-review");
+
+const aa = await runDaemon(rootAA);
+const slugAA = taskAA.file.replace(/\.md$/, "");
+const runsAA = () => {
+	try {
+		return parseInt(readFileSync(join(kanbanDir(rootAA), ".logs", `${slugAA}.reviewer-runs.count`), "utf8").trim(), 10) || 0;
+	} catch {
+		return 0;
+	}
+};
+// three successful reviewer runs (each back to to-review), then the 4th spawn is refused
+await waitFor(() => aa.output().includes("reviewer succeeded 3+ times, moving to to-live-test"), 60000, "reviewer cap refusal logged", aa.output);
+assert.equal(aa.output().split("spawned reviewer").length - 1, 3, "exactly three reviewer spawns before the refusal");
+assert.equal(runsAA(), 0, "the counter cleared on the forced to-live-test advance");
+const reviewerLogsAA = readdirSync(join(kanbanDir(rootAA), ".logs")).filter((f) => f.startsWith(`${slugAA}.reviewer.`) && f.endsWith(".log")).sort();
+assert.deepEqual(reviewerLogsAA, [`${slugAA}.reviewer.0.log`, `${slugAA}.reviewer.1.log`, `${slugAA}.reviewer.2.log`], "three indexed reviewer run logs, no fourth");
+// the pipeline continues from the forced advance: the live-tester runs and the task completes
+await waitFor(() => parseTask(rootAA, taskAA.file).state === "done" && parseTask(rootAA, taskAA.file).worktree === "", 60000, "pipeline after the cap refusal", aa.output);
+assert.equal(runsAA(), 0, "counter still cleared after the pipeline completed");
+aa.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + reviewer successful-run cap smoke passed");
