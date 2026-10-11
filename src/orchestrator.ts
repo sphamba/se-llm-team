@@ -527,7 +527,8 @@ function ensureWorktree(root: string, task: Task): { wt: string; wtDir: string }
 // a fresh clone has an empty .kanban/, a stale working tree can lack branch content and a
 // merge that untracks the board may leave files behind on main: the board lives on
 // refs/heads/meta/kanban, so seed the mirror ref when missing and reconcile the working tree
-// to its tip (branch wins, unmirrored writes survive; runs at every startup, idempotent)
+// to its tip (missing files materialize, local files that differ win as in-flight writes;
+// runs at every startup, idempotent)
 function bootstrapBoard(root: string): void {
 	// a fresh non-bare clone carries only the remote-tracking ref, no local branch: seed the
 	// mirror branch from it, or the reconcile below returns early (board never materializes)
