@@ -1,8 +1,8 @@
 ---
 name: "fix: verify the merged webui board after 47 - pair width, spinner identity, hub tabs"
 priority: "high"
-state: "to-merge"
-worktree: "fix/93-verify-the-merged"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -75,3 +75,11 @@ Constraints:
   - Hub tabs: alpha and beta render, clicking beta shows beta's cards in the pair layout, clicking back restores alpha. The hub page ships every asserted helper name.
 - Verification-only pass: the merged resolution is correct, no code was edited, no issue found.
 - Open questions: none.
+
+## Merge (2026-10-11)
+- Step 1, worktree merge of main into fix/93-verify-the-merged: the branch tip 01136ea was the merge base (the branch had no unique commits, the verified resolution produced no diff), so `git merge main` fast-forwarded it to main tip 33c2283. No conflicts, nothing to resolve, no fix commits needed.
+- Test suites on the new tip 33c2283, all first try, no flake: `node src/kanban.test.ts` -> all assertions passed; `node src/orchestrator.test.ts` -> all smoke parts passed (including task removal, blockedBy failsafe); `node src/webui.test.ts` -> all assertions passed.
+- Source invariants re-checked on 33c2283, since main advanced past 01136ea with 273 changed lines in src/webui.ts (agent history, accents, modal overlay fix, run buttons): `.pair` still has `min-width: 300px; flex: 1 0 300px`, the same floor as `.col`; tabNames, tabsHtml, boardOf, mergeBoards, pairLayout, spinnerHtml, cardHtml, buildShell and syncBoard are all present, and the per-tab render path still uses them (renderTabs and switchTab at src/webui.ts lines 775 and 781, render() calls both).
+- Browser probe re-run on the new tip: first run 16/17. The one failure was a stale probe expectation, not a product bug: the probe asserted the merging column's card has no spinner, but 2e0bcb2 (a main feature, "webui accents and a merging spinner for the to-merge/merging columns") added `merging` to spinnerHtml's spinner states. Probe detail confirms the substance passes (cardSame: true, nameSame: true, spinner running). I updated the probe's expectation in /tmp/check93/browser.mts (outside the repo) to assert `spinner: true` for merging and re-ran: ALL 17 BROWSER CHECKS PASSED (exit 0, /tmp/check93/merger-probe.out). No repo file was touched for this.
+- Step 2, main merge of fix/93-verify-the-merged: `git merge --no-edit fix/93-verify-the-merged` -> "Already up to date." (main 33c2283 equals the branch tip after the fast-forward). Working tree clean, no merge commit created.
+- Outcome: both merges complete, main is clean at 33c2283, worktree clean at 33c2283. No product change was needed; the verified resolution survived main's advance. No open questions.
