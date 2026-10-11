@@ -1,8 +1,8 @@
 ---
 name: "feat: agent cards with tokens and duration; subs always visible in the caller column"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/120-agent-cards-with"
 ---
 
 # Summary
