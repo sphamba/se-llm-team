@@ -820,11 +820,16 @@ function poll(root: string, cfg: Config): void {
 			// for a state with no transition (to-merge, done) would otherwise linger forever
 			const pidName = task.state === "merging" ? "merger" : slug;
 			const pid = agentPid(root, pidName);
-			if (pidAlive(pid)) continue;
+			if (pidAlive(pid)) {
+				// a live agent ends the death streak: reset the counter so a later streak past
+				// the cap gets its own give-up log instead of staying silent forever
+				if (readCounter(root, `${slug}.dead`) > 0) writeFileSync(counterPath(root, `${slug}.dead`), "0");
+				continue;
+			}
 			clearPid(root, pidName);
 			if (!next) continue;
 			if (bumpCounter(root, `${slug}.dead`) > RESPAWN_CAP) {
-				// counter keeps growing while the pidfile stays dead; log the give-up only once
+				// counter keeps growing while the pidfile stays dead; log the give-up once per streak
 				if (readCounter(root, `${slug}.dead`) === RESPAWN_CAP + 1) {
 					log(root, `${slug}: agent died ${RESPAWN_CAP}+ times, giving up (state ${task.state})`);
 				}

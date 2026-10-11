@@ -301,6 +301,13 @@ assert.ok(existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.1.log`)
 await waitFor(() => b.output().includes("live-testing -> to-merge"), 30000, "poll advanced the dead live-tester to to-merge", b.output);
 await waitFor(() => b.output().includes("merging -> to-merge"), 30000, "poll requeued the dead merger's task to to-merge", b.output);
 assert.equal(parseTask(rootB, taskB2.file).state, "to-merge", "requeued task waits for the idle cooldown");
+// revival ends the death streak: the poll resets the counter at the first alive sighting, so
+// a second streak past the cap gets its own give-up log instead of staying silent
+writeFileSync(join(kanbanDir(rootB), ".pids", `${slugB}.pid`), String(process.pid));
+await waitFor(() => readFileSync(join(kanbanDir(rootB), ".logs", `${slugB}.dead.count`), "utf8").trim() === "0", 30000, "alive sighting reset the dead counter", b.output);
+rmSync(join(kanbanDir(rootB), ".pids", `${slugB}.pid`));
+await waitFor(() => (b.output().match(/giving up/g) ?? []).length >= 2, 60000, "second streak give-up", b.output);
+assert.equal((b.output().match(/giving up/g) ?? []).length, 2, "second death streak logged its own give-up");
 b.daemon.kill("SIGTERM");
 
 // --- part C: lock lifecycle: singleton, self-heal while running, release on stop ---
