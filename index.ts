@@ -117,7 +117,7 @@ export default function (pi: ExtensionAPI) {
 		description: "Set or clear (empty string) the worktree attribute of a task.",
 		parameters: Type.Object({
 			file: Type.String({ description: "Task file name" }),
-			worktree: Type.String({ description: "Worktree name under .worktrees/, e.g. feat/nice-thing" }),
+			worktree: Type.String({ description: "Worktree name under .worktrees/, e.g. feat/1-nice-thing" }),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
