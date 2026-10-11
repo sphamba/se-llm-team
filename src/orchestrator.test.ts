@@ -1416,12 +1416,26 @@ const loopStub = (root: string) => {
 	writeFileSync(
 		stub,
 		`#!/usr/bin/env node
-const { readFileSync, writeFileSync } = require("node:fs");
+const { readFileSync, writeFileSync, existsSync } = require("node:fs");
+const { basename, dirname, join } = require("node:path");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
 if (!file || !readFileSync(file, "utf8").match(/^state: /m)) process.exit(0);
+const isReviewer = prompt.includes("Reviewer agent");
+// a reviewer must not outrun the daemon's bookkeeping: it waits for the post-spawn armed
+// marker (the daemon took over), writes its state, then waits for the next sweep to consume
+// the marker with the pidfile still matching (the run was counted). Exiting earlier lets a
+// poll tick clear the pidfile between the exit and that sweep, so consumeReviewerRun drops
+// the run uncounted and one spawn past the cap happens
+const armed = () => join(dirname(file), ".logs", basename(file, ".md") + ".reviewer-armed");
+const waitUntil = (cond, ms) => {
+	const end = Date.now() + ms;
+	while (!cond() && Date.now() < end) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+};
+if (isReviewer) waitUntil(() => existsSync(armed()), 10000);
 const next = prompt.includes("Reviewer agent") ? "to-review" : prompt.includes("Live-tester") ? "done" : null;
 if (next) writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: " + next));
+if (isReviewer) waitUntil(() => !existsSync(armed()), 10000);
 `,
 	);
 	chmodSync(stub, 0o755);
