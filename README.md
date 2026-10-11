@@ -4,8 +4,15 @@ A pi coding agent extension. One skill, `/skill:se-llm-team`, turns the session 
 
 ## Setup
 
-1. The repo is symlinked to `~/.pi/agent/extensions/se-llm-team/`. pi loads `index.ts` from it. No build step.
-2. Publish the skill with a symlink (settings `skills` entries only toggle discovered resources, they do not add paths):
+Install as a pi package from git:
+
+```sh
+pi install git:github.com/sphamba/se-llm-team
+```
+
+The https URL form works too: `pi install https://github.com/sphamba/se-llm-team`. The package provides the kanban/orchestrator tools, the `/skill:se-llm-team` skill, and the agent prompts. Node >= 24 is required: the orchestrator daemon runs the `.ts` sources directly through node's type stripping, so there is no build step.
+
+Local development alternative: symlink the repo to `~/.pi/agent/extensions/se-llm-team/`. pi loads `index.ts` from it. No build step. Publish the skill with a second symlink (settings `skills` entries only toggle discovered resources, they do not add paths):
 
 ```sh
 ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
