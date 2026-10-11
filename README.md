@@ -46,13 +46,13 @@ corepack enable
 corepack prepare pnpm@12.11.2 --activate
 ```
 
-There are no dependencies and no lockfile yet. The checks still run with `node` directly, see [Checks](#checks).
+There are no dependencies and no committed lockfile (pnpm writes an env lockfile that is gitignored). The checks still run with `node` directly, see [Checks](#checks).
 
 ## Kanban board
 
 `.kanban/` in the project repo holds one markdown file per task, named `000001_nice_thing.md` (zero-padded number, slug capped at 4 words with the type word dropped). Flat YAML frontmatter (name, priority, state, worktree) plus # Summary, # Specs, # Notes sections. The library writes files only; the orchestrator daemon is the sole git committer for `.kanban/` paths, at two points only: creation in backlog, and done. Edits in between stay uncommitted and land in the one done commit.
 
-States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing, done.
+States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing, to-merge, merging, done.
 
 ## Orchestrator
 
@@ -62,8 +62,10 @@ States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing,
 - to-do: creates `.worktrees/<type>/<num>-<short-slug>` (e.g. feat/1-nice-thing) from the task, sets the worktree attribute, spawns a Developer, moves to doing. Unlimited lanes; the PM throttles by how many tasks it promotes to to-do.
 - to-review: spawns a Reviewer, moves to reviewing.
 - to-live-test: spawns a Live-tester, moves to live-testing.
-- Liveness poll: an agent dead without a state update moves the task on (a dead Developer goes back to to-do for a fresh run, reviewing to to-review, live-testing to done). Capped at 5 respawns per task.
-- done with a worktree: merges the branch into the main checkout, removes the worktree, deletes the branch, then commits the task file (the done commit). On conflict, spawns a Merger agent, capped at 3 attempts. done without a worktree: the orchestrator commits the task file at the next rescan. The done commit is skipped when the file has nothing uncommitted.
+- to-merge: spawns at most one Merger for the whole project (while the task's own agent is still alive the spawn waits), moves to merging. Only after the task sat idle in to-merge for `autoScheduleMinutes` does a merger requeued by a failed merge get a retry.
+- merging: the Merger merges main into the task worktree, resolves conflicts and runs the tests there, then merges the branch into main from the root checkout and sets done. When the merge cannot be completed it sets the task back to to-merge and aborts any merge left dirty in the root or the worktree, so main never sits mid-merge.
+- Liveness poll: an agent dead without a state update moves the task on (a dead Developer goes back to to-do for a fresh run, reviewing to to-review, live-testing to to-merge, merging to to-merge). Capped at 5 respawns per task.
+- done with a worktree: the Merger merged the branch before setting done, so the orchestrator removes the worktree, deletes the merged branch and commits the task file (the done commit). done without a worktree: the orchestrator commits the task file at the next rescan. The done commit is skipped when the file has nothing uncommitted.
 - A task file with unresolved merge conflict markers is left untouched: the daemon spawns no agents, rewrites no attribute, and commits nothing for it until the merger or the user resolves the conflict.
 
 ### Board mirror to origin

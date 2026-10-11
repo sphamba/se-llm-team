@@ -22,7 +22,7 @@ export default function (pi: ExtensionAPI) {
 		name: "kanban_list",
 		label: "Kanban list",
 		description:
-			"List kanban tasks of this project. scope=backlog: tasks to prioritize. scope=in-progress: tasks being worked on. scope=done: completed tasks. Optional priority filter (low/medium/high/critical). Returns file, num (#NN), name, priority, state, issuer and summary per task.",
+			"List kanban tasks of this project. scope=backlog: tasks to prioritize. scope=in-progress: tasks being worked on. scope=done: completed tasks. Optional priority filter (low/medium/high/critical). Returns file, num (#NN), name, priority, state, issuer, summary and openQuestions (the task body's # Open questions section, empty when none) per task.",
 		parameters: Type.Object({
 			scope: StringEnum(["backlog", "in-progress", "done"] as const),
 			priority: Type.Optional(StringEnum(["low", "medium", "high", "critical"] as const)),
@@ -40,7 +40,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "kanban_get",
 		label: "Kanban get",
-		description: "Read one kanban task in full detail (state, worktree, issuer, summary, specs, notes).",
+		description: "Read one kanban task in full detail (state, worktree, issuer, summary, specs, notes, openQuestions). openQuestions is the task body's # Open questions section, empty when none.",
 		parameters: Type.Object({ file: Type.String({ description: "Task file name, e.g. 000001_nice_thing.md" }) }),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
