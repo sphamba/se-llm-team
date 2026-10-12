@@ -45,7 +45,7 @@ Create a pi coding agent extension (this repo is already symlinked to ~/pi/agent
   - route a task whose branch is not merged into the project root's checkout, or that has no worktree, back to "to-merge"
   - spawn a Live-tester agent on the merged commit (the project root's checkout) and move to "live-testing"
   - If terminated without updated state, move back to "to-live-test"
-- Poll the agents for liveness (every 15 minutes, configurable). If dead, kill the agent, and respawn at same state.
+- Poll the agents for liveness (every 1 minute, configurable). If dead, kill the agent, bounce the task one state back (a dead Developer goes back to "to-do" for a fresh run, reviewing to "to-review", live-testing to "to-live-test", merging to "to-merge") and respawn from the bounced state, capped at 5 respawns per task.
 - configuration variable for the coding agent executable
 
 
