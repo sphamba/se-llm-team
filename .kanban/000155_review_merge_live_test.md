@@ -1,7 +1,7 @@
 ---
 name: "feat: pipeline reorders to review, merge, live-test"
 priority: "high"
-state: "doing"
+state: "reviewing"
 worktree: "feat/155-review-merge-live-test"
 blockedBy: ""
 issuer: "user"
@@ -29,3 +29,15 @@ Changes (src/orchestrator.ts + src/orchestrator.test.ts + skills/se-llm-team/SKI
 Tests: the orchestrator suite covers the reordered pipeline (reviewer cap -> to-merge; merge -> to-live-test; live-test pass -> done; live-test findings -> done + finding tasks; bounce re-mapping; blocker-satisfaction for to-live-test/live-testing/done refs); the suite stays green.
 
 After implementation the PM restarts the orchestrator daemon.
+
+# Notes
+Implemented the reorder in the worktree feat/155-review-merge-live-test, commit efef524 (src/orchestrator.ts, src/orchestrator.test.ts, skills/se-llm-team/SKILL.md, agents/reviewer.md, agents/merger.md, agents/live-tester.md). Full suite green: npm test (kanban, orchestrator, webui, extension, index).
+- Reviewer cap advance and the clean approval now send to-review -> to-merge; the approval counts as a successful reviewer run (consumeReviewerRun at the start of sweepToMerge) and the armed marker is cleaned there. Log line: "reviewer succeeded N+ times, moving to to-merge".
+- The merger sets merging -> to-live-test after a successful merge; the rescan then spawns the live tester on the root checkout (spawnAgent cwd=root, {{WORKTREE}} not substituted), deferred while the project-wide merger pid or the task's own agent pid is alive.
+- A to-live-test task whose branch is not merged into the root HEAD (git merge-base --is-ancestor) bounces to to-merge first, so an in-flight task from a daemon still on the old order never gets main tested unmerged. Edge: a to-live-test task with no worktree attr also routes to to-merge, where the "nothing to merge" path sets done without a live test.
+- A dead live-testing agent bounces live-testing -> to-live-test (merge already happened); a dead merging agent stays to-merge. A passing live test moves live-testing -> done with no merger spawn; findings still travel as new tasks for the PM.
+- Blocker satisfaction is one shared BLOCKER_SATISFIED set (done, to-live-test, live-testing) used by both blockedByUndone and dropDoneBlockers; to-merge and merging keep blocking. dropDoneBlockers log line is now "dropped satisfied blocker ref(s)".
+- The old consumeReviewerRun call in the to-live-test branch is kept as stale-armed-marker hygiene; it is a no-op in the normal flow.
+- Test stubs updated to the new transitions; part F repurposed to the unmerged-branch bounce; part G reworked (reviewer lingers past the cap advance, merger defers, live tester runs with cwd=root); new part AH2 covers blocker satisfaction for a to-live-test/live-testing blocker. The stub role checks are exclusive if/else-if now, because the merger prompt mentions the Live-tester.
+- Deliberately untouched (outside the spec file list): README.md and SPECS.md still describe the old order (README states line 66 and per-state lines 75-79; SPECS.md lines 37-46 and 58-75). Follow-up for the PM.
+- The PM restarts the orchestrator daemon to pick up the new order.
