@@ -2,7 +2,7 @@
 name: "fix: agent cards order by in-log start time, not sweep mtime"
 complexity: "simple"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/139-agent-cards-order"
 ---
 
@@ -20,3 +20,7 @@ Fix, src/webui.ts plus src/webui.test.ts only:
 Test: build two fake logs whose mtimes are inverted relative to their first-record timestamps and assert the entries come out in chronological order; assert a timestamp-less legacy log still sorts by mtime; assert the existing agentHistory tests stay green.
 
 # Notes
+- logStats (src/webui.ts) now surfaces first, the first parseable record timestamp in epoch ms, alongside tokens and duration, memoized by size as before.
+- agentHistory sorts entries by start ?? mtime, then mtime, then the stable enumeration order (LOG_ROLES pipeline order, legacy unsuffixed file first, index ascending), so legacy timestamp-less boards render exactly as before. Entry fields unchanged, start and mtime stay internal to the sort.
+- The sub=list payload strips first so its exact {id, index, tokens, duration} shape stays intact; no orchestrator changes.
+- webui.test.ts: new 000139 section builds two .log.gz runs whose mtimes invert their in-log first-record timestamps plus a timestamp-less legacy log between them, and asserts the order developer.1, developer, developer.0. All suites pass: webui, kanban, orchestrator, index, extension.
