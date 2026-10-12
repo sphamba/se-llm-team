@@ -9,7 +9,8 @@ const DEFAULT_PORT = 4242;
 // 000158: init and back-fill load a fixed number of collapsed lines, not a byte chunk: a thinking
 // block (thinking_start..thinking_end records) and a tool call block (tool_execution_start..end)
 // each count as ONE line, so a window boundary always falls between blocks, never inside one, and
-// no block is ever broken on load or back-fill
+// no block is ever broken on load or back-fill; 000166: a thinking block still open at the live
+// tail (no thinking_end yet) counts as ONE line too, so a live phase never splits across windows
 export const LOG_LINES = 100;
 const SCAN_WINDOW = 81920; // bytes per backward read in the collapsed-line scan
 // working state -> the agent role the orchestrator spawns for it (spawnAgent, src/orchestrator.ts)
@@ -567,12 +568,16 @@ function lastBoundary(full: Buffer | null, target: string, size: number): number
 // 000158: the byte offset that starts `count` collapsed lines before a record-boundary tail: a
 // thinking block (thinking_start..thinking_end records) and a tool call block
 // (tool_execution_start..tool_execution_end) each count as ONE line, every other record its own,
-// so init and back-fill windows always start between blocks and no block is ever broken; returns 0
-// when the file starts first. Ceiling: a record outgrowing the scan window doubles it per step
+// so init and back-fill windows always start between blocks and no block is ever broken;
+// 000166: a thinking block still open at the tail (no thinking_end below it) counts as ONE line
+// too, head landing at its thinking_start, so a live phase loads as one unbroken open block and a
+// back-fill from that head never re-serves it; returns 0 when the file starts first. Ceiling: a
+// record outgrowing the scan window doubles it per step
 function linesBack(full: Buffer | null, target: string, tail: number, count: number): number {
 	let pos = tail; // walks record boundaries backward
 	let head = tail;
 	let inThink = false; // consuming a thinking block backward, back to its thinking_start
+	let openThink = false; // consuming a still-open thinking block backward (000166): its thinking_end lies below the tail
 	let openTool: string | null = null; // consuming a tool block backward, back to its matching start
 	let wlo = Math.max(0, tail - SCAN_WINDOW); // the scan window held in memory, grows backward
 	let win = readBytes(full, target, wlo, tail);
@@ -614,6 +619,17 @@ function linesBack(full: Buffer | null, target: string, tail: number, count: num
 			}
 		} else if (ev?.type === "thinking_end") {
 			inThink = true;
+		} else if (openThink) {
+			// 000166: inside the open block, skip up to its thinking_start; the block counts as ONE
+			// line like a closed one and head lands at the start record, so the whole block stays in
+			// one window and a back-fill from that head never re-serves any part of it
+			if (ev?.type === "thinking_start") {
+				openThink = false;
+				count--;
+				head = pos;
+			}
+		} else if (ev?.type === "thinking_delta") {
+			openThink = true; // no thinking_end below the tail: the block is still open at the live tail
 		} else if (rec?.type === "tool_execution_end" && typeof rec.toolCallId === "string" && rec.toolCallId) {
 			openTool = rec.toolCallId;
 		} else {

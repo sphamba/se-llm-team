@@ -8,9 +8,10 @@ import {
 	getTask,
 	kanbanDir,
 	listAll,
-	splitWorktreeRoot,
+	roleNotesPath,
 	setState,
 	setWorktree,
+	splitWorktreeRoot,
 	updateAttrs,
 	slugWorktree,
 	taskFiles,
@@ -264,6 +265,19 @@ export function compactLogLine(line: string): string | null {
 // --compact-logs: the log fd belongs to the child, so the write-time pipe (whose read end
 // lived in the daemon and died with it, EPIPE-killing the agent) cannot come back
 
+// per-role project notes: .kanban/AGENTS.<role>.md, created when missing with a one-line
+// starter header; agents append their project's guidance (how to run, how to live-test) so
+// future agents of the role start faster. Appended to the system prompt at spawn: pi reads
+// the value as file contents when the path exists, and the flag applies to all modes
+// including headless --mode json
+function ensureRoleNotes(root: string, role: string): string {
+	const path = roleNotesPath(root, role);
+	if (!existsSync(path)) {
+		writeFileSync(path, `# ${role}: append project-specific guidance for this role below (e.g. how to run the project, how to live-test) so future agents of your kind start faster.\n`);
+	}
+	return path;
+}
+
 function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: string, pidName?: string): void {
 	const slug = taskSlug(task.file);
 	mkdirSync(join(kanbanDir(root), ".logs"), { recursive: true });
@@ -275,7 +289,8 @@ function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: st
 	// --approve trusts the project-local files of the worktree, so the headless session never waits for a trust prompt;
 	// --mode json streams the full JSONL event log (thinking, tool calls, text) instead of print mode's final text only;
 	// the provider/model/thinking flags come from the config, resolved per role
-	const child = spawn(cfg.agent, ["--approve", "--mode", "json", ...llmFlags(root, cfg, role, task.complexity ?? "moderate"), "-p", renderPrompt(root, role, task, cwd === root ? undefined : cwd)], {
+	const notesPath = ensureRoleNotes(root, role);
+	const child = spawn(cfg.agent, ["--approve", "--mode", "json", ...llmFlags(root, cfg, role, task.complexity ?? "moderate"), "-p", renderPrompt(root, role, task, cwd === root ? undefined : cwd), "--append-system-prompt", notesPath], {
 		cwd,
 		detached: true,
 		stdio: ["ignore", fd, fd],

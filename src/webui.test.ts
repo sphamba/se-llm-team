@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,12 @@ const cleanup = () => {
 	daemon?.kill("SIGKILL");
 	rmSync(root, { recursive: true, force: true });
 	rmSync(home, { recursive: true, force: true });
+	// leftover webui copy dirs from a crashed run must not pollute the repo's src dir
+	try {
+		for (const d of readdirSync(HERE)) if (d.startsWith(".webui-hot-")) rmSync(join(HERE, d), { recursive: true, force: true });
+	} catch {
+		/* src dir unreadable */
+	}
 };
 process.on("exit", cleanup);
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
@@ -369,6 +375,33 @@ assert.equal(kept[0].root, root);
 assert.equal((await fetch(`${reloadBase}/api/tasks`)).status, 200, "the api keeps answering through the reloaded module");
 reloader.close();
 rmSync(reloadHome, { recursive: true, force: true });
+
+// 000164 graph-fresh reload: the reload copies the whole module graph into a per-version dir and
+// imports the copy, so a kanban.ts-only change (a STATES reorder) goes live on browser reload
+// while the webui file itself keeps its mtime
+const graphHome = mkdtempSync(join(tmpdir(), "webui-graph-"));
+writeFileSync(join(graphHome, "package.json"), JSON.stringify({ type: "module" })); // the stub's dir needs an esm scope
+const graphKanban = join(graphHome, "stub-kanban.ts");
+const graphWebui = join(graphHome, "stub-webui.ts");
+writeFileSync(graphKanban, 'export const STATES = ["a", "b"];\n');
+writeFileSync(
+	graphWebui,
+	'import { STATES } from "./stub-kanban.ts";\nexport const PAGE = "<!doctype html><title>graph " + STATES.join("-") + "</title>";\nexport const taskPayload = (root) => [];\nexport const agentLogPayload = (root, q) => null;\n',
+);
+touch(graphKanban, Date.now() / 1000 - 90);
+touch(graphWebui, Date.now() / 1000 - 91);
+const grapher = await startHub({ name: "webui-graph", root, host: "localhost", port: 0, webuiPath: graphWebui });
+assert.ok(grapher, "hub starts pointing at a webui module with a kanban dependency");
+const graphBase = `http://localhost:${grapher.port}`;
+assert.ok((await (await fetch(`${graphBase}/`)).text()).includes("graph a-b"), "the page serves the kanban states at first load");
+writeFileSync(graphKanban, 'export const STATES = ["a", "b", "c"];\n');
+touch(graphKanban, Date.now() / 1000 - 80); // only kanban.ts changes: the webui file keeps its mtime
+const graphReloaded = await (await fetch(`${graphBase}/`)).text();
+assert.ok(graphReloaded.includes("graph a-b-c"), "a kanban.ts-only change goes live on browser reload");
+assert.ok(!graphReloaded.includes("graph a-b</title>"), "the stale states are gone after the reload");
+assert.equal((await fetch(`${graphBase}/api/tasks`)).status, 200, "the api keeps answering through the graph reload");
+grapher.close();
+rmSync(graphHome, { recursive: true, force: true });
 
 // the real hub keeps serving after a webui reload too: an mtime bump (a branch switch bumps it)
 // makes the loader re-import the real module graph with a fresh query, page and api stay up
@@ -1038,18 +1071,16 @@ assert.equal(splitLog.tail, (JSON.stringify({ type: "session", id: "s" }) + "\n"
 writeFileSync(logFile, JSON.stringify({ type: "session", id: "s" }) + "\n" + bigRecord + "\n");
 assert.ok((await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${splitLog.tail}`)).json()).text.includes("zzz"), "the record renders whole once its newline arrives");
 
-// 000148: an init window that starts inside the open thinking block's delta run (thinking_start
-// far outside the window) renders the deltas as the joinable span, later polls' spans join the
-// promoted block client-side, and the cross-window thinking_end serves the closing span
+// 000166: an init window on a log mid-thinking holds the still-open block whole from its
+// thinking_start as one open Thinking block (never a delta-run orphan span); the later delta
+// polls' spans join it client-side and the cross-window thinking_end serves the closing span
 const filler = "F".repeat(79) + "\n"; // 80-byte lines
 const msStart = JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } }) + "\n";
-// the thinking_start record sits ~2000 records before the end, far outside the 100-line window,
-// so the init window starts inside the delta run
 const msBody = (deltas: string) => filler.repeat(2000) + msStart + filler.repeat(1100) + deltas;
 writeFileSync(logFile, msBody(thinkDelta("outside the window") + "\n"));
 const msInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
-assert.ok(msInit.text.includes('<span class="lg-cont">outside the window</span>'), "the init window renders the open block's deltas as the joinable span, the thinking_start record outside it");
-assert.ok(!msInit.text.includes("data-open"), "the window alone cannot render the block open");
+assert.ok(msInit.text.includes('<details class="lg-think" data-open="think"><summary>Thinking</summary><pre><p>outside the window</p></pre></details>'), "the init window holds the still-open thinking block whole from its thinking_start, one open block");
+assert.ok(!msInit.text.includes("lg-cont"), "no delta-run orphan span: the window never starts inside the open block");
 writeFileSync(logFile, msBody(thinkDelta("outside the window") + "\n" + thinkDelta(" joined") + "\n" + thinkDelta(" in place") + "\n"));
 const msPoll = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${msInit.tail}`)).json();
 assert.ok(msPoll.text.includes('<span class="lg-cont"> joined in place</span>'), "the next poll renders the new deltas as a joinable span too");
@@ -1075,6 +1106,19 @@ assert.ok(!blockInit.text.includes("lg-think"), "the init window holds the 100 p
 const blockHist = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${blockInit.head}&before=1`)).json();
 assert.ok(blockHist.text.includes('<details class="lg-think"><summary>Thinking</summary><pre><p>the whole plan</p></pre></details>'), "the back-fill serves the block whole, never split across the page boundary");
 assert.ok(!blockHist.text.includes("lg-cont"), "no continuation artifact in the back-fill either");
+
+// 000166: a thinking block still open at the tail (no thinking_end yet) is ONE collapsed line
+// too: init holds it whole from its thinking_start, and a scroll-up back-fill from that head
+// never re-serves it, so a live phase renders as one open block that the thinking_end finalizes
+const openBlock = (deltas: number) => msStart + Array.from({ length: deltas }, (_, i) => thinkDelta("d" + i) + "\n").join("");
+writeFileSync(logFile, JSON.stringify({ type: "session", id: "s" }) + "\n" + filler.repeat(100) + openBlock(150));
+const openInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.ok(openInit.text.includes('<details class="lg-think" data-open="think"><summary>Thinking</summary><pre><p>d0'), "the open block loads whole from its thinking_start as one open Thinking block");
+assert.ok(openInit.text.includes("d149"), "the open block's full delta run renders, a never-ending block is never dropped");
+assert.ok(!openInit.text.includes("lg-cont"), "no orphan delta span: the window never starts inside the open block");
+assert.equal(openInit.head, (JSON.stringify({ type: "session", id: "s" }) + "\n").length + filler.length, "the open block counts as one line: it plus the 99 filler lines above it make the last 100 collapsed lines");
+const openHist = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${openInit.head}&before=1`)).json();
+assert.ok(!openHist.text.includes("lg-think") && !openHist.text.includes("lg-cont") && !openHist.text.includes("data-open"), "the back-fill never re-serves the open block: one live phase, one open Thinking block, no stale fragment");
 
 // 000158: a tool call block (tool_execution_start..tool_execution_end) is ONE line too, so the
 // window never splits a tool block's result away from its call

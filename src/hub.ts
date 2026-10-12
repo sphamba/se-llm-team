@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { splitWorktreeRoot } from "./kanban.ts";
 import { pidAlive } from "./pid.ts";
@@ -42,29 +42,118 @@ const CODE_ROOT = (() => {
 	}
 })();
 
-// The webui module (page, rendering, payload builders) reloads when its file changes: node
-// cache-busts the dynamic import with the mtime as the version query, so a browser reload
-// serves the edited code without a daemon restart. The hub's registry, heartbeats and election
-// stay in this process; only the request handlers swap. A vanished or unparseable file serves
-// the last good module, so an edit mid-write never blanks the ui. hub.ts itself still needs a
-// daemon restart to reload (upgrade path: an out-of-process webui child).
+// static relative import specifiers of one file, for the graph walk below
+const RELATIVE_IMPORT_RE = /(?:from|import)\s*\(?\s*["'](\.\.?\/[^"']+)["']/g;
+
+// the webui module graph, walked from webui.ts over its static relative imports (today kanban.ts
+// and pid.ts): node: and bare specifiers stay out, they are process-global or resolve against
+// the real node_modules
+const webuiGraph = (entry: string): string[] => {
+	const seen = new Set<string>();
+	const walk = (file: string): void => {
+		if (seen.has(file)) return;
+		seen.add(file);
+		let src: string;
+		try {
+			src = readFileSync(file, "utf8");
+		} catch {
+			return; // vanished mid-walk: the copy below fails and the last good module serves
+		}
+		for (const m of src.matchAll(RELATIVE_IMPORT_RE)) {
+			const target = resolve(dirname(file), m[1]);
+			try {
+				if (statSync(target).isFile()) walk(target);
+			} catch {
+				// unresolvable specifier: the same import fails inside the copy
+			}
+		}
+	};
+	walk(entry);
+	return [...seen];
+};
+
+// the deepest dir every graph file shares: the copy mirrors the graph layout from here, so
+// relative imports inside the copy resolve to sibling copies, not the stale cached modules
+const commonDir = (files: string[]): string => {
+	let prefix = dirname(files[0]).split(sep);
+	for (const f of files) {
+		const parts = dirname(f).split(sep);
+		let n = 0;
+		while (n < prefix.length && n < parts.length && prefix[n] === parts[n]) n++;
+		prefix = prefix.slice(0, n);
+	}
+	return prefix.join(sep) || sep;
+};
+
+// The webui module (page, rendering, payload builders) reloads when any file in its module graph
+// changes: the whole graph is copied into a per-version dir and imported from the copy, so a
+// reloaded webui.ts sees fresh sibling modules too and a kanban.ts-only change (e.g. a STATES
+// reorder) goes live on browser reload without a daemon restart. The version is the newest
+// mtime in the graph. The hub's registry, heartbeats and election stay in this process; only
+// the request handlers swap. A vanished or unparseable file serves the last good module, so an
+// edit mid-write never blanks the ui. The copy dir is removed after the import: node keeps the
+// modules in memory and only a new version needs files on disk (the graph must not dynamic-import
+// at call time; keep the dir if it ever does). hub.ts itself still needs a daemon restart to
+// reload (upgrade path: an out-of-process webui child).
 const webuiLoader = (path: string): (() => Promise<WebuiModule>) => {
 	let mod: WebuiModule | undefined;
 	let version = -1;
-	return async () => {
-		let mtime = -1;
-		try {
-			mtime = statSync(path).mtimeMs;
-		} catch {
-			// the file vanished: serve the last good module
-		}
-		if (mtime !== -1 && (mod === undefined || mtime !== version)) {
+	let failed = -2;
+	let graph = [path];
+	let pending: Promise<void> | undefined;
+	const srcDir = dirname(path);
+	// the newest mtime in the whole graph, so a kanban.ts-only change reloads even though
+	// webui.ts is unchanged; -1 when a graph file vanished
+	const graphMtime = (): number => {
+		let max = -1;
+		for (const f of graph) {
 			try {
-				mod = await import(`${pathToFileURL(path).href}?v=${mtime}`);
-				version = mtime;
+				max = Math.max(max, statSync(f).mtimeMs);
 			} catch {
-				// an edit mid-write or a broken file: serve the last good module
+				return -1;
 			}
+		}
+		return max;
+	};
+	// stale .webui-hot dirs from a killed process or a failed copy: sweep on every reload
+	const hotSweep = (): void => {
+		try {
+			for (const d of readdirSync(srcDir)) {
+				if (d.startsWith(".webui-hot-")) rmSync(join(srcDir, d), { recursive: true, force: true });
+			}
+		} catch {
+			// srcDir unreadable
+		}
+	};
+	const reload = async (): Promise<void> => {
+		const seen = graphMtime();
+		if (mod !== undefined && (seen === version || seen === failed)) return;
+		let v = seen;
+		try {
+			graph = webuiGraph(path);
+			const base = commonDir(graph);
+			v = graphMtime();
+			const dir = join(srcDir, `.webui-hot-${process.pid}-${v}`);
+			rmSync(dir, { recursive: true, force: true });
+			for (const f of graph) {
+				const dst = join(dir, relative(base, f));
+				mkdirSync(dirname(dst), { recursive: true });
+				copyFileSync(f, dst);
+			}
+			mod = await import(pathToFileURL(join(dir, relative(base, path))).href);
+			version = v;
+		} catch {
+			failed = v; // a broken file at this version: keep the last good module until it changes
+		}
+		hotSweep();
+	};
+	return async () => {
+		if (pending) await pending;
+		else {
+			pending = reload().finally(() => {
+				pending = undefined;
+			});
+			await pending;
 		}
 		if (!mod) throw new Error(`webui module unavailable: ${path}`);
 		return mod;
