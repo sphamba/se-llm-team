@@ -548,7 +548,17 @@ assert.ok(!page.includes(`+ '</div><div id="m-log"`), "renderAgent no longer reb
 const setBodySrc = page.match(/function setBody\(t\) \{[\s\S]*?\n\}/)![0];
 assert.ok(setBodySrc.includes("if (el.__html === html) return;"), "the body rewrite is html-gated: an unchanged body keeps its node and the reader's scroll");
 const ra = page.match(/function renderAgent\(t, keep\) \{[\s\S]*?\n\}/)![0];
-assert.ok(ra.includes('.agent-subs").replaceWith(box)') && ra.includes("if (keep) return;"), "a refresh carries the fetched sub boxes over by handle and fetches sub lists on open only");
+assert.ok(ra.includes('.agent-subs").replaceWith(box)'), "a refresh carries the fetched sub boxes over by handle");
+// 000130: the keep refresh re-fetches only the live run's sub list, so a sub spawned after the
+// card was opened gets its button without re-opening the run; past runs' lists are never re-fetched
+assert.ok(ra.includes('if (live) fetchSubs(agentGen, live,') && ra.includes('.agent-col:last-child > .agent-subs'), "the keep refresh re-fetches only the live run's (last column's) sub list");
+assert.ok(ra.indexOf("if (keep) {") < ra.indexOf("++agentGen"), "the keep refresh passes the current generation, only an openTask render bumps agentGen");
+// 000130: a sub transcript of a still-alive parent keeps polling (an empty poll is not proof a
+// growing transcript stopped); a past run's log still stops after the first empty poll
+const pollSrc = page.match(/function pollLog\(\) \{[\s\S]*?\n\}/)![0];
+assert.ok(pollSrc.includes("const live = !!liveRun && liveRun.handle === logState.handle;"), "a sub view of a still-alive parent stays live: the pane keeps its poll timer after an empty poll");
+assert.ok(!pollSrc.includes("logState.sub == null"), "a sub view is no longer hard-wired non-live, which froze the pane after the first empty poll");
+assert.ok(pollSrc.includes("if (!live && logState.idle) {"), "a past run's log still stops the timer after the first empty poll");
 setState(root, getTask(root, task.file)!, "doing");
 const slug = task.file.replace(/\.md$/, "");
 mkdirSync(join(root, ".kanban", ".pids"), { recursive: true });

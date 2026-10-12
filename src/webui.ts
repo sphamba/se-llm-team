@@ -1305,7 +1305,8 @@ function agentCardHtml(extraCls, attrs, label, tokens, duration, mark) {
 // stacked below, always visible (fetched for every run on open), oldest leftmost (payload order
 // is log mtime order), the live run rightmost; a role with several runs labels them 1-based.
 // keep=true is the 5 s refresh of the open card: the run cards re-render, each run's fetched sub
-// box is carried over by handle with no re-fetch, and the log pane beside the row is untouched
+// box is carried over by handle, only the live run's sub list re-fetched, and the log pane beside
+// the row is untouched
 function renderAgent(t, keep) {
 	const el = document.getElementById("m-agent-btns");
 	const runs = (t.agents || []).slice();
@@ -1328,7 +1329,12 @@ function renderAgent(t, keep) {
 		if (box) c.querySelector(".agent-subs").replaceWith(box);
 	}
 	markActiveAgent();
-	if (keep) return;
+	// the live run is the last column, so its sub list is the one re-fetched: a sub spawned after
+	// the card was opened surfaces without re-opening, past runs' lists are never re-fetched
+	if (keep) {
+		if (live) fetchSubs(agentGen, live, el.querySelector(".agent-col:last-child > .agent-subs"));
+		return;
+	}
 	// every run's subs on open, in parallel: one sub=list fetch per run handle, each list rendered
 	// under its caller column
 	const gen = ++agentGen;
@@ -1377,8 +1383,9 @@ function pollLog() {
 	if (!logState || logState.busy) return;
 	const t = activeBoard().tasks.find(x => x.file === modalFile);
 	const liveRun = t && (t.agents || []).find(a => a.alive);
-	// only the live run's own log keeps writing; a subagent transcript is written once
-	const live = logState.sub == null && !!liveRun && liveRun.handle === logState.handle;
+	// logState carries the parent run's handle for a sub view too, so run aliveness keeps both the
+	// run's own log and its sub transcripts polling while the run is alive
+	const live = !!liveRun && liveRun.handle === logState.handle;
 	// past agents write no lines: one empty poll is proof, stop the timer
 	if (!live && logState.idle) {
 		if (logTimer) { clearInterval(logTimer); logTimer = null; }
