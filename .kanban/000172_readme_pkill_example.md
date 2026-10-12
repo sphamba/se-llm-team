@@ -1,8 +1,8 @@
 ---
 name: "docs: README stale-daemon pkill example misses flags before --root"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "to-review"
+worktree: "docs/172-readme-pkill-example"
 issuer: "#167"
 complexity: "trivial"
 shortName: "readme-pkill-example"
@@ -39,3 +39,7 @@ The shape is real: `--rescan-seconds`/`--poll-minutes` before `--root` is accept
 #168 (hub candidacy detection is path-based so a worktree outside .worktrees stays hub-eligible) — that is about detection when a worktree lives outside .worktrees, not about the README pkill pattern being too narrow for a worktree still under .worktrees.
 
 # Notes
+
+- Widened the README.md Web dashboard hygiene example (line 97) to `pkill -f 'orchestrator.ts.*--root .*/\.worktrees'`. Prose step untouched. Docs-only, one-line diff, commit b23fcb2 on docs/172-readme-pkill-example.
+- Verified with live fixtures (safe pgrep, no pkill, all killed by PID after): stale daemon with `--rescan-seconds 5 --root .../.worktrees/...` matches the widened pattern; stale daemon with `--root .../.worktrees/...` only matches; fixture production daemon with `--root` at a project root does not match.
+- Verified against the real production daemon (`node ~/.pi/agent/extensions/se-llm-team/src/orchestrator.ts --root /home/phamba/repos/se-llm-team`): not matched, untouched.
