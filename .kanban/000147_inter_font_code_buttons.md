@@ -1,9 +1,9 @@
 ---
 name: "fix: code blocks stay monospace; buttons use Inter"
-blockedBy: "#146"
+blockedBy: ""
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "fix/147-inter-font-code-buttons"
 issuer: "#141"
 complexity: "simple"
 shortName: "inter-font-code-buttons"
@@ -21,3 +21,12 @@ Fix, src/webui.ts plus src/webui.test.ts only:
 - Scope is font styling only: markdown rendering, log streaming and HTML escaping passed the #141 live test and stay untouched; the existing logCss assertions (system-ui present, no monospace... note the new code/pre monospace rule introduces "monospace" into the CSS, so the src/webui.test.ts assertion logCss.includes("system-ui") && !logCss.includes("monospace") at :561 needs updating to scope the no-monospace check to the body/#m-log-text font-family declarations rather than the whole CSS).
 
 Tests: extend the flat assertion script - the PAGE ships the code/pre monospace rule scoped to #m-log-text/#m-body and the button font-family: inherit rule; logCss still puts "Inter" first on body and #m-log-text; the updated no-monospace assertion passes; existing suites stay green.
+
+# Notes
+- Implemented on the worktree, commit a6a07ec. src/webui.ts: added `button { font-family: inherit; }` right after the body rule, and `#m-log-text code, #m-log-text pre, #m-body code, #m-body pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }` placed after `#m-log-text pre { font: inherit; }` so it wins the cascade and fenced code in the log pane renders monospace, not Inter. Nothing else in the page changed (markdown rendering, log streaming, escaping untouched).
+- src/webui.test.ts: the old no-monospace check `logCss.includes("system-ui") && !logCss.includes("monospace")` was block-scoped already, so it still passed; tightened it to match the `font-family` declaration inside the `#m-log-text { ... }` block so the scope is explicit. Added assertions: the PAGE ships the monospace rule verbatim, the monospace rule sits after the `font: inherit` shorthand (cascade-order guard), and `button { font-family: inherit; }` ships. The `font-family: Inter, system-ui...` count-of-2 assertion is unchanged and passes.
+- Full suite green: kanban, orchestrator, webui, extension, index.
+
+# Open questions
+- Assumption: the monospace stack `ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace` (from the spec example) is acceptable; no user-specified font list was given.
+- Assumption: the button rule is global (`button { font-family: inherit; }`), so every button on the page including .tab picks up Inter; the spec listed #theme, #m-close, .agent-card, .toggle as the measured cases.
