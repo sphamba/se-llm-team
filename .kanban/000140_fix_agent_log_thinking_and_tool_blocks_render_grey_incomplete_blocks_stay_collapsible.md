@@ -1,9 +1,9 @@
 ---
 name: "fix: agent log thinking and tool blocks render grey; incomplete blocks stay collapsible"
 complexity: "moderate"
-blockedBy: "#139"
+blockedBy: ""
 priority: "medium"
-state: "backlog"
+state: "doing"
 worktree: "fix/140-agent-log-thinking"
 ---
 
