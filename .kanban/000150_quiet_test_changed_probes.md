@@ -62,6 +62,15 @@ Assumption: the live test must not run the repo unit suites. Each sandbox theref
 
 No defects found. The acceptance check holds in all three degraded sandboxes and the healthy-repo output is unchanged. The informational follow-up in the Specs remains true (`scripts/test-changed.test.mjs` is not in `npm test`, and `scripts/test-changed.mjs` has no RULES entry). It stays out of scope, per the Specs.
 
+## Merge (2026-10-12)
+
+Base branch resolved at each step from the project root checkout (`git branch --show-current`): both steps saw `main`, no hardcoded guess involved.
+
+- Step 1 (worktree): merged `main` into fix/150-quiet-test-changed-probes -> already up to date, no conflicts. Test suites skipped per the clean-merge rule.
+- Step 2 (project root): merged fix/150-quiet-test-changed-probes into `main` -> fast-forward b5e07c0..9eb7f40, clean. Root is clean, nothing to resolve.
+
+Both merges complete, no conflicts, no test fixes needed. Worktree left on fix/150-quiet-test-changed-probes at 9eb7f40.
+
 # Open questions
 
 None. Assumptions made:
