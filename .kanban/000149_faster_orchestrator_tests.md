@@ -1,8 +1,8 @@
 ---
 name: "perf: faster orchestrator tests; selective test runner"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "to-merge"
+worktree: "perf/149-faster-orchestrator-tests"
 blockedBy: ""
 issuer: "user"
 complexity: "moderate"
@@ -21,3 +21,51 @@ Changes:
 - package.json gains scripts.test (all five files) and scripts."test:changed" (the runner) without touching name/private/type/packageManager or adding dependencies; README's Checks section documents both commands and the fast-delay profile.
 
 Tests: the runner maps representative paths correctly (assert its mapping table by import in a small self-check or by running it with a fake git state); the orchestrator suite still passes end to end with the smaller delays (run it once as the check); all other suites stay green.
+
+# Notes
+Implemented on the worktree perf/149-faster-orchestrator-tests, commits 5746e4d + 6df4db4.
+
+- src/orchestrator.test.ts: pollMinutes 0.05 -> 0.01 (600 ms) in the shared spawn helper and all 28 config-writing scenarios. Hub CLI spawns (lines 1174/1177/1220/1221) keep 0.05 per the spec; --rescan-seconds 1, the faked cooldowns (utimesSync backdating, injected clock) and the hub MS vars are untouched. Shrank the largest fixed sleeps: part J 4000 -> 2000; the three no-extra-commit sweeps 2500 -> 1500; the recycled-pid confirm 5000 -> 2000; the restart no-twin wait 4500 -> 2500; part G linger stub 5000 -> 3000; part AF linger stub 8000 -> 5000 and its 3000 sleep -> 1500. Updated the two timing comments (3 s poll -> 600 ms poll). No cap and no fake-expiry mechanism touched; part K keeps autoScheduleMinutes 0.08 and its 1.5 s pre-cooldown assert.
+- scripts/test-changed.mjs (node stdlib only): collects the changed paths from git (staged + unstaged vs HEAD, untracked files, commits vs main through merge-base; each source degrades alone when main or HEAD is missing), maps them through the spec table, and runs the mapped suites sequentially with node, stopping on the first failure. A changed *.test.ts runs itself; an unknown path runs everything; no modifications runs nothing.
+- scripts/test-changed.test.mjs: mapping-table self-check with 12 assertions.
+- package.json: scripts.test (the five files in README order) and scripts."test:changed". No other key touched, no dependencies added.
+- README: the Checks section documents npm test, npm run test:changed and the fast-delay profile.
+- Verified: node src/orchestrator.test.ts passed end to end with the smaller delays in 2m17s (was ~210s); the kanban, webui, extension and index suites and the mapping self-check all pass. The runner was also live-checked against fake git states (fresh repo, repo without main, branch-commit repo): the mappings matched the table.
+
+
+## Live test report (live-tester, commit 6df4db4)
+
+Result: all live checks passed. The suites stay with the developer and reviewer as instructed, so this report covers the user-facing flows only: the runner CLI, the npm scripts, the README and the daemon delay premise.
+
+Delays:
+- Real daemon smoke: `node src/orchestrator.ts` on a temp git fixture with `.kanban/se-llm-team.json` pollMinutes 0.01 and a dead agent. Startup logged `poll=0.01min` and the `doing -> to-do` bounce cadence was ~600 ms (6 bounces in 4.2 s). The smaller delay is honored end to end.
+- Static diff check of src/orchestrator.test.ts: 28 `pollMinutes: 0.01`, 0 `pollMinutes: 0.05`; the four hub CLI spawns keep 0.05; all caps and faked cooldowns untouched. Part K keeps autoScheduleMinutes 0.08.
+
+Selective runner: exercised in throwaway sandbox repos built from the real script, package.json and README. The five real suites were replaced by placeholder files that were never executed. A NODE_OPTIONS preload recorded and short-circuited every `node <file>` dispatch, so no repo *.test.ts ran.
+- clean repo -> "no modifications, nothing to run", exit 0, nothing dispatched
+- unstaged src/webui.ts -> webui only
+- staged src/kanban.ts -> kanban, orchestrator, webui (in order)
+- untracked agents/live-tester.md -> orchestrator
+- index.ts -> extension, index; src/hub.ts + src/pid.ts -> orchestrator, webui
+- package.json and unknown README.md -> all five
+- a branch commit with a clean worktree, and main ahead of the branch (merge-base) -> correct subsets
+- a failing first suite -> run stops, exit 3, also through `npm run test:changed`
+- repo without main -> working-tree change still detected and run, exit 0
+- repo without commits (HEAD missing) -> untracked src/webui.test.ts ran, exit 0
+- only *.test.ts files changed -> those files run themselves
+- mapped test file deleted -> "no affected test file exists, nothing to run", exit 0
+- non-git directory -> "no modifications, nothing to run", exit 0
+- run from a subdirectory -> chdir to toplevel, same result
+- `npm test` -> five suites in README order, exit 0; a failing suite propagates its exit code
+- real branch mapping (package.json, README.md, scripts/*, src/orchestrator.test.ts) -> all five, per the unknown-path fallback
+
+Finding (low, cosmetic): in degraded git environments the detection commands leak git stderr to the console while the runner still works. A repo without main prints `fatal: Not a valid object name main`. A repo without commits prints `fatal: ambiguous argument 'HEAD'...` and the same main error. A non-git directory dumps git diff's full usage text. All three still exit 0 with the right suites. Reported to the PM as a candidate task.
+
+Assumptions made while designing the tests:
+- To honor "never run any *.test.ts file", the sandbox suites are placeholder files and a NODE_OPTIONS preload intercepted every dispatched node command. Real suite results are therefore not re-verified here, by design.
+- The daemon smoke used the config pollMinutes path. The suite helper passes `--poll-minutes 0.01` as a CLI flag, which takes precedence and reads the same value.
+- This branch changes package.json and README.md, so `npm run test:changed` here maps to all five suites by design (unknown path -> everything). Not a defect.
+- `scripts/test-changed.test.mjs` (the mapping self-check) is not wired into npm test or into the runner's mapping. The spec scoped scripts.test to the five suites, so this is an observation, not a finding.
+- No observed behavior contradicts the task's stated assumptions.
+
+# Open questions

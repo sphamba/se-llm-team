@@ -1,7 +1,7 @@
 ---
 name: "feat: log pane shows the model name and thinking level above the log"
 priority: "low"
-state: "doing"
+state: "live-testing"
 worktree: "feat/146-log-pane-model-meta"
 blockedBy: ""
 issuer: "user"
@@ -22,3 +22,18 @@ Changes, src/webui.ts plus src/webui.test.ts only:
 - updateOpenTask keeps the log pane untouched (#121/#130 rules): the meta node updates only from pullLog/pollLog, never from the 5s refresh; the chunk walk-back, offsets, dedupe and the #122/#140 rendering rules stay intact.
 
 Tests (extend the flat assertion script): fake run logs and subagent transcripts whose assistant records carry model/thinkingLevel (existing fakes carry only usage/timestamp, so extend them); the payload includes model/thinkingLevel taken from the latest record; a log without usage-bearing records returns nulls and the meta line stays hidden; the PAGE ships the #m-log-meta node; existing payload/walk-back/gz/subagent assertions stay green. No orchestrator changes.
+
+# Notes
+Done in commit 40b4921 on feat/146-log-pane-model-meta (src/webui.ts + src/webui.test.ts only):
+- logStats now returns model and thinkingLevel taken off the latest usage-bearing record (turn_end or assistant, the same guard as tokens), null when no such record exists; the memoized cache entry carries the two fields, so a live log re-parses per growth as before.
+- agentLogPayload computes logStats(target) per request (run log or ?sub= transcript) and ships model/thinkingLevel next to text/head/tail/atStart; the sub=list branch is unchanged.
+- The client ships #m-log-meta above #m-log-text (muted grey, 10px, hidden by default); openLog clears it so a previous view's meta never flashes, pullLog fills it on init, poll and history alike as "model · thinking level" (model only when no thinking level); nulls hide it. updateOpenTask untouched.
+- Tests: the 000120 dev1 fake and the out1 subagent fake now carry model/thinkingLevel; new assertions cover the latest-record payload meta for a run log and a sub transcript, nulls for a log without usage-bearing records, the PAGE node/CSS/fill logic, and the updated static-markup assertion. Full suite green (webui, kanban, orchestrator, extension, index).
+- Review (no fixes): diff verified against the specs point by point. logStats overwrites model/thinkingLevel top to bottom so the latest usage-bearing record wins, with the same turn_end/assistant + usage guard as tokens; agentLogPayload computes logStats(target) after target is resolved and the sub=list early return is untouched; pullLog fills the meta on every mode and both pollLog and the scroll handler route through it, so the line updates live each second; openLog clears the node synchronously with the pane unhide, so no previous view's meta can paint; updateOpenTask has zero diff mentions. Record shape checked against pi docs (message-types.md, json.md): turn_end.message is an AssistantMessage with required model and optional thinkingLevel, so the extraction path is correct; responseModel vs model is the open question below, answered when the user confirms. All five suites re-run green in the worktree.
+
+# Open questions
+Assumptions (confirm or correct):
+- The meta line lives inside the scrollable #m-log pane (per the spec's "#m-log grows a meta line above #m-log-text"), so it scrolls away when reading history; a sticky header above the pane would be a different change.
+- A thinkingLevel of "off" still renders as "model · thinking off"; suppressing the suffix for off/omitted levels was not requested.
+- The model shown is the pi-requested model string (message.model), not responseModel when the provider answers with a different concrete model.
+- The middle-dot separator format "claude-sonnet-4 · thinking high" is exact as specced; a thinkingLevel without a model still hides the line.
