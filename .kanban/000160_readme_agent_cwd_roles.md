@@ -39,6 +39,12 @@ Acceptance:
 - Review: diff main...HEAD is docs-only (8e390da, README.md, 2 lines) and matches the Fix clause; the new sentences match the verified spawn calls; full README sweep found no other statement contradicting :76 or the new wording; the :89 change is outside the Fix clause but required by the acceptance criterion and documented, not a silent assumption; all three test suites pass (orchestrator.test.ts needs ~5 min). No fixes, no open questions. State set to to-merge.
 - Merge step 1: base branch resolved to main; merged main into docs/160-readme-agent-cwd-roles in the worktree (merge commit 941d567, 'ort' strategy, README.md auto-merged, no conflicts). Verified the auto-merged README: the Agents paragraph gives the cwd of all four roles and the Extension load path sentence keeps the :76-compatible wording. No conflicts, so the test suites were skipped per merge policy.
 - Merge step 2: base branch re-resolved to main (unchanged); merged docs/160-readme-agent-cwd-roles into main at the project root as a fast-forward (dc5ee61..941d567). Both merges complete, no conflicts at any point. State set to to-live-test.
+- Live test (docs-only, so the user-facing flow is reading the merged README at the project root, commit 941d567 on main):
+  - README.md:97 (Agents paragraph) reads: "The Developer and the Reviewer run with the task worktree as cwd. The Merger and the Live-tester run at the project root." A reader can tell the cwd of all four roles. The rest of the paragraph (headless command shape, task file path in the prompt, llm flags, agent log, prompt-load path) is unchanged by the fix.
+  - README.md:76 (to-live-test bullet) says the Live-tester runs on the merged commit (the project root's checkout). It agrees with :97 and with README.md:89 ("Role agents run in the task worktree or at the project root"). Full README sweep (grep worktree|cwd|project root) found no other statement contradicting :76.
+  - Cross-checked the claim against the merged code: spawnAgent at src/orchestrator.ts:782 (developer, ensured.wtDir) and :964 (reviewer, ensured.wtDir) use the worktree dir; :838 (merger, root) and :984 (live-tester, root) use the project root. The documented cwds match the actual spawn calls.
+  - Assumption: for a docs-only change there is no runtime flow to exercise; the live test is the read-and-cross-check above. I did not spawn real agents (out of scope and costly) and did not run the unit suites (developer/reviewer gate).
+  - Result: no findings. No technical difficulties. No open questions.
 
 # Open questions
 
