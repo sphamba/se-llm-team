@@ -40,6 +40,6 @@ Assumptions made while designing the tests:
 - The daemon spawn is the user-facing interface of these prompt files (renderPrompt -> -p, role notes -> --append-system-prompt), and nothing else consumes agents/*.md. Rendering the merged checkout verbatim means the captured argv is exactly what an agent would receive.
 - The acceptance note "no test change" means the unit suites are the developer/reviewer gate, so the live test did not run them, per role instructions.
 
-No observed behavior contradicts the task's stated assumptions. One difficulty was in my own harness only: an extensionless fake-pi script produced spawn records but silently exited, so it was renamed fake-pi.mjs. Not a project issue.
+No observed behavior contradicts the task's stated assumptions. One difficulty was in my own harness only: an extensionless Node ESM fake-pi script silently exited without recording anything, so it was renamed fake-pi.mjs. Not a project issue.
 
 # Open questions
