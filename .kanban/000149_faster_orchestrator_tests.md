@@ -1,8 +1,8 @@
 ---
 name: "perf: faster orchestrator tests; selective test runner"
 priority: "medium"
-state: "to-merge"
-worktree: "perf/149-faster-orchestrator-tests"
+state: "done"
+worktree: ""
 blockedBy: ""
 issuer: "user"
 complexity: "moderate"
@@ -67,5 +67,9 @@ Assumptions made while designing the tests:
 - This branch changes package.json and README.md, so `npm run test:changed` here maps to all five suites by design (unknown path -> everything). Not a defect.
 - `scripts/test-changed.test.mjs` (the mapping self-check) is not wired into npm test or into the runner's mapping. The spec scoped scripts.test to the five suites, so this is an observation, not a finding.
 - No observed behavior contradicts the task's stated assumptions.
+
+## Merge (merger, perf/149-faster-orchestrator-tests)
+
+Base branch at both steps: main. Step 1: main merged into perf/149-faster-orchestrator-tests in the worktree, already up to date (main had no new commits since the branch forked), clean, no conflicts, so the test suites were skipped per the merge instructions. Step 2: perf/149-faster-orchestrator-tests merged into main in the project root, fast-forward f33232a..6df4db4, clean, no conflicts. Both merges complete; no fixes needed.
 
 # Open questions
