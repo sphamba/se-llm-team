@@ -1,8 +1,8 @@
 ---
 name: "fix: promotion re-checks the gates on a fresh task read"
 priority: "medium"
-state: "to-merge"
-worktree: "fix/138-fresh-read-promotion-gates"
+state: "done"
+worktree: ""
 blockedBy: ""
 issuer: "#133"
 complexity: "moderate"
