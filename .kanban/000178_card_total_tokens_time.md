@@ -1,7 +1,7 @@
 ---
 name: "feat: task summary cards show total tokens and time across all agents"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "feat/178-card-total-tokens-time"
 issuer: "user"
 complexity: "simple"
@@ -29,6 +29,8 @@ In the task summary (preview) cards, below the chips, show the total tokens (inp
 - 2026-10-12 (dev): implemented in feat/178-card-total-tokens-time (commit 8ea9467). New exported taskStatsText(t) in src/webui.ts next to agentStatsText sums the agents array's tokens/durations per entry (non-number fields count as 0) and wraps the joined "42k · 3.5s" string in a .card-stats span, hidden when no entries or both totals are 0/null. cardHtml appends it after the issuer chip, the page interpolates taskStatsText next to agentStatsText, and a .card-stats muted style (same values as .agent-stats) ships in the css. Tests: three assertions in src/webui.test.ts (summed totals, no-entries hides, css ships). All five test suites pass.
 - 2026-10-12 (review): verified in feat/178-card-total-tokens-time (8ea9467). Branch includes #177 (merge-base 966ce04), so each entry's tokens is input + output. taskStatsText sums the entries' tokens/durations and reuses agentStatsText (same raw-below-1000/k/one-decimal-M format), hides with no entries or both totals 0/null. The .card-stats css is identical to .agent-stats. The modal agent cards and the syncBoard __html mechanics are untouched. Tests assert the summed totals (420+1580 -> "2k", 1500+2000 -> "3.5s"), the no-entries hiding and the css. All five suites pass.
 - Review confirmation: totals span every entry in the agents array (all roles, all runs, finished and live). This matches the spec's "totals across all agent entries", so it is not an open question. No code fixes.
+
+- 2026-10-12 (merge): step 1, base main already contained in feat/178-card-total-tokens-time ("Already up to date"), no conflicts, so no test suites run. Step 2, main fast-forwarded 966ce04 -> 8ea9467 (src/webui.ts +16, src/webui.test.ts +5). Both merges clean, no conflict resolution needed.
 
 # Open questions
 - Live cards (a live agent's duration ticks with now - first per payload, 000169) now rewrite their markup on every poll, so the spinner animation restarts each tick. Accept the stutter, or should the stats line update in place (an in-place card-stats pass like syncAgentStats)? The spec's "syncBoard stays unchanged" excludes the in-place pass, so the developer accepted the stutter as-is. Default: accept.

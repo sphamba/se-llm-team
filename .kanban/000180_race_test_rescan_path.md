@@ -1,8 +1,8 @@
 ---
 name: "fix: race unit test does not exercise the post-write rescan path"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/180-race-test-rescan-path"
 issuer: "#174"
 complexity: "simple"
 shortName: "race-test-rescan-path"

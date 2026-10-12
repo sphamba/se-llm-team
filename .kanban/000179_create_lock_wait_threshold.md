@@ -1,8 +1,8 @@
 ---
 name: "fix: createTask lock wait is shorter than the stale-lock steal threshold"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/179-create-lock-wait-threshold"
 issuer: "#174"
 complexity: "simple"
 shortName: "create-lock-wait-threshold"
