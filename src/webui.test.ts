@@ -445,6 +445,7 @@ const same = relationPaths([
 ], rectOf);
 assert.equal(same.length, 1, "one curve per stored relation");
 assert.equal(same[0].file, "000002_b.md", "each path is keyed by the blocked task's file, so the hover highlight reaches its lines without re-deriving geometry");
+assert.equal(same[0].blocker, "000004_d.md", "each path also carries the blocker's file, so hovering the blocker highlights the line too (000144)");
 assert.ok(same[0].d.startsWith(`M ${310 + 280} ${midY(rects["000002_b.md"])}`), "same column: the path starts at the blocked card's right edge");
 assert.ok(same[0].d.endsWith(`${310 + 280} ${midY(rects["000004_d.md"])}`), "same column: both ends sprout from the right sides, the path ends at the blocker's right edge");
 // stacked pair columns share one x: different states at one x still loop out of the right sides
@@ -467,6 +468,22 @@ assert.equal(relationPaths([
 assert.equal(relationPaths([{ file: "000002_b.md", state: "to-do", blockedBy: "#9, junk, , " }], rectOf).length, 0, "ghost and unparseable refs draw nothing");
 assert.equal(relationPaths([{ file: "000002_b.md", state: "to-do", blockedBy: "#1" }], (f) => (f === "000001_a.md" ? rects["000001_a.md"] : null)).length, 0, "a ref whose card is not rendered draws nothing, and so does an unrendered blocked card");
 assert.deepEqual(relationPaths([{ file: "000002_b.md", state: "to-do" }], rectOf), [], "an older payload without blockedBy draws nothing");
+
+// hovering highlights both ways (000144): the served client script's hotRelations for the blocked
+// file and for the blocker file both raise the same path, an unrelated file raises nothing
+const hotPath: any = { dataset: { file: "000002_b.md", blocker: "000004_d.md" }, hot: new Set<string>() };
+hotPath.classList = { toggle: (cls: string, on: boolean) => (on ? hotPath.hot.add(cls) : hotPath.hot.delete(cls)) };
+const hotFn = (new Function("document", page.match(/<script>([\s\S]*?)<\/script>/)![1].match(/function hotRelations\(file, on\) \{[\s\S]*?\n\}/)![0] + "; return hotRelations;") as (d: unknown) => (file: string, on: boolean) => void)({ querySelectorAll: (sel: string) => (sel === "#relations path" ? [hotPath] : []) });
+hotFn("000002_b.md", true);
+assert.ok(hotPath.hot.has("relations-hot"), "hovering the blocked card highlights its outgoing line");
+hotFn("000002_b.md", false);
+assert.ok(!hotPath.hot.has("relations-hot"), "mouseleave reverts the highlight");
+hotFn("000004_d.md", true);
+assert.ok(hotPath.hot.has("relations-hot"), "hovering the blocker card highlights the same incoming line");
+hotFn("000004_d.md", false);
+assert.ok(!hotPath.hot.has("relations-hot"), "the blocker's mouseleave reverts it too");
+hotFn("000009_x.md", true);
+assert.ok(!hotPath.hot.has("relations-hot"), "an unrelated file highlights nothing");
 
 // 000127: far-apart columns bend the line into an S (the control offsets scale with the span,
 // capped); near pairs and same-column loops keep the fixed bow. The path format is fixed, so the
@@ -510,7 +527,8 @@ const hotOpacity = Number(page.match(/#relations path\.relations-hot \{ stroke-o
 assert.ok(hotOpacity > baseOpacity, "hovering a card raises its lines' opacity clearly above the subtle base");
 assert.match(pathRule, /transition: stroke-opacity/, "the opacity change transitions smoothly, the dash animation continues");
 assert.ok(page.includes("el.onmouseenter = () => hotRelations(file, true)") && page.includes("el.onmouseleave = () => hotRelations(file, false)"), "the card hover wires the highlight on mouseenter and reverts on mouseleave");
-assert.ok(page.includes('if (p.dataset.file === file) p.classList.toggle("relations-hot", on)'), "the hover matches paths by the blocked task's file in the dataset, no quote-unsafe selector interpolation");
+assert.ok(page.includes('if (p.dataset.file === file || p.dataset.blocker === file) p.classList.toggle("relations-hot", on)'), "the hover matches paths by either endpoint's file in the dataset, no quote-unsafe selector interpolation");
+assert.ok(page.includes('" data-blocker="'), "each relation path carries the blocker's file alongside the blocked task's file, so hovering either card finds it");
 assert.ok(page.includes('window.addEventListener("resize", drawRelations)'), "a resize recomputes the line endpoints");
 assert.match(page, /el\.ontransitionend = \(\) => \{ el\.style\.transition = ""; el\.ontransitionend = null; drawRelations\(\); \};/, "settled FLIP transitions recompute the line endpoints");
 assert.ok(page.includes('querySelectorAll("#m-attrs .num-link")'), "the detail card binds its id links to openTask after render");

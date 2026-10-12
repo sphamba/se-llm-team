@@ -868,8 +868,8 @@ export function curve(from, to, same) {
 }
 
 // one curve per stored relation the board can draw: the blocked task's card to each blocking
-// task's card, both currently rendered, keyed by the blocked task's file for the hover highlight
-// (000127). A "#<num>" ref maps to its task via parseInt(file); a ref
+// task's card, both currently rendered, carrying both endpoint files for the hover highlight
+// (000127, 000144). A "#<num>" ref maps to its task via parseInt(file); a ref
 // without a rendered card is skipped, and a done blocker draws nothing. Stacked pair columns
 // share one x, which counts as the same column (the right-side loop, never a line through the cards).
 export function relationPaths(tasks, rectOf) {
@@ -884,7 +884,7 @@ export function relationPaths(tasks, rectOf) {
 			if (!blocker || blocker.state === "done") continue;
 			const to = rectOf(blocker.file);
 			if (!to) continue;
-			out.push({ file: t.file, d: curve(from, to, t.state === blocker.state || Math.abs(to.x - from.x) < 1) });
+			out.push({ file: t.file, blocker: blocker.file, d: curve(from, to, t.state === blocker.state || Math.abs(to.x - from.x) < 1) });
 		}
 	}
 	return out;
@@ -1061,7 +1061,7 @@ h1 { font-size: 16px; margin: 0; }
 paints them above the static .col/.pair containers and below the z-index-2 task cards, pointer-events
 none so the card clicks pass through */
 #relations { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; }
-/* 000127: the low opacity keeps the lines a subtle hint behind the semi-transparent cards; hovering a drawn-from card raises it (.relations-hot) */
+/* 000127: the low opacity keeps the lines a subtle hint behind the semi-transparent cards; hovering either connected card raises it (.relations-hot) */
 #relations path { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-opacity: .3; stroke-dasharray: 6 4; animation: dashflow 1s linear infinite; transition: stroke-opacity .15s ease; }
 #relations path.relations-hot { stroke-opacity: .8; }
 @keyframes dashflow { to { stroke-dashoffset: -10; } }
@@ -1243,11 +1243,12 @@ function cardBox(el) {
 	const r = el.getBoundingClientRect();
 	return { x: r.left - boardRect.left + board.scrollLeft, y: r.top - boardRect.top + board.scrollTop, w: r.width, h: r.height };
 }
-// hovering a card raises the opacity of the lines drawn from it, mouseleave reverts (000127); the
-// paths carry the blocked task's file as data, so the match needs no selector interpolation
+// hovering a card raises the opacity of the lines it connects to, in and out, mouseleave reverts
+// (000127, 000144); the paths carry both endpoint files as data, so the match needs no selector
+// interpolation
 function hotRelations(file, on) {
 	for (const p of document.querySelectorAll("#relations path")) {
-		if (p.dataset.file === file) p.classList.toggle("relations-hot", on);
+		if (p.dataset.file === file || p.dataset.blocker === file) p.classList.toggle("relations-hot", on);
 	}
 }
 // one dashed curve per drawn relation, sized to the rendered card extent (+ the loop bulge);
@@ -1268,7 +1269,7 @@ function drawRelations() {
 	const paths = relationPaths(activeBoard().tasks, rectOf);
 	svg.setAttribute("width", w + 40);
 	svg.setAttribute("height", h);
-	const html = paths.map(p => '<path d="' + p.d + '" data-file="' + esc(p.file) + '"/>').join("");
+	const html = paths.map(p => '<path d="' + p.d + '" data-file="' + esc(p.file) + '" data-blocker="' + esc(p.blocker) + '"/>').join("");
 	if (svg.__html !== html) { svg.innerHTML = html; svg.__html = html; }
 }
 function render(skipFlip) {
