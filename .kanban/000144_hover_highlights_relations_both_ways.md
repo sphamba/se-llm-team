@@ -1,8 +1,8 @@
 ---
 name: "fix: hovering a task highlights its blocked-by lines in and out"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/144-hover-highlights-relations-both-ways"
+state: "done"
+worktree: ""
 blockedBy: ""
 issuer: "user"
 complexity: "simple"
@@ -27,4 +27,6 @@ Tests: extend the flat assertion script - a path between a blocker and a blocked
 - hotRelations, makeCard and drawRelations are client code inside the PAGE template literal, not module scope, so hotRelations cannot be imported. The test extracts it from the served page's <script> with the existing regex + new Function pattern and runs it against a one-path document stub.
 - Tests: a relationPaths blocker-field assert, the functional hover test (blocked on, off, blocker on, off, unrelated file highlights nothing) and updated page-level asserts for the OR condition and the data-blocker attribute. node src/webui.test.ts, src/kanban.test.ts and src/extension.test.ts all pass.
 - Committed 16635b1 on fix/144-hover-highlights-relations-both-ways. No open questions.
+- Live test (real browser against a hub started from the worktree on 127.0.0.1:4545, isolated HOME): the served page carries the OR condition and the data-blocker attribute. All three board relations draw with both endpoints (146->144, 147->146, 148->147). Hovering blocked card 146 raises its outgoing line to 144 and its incoming line from 147 together (stroke-opacity .3 -> .8), mouseleave reverts both. Hovering blocker card 144 raises the same 146->144 line; the old code raised nothing there. Hovering unrelated card 145 raises nothing. The highlight survives a full 5 s refresh cycle and still reverts after it. #relations keeps pointer-events none. Chain end 148 raises 148->147. No page errors. 17/17 checks passed. Control: the main-checkout hub on :4242 serves the unfixed page (no data-blocker), so the test discriminates. No issues, no open questions. Screenshots: /tmp/hub144/hover-146.png, /tmp/hub144/hover-144.png.
+- Merge: step 1 merged main into fix/144-hover-highlights-relations-both-ways in the worktree, clean (ort strategy, 3 agent files). No conflicts, so test suites were skipped per merge policy. Step 2 merged the branch back into main in the project root, fast-forward (f33232a), clean. Verified in the root checkout: drawRelations emits data-file plus data-blocker on each #relations path, hotRelations ORs dataset.file and dataset.blocker.
 - Review: the diff matches the Specs exactly. relationPaths pushes { file, blocker, d } with blocker always set (the find and rectOf checks guard each push). drawRelations emits data-file plus an esc'd data-blocker. hotRelations ORs dataset.file and dataset.blocker. The .relations-hot rule, pointer-events none, and the dash animation stay untouched. makeCard wires the hover on each rebuild, so the wiring survives the 5s refresh. The test regex is correct: the inner closing brace is tab-indented, so \n\} matches only the function close. Only src/webui.ts and src/webui.test.ts changed. node src/webui.test.ts, src/kanban.test.ts, and src/extension.test.ts all pass in the worktree. No fixes needed; moving to to-live-test.
