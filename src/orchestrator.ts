@@ -971,10 +971,11 @@ function rescan(root: string, cfg: Config): void {
 				consumeReviewerRun(root, slug);
 				// the live test runs on the merged commit on main, not the feature worktree: an
 				// unmerged branch (in-flight task from a daemon still on the old order, or a manual
-				// placement) goes to the merger first, so main never gets tested unmerged
-				if (task.worktree && git(root, ["merge-base", "--is-ancestor", task.worktree, "HEAD"], true) === null) {
+				// placement) or a task with no worktree at all goes to the merger first, so main
+				// never gets tested without this task's merged change
+				if (!task.worktree || git(root, ["merge-base", "--is-ancestor", task.worktree, "HEAD"], true) === null) {
 					setState(root, task, "to-merge");
-					log(root, `${task.file}: branch not merged yet, moving to to-merge for the merger`);
+					log(root, task.worktree ? `${task.file}: branch not merged yet, moving to to-merge for the merger` : `${task.file}: no worktree, moving to to-merge for the merger`);
 				} else if (!agentAlive(root, "merger") && !pidAlive(agentPid(root, slug))) {
 					// a live merger would change main under the test (and may still be writing its
 					// report), and a stale agent for this task may still write the task file: defer

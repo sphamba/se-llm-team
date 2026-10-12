@@ -496,7 +496,9 @@ assert.ok(!existsSync(join(kanbanDir(rootE), ".logs", `${slugE}.reviewer-runs.co
 e.daemon.kill("SIGTERM");
 
 // a to-live-test task whose branch is not merged yet goes to the merger first: the live test
-// runs on the merged commit on main, so an unmerged branch must never spawn a live-tester
+// runs on the merged commit on main, so an unmerged branch must never spawn a live-tester;
+// a to-live-test task with no worktree at all routes to to-merge too, where the
+// nothing-to-merge path sets done without a live test
 const rootF = fixture();
 cleaned.push(rootF);
 mkdirSync(kanbanDir(rootF), { recursive: true });
@@ -505,12 +507,16 @@ const taskF = createTask(rootF, { name: "fix: unmerged live test", summary: "Unm
 execSync("git checkout -qb feat/unmerged-live && git commit -q --allow-empty -m x && git checkout -q main", { cwd: rootF, shell: "/bin/bash" });
 setWorktree(rootF, taskF, "feat/unmerged-live");
 setState(rootF, taskF, "to-live-test");
+const taskF2 = createTask(rootF, { name: "fix: worktree-less live test", summary: "No-worktree smoke", specs: "n/a" });
+setState(rootF, taskF2, "to-live-test");
 
 const f = await runDaemon(rootF);
 await waitFor(() => f.output().includes("not merged yet, moving to to-merge"), 30000, "unmerged branch sent to the merger first", f.output);
 assert.ok(!f.output().includes("spawned live-tester"), "live-tester never spawned for an unmerged branch");
 await waitFor(() => f.output().includes("merging -> to-merge"), 30000, "the dead stub's merge requeued through merging", f.output);
 assert.equal(parseTask(rootF, taskF.file).state, "to-merge", "task waits for the merger instead of testing unmerged code");
+await waitFor(() => parseTask(rootF, taskF2.file).state === "done", 30000, "no-worktree task done without a live test", f.output);
+assert.ok(f.output().includes("nothing to merge, set done"), "no-worktree task routed through the nothing-to-merge path");
 f.daemon.kill("SIGTERM");
 
 // --- part G: the merger spawn waits for the task's registered agent to die, and the live
@@ -1765,6 +1771,10 @@ mkdirSync(kanbanDir(rootAH2), { recursive: true });
 // dies, the poll bounces it back), never done
 writeFileSync(join(kanbanDir(rootAH2), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAH2), pollMinutes: 0.01 }));
 const blockerAH2 = createTask(rootAH2, { name: "feat: live-test blocker", summary: "Blocker satisfaction smoke", specs: "n/a" });
+// a branch at HEAD (merged): a worktree-less to-live-test task would route to to-merge and
+// reach done through the nothing-to-merge path, so the blocker needs one to stay cycling
+execSync("git branch merged-blocker", { cwd: rootAH2, shell: "/bin/bash" });
+setWorktree(rootAH2, blockerAH2, "merged-blocker");
 setState(rootAH2, blockerAH2, "to-live-test");
 const blockedAH2 = createTask(rootAH2, { name: "feat: blocked by live test", priority: "critical", summary: "Blocker satisfaction smoke", specs: "n/a", blockedBy: `#${parseInt(blockerAH2.file, 10)}` });
 
