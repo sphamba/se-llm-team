@@ -185,6 +185,7 @@ const was = statSync(realWebui).mtime;
 utimesSync(realWebui, new Date(was.getTime() + 1000), new Date(was.getTime() + 1000));
 assert.equal((await fetch(`${base}/`)).status, 200, "the hub keeps serving the real page after a webui reload");
 assert.equal((await fetch(`${base}/api/tasks`)).status, 200, "the hub keeps serving the real api after a webui reload");
+utimesSync(realWebui, was, was); // the mtime bump is test scaffolding, leave the file as it was
 
 // GET / mentions all 10 state names; other paths and methods are 404
 const pageRes = await fetch(`${base}/`);
