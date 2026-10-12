@@ -1,8 +1,8 @@
 ---
 name: "fix: live agent elapsed time ticks every second between log records"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/169-live-duration-ticks"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "live-duration-ticks"
