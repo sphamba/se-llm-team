@@ -1,9 +1,9 @@
 ---
 name: "feat: trivial complexity level with 0 reviewer steps by default"
 priority: "medium"
-state: "backlog"
-worktree: ""
-blockedBy: "#142"
+state: "doing"
+worktree: "feat/143-trivial-complexity-level"
+blockedBy: ""
 issuer: "user"
 complexity: "complex"
 shortName: "trivial-complexity-level"

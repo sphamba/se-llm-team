@@ -1,5 +1,5 @@
 ---
-name: "fix: Inter font does not reach log code and buttons"
+name: "fix: code blocks stay monospace; buttons use Inter"
 blockedBy: "#146"
 priority: "low"
 state: "backlog"
@@ -10,45 +10,14 @@ shortName: "inter-font-code-buttons"
 ---
 
 # Summary
-Live test of #141 (commit 03c450b) found the Inter font does not reach every element, so the "Inter font everywhere" claim is not met. Measured computed styles on the real board (Chromium) show #m-log-text pre = Inter, but #m-log-text code and #m-body code = "monospace" and #theme, #m-close, .agent-card, .toggle (all <button>) = "Arial" — the browser UA defaults, not inherited Inter. Root cause: src/webui.ts has no rule overriding the UA stylesheet for code and button. The #141 spec wrongly claimed these inherit Inter. Fix is one line each in src/webui.ts: `code { font-family: inherit; }` and `button { font: inherit; }`. Only the font inheritance is in scope: markdown rendering, log streaming and HTML escaping passed the #141 live test.
+Follow-up to the #141 live test (commit 03c450b): code blocks (inline code and fenced code) get an explicit monospace font instead of the UA default or the inherited Inter, and buttons (theme toggle, column header toggles, Close, agent cards) get Inter instead of the UA Arial default. The user answered the open questions: code stays monospace, buttons use Inter.
 
 # Specs
-Follow-up to the live test of #141 (worktree feat/141-markdown-log-text-inter-font, commit 03c450b). The task title claims "Inter font everywhere", but the page serves two UA-defaulted font stacks that never inherit the two Inter declarations (body and #m-log-text).
+Measured computed styles on the real board (Chromium, from the #141 live test): #m-log-text pre = Inter (fenced code blocks render as pre via md(), so fenced code is Inter today), #m-log-text code and #m-body code = "monospace" (UA default), and #theme, #m-close, .agent-card, .toggle (all button) = "Arial" (UA default). Root cause: src/webui.ts declares Inter only on body and #m-log-text (plus #m-log-text pre { font: inherit; }) and has no rule for code or button, so both keep the UA defaults.
 
-## Reproduction
+Fix, src/webui.ts plus src/webui.test.ts only:
+- Code stays monospace, explicitly: give code elements and fenced code blocks a monospace stack, e.g. `code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }` scoped to the log pane and task body (#m-log-text, #m-body), overriding the #m-log-text pre { font: inherit; } Inter inheritance so fenced code blocks from md() render monospace deliberately instead of the UA default or Inter; inline code keeps monospace explicitly rather than relying on the UA sheet.
+- Buttons use Inter: `button { font-family: inherit; }` (font-family alone, not font: inherit, so size/weight/line-height stay as today and only the family changes) so #theme, #m-close, .agent-card and .toggle render Inter.
+- Scope is font styling only: markdown rendering, log streaming and HTML escaping passed the #141 live test and stay untouched; the existing logCss assertions (system-ui present, no monospace... note the new code/pre monospace rule introduces "monospace" into the CSS, so the src/webui.test.ts assertion logCss.includes("system-ui") && !logCss.includes("monospace") at :561 needs updating to scope the no-monospace check to the body/#m-log-text font-family declarations rather than the whole CSS).
 
-Serve the board from the #141 worktree and, in Chromium devtools, inspect the computed `font-family` of:
-
-- `#m-log-text pre` → Inter (correct)
-- `#m-log-text code` → "monospace" (browser default)
-- `#m-body code` → "monospace" (browser default)
-- `#theme`, `#m-close`, `.agent-card`, `.toggle` (all `<button>`) → "Arial" (browser default)
-
-## Root cause
-
-The browser UA stylesheet sets `code` to monospace and `button` to Arial. src/webui.ts declares Inter only on `body` and on `#m-log-text` (plus `#m-log-text pre { font: inherit; }`), so `code` and `button` keep the UA defaults instead of inheriting Inter. The #141 spec assumed code and everything else inherit Inter; that assumption is false.
-
-## Suggested fix
-
-One line each in src/webui.ts:
-
-```css
-code { font-family: inherit; }
-button { font: inherit; }
-```
-
-`font: inherit` also pulls in the button's size/weight/line-height; if that changes button appearance (agent cards, column header toggles), use `font-family: inherit` alone.
-
-## Acceptance
-
-Computed `font-family` of `#m-log-text code`, `#m-body code`, `#theme`, `#m-close`, `.agent-card` and `.toggle` matches the page's Inter stack (for `code`, whichever the Open questions resolve to), verified on the real page in Chromium; the rest of the #141 behaviour untouched.
-
-## Out of scope
-
-Markdown rendering, the log streaming and the HTML escaping all passed the #141 live test. This task is only about the font inheritance.
-
-# Notes
-
-# Open questions
-1. Should inline code and fenced code blocks in the board, the task body and the agent log use Inter (as the spec claims) or stay monospace (the usual convention for code)?
-2. Should the buttons (theme toggle, column header toggles, Close, agent cards) inherit Inter like the rest of the page?
+Tests: extend the flat assertion script - the PAGE ships the code/pre monospace rule scoped to #m-log-text/#m-body and the button font-family: inherit rule; logCss still puts "Inter" first on body and #m-log-text; the updated no-monospace assertion passes; existing suites stay green.
