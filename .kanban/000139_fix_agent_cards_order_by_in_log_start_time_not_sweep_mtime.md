@@ -2,8 +2,8 @@
 name: "fix: agent cards order by in-log start time, not sweep mtime"
 complexity: "simple"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/139-agent-cards-order"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -25,3 +25,11 @@ Test: build two fake logs whose mtimes are inverted relative to their first-reco
 - The sub=list payload strips first so its exact {id, index, tokens, duration} shape stays intact; no orchestrator changes.
 - webui.test.ts: new 000139 section builds two .log.gz runs whose mtimes invert their in-log first-record timestamps plus a timestamp-less legacy log between them, and asserts the order developer.1, developer, developer.0. All suites pass: webui, kanban, orchestrator, index, extension.
 - Review: sort keys verified against the specs, primary start ?? mtime, secondary mtime, stable enumeration tiebreak; logStats memoizes first by size and the sub=list payload keeps its exact {id, index, tokens, duration} shape; taskPayload agents entries stay stripped of start and mtime; no orchestrator changes. The discriminating test case is real: under the old mtime sort the asserted order would read developer.0, developer, developer.1. All five suites re-run green in the worktree. One fix: the comment introduced the codebase's only em-dash, replaced with the house-style semicolon (commit 8b97adb).
+- Live test (real usage, no code edits): the running production hub serves the main checkout, so the test served the board through separate hub instances on test ports, one with the worktree webui.ts (fixed) and one with the main checkout webui.ts (old). Real user flow, verified over HTTP and in a headless Chromium browser.
+  - Real board, task 121 (this task's example): the fixed hub renders Developer, Reviewer 1, Reviewer 2, Live-tester, Merger in the card DOM. The old hub renders Developer, Live-tester, Merger, Reviewer 1, Reviewer 2, so the bug reproduces live and the fix corrects it.
+  - Independent check of all 137 board tasks: the API order equals the order from the first raw in-log timestamp of each log (mtime fallback for the 55 timestamp-less logs), 0 mismatches. 80 tasks changed order against the old code.
+  - Controlled board: 3 timestamped logs with inverted mtimes plus 1 timestamp-less legacy log with its mtime between them. Fixed pre-sweep order developer, reviewer, merger (mtime fallback), live-tester. Old pre-sweep order live-tester, merger, reviewer, developer. After a real compactFinishedLogs sweep the fixed order stays developer, reviewer, live-tester, merger while the old order reads developer, live-tester, reviewer, merger.
+  - Legacy-only board (all 4 logs timestamp-less, 1 equal-mtime tie): fixed and old renderings are identical, developer, reviewer, merger, live-tester, the tie broken by enumeration order.
+  - No regression: entry fields (role, run, alive, status, handle, tokens, duration) identical old against new over all 137 tasks. /api/agent-log payloads byte-identical for a .gz chunk, offset, before=1, sub=list, sub=n and the 404 cases. sub=list keys stay exactly id, index, tokens, duration.
+  - UI behavior: the live card renders last with the spinner (task 139), the dead run shows the cross (task 138), and the 5 s refresh keeps the card order stable (tasks 121 and 138).
+  - No issues found. One observed, spec-accepted limitation: a timestamp-less legacy log that the sweep gzips carries the sweep mtime, so it sorts last. This is the prescribed mtime fallback.
