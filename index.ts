@@ -165,7 +165,7 @@ export default function (pi: ExtensionAPI) {
 		name: "orchestrator_start",
 		label: "Orchestrator start",
 		description:
-			"Start the se-llm-team orchestrator daemon for this project. It watches .kanban/, spawns Developer/Reviewer/Live-tester agents for to-do/to-review/to-live-test tasks, polls agent liveness, and merges done branches. When webUi.enabled is set in ~/.pi/agent/se-llm-team.json it also starts an in-process web dashboard for the board. Exits early if it already runs for this project.",
+			"Start the se-llm-team orchestrator daemon for this project. It watches .kanban/, spawns Developer agents for to-do tasks, Reviewer agents for to-review tasks, one Merger agent for to-merge tasks, and Live-tester agents for to-live-test tasks on the merged commit, and polls agent liveness. Pipeline order: review -> merge -> live-test. When webUi.enabled is set in ~/.pi/agent/se-llm-team.json it also starts an in-process web dashboard for the board. Exits early if it already runs for this project.",
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
 			const root = resolveRoot(ctx.cwd);
