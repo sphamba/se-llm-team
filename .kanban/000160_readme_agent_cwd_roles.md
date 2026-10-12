@@ -1,7 +1,7 @@
 ---
 name: "docs: README Agents paragraph says every agent runs in the task worktree"
 priority: "low"
-state: "reviewing"
+state: "live-testing"
 worktree: "docs/160-readme-agent-cwd-roles"
 issuer: "#156"
 complexity: "simple"
@@ -36,6 +36,9 @@ Acceptance:
 - README.md:97 (Agents paragraph): removed "with the task worktree as cwd" from the headless-command sentence and added "The Developer and the Reviewer run with the task worktree as cwd. The Merger and the Live-tester run at the project root." Rest of the paragraph (command shape, task file path, log, prompt-load path) unchanged.
 - README.md:89 (Extension load path) also said "Role agents run in task worktrees", which contradicted :76 the same way; changed to "Role agents run in the task worktree or at the project root". This was not in the Fix clause but is required by the acceptance criterion (no README statement contradicts :76).
 - node src/kanban.test.ts && node src/orchestrator.test.ts && node src/webui.test.ts all pass. Committed as 8e390da in docs/160-readme-agent-cwd-roles.
+- Review: diff main...HEAD is docs-only (8e390da, README.md, 2 lines) and matches the Fix clause; the new sentences match the verified spawn calls; full README sweep found no other statement contradicting :76 or the new wording; the :89 change is outside the Fix clause but required by the acceptance criterion and documented, not a silent assumption; all three test suites pass (orchestrator.test.ts needs ~5 min). No fixes, no open questions. State set to to-merge.
+- Merge step 1: base branch resolved to main; merged main into docs/160-readme-agent-cwd-roles in the worktree (merge commit 941d567, 'ort' strategy, README.md auto-merged, no conflicts). Verified the auto-merged README: the Agents paragraph gives the cwd of all four roles and the Extension load path sentence keeps the :76-compatible wording. No conflicts, so the test suites were skipped per merge policy.
+- Merge step 2: base branch re-resolved to main (unchanged); merged docs/160-readme-agent-cwd-roles into main at the project root as a fast-forward (dc5ee61..941d567). Both merges complete, no conflicts at any point. State set to to-live-test.
 
 # Open questions
 

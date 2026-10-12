@@ -1,7 +1,7 @@
 ---
 name: "docs: SPECS liveness bullet says a 15-minute poll and respawn at the same state"
 priority: "low"
-state: "doing"
+state: "reviewing"
 worktree: "docs/163-specs-liveness-poll-wording"
 issuer: "#156"
 complexity: "simple"
@@ -34,6 +34,13 @@ Acceptance:
 - node src/kanban.test.ts && node src/orchestrator.test.ts && node src/webui.test.ts pass (docs-only; no code change and no new test).
 
 # Notes
+- #162 had merged when I started (blockedBy empty), so SPECS.md line 48 still held the stale text. Verified against the code: DEFAULT_POLL_MINUTES = 1 (src/orchestrator.ts:25), WORKING_STATES bounce (src/orchestrator.ts:1023-1028), RESPAWN_CAP = 5 (src/orchestrator.ts:30).
+- Rewrote SPECS.md:48: "- Poll the agents for liveness (every 1 minute, configurable). If dead, kill the agent, bounce the task one state back (a dead Developer goes back to \"to-do\" for a fresh run, reviewing to \"to-review\", live-testing to \"to-live-test\", merging to \"to-merge\") and respawn from the bounced state, capped at 5 respawns per task." Added the 5-respawn cap so the bullet agrees with README.md:79. No "15 minutes", no "respawn at same state" left in SPECS.md or README.md.
+- Committed in the worktree (631a7a4). Acceptance tests pass: kanban.test.ts, orchestrator.test.ts, webui.test.ts.
 
 # Open questions
+
+Assumptions:
+- The respawn cap (5, RESPAWN_CAP in src/orchestrator.ts) belongs in the SPECS liveness bullet, because README.md:79 already mentions it and the task asks the two docs to agree.
+- Docs-only scope: no code change and no new test needed, per the Specs.
 
