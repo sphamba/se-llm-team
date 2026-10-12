@@ -1,8 +1,8 @@
 ---
 name: "docs: tasks from a merge completion carry the issuer task number"
 priority: "medium"
-state: "live-testing"
-worktree: "docs/132-tasks-from-a"
+state: "done"
+worktree: ""
 complexity: "simple"
 blockedBy: ""
 ---
@@ -29,3 +29,7 @@ simple. Single file, docs-only.
 
 - Extended step 3 (Session flow) of skills/se-llm-team/SKILL.md: filing tasks from a merge completion or a live-tester report must pass issuer "#<num>" of the task whose merge or live test produced the findings (e.g. "#118"); the default issuer "user" stays for tasks the user requested. Docs-only, one sentence.
 - Review pass: diff matches the Specs. One sentence in step 3 covers merge completions and live-tester reports, gives the "#118" example, and keeps the default "user" for user-requested tasks. Single file, no other changes. No open questions. Approved for live test.
+- Live test (HEAD 7cc2257, tree clean): pass. Diff main...HEAD is the single step-3 sentence in skills/se-llm-team/SKILL.md. The sentence covers both a merge completion and a live-tester report, gives the issuer "#<num>" format with the "#118" example, and keeps the default "user" for tasks the user requested. No other file in skills/ or agents/ mentions issuer, so no contradicting instruction exists.
+- Live test, real tool flow for the new instruction: kanban_create with issuer "#132" created 000138 with frontmatter issuer: "#132", and kanban_get reported the same value. kanban_create with no issuer created 000139 with issuer: "user". Both probes were deleted with kanban_delete. Board counts returned to done 129, backlog 3, live-testing 1, and the meta/kanban mirror holds the create/delete commit pairs for both probes.
+- Live test observation, not a defect: the global symlink ~/.pi/agent/skills/se-llm-team points at the main checkout, so the new sentence serves only after the Merger merges this branch. This behavior is the known extension load path of unmerged branches.
+- No unit suite was run. No issues found, so no Project manager report was needed. No open questions.
