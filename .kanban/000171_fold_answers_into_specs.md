@@ -1,7 +1,7 @@
 ---
 name: "fix: answered board questions land in # Notes, not the Specs the skill and Developer contract require"
 priority: "medium"
-state: "reviewing"
+state: "merging"
 worktree: "fix/171-fold-answers-into-specs"
 issuer: "#161"
 complexity: "simple"
@@ -61,6 +61,7 @@ Blocked by #172 because both tasks rewrite the same SKILL.md Watcher-section bul
 - Acceptance: criterion 1 holds in the worktree (SKILL.md and agents/developer.md both point answered questions at the Specs, reachable with the documented kanban_update(specs) path). Criterion 2 holds via the skill's explicit fold instruction: the Specs carry the decided acceptance, so a Developer implements without consulting Notes.
 - Live-test hint for criterion 2: with the updated skill, have the PM answer a backlog task's openQuestions and confirm the decided acceptance lands in the Specs via kanban_update(specs), openQuestions is cleared, and the task promotes.
 - No fixes. State set to to-review.
+- Review pass 2 done, no fixes. Verified: the diff is exactly 1 line (SKILL.md step 2's openQuestions bullet) and carries the decided fold semantics; kanban_update (index.ts:91-100) has no notes field, additionalProperties false, specs = "Replaces the whole Specs section", so the bullet's "kanban_update cannot write Notes" and "specs replaces the whole section" are accurate; agents/developer.md untouched and consistent ("The Specs are the contract." line 12, "When an answer reaches the Specs" line 10). Both acceptance criteria hold; no tests reference SKILL.md, so no checkable command applies. Branch sits on post-#172 main (7b39251) and preserves the #172 Watcher wording. The four developer assumptions are stated in # Open questions and match the Decision block; none silent. State set to to-merge.
 
 # Open questions
 

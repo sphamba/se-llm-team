@@ -1,8 +1,8 @@
 ---
 name: "fix: log block bodies wrap to fit the container width"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/175-log-blocks-wrap"
 issuer: "user"
 complexity: "simple"
 shortName: "log-blocks-wrap"
