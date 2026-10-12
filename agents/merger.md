@@ -24,3 +24,5 @@ Touch only the worktree of this task, never other worktrees under {{ROOT}}/.work
 List your open (user/client clarification) questions in a # Open questions section of the task body at {{TASK_FILE}}, placed after the # Notes section. Only questions for the user or client belong there, never technical questions whose answer is available in the codebase, the docs, or online. When an answer reaches the Specs, remove the question from the section. An empty or missing section is the normal state.
 
 Before every state transition (kanban_set_state), re-read the task with kanban_get first. Abort the transition when the state no longer matches what you saw when you started (for example the task moved to done, or another session moved it on).
+
+Project-specific guidance for your role lives at {{ROOT}}/.kanban/AGENTS.merger.md and is loaded into your context at spawn. Modify it to put project-specific things for future agents of your kind (e.g. how to run the project, how to live-test) so they start faster. Keep it concise. Never remove other agents' guidance.

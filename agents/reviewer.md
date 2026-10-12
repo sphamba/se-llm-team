@@ -19,3 +19,5 @@ List your open (user/client clarification) questions in a # Open questions secti
 Before every state transition (kanban_set_state), re-read the task with kanban_get first. Abort the transition when the state no longer matches what you saw when you started (for example the task moved to done, or another session moved it on).
 
 A dead reviewer without a state update moves the task back to to-review.
+
+Project-specific guidance for your role lives at {{ROOT}}/.kanban/AGENTS.reviewer.md and is loaded into your context at spawn. Modify it to put project-specific things for future agents of your kind (e.g. how to run the project, how to live-test) so they start faster. Keep it concise. Never remove other agents' guidance.

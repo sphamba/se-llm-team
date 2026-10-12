@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readHubRegistry, startHub } from "./hub.ts";
-import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, updateTask } from "./kanban.ts";
+import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, updateTask, ROLE_NOTES_RE } from "./kanban.ts";
 import { compactFinishedLogs, compactLogLine, dropDoneBlockers, loadConfig, nextRunIndex, poll, promoteBacklog, removeTask, waitForBoardCommits } from "./orchestrator.ts";
 import { gunzipSync } from "node:zlib";
 import { pidAlive } from "./pid.ts";
@@ -2238,3 +2238,49 @@ assert.equal(parseTask(rootAR, refHolderAR.file).blockedBy.includes(doneNumAR), 
 assert.equal(parseTask(rootAR, refRemoverAR.file).blockedBy, otherNumAR, "the mid-sweep removed ref stays removed");
 cleanupAll(rootAR);
 console.log("orchestrator.test.ts: ... + fresh-read promotion gates smoke passed");
+
+// --- part AS: per-role project notes in .kanban, appended to the system prompt at spawn ---
+// every spawn carries --append-system-prompt <root>/.kanban/AGENTS.<role>.md, the daemon
+// creates the file when missing, the notes files are not tasks (promoteBacklog cannot turn
+// one into a phantom developer run) and ride the board mirror's snapshot commits
+const rootAS = fixture();
+cleaned.push(rootAS);
+// an empty temp HOME keeps the ambient user-level config out of loadConfig, as in part X
+const homeAS = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAS);
+mkdirSync(kanbanDir(rootAS), { recursive: true });
+writeFileSync(join(kanbanDir(rootAS), "se-llm-team.json"), JSON.stringify({ agent: argvStub(rootAS), pollMinutes: 0.01 }));
+const taskAS = createTask(rootAS, { name: "feat: role notes", summary: "Role notes smoke", specs: "n/a" });
+setState(rootAS, taskAS, "to-do");
+const as = await runDaemon(rootAS, join(HERE, "orchestrator.ts"), homeAS);
+await waitFor(
+	() => parseTask(rootAS, taskAS.file).state === "done" && parseTask(rootAS, taskAS.file).worktree === "",
+	60000,
+	"pipeline with role notes",
+	as.output,
+);
+const notesPathAS = (role: string) => join(kanbanDir(rootAS), `AGENTS.${role}.md`);
+const asSpawns = () =>
+	readFileSync(join(rootAS, "argv.log"), "utf8")
+		.trim()
+		.split("\n")
+		.filter(Boolean)
+		.map((l) => JSON.parse(l) as { role: string; argv: string[] });
+for (const role of ["developer", "reviewer", "merger", "live-tester"]) {
+	const path = notesPathAS(role);
+	assert.ok(existsSync(path), `the ${role} notes file was created when missing`);
+	assert.ok(readFileSync(path, "utf8").includes(`# ${role}:`), "the starter header names the role");
+	const spawns = asSpawns().filter((s) => s.role === role);
+	assert.ok(spawns.length > 0, `the ${role} ran`);
+	for (const s of spawns) {
+		const i = s.argv.indexOf("--append-system-prompt");
+		assert.ok(i !== -1, `every ${role} spawn carries --append-system-prompt`);
+		assert.equal(s.argv[i + 1], path, "the flag points at the role's notes file");
+	}
+}
+assert.ok(!listAll(rootAS).some((t) => ROLE_NOTES_RE.test(t.file)), "role notes files are not tasks");
+for (const role of ["developer", "reviewer", "merger", "live-tester"]) {
+	assert.ok(showTip(rootAS, `AGENTS.${role}.md`) !== null, `the board mirror carries the ${role} notes file`);
+}
+as.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + per-role project notes smoke passed");

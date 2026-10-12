@@ -161,8 +161,15 @@ export function parseTask(root: string, file: string): Task {
 	};
 }
 
+// per-role project notes (AGENTS.<role>.md) live beside the tasks in .kanban: the board
+// mirror carries them, but they carry no frontmatter and must never parse as tasks
+export const ROLE_NOTES_RE = /^AGENTS\..+\.md$/;
+export const roleNotesPath = (root: string, role: string) => join(kanbanDir(root), `AGENTS.${role}.md`);
+
 export function listAll(root: string): Task[] {
-	return taskFiles(root).map((f) => parseTask(root, f));
+	return taskFiles(root)
+		.filter((f) => !ROLE_NOTES_RE.test(f))
+		.map((f) => parseTask(root, f));
 }
 
 export function listTasks(root: string, scope: Scope, priority?: Priority | string): TaskRef[] {
