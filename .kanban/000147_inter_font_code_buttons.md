@@ -1,5 +1,6 @@
 ---
 name: "fix: Inter font does not reach log code and buttons"
+blockedBy: "#146"
 priority: "low"
 state: "backlog"
 worktree: ""
@@ -12,8 +13,6 @@ shortName: "inter-font-code-buttons"
 Live test of #141 (commit 03c450b) found the Inter font does not reach every element, so the "Inter font everywhere" claim is not met. Measured computed styles on the real board (Chromium) show #m-log-text pre = Inter, but #m-log-text code and #m-body code = "monospace" and #theme, #m-close, .agent-card, .toggle (all <button>) = "Arial" — the browser UA defaults, not inherited Inter. Root cause: src/webui.ts has no rule overriding the UA stylesheet for code and button. The #141 spec wrongly claimed these inherit Inter. Fix is one line each in src/webui.ts: `code { font-family: inherit; }` and `button { font: inherit; }`. Only the font inheritance is in scope: markdown rendering, log streaming and HTML escaping passed the #141 live test.
 
 # Specs
-# Specs
-
 Follow-up to the live test of #141 (worktree feat/141-markdown-log-text-inter-font, commit 03c450b). The task title claims "Inter font everywhere", but the page serves two UA-defaulted font stacks that never inherit the two Inter declarations (body and #m-log-text).
 
 ## Reproduction

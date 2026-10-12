@@ -1,8 +1,8 @@
 ---
 name: "feat: markdown-render assistant and thinking log text; Google Inter font everywhere"
 priority: "medium"
-state: "to-merge"
-worktree: "feat/141-markdown-log-text-inter-font"
+state: "done"
+worktree: ""
 blockedBy: ""
 issuer: "user"
 complexity: "moderate"
