@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, PRIORITY_RANK, setState } from "./kanban.ts";
 import { startHub } from "./hub.ts";
-import { agentLabel, boardOf, buildShell, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_CHUNK, mergeBoards, numLinkHtml, pairLayout, relationPaths, renderLogChunk, spinnerHtml, syncBoard, tabNames, tabsHtml } from "./webui.ts";
+import { agentLabel, boardOf, buildShell, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_CHUNK, logFixups, mergeBoards, numLinkHtml, pairLayout, relationPaths, renderLogChunk, spinnerHtml, syncBoard, tabNames, tabsHtml } from "./webui.ts";
 import { gzipSync } from "node:zlib";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -33,6 +33,57 @@ const realHome = process.env.HOME;
 process.env.HOME = home;
 assert.equal(loadWebUiConfig(root).enabled, false);
 process.env.HOME = realHome;
+
+// minimal element stub for the log-pane fixups: only the DOM surface logFixups touches
+class LogEl {
+	tag: string;
+	className = "";
+	textContent = "";
+	dataset: Record<string, string> = {};
+	children: LogEl[] = [];
+	parent: LogEl | null = null;
+	classList = { contains: (cls: string) => this.className.split(/\s+/).includes(cls) };
+	constructor(tag: string) { this.tag = tag; }
+	get previousElementSibling(): LogEl | null {
+		const p = this.parent;
+		return p ? p.children[p.children.indexOf(this) - 1] ?? null : null;
+	}
+	querySelectorAll(sel: string): LogEl[] {
+		const out: LogEl[] = [];
+		const walk = (n: LogEl) => {
+			for (const c of n.children) {
+				if (logElMatches(c, sel)) out.push(c);
+				walk(c);
+			}
+		};
+		walk(this);
+		return out;
+	}
+	querySelector(sel: string): LogEl | null { return this.querySelectorAll(sel)[0] ?? null; }
+	appendChild(c: LogEl): LogEl { c.remove(); c.parent = this; this.children.push(c); return c; }
+	append(...cs: (LogEl | string)[]) { for (const c of cs) { if (typeof c === "string") this.textContent += c; else this.appendChild(c); } }
+	replaceWith(c: LogEl) {
+		const p = this.parent;
+		if (!p) return;
+		p.children[p.children.indexOf(this)] = c;
+		c.parent = p;
+		this.parent = null;
+	}
+	remove() { const p = this.parent; if (p) p.children.splice(p.children.indexOf(this), 1); this.parent = null; }
+}
+// the selector forms logFixups uses: tag.class[data-tc] / [data-tc="id"], .class, bare tag
+const logElMatches = (c: LogEl, sel: string) => {
+	const attr = sel.match(/^(?:([a-z]+))?(?:\.?([\w-]+))?(?:\[data-tc(?:="([^"]*)")?\])?$/);
+	if (!attr) return c.tag === sel;
+	const [, tag, cls, tc] = attr;
+	return (
+		(!tag || c.tag === tag) &&
+		(!cls || c.classList.contains(cls)) &&
+		(tc !== undefined ? c.dataset.tc === tc : !sel.includes("[data-tc") || c.dataset.tc !== undefined)
+	);
+};
+(globalThis as any).CSS ??= { escape: (s: string) => s };
+const logDoc = { createElement: (tag: string) => new LogEl(tag) };
 
 // renderLogChunk: JSONL events render as readable lines, non-JSON lines pass through,
 // a partial trailing record (byte boundary split) drops
@@ -87,6 +138,66 @@ assert.ok(toolChunk.includes("x".repeat(120)), "the full command stays in the bl
 
 const joinChunk = renderLogChunk(JSON.stringify({ type: "tool_execution_end", toolCallId: "t1", toolName: "bash", result: { content: [{ type: "text", text: "boom: exit 1" }] }, isError: true }) + "\n");
 assert.ok(joinChunk.includes('<span class="lg-tres" data-tc="t1" data-sum="bash failed: boom: exit 1">boom: exit 1</span>'), "a tool end whose block lives in an earlier chunk renders the joinable span, errors carrying the summary text");
+// client-side promotion: an orphan span with no matching block in the pane becomes a collapsible
+// details collapsed by default, the data-sum one-liner as the summary, the result text as the body
+const joinPane = new LogEl("div");
+const orphan = new LogEl("span");
+orphan.className = "lg-tres";
+orphan.dataset.tc = "t1";
+orphan.dataset.sum = "bash failed: boom: exit 1";
+orphan.textContent = "boom: exit 1";
+joinPane.appendChild(orphan);
+logFixups(joinPane, logDoc);
+assert.equal(joinPane.children.length, 1);
+const promoted = joinPane.children[0];
+assert.ok(promoted.tag === "details" && promoted.className === "lg-tool" && !("tc" in promoted.dataset), "an orphan tool result with no matching block promotes to a collapsible details.lg-tool instead of staying a bare span");
+assert.ok(promoted.children[0].tag === "summary" && promoted.children[0].textContent === "bash failed: boom: exit 1", "the promoted block summarizes from the data-sum one-liner");
+assert.ok(promoted.children[1].tag === "pre" && promoted.children[1].className === "lg-out" && promoted.children[1].textContent === "boom: exit 1", "the promoted block holds the result text as its body");
+// the join is unchanged when a matching block is loaded: the result joins it by toolCallId
+const joinedPane = new LogEl("div");
+const joinedBlock = new LogEl("details");
+joinedBlock.className = "lg-tool";
+joinedBlock.dataset.tc = "t1";
+const joinedSum = new LogEl("summary");
+joinedSum.textContent = "bash: ls";
+joinedBlock.appendChild(joinedSum);
+const joinSpan = new LogEl("span");
+joinSpan.className = "lg-tres";
+joinSpan.dataset.tc = "t1";
+joinSpan.dataset.sum = "bash failed: boom: exit 1";
+joinSpan.textContent = "boom: exit 1";
+joinedPane.appendChild(joinedBlock);
+joinedPane.appendChild(joinSpan);
+logFixups(joinedPane, logDoc);
+assert.equal(joinedPane.children.length, 1);
+assert.ok(joinedBlock.children[0].textContent === "bash failed: boom: exit 1", "a joinable span still joins its block and carries the summary over");
+assert.ok(joinedBlock.children[1].tag === "pre" && joinedBlock.children[1].className === "lg-out" && joinedBlock.children[1].textContent === "boom: exit 1", "a joinable span still fills its block's result");
+// thinking deltas continuing a mid-thought chunk: one with no open block to join promotes to a
+// collapsible details, one that finds the previous chunk's open block appends into it
+const contPane = new LogEl("div");
+const contSpan = new LogEl("span");
+contSpan.className = "lg-cont";
+contSpan.textContent = "still mid-thought";
+contPane.appendChild(contSpan);
+logFixups(contPane, logDoc);
+assert.ok(contPane.children[0].tag === "details" && contPane.children[0].className === "lg-think", "a thinking delta with no open block to join promotes to a collapsible details.lg-think instead of staying a bare span");
+assert.ok(contPane.children[0].children[0].textContent === "Thinking" && contPane.children[0].children[1].textContent === "still mid-thought", "the promoted thinking block summarizes as Thinking with the delta text as its body");
+const contJoinPane = new LogEl("div");
+const openThink = new LogEl("details");
+openThink.className = "lg-think";
+openThink.dataset.open = "think";
+openThink.appendChild(new LogEl("summary"));
+const thinkBody = new LogEl("pre");
+thinkBody.textContent = "started in the previous chunk";
+openThink.appendChild(thinkBody);
+const liveCont = new LogEl("span");
+liveCont.className = "lg-cont";
+liveCont.textContent = " continued here";
+contJoinPane.appendChild(openThink);
+contJoinPane.appendChild(liveCont);
+logFixups(contJoinPane, logDoc);
+assert.equal(contJoinPane.children.length, 1);
+assert.ok(thinkBody.textContent === "started in the previous chunk continued here", "a thinking delta still appends into the previous chunk's open block");
 
 const bareErr = renderLogChunk([
 	JSON.stringify({ type: "tool_execution_start", toolCallId: "t3", toolName: "bash", args: { command: "ls" } }),
@@ -107,6 +218,15 @@ const side = renderLogChunk(sidechain);
 assert.ok(side.includes("[prompt] Review the diff\n"), "a sidechain user record renders the prompt text");
 assert.ok(side.includes("Reading the diff.\n"), "sidechain text blocks render as message text");
 assert.ok(side.includes('<span class="lg-tres" data-tc="t9">diff looks fine</span>'), "a sidechain toolResult without its toolcall renders the joinable result span");
+// an orphan without a data-sum promotes with a generic result summary
+const sidePane = new LogEl("div");
+const sideOrphan = new LogEl("span");
+sideOrphan.className = "lg-tres";
+sideOrphan.dataset.tc = "t9";
+sideOrphan.textContent = "diff looks fine";
+sidePane.appendChild(sideOrphan);
+logFixups(sidePane, logDoc);
+assert.ok(sidePane.children[0].children[0].textContent === "result" && sidePane.children[0].children[1].textContent === "diff looks fine", "an orphan tool result without a data-sum promotes with a generic result summary");
 assert.ok(side.includes('<details class="lg-think"><summary>Thinking</summary><pre>Plan the fix.</pre></details>'), "a sidechain thinking block renders as a collapsed details");
 assert.equal(side.split("<summary>read: /r/SPECS.md</summary>").length - 1, 1, "one tool block per call: the toolcall args render once");
 assert.ok(!side.includes('lg-tres" data-tc="t8'), "a sidechain toolResult dedupes against its toolcall within the chunk");
@@ -500,7 +620,7 @@ assert.ok(page.includes('(active ? "&project=" + encodeURIComponent(active) : ""
 assert.ok(page.includes('const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";'), "reduced motion falls back to an instant auto scroll");
 assert.ok(page.includes("p.scrollTo({ top: p.scrollHeight, behavior: behavior });"), "the live auto-scroll glides smoothly to the bottom");
 assert.ok(page.includes('details.lg-tool[data-tc]'), "the client dedupes tool blocks across poll windows by toolCallId");
-assert.ok(page.includes('#m-log-text .lg-tres, #m-log-text .lg-cont { display: block; }'), "a joinable span left unresolved by the loaded window still renders as its own line");
+assert.ok(page.includes(String(logFixups)), "the page runs the tested log fixups: dedupe, joins, orphan promotions");
 assert.ok(page.includes('".lg-tres"'), "the client joins later tool results into their block");
 assert.ok(page.includes('".lg-cont"'), "the client joins thinking deltas that continue the previous chunk's block");
 
@@ -561,6 +681,7 @@ assert.ok(logCss.includes("font-size: 10px"), "the agent log text keeps its 10px
 assert.ok(logCss.includes("system-ui") && !logCss.includes("monospace"), "the agent log text renders in the page's sans serif stack");
 assert.ok(page.includes("#m-log-text pre { font: inherit;"), "log block bodies inherit the sans serif font");
 assert.ok(page.includes("#m-log-text summary { cursor: pointer;"), "collapsed log summaries read as clickable");
+assert.ok(page.includes("#m-log-text details.lg-think, #m-log-text details.lg-tool { color: var(--muted); }"), "thinking and tool blocks render muted grey in both themes, collapsed and expanded alike");
 assert.ok(/display: flex; flex-wrap: wrap/.test(page.match(/#m-agent-btns \{[^}]*\}/)![0]), "the run columns render as one wrapping flex row");
 assert.ok(!page.includes(".agent-past {") && !page.includes(".agent-live {"), "no per-card block row styles remain");
 assert.ok(page.includes('"agent-past"') && page.includes('"agent-live"'), "past and live cards carry their state class");

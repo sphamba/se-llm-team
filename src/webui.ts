@@ -467,7 +467,7 @@ export function renderLogChunk(text: string): string {
 		}
 	}
 	flush();
-	if (cont !== null) out[contIdx] = '<span class="lg-cont">' + esc(cont) + "</span>";
+	if (cont) out[contIdx] = '<span class="lg-cont">' + esc(cont) + "</span>";
 	if (think !== null) out[thinkIdx] = thinkHtml(true); // the block continues into the next chunk
 	for (const t of tools.values()) out[t.idx] = toolHtml(t);
 	return out.join("");
@@ -889,6 +889,57 @@ export function syncBoard(cols, tasks, expanded, els, make, visible) {
 	}
 }
 
+// the cross-chunk fixups over the whole pane, run after every chunk insert: duplicate tool blocks
+// (a record split across poll windows re-serves the start) drop keeping the first; a later tool
+// result joins its block by toolCallId, an orphan one promotes to a collapsible details (the
+// data-sum one-liner as the summary, a generic "result" without one, the result text as the body);
+// thinking deltas continuing the previous chunk's block append into it, an unjoined one promotes
+// to a collapsible details too; doc is injected so tests run this without a DOM
+export function logFixups(el, doc) {
+	const seen = new Set();
+	for (const d of el.querySelectorAll("details.lg-tool[data-tc]")) {
+		if (seen.has(d.dataset.tc)) d.remove(); else seen.add(d.dataset.tc);
+	}
+	for (const s of el.querySelectorAll(".lg-tres")) {
+		const b = el.querySelector('details.lg-tool[data-tc="' + CSS.escape(s.dataset.tc) + '"]');
+		if (b) {
+			if (s.dataset.sum) b.querySelector("summary").textContent = s.dataset.sum;
+			const out = doc.createElement("pre");
+			out.className = "lg-out";
+			out.textContent = s.textContent;
+			b.appendChild(out);
+			s.remove();
+			continue;
+		}
+		const d = doc.createElement("details");
+		d.className = "lg-tool";
+		const sum = doc.createElement("summary");
+		sum.textContent = s.dataset.sum || "result";
+		const out = doc.createElement("pre");
+		out.className = "lg-out";
+		out.textContent = s.textContent;
+		d.append(sum, out);
+		s.replaceWith(d);
+	}
+	for (const s of el.querySelectorAll(".lg-cont")) {
+		let b = s.previousElementSibling;
+		while (b && !(b.classList.contains("lg-think") && b.dataset.open === "think")) b = b.previousElementSibling;
+		if (b) {
+			b.querySelector("pre").append(s.textContent);
+			s.remove();
+			continue;
+		}
+		const d = doc.createElement("details");
+		d.className = "lg-think";
+		const sum = doc.createElement("summary");
+		sum.textContent = "Thinking";
+		const pre = doc.createElement("pre");
+		pre.textContent = s.textContent;
+		d.append(sum, pre);
+		s.replaceWith(d);
+	}
+}
+
 // served by the single-project server and by the hub for every registered project; the tab bar
 // comes from the hub's /api/projects and each tab polls /api/tasks?project=<root id>
 export const PAGE = `<!doctype html>
@@ -977,7 +1028,7 @@ none so the card clicks pass through */
 #m-log-text pre { font: inherit; margin: 0; padding: 0; }
 #m-log-text details { margin: 2px 0; }
 #m-log-text summary { cursor: pointer; }
-#m-log-text .lg-tres, #m-log-text .lg-cont { display: block; }
+#m-log-text details.lg-think, #m-log-text details.lg-tool { color: var(--muted); }
 #m-log-text details > pre { padding-left: 12px; }
 #modal { position: fixed; inset: 0; z-index: 3; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
 #modal.hidden { display: none; }
@@ -1075,6 +1126,7 @@ ${numLinkHtml}
 ${cardHtml}
 ${buildShell}
 ${syncBoard}
+${logFixups}
 ${tabNames}
 ${tabsHtml}
 ${boardOf}
@@ -1261,39 +1313,12 @@ function glide(p) {
 	const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
 	p.scrollTo({ top: p.scrollHeight, behavior: behavior });
 }
-// the rendered chunk lands in the pane first, then the cross-chunk fixups run over the whole pane:
-// duplicate tool blocks (a record split across poll windows re-serves the start) drop keeping the
-// first; a later tool result joins its block by toolCallId, or shows as a line when the walk-back
-// left the block unloaded; thinking deltas continuing the previous chunk's block append into it
+// the rendered chunk lands in the pane first, then logFixups runs the cross-chunk fixes over it
 function ingest(html, where) {
 	const el = document.getElementById("m-log-text");
 	if (where === "init") el.innerHTML = html;
 	else el.insertAdjacentHTML(where === "history" ? "afterbegin" : "beforeend", html);
-	const seen = new Set();
-	for (const d of el.querySelectorAll("details.lg-tool[data-tc]")) {
-		if (seen.has(d.dataset.tc)) d.remove(); else seen.add(d.dataset.tc);
-	}
-	for (const s of el.querySelectorAll(".lg-tres")) {
-		const b = el.querySelector('details.lg-tool[data-tc="' + CSS.escape(s.dataset.tc) + '"]');
-		if (b) {
-			if (s.dataset.sum) b.querySelector("summary").textContent = s.dataset.sum;
-			const out = document.createElement("pre");
-			out.className = "lg-out";
-			out.textContent = s.textContent;
-			b.appendChild(out);
-			s.remove();
-		} else if (s.dataset.sum) {
-			s.textContent = s.dataset.sum;
-		}
-	}
-	for (const s of el.querySelectorAll(".lg-cont")) {
-		let b = s.previousElementSibling;
-		while (b && !(b.classList.contains("lg-think") && b.dataset.open === "think")) b = b.previousElementSibling;
-		if (b) {
-			b.querySelector("pre").append(s.textContent);
-			s.remove();
-		}
-	}
+	logFixups(el, document);
 }
 // one agent card: the role label, then a tokens/duration stats line (42k · 5m 12s); mark is the
 // live spinner or the past check, empty on a sub card
