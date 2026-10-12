@@ -936,15 +936,15 @@ export function cardHtml(t: Task, st: string) {
 		spinnerHtml(st) +
 		numLinkHtml(t.file, "num") +
 		esc(t.name) +
-		'</div><span class="chip p-' +
+		'</div> <span class="chip p-' +
 		esc(t.priority) +
 		'">' +
 		esc(t.priority) +
-		'</span><span class="chip cx cx-' +
+		'</span> <span class="chip cx cx-' +
 		esc(t.complexity || "moderate") +
 		'">' +
 		esc(t.complexity || "moderate") +
-		'</span><span class="chip' +
+		'</span> <span class="chip' +
 		(issued ? " issuer" : "") +
 		'">' +
 		(issued ? esc(t.issuer) : "user") +
