@@ -39,13 +39,13 @@ Create a pi coding agent extension (this repo is already symlinked to ~/pi/agent
   - If terminated without updated state, move to back to "to-review"
 - For every new task in to-merge:
   - spawn at most one Merger agent at a time for the whole project, and move to "merging"
-  - the Merger merges main into the task worktree, resolves conflicts and runs the tests there, then merges the branch into main and sets "to-live-test"
+  - the Merger resolves the project root's current branch at the start of each step, merges it into the task worktree, resolves conflicts and runs the tests there only when it had to resolve conflicts, then merges the branch into the project root's current branch and sets "to-live-test"
   - when the merge cannot be completed, the Merger sets the task back to "to-merge" and aborts any merge left dirty, so main never sits mid-merge
 - For every new task in to-live-test:
   - route a task whose branch is not merged into the project root's checkout, or that has no worktree, back to "to-merge"
   - spawn a Live-tester agent on the merged commit (the project root's checkout) and move to "live-testing"
   - If terminated without updated state, move back to "to-live-test"
-- Poll the agents for liveness (every 15 minutes, configurable). If dead, kill the agent, and respawn at same state.
+- Poll the agents for liveness (every 1 minute, configurable). If dead, kill the agent, bounce the task one state back (a dead Developer goes back to "to-do" for a fresh run, reviewing to "to-review", live-testing to "to-live-test", merging to "to-merge") and respawn from the bounced state, capped at 5 respawns per task.
 - configuration variable for the coding agent executable
 
 
@@ -71,6 +71,6 @@ All agents can spawn subagents (and are encouraged to do so) for implementation,
 - Spawns a Project manager subagent to report feedback, issues, and findings, so that the Project manager creates new tasks
 
 ## Merger
-- Merges main into the task worktree, resolves conflicts, and runs the tests there. When the two sides disagree, main wins unless the task Specs say otherwise.
-- Merges the task branch into main, then moves the task to "to-live-test"
+- Resolves the project root's current branch at the start of each step, merges it into the task worktree, and runs the tests there only when it had to resolve conflicts. When the two sides disagree, the base branch wins unless the task Specs say otherwise.
+- Merges the task branch into the project root's current branch, then moves the task to "to-live-test"
 - Moves the task back to "to-merge" when the merge cannot be completed, and aborts any merge left dirty, so main never sits mid-merge
