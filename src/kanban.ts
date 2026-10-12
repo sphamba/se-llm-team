@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 
 export const STATES = [
@@ -369,19 +369,48 @@ export function createTask(
 		`# Summary\n${input.summary.trim()}\n\n# Specs\n${(input.specs ?? "").trim()}\n\n# Notes\n` +
 		(open ? `\n# Open questions\n${open}\n` : "");
 	mkdirSync(kanbanDir(root), { recursive: true });
-	for (let attempt = 0; attempt < 10; attempt++) {
-		const nums = taskFiles(root).map(taskNum).filter((n) => n > 0);
-		const num = String((nums.length ? Math.max(...nums) : 0) + 1).padStart(6, "0");
-		// the new task's number is known only here: a stale ref to it (a deleted task's
-		// number) or the create's own next number can still form a direct 2-cycle
-		if (input.blockedBy) assertNoBlockCycle(root, parseInt(num, 10), input.blockedBy);
-		const file = `${num}_${shortName ? shortName.replaceAll("-", "_") : slugFile(input.name)}.md`;
+	// serialize the allocation: wx guards only one exact path, so two creators scanning
+	// the same max can otherwise write the same number under different slugs; the lock
+	// makes scan+write one critical section. A live holder commits in microseconds.
+	const lock = join(kanbanDir(root), ".create.lock");
+	let locked = false;
+	for (let wait = 0; wait < 100 && !locked; wait++) {
 		try {
-			writeFileSync(join(kanbanDir(root), file), content, { flag: "wx" });
-			return parseTask(root, file);
+			writeFileSync(lock, String(process.pid), { flag: "wx" });
+			locked = true;
 		} catch (e) {
 			if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+			try {
+				// steal a lock left behind by a crashed creator
+				if (Date.now() - statSync(lock).mtimeMs > 10000) unlinkSync(lock);
+			} catch {}
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
 		}
 	}
-	throw new Error(`could not allocate a task number for "${input.name}" after 10 attempts`);
+	if (!locked) throw new Error(`could not lock "${kanbanDir(root)}" for task creation`);
+	try {
+		for (let attempt = 0; attempt < 10; attempt++) {
+			const nums = taskFiles(root).map(taskNum).filter((n) => n > 0);
+			const num = String((nums.length ? Math.max(...nums) : 0) + 1).padStart(6, "0");
+			// the new task's number is known only here: a stale ref to it (a deleted task's
+			// number) or the create's own next number can still form a direct 2-cycle
+			if (input.blockedBy) assertNoBlockCycle(root, parseInt(num, 10), input.blockedBy);
+			const file = `${num}_${shortName ? shortName.replaceAll("-", "_") : slugFile(input.name)}.md`;
+			try {
+				writeFileSync(join(kanbanDir(root), file), content, { flag: "wx" });
+				// a number claimed under a different basename (hand-written file) between
+				// the scan and the write still succeeds; drop our file and retry
+				if (taskFiles(root).some((f) => f !== file && taskNum(f) === parseInt(num, 10))) {
+					unlinkSync(join(kanbanDir(root), file));
+					continue;
+				}
+				return parseTask(root, file);
+			} catch (e) {
+				if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+			}
+		}
+		throw new Error(`could not allocate a task number for "${input.name}" after 10 attempts`);
+	} finally {
+		unlinkSync(lock);
+	}
 }

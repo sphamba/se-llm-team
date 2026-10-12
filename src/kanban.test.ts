@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execSync, spawn } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { createTask, getTask, listAll, listTasks, parseTask, setState, setWorktree, slugFile, slugWorktree, splitWorktreeRoot, taskFiles, taskNum, updateTask } from "./kanban.ts";
 
@@ -154,14 +155,47 @@ for (let i = 0; i < 5; i++) {
 	created.push(createTask(raceRoot, { name: `feat: race ${i}`, summary: "s" }).file);
 }
 assert.equal(new Set(created).size, created.length);
-// a concurrent create landed between the max scan and the write: target file already exists
+// a rival create landed first: its file already holds the next number under a different slug
 writeFileSync(join(raceRoot, ".kanban", "000006_other_creator.md"), '---\nname: "other"\n---\n');
 const tr = createTask(raceRoot, { name: "feat: racer", summary: "s" });
 assert.equal(tr.file, "000007_racer.md"); // bumped to the next free number
 assert.match(readFileSync(join(raceRoot, ".kanban", "000006_other_creator.md"), "utf8"), /other/); // not overwritten
 created.push(tr.file);
 assert.equal(new Set(created).size, created.length);
+const raceNums = taskFiles(raceRoot).map(taskNum);
+assert.equal(new Set(raceNums).size, raceNums.length); // never two files with one number, hand-written ones included
 rmSync(raceRoot, { recursive: true, force: true });
+
+// simultaneous creators racing through repeated creates: the wx flag only guards the
+// exact path, so createTask holds a lock file across scan+write and retries on a
+// same-number clash with a hand-written file
+const concRoot = mkdtempSync(join(tmpdir(), "kanban-conc-"));
+const mod = JSON.stringify(pathToFileURL(join(import.meta.dirname, "kanban.ts")).href);
+const creator = `import(${mod}).then(({ createTask }) => { for (let i = 0; i < 20; i++) createTask(${JSON.stringify(concRoot)}, { name: "feat: concurrent " + process.pid + " " + i, summary: "s" }); })`;
+await Promise.all(
+	Array.from({ length: 4 }, () =>
+		new Promise<void>((resolve, reject) => {
+			let err = "";
+			const child = spawn(process.execPath, ["-e", creator], { stdio: ["ignore", "ignore", "pipe"] });
+			child.stderr.on("data", (d) => (err += d));
+			child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`creator exited ${code}: ${err}`))));
+		}),
+	),
+);
+const concNums = taskFiles(concRoot).map(taskNum);
+assert.equal(concNums.length, 80); // every creator landed its 20 tasks
+assert.equal(new Set(concNums).size, concNums.length); // never two files with one number
+rmSync(concRoot, { recursive: true, force: true });
+
+// a lock left behind by a crashed creator is stolen, not fatal
+const staleRoot = mkdtempSync(join(tmpdir(), "kanban-stale-"));
+const staleLock = join(staleRoot, ".kanban", ".create.lock");
+mkdirSync(join(staleRoot, ".kanban"), { recursive: true });
+writeFileSync(staleLock, "999999");
+utimesSync(staleLock, Date.now() / 1000 - 20000, Date.now() / 1000 - 20000);
+assert.equal(createTask(staleRoot, { name: "fix: after crash", summary: "s" }).file, "000001_after_crash.md");
+assert.equal(existsSync(staleLock), false); // lock stolen, no leftovers
+rmSync(staleRoot, { recursive: true, force: true });
 
 // merge-conflict handling: a conflict-marked file is never rewritten
 const tc = createTask(root, { name: "fix: conflicted file", summary: "s", specs: "real specs" });
