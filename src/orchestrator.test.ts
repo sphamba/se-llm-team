@@ -6,7 +6,7 @@ import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSyn
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readHubRegistry, startHub } from "./hub.ts";
+import { isLinkedWorktree, readHubRegistry, startHub } from "./hub.ts";
 import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, updateTask, ROLE_NOTES_RE } from "./kanban.ts";
 import { compactFinishedLogs, compactLogLine, dropDoneBlockers, loadConfig, nextRunIndex, poll, promoteBacklog, removeTask, waitForBoardCommits } from "./orchestrator.ts";
 import { gunzipSync } from "node:zlib";
@@ -1342,6 +1342,44 @@ assert.ok(!existsSync(wtPath), "the startup reap ran before the dirs were recrea
 process.env.HOME = realHomeWt;
 hubWt.close();
 console.log("orchestrator.test.ts: ... + worktree hub candidacy smoke passed");
+
+// --- part Y2: 000168 hub candidacy is git topology: a linked worktree outside .worktrees
+// stands down like a task worktree; a main checkout, a subdir of one and a non-git root stay
+// hub-eligible ---
+const repoT = fixture();
+const wtT = join(mkdtempSync(join(tmpdir(), "orch-hub-wt-out-")), "wt");
+cleaned.push(repoT, dirname(wtT));
+execSync(`git worktree add -q ${wtT} -b wt-out`, { cwd: repoT, shell: "/bin/bash" });
+assert.equal(isLinkedWorktree(repoT), false, "a main checkout is hub-eligible");
+mkdirSync(join(repoT, "sub"));
+assert.equal(isLinkedWorktree(join(repoT, "sub")), false, "a subdir of a main checkout is hub-eligible");
+assert.equal(isLinkedWorktree(wtT), true, "a linked worktree outside .worktrees is not hub-eligible");
+mkdirSync(join(wtT, "sub"));
+assert.equal(isLinkedWorktree(join(wtT, "sub")), true, "a subdir of a linked worktree is not hub-eligible");
+const nogitT = mkdtempSync(join(tmpdir(), "orch-hub-nogit-"));
+cleaned.push(nogitT);
+assert.equal(isLinkedWorktree(nogitT), false, "a non-git root is hub-eligible");
+const homeT = mkdtempSync(join(tmpdir(), "orch-hub-wt-out-home-"));
+cleaned.push(homeT);
+const portT = await freePort();
+mkdirSync(join(homeT, ".pi", "agent"), { recursive: true });
+writeFileSync(join(homeT, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portT } }));
+const envT = { ...process.env, HOME: homeT, SE_LLM_TEAM_HUB_HEALTH_MS: "300" };
+delete envT.SE_LLM_TEAM_NO_WEBUI;
+const dT = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", wtT, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: envT });
+daemons.push({ daemon: dT, root: wtT });
+let outT = "";
+dT.stdout.on("data", (d) => (outT += d));
+dT.stderr.on("data", (d) => (outT += d));
+const exitT = new Promise<string>((r) => dT.on("exit", (code) => r(String(code))));
+await waitFor(() => outT.includes("stands down"), 15000, "worktree-outside-.worktrees daemon stands down with no hub", () => outT);
+assert.ok(!outT.includes("web ui on"), "a worktree outside .worktrees never races for the port");
+assert.ok(!existsSync(join(homeT, ".pi", "agent", "se-llm-team-hub.lock")), "a worktree outside .worktrees never races for the hub lock");
+await new Promise((r) => setTimeout(r, 1200)); // several hub ticks: still never served
+assert.ok(!outT.includes("web ui on"), "a worktree outside .worktrees never serves the ui");
+assert.equal(await Promise.race([exitT, Promise.resolve("alive")]), "alive", "a daemon rooted outside .worktrees is not reaped as a task worktree");
+dT.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + worktree-outside-.worktrees hub candidacy smoke passed");
 
 // --- part X: provider/model/thinking config flags, with per-role overrides ---
 // the llm flags sit between "--mode json" and "-p", in resolution order provider, model, thinking

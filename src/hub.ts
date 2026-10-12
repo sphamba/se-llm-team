@@ -4,7 +4,6 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { splitWorktreeRoot } from "./kanban.ts";
 import { pidAlive } from "./pid.ts";
 
 // Hub backend: daemons register on spawn, the hub is elected by a lock race, the registry is
@@ -183,6 +182,21 @@ export function currentCommit(root: string): string {
 		return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 	} catch {
 		return "";
+	}
+}
+
+// 000168: whether root is a linked git worktree, decided by git topology, not path segments:
+// a linked worktree's git dir is a per-worktree dir, not the common dir. A main checkout, a
+// subdir of one, a separate-git-dir checkout and a non-git root all match and stay production,
+// so a worktree created anywhere (not just under .worktrees) is caught
+export function isLinkedWorktree(root: string): boolean {
+	try {
+		const rev = (arg: string): string =>
+			execFileSync("git", ["rev-parse", arg], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+		const abs = (out: string): string => (isAbsolute(out) ? out : join(root, out));
+		return realpathSync(abs(rev("--git-dir"))) !== realpathSync(abs(rev("--git-common-dir")));
+	} catch {
+		return false;
 	}
 }
 
@@ -435,16 +449,17 @@ export async function startHub(opts: HubOptions): Promise<{ port: number; close:
 // race for the shared lock. The winner serves the ui in-process, losers stand down and
 // register with the winner. Every daemon heartbeats and polls /health: repeated failures
 // re-run the election, so a dead hub fails over to a surviving daemon. A daemon rooted in a
-// task worktree never races (its checkout can hold old code): it registers and heartbeats
-// only, so a production restart leaves the port free for the new production daemon (000165).
+// linked git worktree never races (its checkout can hold old code): it registers and
+// heartbeats only, so a production restart leaves the port free for the new production daemon
+// (000165; 000168: any linked worktree, not just task worktrees under .worktrees).
 // Runs for the daemon's lifetime.
 export function joinHub(opts: HubOptions): void {
 	const log = opts.log ?? (() => {});
 	const tickMs = opts.healthMs ?? envMs("SE_LLM_TEAM_HUB_HEALTH_MS", DEFAULT_HEALTH_MS);
 	const base = `http://${dialHost(opts.host)}:${opts.port}`;
-	// 000165: a task worktree checkout can hold old code, so its daemon never races for the
-	// port; the election stays with non-worktree daemons
-	const canHub = !splitWorktreeRoot(opts.root);
+	// 000168: candidacy is git topology, not a path rule: a linked worktree checkout can hold
+	// old code, so its daemon never races for the port; main checkouts stay production (000165)
+	const canHub = !isLinkedWorktree(opts.root);
 	let timer: NodeJS.Timeout | undefined;
 	let busy = false;
 	let failures = 0;
@@ -534,11 +549,11 @@ export function joinHub(opts: HubOptions): void {
 
 	void (async () => {
 		// startup election: no hub answered, so race for the lock; the winner serves the ui,
-		// the loser joins the winner's hub. A worktree checkout never races: its code can be
+		// the loser joins the winner's hub. A linked worktree never races: its code can be
 		// stale, so it stands down and waits for a hub to register with (000165)
 		if (!(await healthy())) {
 			if (canHub) await becomeHub();
-			else log("no hub answering; task worktree checkout stands down (the port is not ours to take)");
+			else log("no hub answering; linked worktree checkout stands down (the port is not ours to take)");
 		}
 		timer = setInterval(() => void tick(), tickMs);
 		void tick();
