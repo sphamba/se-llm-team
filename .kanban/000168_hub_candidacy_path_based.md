@@ -1,7 +1,7 @@
 ---
 name: "fix: hub candidacy detection is path-based so a worktree outside .worktrees stays hub-eligible"
 priority: "low"
-state: "doing"
+state: "reviewing"
 worktree: "fix/168-hub-candidacy-path-based"
 issuer: "#165"
 complexity: "simple"
@@ -31,4 +31,14 @@ Either the .worktrees path-segment rule is accepted and documented (manually pla
 ## Decision (user, 2026-10-12)
 Switch detection to git worktree topology: a daemon is non-production when its git common dir differs from its working tree top level (compare git rev-parse --git-common-dir with --show-toplevel), catching worktrees created anywhere, not just .worktrees. Add a test covering a worktree outside .worktrees.
 
+## Done (developer, 2026-10-12)
+- src/hub.ts: new exported isLinkedWorktree(root). Git topology, not path segments: the per-worktree git dir differs from the common dir. Git failure (non-git root) falls back to production, as before.
+- joinHub: canHub = !isLinkedWorktree(opts.root). The splitWorktreeRoot import is gone. The standdown log now says "linked worktree checkout".
+- The task-worktree self-reap in orchestrator.ts stays path-based. Task worktrees always live under .worktrees, so no change needed there.
+- README: the hub candidacy paragraph now documents the topology rule.
+- Tests: orchestrator.test.ts part Y2. Unit asserts for a main checkout, a subdir of one, a worktree outside .worktrees, a subdir of it, and a non-git root. E2E: a daemon rooted at that worktree stands down, never binds, never races for the hub lock, and is not reaped as a task worktree. Full suite passes (kanban, orchestrator, webui, extension, index). Commit 04c53df.
+
 # Open questions
+
+- Assumption: the literal command pair in the decision (--git-common-dir vs --show-toplevel) would wrongly mark a separate-git-dir main checkout (git init --separate-git-dir) non-production. I kept the same topology rule but compare --git-dir with --git-common-dir, the canonical linked-worktree check, so that case stays production. Confirm this mapping is acceptable.
+- Assumption: a linked worktree of a bare repo counts as non-production (git worktree add created it). A bare repo root itself stays production.
