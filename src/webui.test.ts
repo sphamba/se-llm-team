@@ -815,7 +815,7 @@ const upd = page.match(/function updateOpenTask\(t\) \{[\s\S]*?\n\}/)![0];
 assert.ok(page.includes("if (open) updateOpenTask(open); else closeModal();"), "the refresh updates the open card in place and closes it when its task is gone");
 assert.ok(upd.includes("writeHead(t)") && upd.includes("renderAgent(t, true)") && upd.includes("setBody(t)"), "the refresh re-derives title, attrs, agent row and body from the fresh payload");
 assert.ok(!upd.includes("closeLog") && !upd.includes("logState"), "the refresh path never touches the log pane, logState or the log timer");
-assert.ok(page.includes('<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><div id="m-log-meta" class="hidden"></div><div id="m-log-text"></div></div></div>'), "the log pane ships the meta line above the log text, hidden until a payload carries meta");
+assert.ok(page.includes('<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log-meta" class="hidden"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>'), "000154: the meta line ships as a sibling above the log pane, hidden until a payload carries meta");
 assert.ok(page.includes('meta.classList.toggle("hidden", !label)') && page.includes('" \u00b7 thinking "'), "openLog/pullLog fill the meta line on init and every poll, model name then thinking level");
 assert.ok(!page.includes(`+ '</div><div id="m-log"`), "renderAgent no longer rebuilds the log pane with the run cards");
 const setBodySrc = page.match(/function setBody\(t\) \{[\s\S]*?\n\}/)![0];

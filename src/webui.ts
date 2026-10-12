@@ -1191,7 +1191,7 @@ none so the card clicks pass through */
 <div id="modal" class="hidden"><div id="m-box">
 <div id="m-head"><h2 id="m-title"></h2><button id="m-close" onclick="closeModal()">Close</button></div>
 <div id="m-attrs"></div>
-<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><div id="m-log-meta" class="hidden"></div><div id="m-log-text"></div></div></div>
+<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log-meta" class="hidden"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>
 <div id="m-body"></div>
 </div></div>
 <script>
@@ -1522,6 +1522,9 @@ function closeLog() {
 	logState = null;
 	const p = logPane();
 	if (p) p.classList.add("hidden");
+	// 000154: the meta line is a sibling above the pane now, so it must hide itself on close
+	const meta = document.getElementById("m-log-meta");
+	if (meta) { meta.textContent = ""; meta.classList.add("hidden"); }
 	markActiveAgent();
 }
 function pollLog() {
