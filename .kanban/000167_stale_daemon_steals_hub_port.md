@@ -1,7 +1,7 @@
 ---
 name: "fix: pre-#165 hub-aware worktree daemons still steal the port on restart"
 priority: "medium"
-state: "doing"
+state: "live-testing"
 worktree: "fix/167-stale-daemon-steals-hub-port"
 issuer: "#165"
 complexity: "moderate"
@@ -36,5 +36,32 @@ Either the production daemon can reclaim/preempt the port from a worktree-rooted
 
 ## Decision (user, 2026-10-12)
 One-time manual hygiene, not a port-reclaim follow-up. The task's code change is to document the cleanup (README or the #165 notes): kill any pre-#165 hub-aware worktree daemons once; new worktree daemons run post-#165 code and self-exclude, so the residue does not recur. The PM killed the leaked pre-fix daemons on this machine today.
+
+## Notes (Developer, 2026-10-12)
+
+Commit b823888 on fix/167-stale-daemon-steals-hub-port. Doc-only change in the chosen README place (the #165 task file is done, so its Notes are not edited).
+
+- README.md Web dashboard section, after the candidacy-restriction paragraph: new paragraph states that both checks (stand-down, self-reap) run inside each daemon's own code, so a pre-change worktree daemon still wins the election and holds the port; after upgrade, kill old worktree daemons one time with `pgrep -af orchestrator.ts` and kill each process whose `--root` contains `.worktrees` (example: `pkill -f 'orchestrator.ts --root .*/\.worktrees'`; the pattern does not match a daemon at the project root). New worktree daemons run the current code and exclude themselves, so the residue does not recur.
+- Pattern verified against a fixture of the two command-line shapes: matches the worktree-rooted daemon, not the production one. Live check: `pgrep -af 'orchestrator\.ts --root .*/\.worktrees'` matches nothing on this machine (the PM killed the leaked pre-fix daemons today); the only daemon left is the production one, correctly not matched. No `pkill` was run by the developer.
+- All five suites pass (README is an unmapped path in test:changed, so the full suite ran).
+
+Assumptions (confirm or correct):
+- README is the single documentation place; the #165 task Notes stay untouched.
+- The `pkill -f` example is safe for users: it matches only daemons whose `--root` is under a `.worktrees` path, never the production daemon at a project root.
+
+## Notes (Reviewer, 2026-10-12)
+
+Reviewed b823888 (one paragraph in README.md, Web dashboard section). No fixes made.
+
+- Acceptance met: residue accepted, one-time hygiene step documented in the chosen README place. Verified in code that the claims hold: both #165 checks run inside the daemon's own code (stand-down: hub.ts election, never races for worktree roots; self-reap: orchestrator.ts, at startup and on every sweep before acquireLock). Task #165 is done, so its Notes are correctly not edited.
+- Pattern safety re-verified live: the production daemon runs as `node .../extensions/se-llm-team/src/orchestrator.ts --root /home/phamba/repos/se-llm-team`; `pgrep -af 'orchestrator\.ts --root .*/\.worktrees'` does not match it (exit 1), and the shell wrapper carrying the pattern text is not matched either. The pattern matches the worktree daemon shape (`--root <repo>/.worktrees/<name>`).
+- Assumptions confirmed: README is the single doc place; the `pkill -f` example only matches `--root` paths containing `/.worktrees`. Known edge (not fixed): a project root dir named like `.worktrees-main` would match; the same edge applies to the plain `pgrep` instruction text, and the layout is unrealistic, so the example stands.
+- Tests: the diff touches only README.md; no test parses the repo README (tests only write README fixtures in scratch roots), so the full-suite run claim is consistent.
+
+## Notes (Merger, 2026-10-12)
+
+- Step 1: base branch resolved as main (root checkout). Merged main into fix/167-stale-daemon-steals-hub-port in the worktree: already up to date, no conflicts, so test suites skipped per pipeline rule.
+- Step 2: base branch re-resolved as main. Merged fix/167-stale-daemon-steals-hub-port into main in the project root: fast-forward 3149f65..b823888, README.md +2 lines, clean, no conflicts.
+- The live test runs on the merged commit b823888 on the root checkout.
 
 # Open questions

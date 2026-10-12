@@ -1,8 +1,8 @@
 ---
 name: "fix: live agent elapsed time ticks every second between log records"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "fix/169-live-duration-ticks"
 issuer: "user"
 complexity: "simple"
 shortName: "live-duration-ticks"
@@ -27,4 +27,14 @@ logStats computes duration as the last record timestamp minus the first, memoize
 
 # Notes
 
+- Implemented in worktree fix/169-live-duration-ticks, commit 2dd1cec.
+- src/webui.ts agentHistory: takes Date.now() once per /api/tasks request, and the live entry's duration is now Math.max(0, now - stats.first) when the parsed first timestamp exists, otherwise the parsed value. Non-live entries keep the parsed last - first. The sort still uses the parsed first via start, and tokens stay record-driven.
+- Verified agentRowSig keys on role/run/status/handle only, so the client's syncAgentStats keeps updating the stats line in place and the .spin node survives while the now-based duration ticks each 1s poll.
+- src/webui.test.ts: the 000120 live-entry fixture now uses relative timestamps (ISO session record and epoch-ms turn_end kept for the ISO/epoch-ms coverage) and asserts duration >= 600000 for the live developer.1 run; a new finished-run fixture (live-tester.1, status ok) asserts duration stays the parsed 5000. All five test suites pass (kanban, orchestrator, webui, extension, index).
+
 # Open questions
+
+Assumptions:
+- Scope is the task-detail card's agent history only; subagent transcript durations in the log pane (agentLogPayload sub=list) stay last - first, they are finished or short-lived sidechains and the spec does not ask for them.
+- A live run whose log has no parseable first timestamp keeps rendering no duration (parsed null stays null).
+- now is server-side payload-build time; a clock skew where the agent wrote a future first timestamp clamps to 0 instead of a negative duration.
