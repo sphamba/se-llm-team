@@ -150,8 +150,46 @@ const heldRow = (await (await fetch(`${base}/api/tasks`)).json()).find((t) => t.
 assert.equal(heldRow.blockedBy, `#${parseInt(task.file, 10)}`, "the blockedBy attribute serves with the payload");
 rmSync(join(root, ".kanban", held.file)); // the daemon section below expects a one-task board
 
+// 000134 webui reload: the hub references the webui functions through a dynamically imported
+// module and re-imports it when the file's mtime changes, so a browser reload serves edited
+// page and handler code without a daemon restart; the hub's own state (registry, heartbeats,
+// election) stays in the running process, and hub.ts itself still needs a restart by design
+const reloadHome = mkdtempSync(join(tmpdir(), "webui-reload-"));
+writeFileSync(join(reloadHome, "package.json"), JSON.stringify({ type: "module" })); // the stub's dir needs an esm scope
+const stubPath = join(reloadHome, "stub-webui.ts");
+const stubPage = (marker: string) =>
+	`export const PAGE = "<!doctype html><title>stub ${marker}</title>";\nexport const taskPayload = (root) => [];\nexport const agentLogPayload = (root, q) => null;\n`;
+const touch = (file: string, seconds: number) => utimesSync(file, seconds, seconds);
+writeFileSync(stubPath, stubPage("one"));
+touch(stubPath, Date.now() / 1000 - 100);
+const reloader = await startHub({ name: "webui-reload", root, host: "localhost", port: 0, webuiPath: stubPath });
+assert.ok(reloader, "hub starts pointing at a stub webui module");
+const reloadBase = `http://localhost:${reloader.port}`;
+assert.ok((await (await fetch(`${reloadBase}/`)).text()).includes("stub one"), "the hub serves the stub webui page");
+writeFileSync(stubPath, stubPage("two"));
+touch(stubPath, Date.now() / 1000 - 95);
+const reloaded = await (await fetch(`${reloadBase}/`)).text();
+assert.ok(reloaded.includes("stub two"), "a browser reload serves the edited webui page without a daemon restart");
+assert.ok(!reloaded.includes("stub one"), "the stale page is gone after the reload");
+const kept = await (await fetch(`${reloadBase}/api/projects`)).json();
+assert.equal(kept.length, 1, "the hub keeps serving after a reload and its registry entry survives");
+assert.equal(kept[0].root, root);
+assert.equal((await fetch(`${reloadBase}/api/tasks`)).status, 200, "the api keeps answering through the reloaded module");
+reloader.close();
+rmSync(reloadHome, { recursive: true, force: true });
+
+// the real hub keeps serving after a webui reload too: an mtime bump (a branch switch bumps it)
+// makes the loader re-import the real module graph with a fresh query, page and api stay up
+const realWebui = fileURLToPath(new URL("./webui.ts", import.meta.url));
+const was = statSync(realWebui).mtime;
+utimesSync(realWebui, new Date(was.getTime() + 1000), new Date(was.getTime() + 1000));
+assert.equal((await fetch(`${base}/`)).status, 200, "the hub keeps serving the real page after a webui reload");
+assert.equal((await fetch(`${base}/api/tasks`)).status, 200, "the hub keeps serving the real api after a webui reload");
+
 // GET / mentions all 10 state names; other paths and methods are 404
-const page = await (await fetch(`${base}/`)).text();
+const pageRes = await fetch(`${base}/`);
+assert.equal(pageRes.headers.get("cache-control"), "no-cache", "the page serves with a no-cache header so a browser reload re-fetches");
+const page = await pageRes.text();
 assert.doesNotThrow(() => new Function(page.match(/<script>([\s\S]*?)<\/script>/)![1]), "the served client script parses");
 assert.ok(page.includes("Software Engineering LLM Team"), "page shows the new title");
 assert.ok(page.includes('id="theme"'), "page has the theme toggle");

@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { pidAlive } from "./pid.ts";
-import { agentLogPayload, PAGE, taskPayload } from "./webui.ts";
 
 // Hub backend: daemons register on spawn, the hub is elected by a lock race, the registry is
 // one hub-written file, failover re-elects on hub death, and only the hub serves the ui.
@@ -25,7 +25,40 @@ export interface HubOptions {
 	log?: (message: string) => void;
 	healthMs?: number; // heartbeat + failover poll + hub reap cadence
 	staleMs?: number; // registry age-out for silent entries
+	webuiPath?: string; // the reloadable webui module; defaults to the sibling webui.ts
 }
+
+type WebuiModule = typeof import("./webui.ts");
+const DEFAULT_WEBUI_PATH = fileURLToPath(new URL("./webui.ts", import.meta.url));
+
+// The webui module (page, rendering, payload builders) reloads when its file changes: node
+// cache-busts the dynamic import with the mtime as the version query, so a browser reload
+// serves the edited code without a daemon restart. The hub's registry, heartbeats and election
+// stay in this process; only the request handlers swap. A vanished or unparseable file serves
+// the last good module, so an edit mid-write never blanks the ui. hub.ts itself still needs a
+// daemon restart to reload (upgrade path: an out-of-process webui child).
+const webuiLoader = (path: string): (() => Promise<WebuiModule>) => {
+	let mod: WebuiModule | undefined;
+	let version = -1;
+	return async () => {
+		let mtime = -1;
+		try {
+			mtime = statSync(path).mtimeMs;
+		} catch {
+			// the file vanished: serve the last good module
+		}
+		if (mtime !== -1 && (mod === undefined || mtime !== version)) {
+			try {
+				mod = await import(`${pathToFileURL(path).href}?v=${mtime}`);
+				version = mtime;
+			} catch {
+				// an edit mid-write or a broken file: serve the last good module
+			}
+		}
+		if (!mod) throw new Error(`webui module unavailable: ${path}`);
+		return mod;
+	};
+};
 
 const REGISTRY_FILE = "se-llm-team-hub.json";
 const LOCK_FILE = "se-llm-team-hub.lock";
@@ -149,6 +182,7 @@ async function route(
 	opts: HubOptions,
 	entries: Map<string, HubEntry>,
 	flush: () => void,
+	webui: () => Promise<WebuiModule>,
 	req: IncomingMessage,
 	res: ServerResponse,
 ): Promise<void> {
@@ -160,7 +194,9 @@ async function route(
 		res.writeHead(200, { "content-type": "text/plain; charset=utf-8", connection: "close" });
 		res.end("ok");
 	} else if (req.method === "GET" && path === "/") {
-		res.writeHead(200, { "content-type": "text/html; charset=utf-8", connection: "close" });
+		const { PAGE } = await webui();
+		// no-cache: a browser reload re-fetches the page instead of serving a stale one
+		res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache", connection: "close" });
 		res.end(PAGE);
 	} else if (req.method === "GET" && path === "/api/projects") {
 		json(res, [...entries.values()]);
@@ -169,11 +205,11 @@ async function route(
 		if (!entry) {
 			res.writeHead(404).end(); // unknown projects are rejected
 		} else {
-			json(res, taskPayload(entry.root));
+			json(res, (await webui()).taskPayload(entry.root));
 		}
 	} else if (req.method === "GET" && path === "/api/agent-log") {
 		const entry = resolveEntry(entries, project);
-		const payload = entry ? agentLogPayload(entry.root, url.searchParams) : null;
+		const payload = entry ? (await webui()).agentLogPayload(entry.root, url.searchParams) : null;
 		if (!payload) {
 			res.writeHead(404).end();
 		} else {
@@ -239,12 +275,13 @@ export async function startHub(opts: HubOptions): Promise<{ port: number; close:
 	for (const e of readHubRegistry()) if (e.root && now - e.lastHeartbeat <= staleMs) entries.set(e.root, e);
 	const self: HubEntry = { name: opts.name, root: opts.root, branch: currentBranch(opts.root), start: now, lastHeartbeat: now };
 	entries.set(opts.root, self);
+	const webui = webuiLoader(opts.webuiPath ?? DEFAULT_WEBUI_PATH);
 	const flush = () => writeRegistry([...entries.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)));
 	flush();
 
 	const server = createServer((req, res) => {
 		res.on("error", () => {}); // client aborted mid-response
-		route(opts, entries, flush, req, res).catch(() => {
+		route(opts, entries, flush, webui, req, res).catch(() => {
 			try {
 				res.writeHead(500, { "content-type": "text/plain" });
 				res.end("hub error");
