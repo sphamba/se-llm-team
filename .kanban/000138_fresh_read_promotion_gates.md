@@ -1,9 +1,9 @@
 ---
 name: "fix: promotion re-checks the gates on a fresh task read"
 priority: "medium"
-state: "backlog"
-worktree: ""
-blockedBy: "#137"
+state: "to-merge"
+worktree: "fix/138-fresh-read-promotion-gates"
+blockedBy: ""
 issuer: "#133"
 complexity: "moderate"
 shortName: "fresh-read-promotion-gates"
@@ -42,3 +42,13 @@ In `src/orchestrator.ts`, `rescan` and `poll` take one `listAll` board snapshot,
 - Do the same fresh read in the done-ref drop pass (`dropDoneBlockers`) so a newly added blocker is not dropped or missed.
 
 # Notes
+
+- Fixed in worktree commit 8d2eb82. `promoteBacklog` now re-reads the board (`listAll`) and re-checks the three gates (not conflicted, state still backlog, empty openQuestions, no undone blockedBy ref) just before `setState`. The snapshot gates stay as a cheap pre-filter. A task deleted mid-sweep skips. The `promoting` log line now fires only when the fresh re-check passes.
+- Both call sites are covered: `rescan` and `poll` share `promoteBacklog`.
+- `dropDoneBlockers` stays on the snapshot read on purpose: it is board hygiene, not a promotion gate (the spec scope is the promotion gates), and its stale case only defers a ref drop to the next sweep. Reviewer may flag it if wanted.
+- Regression test part AR in `src/orchestrator.test.ts`: a mid-sweep done rewrite, an openQuestions edit and a blockedBy ref all survive a promotion pass on a stale snapshot, and a clean candidate still promotes. All four suites pass (orchestrator, kanban, webui, extension).
+- Review of 8d2eb82 (2026-10-12): the promotion fix is correct. `promoteBacklog` re-reads the board per candidate and re-checks the gates on fresh data, both call sites share the pass, and part AR covers the three gate overrides plus a clean promote. All four suites pass on my run.
+- Found one gap against the Suggested fix: `dropDoneBlockers` wrote a kept list derived from the stale snapshot. `updateAttrs` writes that value over the fresh file, so a ref the PM added mid-sweep was erased, and the promotion gate then saw no blocker and promoted. The note claim that the stale case "only defers a ref drop" was not complete. Fixed in worktree commit d657959: the kept/dropped split now comes from a fresh task read just before the write. The snapshot `blockedBy` stays as a cheap pre-filter, and a vanished or conflicted task skips. Part AR now also covers a mid-sweep added ref and a mid-sweep removed ref. All four suites pass.
+- State set back to to-review for a re-review of d657959.
+- Review of d657959 (2026-10-12): correct against the Specs. `promoteBacklog` re-reads the board per candidate and re-checks the gates (vanished, not conflicted, state still backlog, empty openQuestions, no undone blockedBy ref) on the fresh copy just before setState. `dropDoneBlockers` computes the kept and dropped lists from a fresh task read just before the write. Both call sites (rescan, poll) share the passes. Part AR covers the three promotion overrides, the clean promote, the mid-sweep added ref and the mid-sweep removed ref. All five check suites pass on my run (orchestrator, kanban, webui, extension, index). No fixes made.
+- Two cosmetic comment notes, left as is: the dropDoneBlockers doc comment ends with a dangling possessive ("over the snapshot's"), and the poll call site comment does not mention the fresh re-read (the snapshot is the input; the fresh read follows).
