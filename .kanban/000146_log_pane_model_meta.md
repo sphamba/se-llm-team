@@ -1,9 +1,9 @@
 ---
 name: "feat: log pane shows the model name and thinking level above the log"
 priority: "low"
-state: "backlog"
-worktree: ""
-blockedBy: "#144"
+state: "doing"
+worktree: "feat/146-log-pane-model-meta"
+blockedBy: ""
 issuer: "user"
 complexity: "simple"
 shortName: "log-pane-model-meta"
