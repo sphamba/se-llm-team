@@ -155,20 +155,59 @@ for (let i = 0; i < 5; i++) {
 	created.push(createTask(raceRoot, { name: `feat: race ${i}`, summary: "s" }).file);
 }
 assert.equal(new Set(created).size, created.length);
-// a rival create landed first: its file already holds the next number under a different slug
-writeFileSync(join(raceRoot, ".kanban", "000006_other_creator.md"), '---\nname: "other"\n---\n');
-const tr = createTask(raceRoot, { name: "feat: racer", summary: "s" });
-assert.equal(tr.file, "000007_racer.md"); // bumped to the next free number
-assert.match(readFileSync(join(raceRoot, ".kanban", "000006_other_creator.md"), "utf8"), /other/); // not overwritten
-created.push(tr.file);
+// the duplicate-number net (drop-and-retry after the write) only fires when a rival file
+// lands inside the scan/write window, after the max scan: a preload hooks the racer's own
+// 000006 write and injects the rival there. The test process's fs bindings are already
+// resolved, so the interception runs in a child (same pattern as the concurrency block).
+const rivalFile = join(raceRoot, ".kanban", "000006_other_creator.md");
+const preload = join(raceRoot, "preload.cjs");
+writeFileSync(
+	preload,
+	`const fs = require("node:fs");
+const orig = fs.writeFileSync;
+const target = ${JSON.stringify(join(raceRoot, ".kanban", "000006_racer.md"))};
+fs.writeFileSync = function (p, ...args) {
+	if (String(p) === target && !globalThis.__rivalInjected) {
+		globalThis.__rivalInjected = true;
+		orig.call(fs, ${JSON.stringify(rivalFile)}, ${JSON.stringify('---\nname: "other"\n---\n')});
+	}
+	return orig.call(fs, p, ...args);
+};`,
+);
+const racerMod = JSON.stringify(pathToFileURL(join(import.meta.dirname, "kanban.ts")).href);
+const racerOut = await new Promise((resolve, reject) => {
+	let stdout = "";
+	let err = "";
+	const child = spawn(
+		process.execPath,
+		[
+			"--require",
+			preload,
+			"-e",
+			`import(${racerMod}).then(({ createTask }) => { const t = createTask(${JSON.stringify(raceRoot)}, { name: "feat: racer", summary: "s" }); process.stdout.write(JSON.stringify({ file: t.file, injected: globalThis.__rivalInjected === true })); })`,
+		],
+		{ stdio: ["ignore", "pipe", "pipe"] },
+	);
+	child.stdout.on("data", (d) => (stdout += d));
+	child.stderr.on("data", (d) => (err += d));
+	child.on("close", (code) => (code === 0 ? resolve(stdout) : reject(new Error(`racer exited ${code}: ${err}`))));
+});
+const racer = JSON.parse(racerOut);
+assert.ok(racer.injected); // the rival was written after the max scan, inside the window
+assert.equal(racer.file, "000007_racer.md"); // first attempt unlinked, retried past the rival
+assert.ok(!existsSync(join(raceRoot, ".kanban", "000006_racer.md"))); // the dropped attempt left nothing
+assert.match(readFileSync(rivalFile, "utf8"), /other/); // the rival survived untouched
+created.push(racer.file);
 assert.equal(new Set(created).size, created.length);
 const raceNums = taskFiles(raceRoot).map(taskNum);
 assert.equal(new Set(raceNums).size, raceNums.length); // never two files with one number, hand-written ones included
 rmSync(raceRoot, { recursive: true, force: true });
 
 // simultaneous creators racing through repeated creates: the wx flag only guards the
-// exact path, so createTask holds a lock file across scan+write and retries on a
-// same-number clash with a hand-written file
+// exact path, so createTask holds a lock file across scan+write; the lock serializes
+// the allocation and every slug differs, so no duplicate number can arise here: this
+// block proves unique numbers under contention, while the net itself is exercised only
+// by the race block above
 const concRoot = mkdtempSync(join(tmpdir(), "kanban-conc-"));
 const mod = JSON.stringify(pathToFileURL(join(import.meta.dirname, "kanban.ts")).href);
 const creator = `import(${mod}).then(({ createTask }) => { for (let i = 0; i < 20; i++) createTask(${JSON.stringify(concRoot)}, { name: "feat: concurrent " + process.pid + " " + i, summary: "s" }); })`;
