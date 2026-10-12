@@ -2,7 +2,7 @@
 name: "fix: code blocks stay monospace; buttons use Inter"
 blockedBy: ""
 priority: "low"
-state: "reviewing"
+state: "to-merge"
 worktree: "fix/147-inter-font-code-buttons"
 issuer: "#141"
 complexity: "simple"
@@ -26,7 +26,20 @@ Tests: extend the flat assertion script - the PAGE ships the code/pre monospace 
 - Implemented on the worktree, commit a6a07ec. src/webui.ts: added `button { font-family: inherit; }` right after the body rule, and `#m-log-text code, #m-log-text pre, #m-body code, #m-body pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }` placed after `#m-log-text pre { font: inherit; }` so it wins the cascade and fenced code in the log pane renders monospace, not Inter. Nothing else in the page changed (markdown rendering, log streaming, escaping untouched).
 - src/webui.test.ts: the old no-monospace check `logCss.includes("system-ui") && !logCss.includes("monospace")` was block-scoped already, so it still passed; tightened it to match the `font-family` declaration inside the `#m-log-text { ... }` block so the scope is explicit. Added assertions: the PAGE ships the monospace rule verbatim, the monospace rule sits after the `font: inherit` shorthand (cascade-order guard), and `button { font-family: inherit; }` ships. The `font-family: Inter, system-ui...` count-of-2 assertion is unchanged and passes.
 - Full suite green: kanban, orchestrator, webui, extension, index.
+- Review (000147, worktree commit a6a07ec): no fixes needed. Verified against the Specs: the monospace rule at src/webui.ts:1155 sits after `#m-log-text pre { font: inherit; }` at :1133 with equal specificity, so it wins the cascade and fenced log code renders monospace, not Inter; `button { font-family: inherit; }` at :1059 sets font-family only, so size/weight/line-height stay unchanged; diff touches only webui.ts CSS and webui.test.ts assertions. Both developer assumptions resolved against the Specs: the mono stack is the spec's own example used verbatim, and the global button rule is the spec's own prescription (the .tab project buttons also pick up Inter, consistent with "buttons use Inter"). Full suite re-run green.
+- Live test (worktree fix/147-inter-font-code-buttons, commit a6a07ec): one issue found.
+- Method: no unit suite was run, that is the developer and reviewer gate. A hub daemon imported the worktree src/hub.ts and served the worktree src/webui.ts PAGE on a test port, pointed at the real board and the real .kanban/.logs. The hub registry lived in a throwaway HOME, so the production hub on 4242 kept running untouched. Chromium (Playwright) loaded the production hub at 4242 as the pre-fix baseline and the worktree build at 4673. Flows: load the board, toggle the theme, expand collapsed columns, open task #141 (inline code) and task #147, click the Developer agent card, scroll the log pane to the top until a history chunk with a real fenced block loaded, expand a collapsed Thinking block, click the project tabs, and close the modal.
+- Passed, measured computed styles in Chromium:
+  - Inline and fenced code in the task body: #m-body code and #m-body pre = ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace at 12px. The old UI measured UA monospace for #m-body code.
+  - Fenced code in the log pane: a real fenced block in the #147 developer log renders #m-log-text pre code and its parent pre in the mono stack at 10px after 13 scroll-to-top history loads. The old UI measured Inter for the parent pre and UA monospace for the inner code.
+  - Buttons use Inter: #theme, .toggle, .tab, #m-close, .agent-card and .agent-sub = Inter, system-ui, ... in the closed and open modal states. The old UI measured Arial. Size, weight and line height stay at 12px / 400 / normal, so only the family moved.
+  - body and #m-log-text keep Inter first (exactly two declarations), document.fonts.check("12px Inter") is true, no page error and no failed request in any flow, the theme toggle flips Dark and Light, the tabs switch and return, and the modal closes.
+- Issue:
+  - The log-pane pre selector is broader than code blocks. #m-log-text pre also matches the Thinking wrapper pre, which holds the md() rendering of the thinking body, so prose inside an expanded Thinking block now renders monospace (details.lg-think > pre p = mono stack, Inter before). It also matches the raw tool-argument and tool-output blocks (pre.lg-args, pre.lg-out), which were Inter before. The #141 spec intended thinking bodies to render markdown in the page's Inter stack. The scope of "code blocks stay monospace" does not cover that prose. A task went to the Project manager.
+- Assumptions and contradictions:
+  - The Specs repeat the #141 measurement "#m-log-text pre = Inter (fenced code blocks render as pre via md())". On the real logs a markdown fenced block is pre > code, while a plain pre in the log pane is the Thinking wrapper (md output) or a tool args/output block. #m-body has no such wrapper, so there pre is only a fenced block. The test measured both forms, and the discrepancy is the issue above. This contradicts the task assumption that a log-pane pre is a fenced code block.
+  - No task body on the board has a real fenced block, so #m-body pre was exercised with a temporary element in the real open task modal. Writing a test task file would touch the shared .kanban board.
+  - The fenced-block check needed history: the log pane opens on the tail chunk, so the test scrolled to the top repeatedly, which is a normal user gesture.
 
 # Open questions
-- Assumption: the monospace stack `ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace` (from the spec example) is acceptable; no user-specified font list was given.
-- Assumption: the button rule is global (`button { font-family: inherit; }`), so every button on the page including .tab picks up Inter; the spec listed #theme, #m-close, .agent-card, .toggle as the measured cases.
+- Should the log pane's Thinking prose and the tool argument/output blocks stay monospace, or should only inline code and fenced code be monospace? The new rule makes the whole Thinking body monospace, which is more than the Summary asked for.
