@@ -1,8 +1,9 @@
 ---
 name: "fix: agent cards order by in-log start time, not sweep mtime"
+complexity: "simple"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/139-agent-cards-order"
 ---
 
 # Summary
