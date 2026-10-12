@@ -246,12 +246,13 @@ const issuedCard = cardHtml({ file: "000002_b.md", name: "b", priority: "low", i
 assert.ok(issuedCard.includes('<div class="name issued">'), "a task-issued card dims its name");
 assert.ok(issuedCard.includes('<span class="chip issuer">#42</span>'), "a task-issued card carries a small #num badge");
 assert.ok(page.includes(".chip.issuer {") && page.includes(".issued {"), "the differentiation classes ship in the page css");
-// complexity badge on cards: a quiet chip next to the priority chip, default moderate when absent
+// complexity badge on cards: a per-value color chip next to the priority chip, default moderate when absent
 const cxCard = cardHtml({ file: "000003_c.md", name: "c", priority: "medium", complexity: "complex" }, "doing");
-assert.ok(cxCard.includes('<span class="chip p-medium">medium</span><span class="chip cx">complex</span>'), "the complexity badge sits next to the priority badge");
-assert.ok(cardHtml({ file: "000004_d.md", name: "d", priority: "high", complexity: "<x>" }, "doing").includes('<span class="chip cx">&lt;x&gt;</span>'), "the complexity badge is escaped");
-assert.ok(userCard.includes('<span class="chip cx">moderate</span>'), "an absent complexity renders as moderate");
-assert.ok(page.includes(".chip.cx {"), "the quiet complexity chip style ships in the page css");
+assert.ok(cxCard.includes('<span class="chip p-medium">medium</span><span class="chip cx cx-complex">complex</span>'), "the complexity badge carries its value class next to the priority badge");
+assert.ok(cardHtml({ file: "000004_d.md", name: "d", priority: "high", complexity: "<x>" }, "doing").includes('<span class="chip cx cx-&lt;x&gt;">&lt;x&gt;</span>'), "the complexity badge is escaped");
+assert.ok(userCard.includes('<span class="chip cx cx-moderate">moderate</span>'), "an absent complexity renders as moderate");
+assert.ok(page.includes(".chip.cx {"), "the base complexity chip style ships in the page css as the fallback");
+assert.ok(page.includes(".chip.cx-simple {") && page.includes(".chip.cx-moderate {") && page.includes(".chip.cx-complex {"), "the per-value complexity chip styles ship in the page css");
 
 // relation lines: one dashed curve per stored relation between rendered cards, running from the
 // blocked task's card to the blocker's card, so the dashes flow blocked -> blocker. A done
@@ -496,8 +497,8 @@ assert.ok(page.includes('id="m-agent"'), "modal has the agent area");
 assert.ok(!page.includes("<div><span>name</span>"), "the detail card drops the name attribute row the title already shows");
 assert.ok(page.includes('"<div><span>issuer</span>" + esc(t.issuer || "user")'), "the detail card shows the issuer row");
 assert.ok(
-	page.includes("\"<div><span>complexity</span><span class='chip cx'>\" + esc(t.complexity || \"moderate\")"),
-	"the detail card gives the complexity badge its own labeled row",
+	page.includes("\"<div><span>complexity</span><span class='chip cx cx-\" + esc(t.complexity || \"moderate\") + \"'>\""),
+	"the detail card complexity row carries the value class",
 );
 assert.ok(
 	page.includes("\"<div><span>priority</span><span class='chip p-\" + esc(t.priority) + \"'>\" + esc(t.priority) + \"</span></div>\" +"),

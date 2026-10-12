@@ -596,10 +596,11 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 // Ayu Dark palette (ayu-theme/ayu-colors), written once and applied twice: explicit choice via data-theme, browser default via media query
 const DARK_VARS = `
 :root[data-theme="dark"] { --bg: #10141c; --fg: #bfbdb6; --panel: #141821; --border: #1b1f29; --heading: #bfbdb6; --muted: #5a6673; --faint: #5a6673; --soft: #bfbdb6; --hover: #1b1f29; --overlay: rgba(0, 0, 0, .6); --code-bg: #010102; --link: #e6b450;
---low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 180, 84, .15); --medium-fg: #ffb454; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(217, 87, 87, .15); --critical-fg: #d95757; }
+/* 000129: medium/critical hues widened (yellow / strong red) so the priority chips read apart; -bg tints match their fg */
+--low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252; }
 :root[data-theme="dark"] #theme { color: var(--link); border-color: var(--link); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #10141c; --fg: #bfbdb6; --panel: #141821; --border: #1b1f29; --heading: #bfbdb6; --muted: #5a6673; --faint: #5a6673; --soft: #bfbdb6; --hover: #1b1f29; --overlay: rgba(0, 0, 0, .6); --code-bg: #010102; --link: #e6b450;
---low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 180, 84, .15); --medium-fg: #ffb454; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(217, 87, 87, .15); --critical-fg: #d95757; }
+--low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252; }
 :root:not([data-theme="light"]) #theme { color: var(--link); border-color: var(--link); } }
 `;
 
@@ -722,7 +723,9 @@ export function cardHtml(t: Task, st: string) {
 		esc(t.priority) +
 		'">' +
 		esc(t.priority) +
-		'</span><span class="chip cx">' +
+		'</span><span class="chip cx cx-' +
+		esc(t.complexity || "moderate") +
+		'">' +
 		esc(t.complexity || "moderate") +
 		'</span><span class="chip' +
 		(issued ? " issuer" : "") +
@@ -896,9 +899,9 @@ export const PAGE = `<!doctype html>
 <title>Software Engineering LLM Team</title>
 <style>
 * { box-sizing: border-box; }
-/* Ayu Light palette (ayu-theme/ayu-colors) */
+/* Ayu Light palette (ayu-theme/ayu-colors); 000129: medium moved to a deeper yellow so the priority chips read apart */
 :root { --bg: #fcfcfc; --fg: #5c6166; --panel: #ffffff; --border: rgba(107, 125, 143, .12); --heading: #5c6166; --muted: #adaeb1; --faint: #adaeb1; --soft: #5c6166; --hover: rgba(130, 142, 159, .1); --overlay: rgba(15, 23, 42, .45); --code-bg: #ebeef0; --link: #f29718;
---low-bg: rgba(134, 179, 0, .15); --low-fg: #86b300; --medium-bg: rgba(235, 164, 0, .15); --medium-fg: #eba400; --high-bg: rgba(250, 133, 50, .15); --high-fg: #fa8532; --critical-bg: rgba(230, 80, 80, .15); --critical-fg: #e65050; }
+--low-bg: rgba(134, 179, 0, .15); --low-fg: #86b300; --medium-bg: rgba(201, 151, 0, .15); --medium-fg: #c99700; --high-bg: rgba(250, 133, 50, .15); --high-fg: #fa8532; --critical-bg: rgba(230, 80, 80, .15); --critical-fg: #e65050; }
 ${DARK_VARS}
 html, body { height: 100%; }
 body { display: flex; flex-direction: column; margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
@@ -947,6 +950,10 @@ none so the card clicks pass through */
 .p-medium { background: var(--medium-bg); color: var(--medium-fg); }
 .p-high { background: var(--high-bg); color: var(--high-fg); }
 .p-critical { background: var(--critical-bg); color: var(--critical-fg); }
+/* 000129: per-value complexity chips reuse the priority palette; .chip.cx above stays as the fallback for an unknown value */
+.chip.cx-simple { background: var(--low-bg); color: var(--low-fg); }
+.chip.cx-moderate { background: var(--medium-bg); color: var(--medium-fg); }
+.chip.cx-complex { background: var(--critical-bg); color: var(--critical-fg); }
 .empty { font-size: 12px; color: var(--faint); }
 .toggle { display: block; width: 100%; margin-top: 2px; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 .toggle:hover { background: var(--hover); }
@@ -1187,7 +1194,7 @@ function attrsHtml(t) {
 	return "<div><span>number</span>" + numLinkHtml(t.file) + "</div>" +
 		"<div><span>file</span>" + esc(t.file) + "</div>" +
 		"<div><span>priority</span><span class='chip p-" + esc(t.priority) + "'>" + esc(t.priority) + "</span></div>" +
-		"<div><span>complexity</span><span class='chip cx'>" + esc(t.complexity || "moderate") + "</span></div>" +
+		"<div><span>complexity</span><span class='chip cx cx-" + esc(t.complexity || "moderate") + "'>" + esc(t.complexity || "moderate") + "</span></div>" +
 		"<div><span>state</span>" + esc(t.state) + "</div>" +
 		"<div><span>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>" +
 		"<div><span>issuer</span>" + esc(t.issuer || "user") + "</div>" +
