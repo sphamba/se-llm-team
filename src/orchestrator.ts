@@ -1051,14 +1051,25 @@ function blockedByUndone(tasks: Task[], task: Task): boolean {
 // its ref from every task that listed it, in the same sweep (the PM used to maintain the list
 // by hand). Attribute-only rewrite through updateAttrs: nothing else is touched, and a task
 // with nothing to drop stays byte-for-byte. Ghost or malformed refs stay: their blocker is
-// not done
-function dropDoneBlockers(root: string, tasks: Task[]): void {
+// not done. The kept list is recomputed from a fresh read just before the write: the snapshot
+// predates this pass, so a ref the PM added or removed mid-sweep must win over the snapshot's
+export function dropDoneBlockers(root: string, tasks: Task[]): void {
 	// a conflicted file parses bogus state values: never proof that a blocker is done
 	const done = new Set(tasks.filter((t) => t.state === "done" && !t.conflicted).map((t) => sortNum(t.file)));
 	for (const task of tasks) {
+		// snapshot blockedBy as a cheap pre-filter: a task the snapshot shows without a done ref
+		// gets its drop, if any, on the next sweep that sees it (a mid-sweep done edit only defers)
 		if (!task.blockedBy || task.conflicted) continue;
+		const hasDoneRef = task.blockedBy.split(",").some((ref) => {
+			const num = parseInt(ref.trim().replace(/^#/, ""), 10);
+			return num > 0 && done.has(num);
+		});
+		if (!hasDoneRef) continue;
+		// a vanished task is gone; a conflicted file parses bogus values: never rewrite it
+		const current = getTask(root, task.file);
+		if (!current || current.conflicted || !current.blockedBy) continue;
 		const dropped: string[] = [];
-		const kept = task.blockedBy.split(",").map((ref) => ref.trim()).filter((ref) => {
+		const kept = current.blockedBy.split(",").map((ref) => ref.trim()).filter((ref) => {
 			if (!ref) return false;
 			const num = parseInt(ref.replace(/^#/, ""), 10);
 			if (num > 0 && done.has(num)) {
@@ -1069,7 +1080,7 @@ function dropDoneBlockers(root: string, tasks: Task[]): void {
 		});
 		if (!dropped.length) continue;
 		try {
-			updateAttrs(root, task, { blockedBy: kept.join(", ") });
+			updateAttrs(root, current, { blockedBy: kept.join(", ") });
 			log(root, `${task.file}: dropped done blocker ref(s) ${dropped.join(", ")}`);
 		} catch (err) {
 			log(root, `blockedBy update of ${task.file} failed: ${err instanceof Error ? err.message : err}`);

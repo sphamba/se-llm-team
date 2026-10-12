@@ -8,7 +8,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readHubRegistry, startHub } from "./hub.ts";
 import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, updateTask } from "./kanban.ts";
-import { compactFinishedLogs, compactLogLine, loadConfig, nextRunIndex, poll, promoteBacklog, removeTask, waitForBoardCommits } from "./orchestrator.ts";
+import { compactFinishedLogs, compactLogLine, dropDoneBlockers, loadConfig, nextRunIndex, poll, promoteBacklog, removeTask, waitForBoardCommits } from "./orchestrator.ts";
 import { gunzipSync } from "node:zlib";
 import { pidAlive } from "./pid.ts";
 
@@ -2104,5 +2104,22 @@ assert.ok(parseTask(rootAR, victimBlockedAR.file).blockedBy.includes(`#${parseIn
 const cleanAR = createTask(rootAR, { name: "feat: clean promote", summary: "Fresh-read gates", specs: "n/a" });
 promoteBacklog(rootAR, listAll(rootAR));
 assert.equal(parseTask(rootAR, cleanAR.file).state, "to-do", "an unchanged candidate still promotes");
+// dropDoneBlockers re-reads the task before the write: a ref the PM added mid-sweep survives
+// the drop, and a ref the PM removed mid-sweep stays removed
+const doneBlockerAR = createTask(rootAR, { name: "feat: done blocker", summary: "Fresh-read gates", specs: "n/a" });
+setState(rootAR, doneBlockerAR, "done");
+const doneNumAR = `#${parseInt(doneBlockerAR.file, 10)}`;
+const otherBlockerAR = createTask(rootAR, { name: "feat: live blocker", summary: "Fresh-read gates", specs: "n/a" });
+const otherNumAR = `#${parseInt(otherBlockerAR.file, 10)}`;
+const refHolderAR = createTask(rootAR, { name: "feat: ref holder", summary: "Fresh-read gates", specs: "n/a", blockedBy: doneNumAR });
+const refRemoverAR = createTask(rootAR, { name: "feat: ref remover", summary: "Fresh-read gates", specs: "n/a", blockedBy: `${doneNumAR}, ${otherNumAR}` });
+const dropSnapshotAR = listAll(rootAR);
+// the edits land after the snapshot, before the drop pass
+updateTask(rootAR, refHolderAR, { blockedBy: `${doneNumAR}, ${otherNumAR}` });
+updateTask(rootAR, refRemoverAR, { blockedBy: otherNumAR });
+dropDoneBlockers(rootAR, dropSnapshotAR);
+assert.equal(parseTask(rootAR, refHolderAR.file).blockedBy, otherNumAR, "the mid-sweep added ref survives the done-ref drop");
+assert.equal(parseTask(rootAR, refHolderAR.file).blockedBy.includes(doneNumAR), false, "the done ref itself is still dropped");
+assert.equal(parseTask(rootAR, refRemoverAR.file).blockedBy, otherNumAR, "the mid-sweep removed ref stays removed");
 cleanupAll(rootAR);
 console.log("orchestrator.test.ts: ... + fresh-read promotion gates smoke passed");
