@@ -1,7 +1,7 @@
 ---
 name: "fix: orchestrator_start tool description omits the Merger and the new pipeline order"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/161-orchestrator-start-tool-description"
 issuer: "#156"
 complexity: "simple"
@@ -35,5 +35,10 @@ Acceptance:
 
 # Notes
 
+- Rewrote the orchestrator_start description at index.ts:168 (commit c8e7f77): it now names the four roles with their trigger states (Developer/to-do, Reviewer/to-review, one Merger/to-merge, Live-tester/to-live-test on the merged commit), states the review -> merge -> live-test order, and drops the "merges done branches" claim. WebUi and "Exits early" sentences kept as-is.
+- Acceptance: sed -n '168p' matches the contract; kanban.test.ts, orchestrator.test.ts (all smoke parts) and webui.test.ts pass.
+
 # Open questions
+
+- Assumption: no wording review needed on the new sentence beyond the acceptance criteria in the Specs; the "one Merger agent" phrasing reflects sweepToMerge spawning at most one merger per project.
 
