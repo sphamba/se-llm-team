@@ -269,10 +269,11 @@ const same = relationPaths([
 	{ file: "000004_d.md", state: "to-do", blockedBy: "" },
 ], rectOf);
 assert.equal(same.length, 1, "one curve per stored relation");
-assert.ok(same[0].startsWith(`M ${310 + 280} ${midY(rects["000002_b.md"])}`), "same column: the path starts at the blocked card's right edge");
-assert.ok(same[0].endsWith(`${310 + 280} ${midY(rects["000004_d.md"])}`), "same column: both ends sprout from the right sides, the path ends at the blocker's right edge");
+assert.equal(same[0].file, "000002_b.md", "each path is keyed by the blocked task's file, so the hover highlight reaches its lines without re-deriving geometry");
+assert.ok(same[0].d.startsWith(`M ${310 + 280} ${midY(rects["000002_b.md"])}`), "same column: the path starts at the blocked card's right edge");
+assert.ok(same[0].d.endsWith(`${310 + 280} ${midY(rects["000004_d.md"])}`), "same column: both ends sprout from the right sides, the path ends at the blocker's right edge");
 // stacked pair columns share one x: different states at one x still loop out of the right sides
-assert.equal(relationPaths([
+assert.deepEqual(relationPaths([
 	{ file: "000002_b.md", state: "to-do", blockedBy: "#4" },
 	{ file: "000004_d.md", state: "doing", blockedBy: "" },
 ], rectOf)[0], same[0], "a different state at the same x (stacked pair) loops out of the right sides too, never through the cards");
@@ -282,8 +283,8 @@ const cross = relationPaths([
 	{ file: "000003_c.md", state: "to-review", blockedBy: "" },
 ], rectOf);
 assert.equal(cross.length, 2, "multiple blockers draw one curve each");
-assert.ok(cross[0].startsWith(`M 310 ${midY(rects["000002_b.md"])}`) && cross[0].endsWith(`280 ${midY(rects["000001_a.md"])}`), "blocker left of blocked: blocked's left edge to the blocker's right edge");
-assert.ok(cross[1].startsWith(`M ${310 + 280} ${midY(rects["000002_b.md"])}`) && cross[1].endsWith(`620 ${midY(rects["000003_c.md"])}`), "blocker right of blocked: blocked's right edge to the blocker's left edge");
+assert.ok(cross[0].d.startsWith(`M 310 ${midY(rects["000002_b.md"])}`) && cross[0].d.endsWith(`280 ${midY(rects["000001_a.md"])}`), "blocker left of blocked: blocked's left edge to the blocker's right edge");
+assert.ok(cross[1].d.startsWith(`M ${310 + 280} ${midY(rects["000002_b.md"])}`) && cross[1].d.endsWith(`620 ${midY(rects["000003_c.md"])}`), "blocker right of blocked: blocked's right edge to the blocker's left edge");
 assert.equal(relationPaths([
 	{ file: "000002_b.md", state: "to-do", blockedBy: "#3" },
 	{ file: "000003_c.md", state: "done", blockedBy: "" },
@@ -291,6 +292,32 @@ assert.equal(relationPaths([
 assert.equal(relationPaths([{ file: "000002_b.md", state: "to-do", blockedBy: "#9, junk, , " }], rectOf).length, 0, "ghost and unparseable refs draw nothing");
 assert.equal(relationPaths([{ file: "000002_b.md", state: "to-do", blockedBy: "#1" }], (f) => (f === "000001_a.md" ? rects["000001_a.md"] : null)).length, 0, "a ref whose card is not rendered draws nothing, and so does an unrendered blocked card");
 assert.deepEqual(relationPaths([{ file: "000002_b.md", state: "to-do" }], rectOf), [], "an older payload without blockedBy draws nothing");
+
+// 000127: far-apart columns bend the line into an S (the control offsets scale with the span,
+// capped); near pairs and same-column loops keep the fixed bow. The path format is fixed, so the
+// control points parse straight out of the d string
+const parseCurve = (d: string) => d.match(/^M (-?[\d.]+) (-?[\d.]+) C (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+)$/)!.slice(1).map(Number);
+const [sx1, , sc1x, , sc2x, , sx2] = parseCurve(same[0].d);
+assert.equal(sc1x, sx1 + 40, "same-column loops keep the fixed bow");
+assert.equal(sc2x, sx2 + 40, "same-column loops keep the fixed bow");
+const [nx1, , nc1x, , nc2x, , nx2] = parseCurve(cross[0].d);
+assert.equal(nc1x, nx1 - 40, "adjacent columns keep the fixed bow, the small span never triggers the S");
+assert.equal(nc2x, nx2 + 40, "adjacent columns keep the fixed bow, the small span never triggers the S");
+const farRects = { ...rects, "000005_e.md": { x: 1240, y: 0, w: 280, h: 60 }, "000006_f.md": { x: 2000, y: 0, w: 280, h: 60 } };
+const farOf = (f: string) => farRects[f] ?? null;
+const farTasks = (file: string) => [
+	{ file, state: "to-do", blockedBy: "#1" },
+	{ file: "000001_a.md", state: "backlog", blockedBy: "" },
+];
+const [fx1, fy1, fc1x, fc1y, fc2x, fc2y, fx2, fy2] = parseCurve(relationPaths(farTasks("000005_e.md"), farOf)[0].d);
+const farSpan = Math.abs(fx2 - fx1);
+assert.equal(fc1y, fy1, "the S leaves the source card horizontally");
+assert.equal(fc2y, fy2, "the S arrives into the target card horizontally");
+assert.equal(fc1x, fx1 - farSpan * 0.35, "far-apart columns: the near control offset scales with the span, the line bends into an S");
+assert.equal(fc2x, fx2 + farSpan * 0.35, "far-apart columns: the far control scales too, so the S crosses in the middle");
+const capped = parseCurve(relationPaths(farTasks("000006_f.md"), farOf)[0].d);
+assert.equal(capped[2], capped[0] - 480, "an extreme width caps the control offset at 480 so it never overshoots the board");
+assert.equal(capped[4], capped[6] + 480, "an extreme width caps both controls");
 
 // the page runs the tested helpers and ships the overlay wiring
 assert.ok(page.includes(String(numLinkHtml)) && page.includes(String(curve)) && page.includes(String(relationPaths)), "the page ships the tested id-link and relation helpers");
@@ -301,6 +328,14 @@ assert.ok(page.includes('setAttribute("pointer-events", "none")'), "the overlay 
 assert.ok(page.includes("stroke-dasharray: 6 4"), "the relation paths render dashed");
 assert.ok(page.includes("@keyframes dashflow { to { stroke-dashoffset: -10; } }"), "dashes flow along the path, from the blocked task towards the blocker");
 assert.match(page, /@media \(prefers-reduced-motion: reduce\) \{ \.spin \{ animation: none; \} #relations path \{ animation: none; \} \}/, "reduced motion renders the relation paths static");
+const pathRule = page.match(/#relations path \{([^}]*)\}/)?.[1] ?? "";
+const baseOpacity = Number(pathRule.match(/stroke-opacity: ([\d.]+)/)?.[1]);
+assert.ok(baseOpacity > 0 && baseOpacity < 1, "the relation lines draw at a reduced opacity, a subtle hint behind the semi-transparent cards");
+const hotOpacity = Number(page.match(/#relations path\.relations-hot \{ stroke-opacity: ([\d.]+)/)?.[1]);
+assert.ok(hotOpacity > baseOpacity, "hovering a card raises its lines' opacity clearly above the subtle base");
+assert.match(pathRule, /transition: stroke-opacity/, "the opacity change transitions smoothly, the dash animation continues");
+assert.ok(page.includes("el.onmouseenter = () => hotRelations(file, true)") && page.includes("el.onmouseleave = () => hotRelations(file, false)"), "the card hover wires the highlight on mouseenter and reverts on mouseleave");
+assert.ok(page.includes('if (p.dataset.file === file) p.classList.toggle("relations-hot", on)'), "the hover matches paths by the blocked task's file in the dataset, no quote-unsafe selector interpolation");
 assert.ok(page.includes('window.addEventListener("resize", drawRelations)'), "a resize recomputes the line endpoints");
 assert.match(page, /el\.ontransitionend = \(\) => \{ el\.style\.transition = ""; el\.ontransitionend = null; drawRelations\(\); \};/, "settled FLIP transitions recompute the line endpoints");
 assert.ok(page.includes('querySelectorAll("#m-attrs .num-link")'), "the detail card binds its id links to openTask after render");
