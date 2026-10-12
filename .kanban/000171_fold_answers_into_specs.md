@@ -1,12 +1,12 @@
 ---
 name: "fix: answered board questions land in # Notes, not the Specs the skill and Developer contract require"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "fix/171-fold-answers-into-specs"
 issuer: "#161"
 complexity: "simple"
 shortName: "fold-answers-into-specs"
-blockedBy: "#172"
+blockedBy: ""
 ---
 
 # Summary
@@ -51,4 +51,20 @@ Blocked by #172 because both tasks rewrite the same SKILL.md Watcher-section bul
 
 # Notes
 
+- Implemented the user decision (option 1, fold into Specs). Worktree commit ca621b3, skills/se-llm-team/SKILL.md only, 1 line changed.
+  - Step 2's openQuestions bullet now states the fold semantics: kanban_update(specs) replaces the whole Specs section, so the PM restates the ambiguous acceptance as the decided acceptance and the Developer implements from the Specs alone.
+  - The same bullet now says # Notes may repeat a decision as provenance, but an answer never lives in Notes alone: kanban_update cannot write Notes, and Notes does not bind the Developer.
+  - agents/developer.md untouched: "The Specs are the contract." stays as written, and it already points answers at the Specs ("When an answer reaches the Specs, remove the question from the section"). The live-tester, merger and reviewer prompts and the kanban_update tool description ("Replaces the whole Specs section", index.ts) are consistent too, so no change there.
+  - Step 6 and the Watcher bullet keep their short "fold ... into the Specs" wording; step 2 carries the full semantics. The #172 wording (Watcher report carries board events only, PM runs the board check) is respected, not rewritten.
+  - No code change, per the decision: kanban_update(specs) already replaces the whole Specs section.
+  - #167 and #168 not retrofitted: both are done and merged, their decisions are recorded in their Notes and their work matches them.
+- Acceptance: criterion 1 holds in the worktree (SKILL.md and agents/developer.md both point answered questions at the Specs, reachable with the documented kanban_update(specs) path). Criterion 2 holds via the skill's explicit fold instruction: the Specs carry the decided acceptance, so a Developer implements without consulting Notes.
+- Live-test hint for criterion 2: with the updated skill, have the PM answer a backlog task's openQuestions and confirm the decided acceptance lands in the Specs via kanban_update(specs), openQuestions is cleared, and the task promotes.
+- No fixes. State set to to-review.
+
 # Open questions
+
+- Assumption: option 1 (fold into Specs) is the chosen fix, as the Decision block states; the skill's fold-into-Specs wording stays as the contract.
+- Assumption: the fix is docs-only in skills/se-llm-team/SKILL.md; no code change and no role-prompt change, because all four role prompts already point answers at the Specs.
+- Assumption: #167 and #168 stay as merged; their either/or Specs are not retrofitted because both tasks are done.
+- Assumption: step 6 and the Watcher bullet keep their short fold wording; only step 2's bullet gains the full fold semantics.

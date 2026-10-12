@@ -1,7 +1,7 @@
 ---
 name: "fix: createTask misses a same-number file with a different slug"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/174-createTask-number-collision"
 issuer: "#17"
 complexity: "simple"
@@ -23,4 +23,14 @@ Task #17 made createTask retry on a filename collision (wx flag), but a concurre
 
 # Notes
 
+- In src/kanban.ts createTask, after a successful wx write, the code now re-scans the task files for another file with the same number and a different basename. On a clash, it unlinks the just-written file and continues the loop. The next attempt rescans the max and bumps. The 10-attempt bound and the throw stay.
+- In src/kanban.test.ts, the #17 race block now also checks the whole directory: no two files share one number, hand-written files included.
+- Added a true-concurrency test: four child processes each run 20 createTask calls on one shared temp root. Without the fix, 3 of 3 runs fail with 80 files but 79 distinct numbers. With the fix, 3 of 3 runs pass. Full test suite passes.
+
 # Open questions
+
+Assumptions (confirm or correct before merge):
+- On a number clash, createTask keeps the pre-existing file, removes its own new file, and retries with the next free number.
+- The bounded 10-attempt loop and the error throw stay as task #17 made them.
+- No tool contract, frontmatter field, or parseTask behavior changes.
+- The check scans only the .kanban directory for .md files, like taskFiles does today.
