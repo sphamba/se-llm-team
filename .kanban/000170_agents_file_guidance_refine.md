@@ -23,4 +23,23 @@ Refine the AGENTS file guidance in all four agent prompts (agents/developer.md:2
 - Merge step 1 (main into branch in the worktree): already up to date, no conflicts, test suites skipped per the clean-merge rule.
 - Merge step 2 (branch into main at the project root): fast-forward c7c1150..ec5d1eb, no conflicts. Verified the new wording in all four agent prompts on main at ec5d1eb.
 
+## Live test (2026-10-12)
+
+PASS, no findings. No PM task created.
+
+Flow exercised (real interface = daemon spawn): scratch bare clone of the merged commit ec5d1eb (meta/kanban ref deleted, isolated HOME), fake-pi recording the real spawn argv, daemon started from the merged code with --rescan-seconds 1. Four probe tasks, one per role trigger state: to-do (developer), to-review (reviewer), to-live-test with a worktree branch that is an ancestor of HEAD (live-tester), to-merge with a worktree branch (merger). All four spawned in one sweep; fake-pi records show the real pi argv.
+
+Checks on each of the four spawn payloads (-p argument):
+- Structural equality with the shipped agents/<role>.md: same line count, every {{VAR}} substituted (no leftover placeholder), no other text difference.
+- The project-guidance paragraph equals the shipped line with {{ROOT}} rendered to the fixture root, so the path, the modify-it instruction and the examples are unchanged.
+- "Keep it as detailed as necessary but as concise as possible. You may rewrite or compact existing sections." present; "Never remove other agents' guidance." absent.
+- --append-system-prompt points at {{ROOT}}/.kanban/AGENTS.<role>.md and the file content is non-empty (the daemon created the one-line starter file).
+- Merged tree: git grep finds the old wording nowhere tracked, and the new wording exactly once in each of the four files; project root clean at ec5d1eb.
+
+Assumptions made while designing the tests:
+- The daemon spawn is the user-facing interface of these prompt files (renderPrompt -> -p, role notes -> --append-system-prompt), and nothing else consumes agents/*.md. Rendering the merged checkout verbatim means the captured argv is exactly what an agent would receive.
+- The acceptance note "no test change" means the unit suites are the developer/reviewer gate, so the live test did not run them, per role instructions.
+
+No observed behavior contradicts the task's stated assumptions. One difficulty was in my own harness only: an extensionless fake-pi script produced spawn records but silently exited, so it was renamed fake-pi.mjs. Not a project issue.
+
 # Open questions
