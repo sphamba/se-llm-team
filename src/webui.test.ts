@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,12 @@ const cleanup = () => {
 	daemon?.kill("SIGKILL");
 	rmSync(root, { recursive: true, force: true });
 	rmSync(home, { recursive: true, force: true });
+	// leftover webui copy dirs from a crashed run must not pollute the repo's src dir
+	try {
+		for (const d of readdirSync(HERE)) if (d.startsWith(".webui-hot-")) rmSync(join(HERE, d), { recursive: true, force: true });
+	} catch {
+		/* src dir unreadable */
+	}
 };
 process.on("exit", cleanup);
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
@@ -369,6 +375,33 @@ assert.equal(kept[0].root, root);
 assert.equal((await fetch(`${reloadBase}/api/tasks`)).status, 200, "the api keeps answering through the reloaded module");
 reloader.close();
 rmSync(reloadHome, { recursive: true, force: true });
+
+// 000164 graph-fresh reload: the reload copies the whole module graph into a per-version dir and
+// imports the copy, so a kanban.ts-only change (a STATES reorder) goes live on browser reload
+// while the webui file itself keeps its mtime
+const graphHome = mkdtempSync(join(tmpdir(), "webui-graph-"));
+writeFileSync(join(graphHome, "package.json"), JSON.stringify({ type: "module" })); // the stub's dir needs an esm scope
+const graphKanban = join(graphHome, "stub-kanban.ts");
+const graphWebui = join(graphHome, "stub-webui.ts");
+writeFileSync(graphKanban, 'export const STATES = ["a", "b"];\n');
+writeFileSync(
+	graphWebui,
+	'import { STATES } from "./stub-kanban.ts";\nexport const PAGE = "<!doctype html><title>graph " + STATES.join("-") + "</title>";\nexport const taskPayload = (root) => [];\nexport const agentLogPayload = (root, q) => null;\n',
+);
+touch(graphKanban, Date.now() / 1000 - 90);
+touch(graphWebui, Date.now() / 1000 - 91);
+const grapher = await startHub({ name: "webui-graph", root, host: "localhost", port: 0, webuiPath: graphWebui });
+assert.ok(grapher, "hub starts pointing at a webui module with a kanban dependency");
+const graphBase = `http://localhost:${grapher.port}`;
+assert.ok((await (await fetch(`${graphBase}/`)).text()).includes("graph a-b"), "the page serves the kanban states at first load");
+writeFileSync(graphKanban, 'export const STATES = ["a", "b", "c"];\n');
+touch(graphKanban, Date.now() / 1000 - 80); // only kanban.ts changes: the webui file keeps its mtime
+const graphReloaded = await (await fetch(`${graphBase}/`)).text();
+assert.ok(graphReloaded.includes("graph a-b-c"), "a kanban.ts-only change goes live on browser reload");
+assert.ok(!graphReloaded.includes("graph a-b</title>"), "the stale states are gone after the reload");
+assert.equal((await fetch(`${graphBase}/api/tasks`)).status, 200, "the api keeps answering through the graph reload");
+grapher.close();
+rmSync(graphHome, { recursive: true, force: true });
 
 // the real hub keeps serving after a webui reload too: an mtime bump (a branch switch bumps it)
 // makes the loader re-import the real module graph with a fresh query, page and api stay up
