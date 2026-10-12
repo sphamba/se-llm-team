@@ -1,7 +1,7 @@
 ---
 name: "docs: README Agents paragraph says every agent runs in the task worktree"
 priority: "low"
-state: "doing"
+state: "reviewing"
 worktree: "docs/160-readme-agent-cwd-roles"
 issuer: "#156"
 complexity: "simple"
@@ -32,6 +32,10 @@ Acceptance:
 - node src/kanban.test.ts && node src/orchestrator.test.ts && node src/webui.test.ts pass (docs-only; no code change and no new test).
 
 # Notes
+- Verified the spec's spawn calls in the worktree (developer :782 and reviewer :964 with ensured.wtDir; merger :838 and live-tester :984 with root) and that all four roles have prompts in agents/, so "role agents" covers the Merger and Live-tester.
+- README.md:97 (Agents paragraph): removed "with the task worktree as cwd" from the headless-command sentence and added "The Developer and the Reviewer run with the task worktree as cwd. The Merger and the Live-tester run at the project root." Rest of the paragraph (command shape, task file path, log, prompt-load path) unchanged.
+- README.md:89 (Extension load path) also said "Role agents run in task worktrees", which contradicted :76 the same way; changed to "Role agents run in the task worktree or at the project root". This was not in the Fix clause but is required by the acceptance criterion (no README statement contradicts :76).
+- node src/kanban.test.ts && node src/orchestrator.test.ts && node src/webui.test.ts all pass. Committed as 8e390da in docs/160-readme-agent-cwd-roles.
 
 # Open questions
 

@@ -1,7 +1,7 @@
 ---
 name: "fix: orchestrator_start tool description omits the Merger and the new pipeline order"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/161-orchestrator-start-tool-description"
 issuer: "#156"
 complexity: "simple"
@@ -37,8 +37,6 @@ Acceptance:
 
 - Rewrote the orchestrator_start description at index.ts:168 (commit c8e7f77): it now names the four roles with their trigger states (Developer/to-do, Reviewer/to-review, one Merger/to-merge, Live-tester/to-live-test on the merged commit), states the review -> merge -> live-test order, and drops the "merges done branches" claim. WebUi and "Exits early" sentences kept as-is.
 - Acceptance: sed -n '168p' matches the contract; kanban.test.ts, orchestrator.test.ts (all smoke parts) and webui.test.ts pass.
-
-# Open questions
-
-- Assumption: no wording review needed on the new sentence beyond the acceptance criteria in the Specs; the "one Merger agent" phrasing reflects sweepToMerge spawning at most one merger per project.
+- Review (no fixes needed): verified the new description against src/orchestrator.ts. The "one Merger agent" phrasing matches the code: sweepToMerge returns early when a merger is alive ("at most one merger at a time, project-wide", :812-813), and "on the merged commit" matches the live test running after the merge, at the project root. Branch changes only index.ts (single commit c8e7f77). The developer's one assumption was disclosed, not silent, and is confirmed by the code, so the Open questions section is empty again.
+- Merge (Merger): base branch was main at both steps. Step 1 merged main into fix/161-orchestrator-start-tool-description in the worktree (clean, ort strategy; carried in README.md, SPECS.md, agents/live-tester.md pipeline-order changes). No conflicts, so test suites were skipped per the merge policy. Step 2 merged the branch into main at the project root (fast-forward 6a5666a..dc5ee61, index.ts only). No conflicts anywhere, nothing extra to commit.
 

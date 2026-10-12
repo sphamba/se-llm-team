@@ -1,12 +1,12 @@
 ---
 name: "docs: SPECS liveness bullet says a 15-minute poll and respawn at the same state"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "docs/163-specs-liveness-poll-wording"
 issuer: "#156"
 complexity: "simple"
 shortName: "specs-liveness-poll-wording"
-blockedBy: "#162"
+blockedBy: ""
 ---
 
 # Summary
