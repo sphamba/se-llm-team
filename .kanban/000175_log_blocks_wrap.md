@@ -1,7 +1,7 @@
 ---
 name: "fix: log block bodies wrap to fit the container width"
 priority: "medium"
-state: "merging"
+state: "live-testing"
 worktree: "fix/175-log-blocks-wrap"
 issuer: "user"
 complexity: "simple"
@@ -28,5 +28,6 @@ Expanded tool and thinking blocks in the log UI do not wrap: `#m-log-text pre` (
 - Review: the diff is exactly the spec (one rule, one test line). Coverage verified in src/webui.ts: tool args/output pres (:387-390), thinking pres (:395, :519) and md() fenced code (:350) are all pres inside #m-log-text; the #147 monospace rules (:1290), the details > pre indent (:1272) and the pane pre-wrap (:1267) are untouched. Assumption is already stated in Notes, not silent.
 - Reviewer merged main (c38a37b: the #176 chip-spacing fix and a docs commit) into the branch as 4f8f2ea; main had moved past the merge-base 7b392511. Clean auto-merge, no conflicts; npm test passes on all five suites after the merge.
 - No fixes needed beyond the base merge.
+- Merge: step 1 (base main into the branch in the worktree) was already up to date; the reviewer's 4f8f2ea had merged main at c38a37b and main had not moved since. No conflicts, so no test suites re-ran per the clean-merge rule. Step 2 (branch into base main at the project root) was a clean fast-forward c38a37b..4f8f2ea. Verified on main: the full rule at src/webui.ts:1268 and the test assertion at src/webui.test.ts:838.
 
 # Open questions
