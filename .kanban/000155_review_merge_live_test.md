@@ -1,8 +1,8 @@
 ---
 name: "feat: pipeline reorders to review, merge, live-test"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/155-review-merge-live-test"
 blockedBy: ""
 issuer: "user"
 complexity: "complex"

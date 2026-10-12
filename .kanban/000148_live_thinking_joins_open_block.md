@@ -1,8 +1,8 @@
 ---
 name: "fix: live thinking deltas join the open block instead of creating new blocks"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/148-live-thinking-joins-open-block"
+state: "done"
+worktree: ""
 blockedBy: ""
 issuer: "user"
 complexity: "moderate"
@@ -34,4 +34,13 @@ Tests (extend the flat assertion script, adding the missing multi-chunk live cov
 - Full suite green: all five test files (kanban, orchestrator, webui, extension, index).
 - Cleared the previous Open questions: all four assumptions are settled by the Specs (the data-final marker on .lg-cont was spec-suggested; the non-string typeof check matches the same-chunk flow; the plain-text close is the pre-existing promotion-path behavior with md() untouched per spec; back-fill duplication is explicitly out of scope per spec).
 
+- Live test (b5e07c0): ran the real product from the worktree daemon (`node src/orchestrator.ts --root <temp root>`) with an isolated HOME, and drove the real hub UI in headless Chromium. The simulated live agent appended pi JSONL records to the real log file, so the daemon, the HTTP chunk and poll endpoints, and the browser were real. No code was edited, no unit suite was run.
+- Synthetic records, 11 checks: 11/11 pass on b5e07c0 and 6/11 on the pre-fix parent a6a07ec. The pre-fix failures were A3 (a cross-window thinking_end never closed the block), B1 and B1b (a mid-stream init promoted a block without the marker), B2 (two later delta polls did not join the live tail block), and B3 (the cross-window end did not replace it). A1 and A2 (same-chunk join), C1 and C2 (same-chunk close, idle polls add no blocks), D1 (tool dedupe and lg-tres join), and E1 (no console errors) passed in both builds, so the fix changed only the broken paths.
+- Mid-stream evidence on b5e07c0: the init promoted one marked open block of 8188 chars, two later delta polls grew that same tail block to 8204 (16 chars added) and added no block, and the cross-window end replaced its body with AUTHORITATIVE-B and cleared data-open. Pre-fix the same polls left the live tail block at 8188 and the end was dropped.
+- Real records, 5 checks: 5/5 on b5e07c0 and 2/5 pre-fix. The fixture was this task's own developer log, truncated mid-thinking at a record boundary (thinking_start outside the 80 KB tail window, 354 real deltas inside), with the real 26053-char thinking_end record appended. On b5e07c0 the pane replaced the promoted block body with the exact authoritative text and kept one block. Pre-fix the real end never reached the pane.
+- Assumptions for the usage tests: (1) the live agent writes are simulated JSONL appends while the server, hub and browser are real, (2) LOG_CHUNK is 81920 bytes and the mid-stream case needs thinking_start outside the tail window, (3) a mid-stream open triggers the client scroll-to-top history back-fill because the promoted pre has no line wrap, so the test waits for that spec-accepted phase to settle and asserts on the live tail block, (4) data-open is a marker and promoted blocks stay collapsed, which was observed.
+- No observed behavior contradicts the Specs. Two pre-existing behaviours remain, both out of scope and unchanged by the fix: the mid-stream scroll-to-top back-fill still prepends a separate block for the same thinking stream (accepted in the Specs), and a promoted block is one long unwrapped line (the pre keeps white-space: pre), so the pane scrolls horizontally instead of wrapping.
+
 # Open questions
+
+- Merge: step 1 merged base branch main into fix/148-live-thinking-joins-open-block in the worktree - already up to date, clean, no conflicts (tests skipped per clean-merge rule). Step 2 merged fix/148-live-thinking-joins-open-block into main in the project root - fast-forward a6a07ec..b5e07c0, clean, no conflicts. src/webui.ts (+21) and src/webui.test.ts (+75) landed on main as b5e07c0. Base branch resolved with git branch --show-current before each step (main both times, no detached HEAD).
