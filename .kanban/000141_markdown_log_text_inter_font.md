@@ -1,9 +1,9 @@
 ---
 name: "feat: markdown-render assistant and thinking log text; Google Inter font everywhere"
 priority: "medium"
-state: "backlog"
-worktree: ""
-blockedBy: "#140"
+state: "doing"
+worktree: "feat/141-markdown-log-text-inter-font"
+blockedBy: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "markdown-log-text-inter-font"

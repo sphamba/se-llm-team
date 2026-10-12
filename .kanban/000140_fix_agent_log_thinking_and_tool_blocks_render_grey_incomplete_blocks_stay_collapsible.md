@@ -36,3 +36,5 @@ Fix, src/webui.ts plus src/webui.test.ts only:
 - The same flows ran on one real 3.2 MB reviewer log (a copy of the 000140 reviewer.0 log): the tail chunk promoted its orphan result, and the history chunks showed real thinking and tool blocks as grey collapsed details. No page errors.
 - Observation, not a defect: after an unjoined .lg-cont promotes to its own collapsible block, a later history chunk that holds the real open block does not merge with it, so one long thought can show as two "Thinking" blocks. This is the agreed Specs behavior (a promoted block carries no data-open marker).
 - Findings: none. No new tasks.
+- 2026-10-12 (Merger): merged in two steps. Step 1: base branch was main; merged main into fix/140-agent-log-thinking in the worktree. Both files auto-merged with no conflicts (src/webui.ts, src/webui.test.ts), merge commit 18db541. No test suites run per the clean-merge rule. Step 2: base branch still main; merged fix/140-agent-log-thinking into main in the project root, fast-forward to 18db541. No conflicts, no test fixes. State set to done.
+- 2026-10-12 (Merger): open questions: none.
