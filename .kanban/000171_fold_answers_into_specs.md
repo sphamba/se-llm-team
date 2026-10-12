@@ -27,7 +27,12 @@ The changed SKILL.md text (and step 2 before it) says the PM folds the answers t
 - The decisions themselves are unambiguous in Notes (#167: one-time manual hygiene; #168: switch to git worktree topology with a test), and the work so far matches them, but a Developer that reads only the Specs still sees an open either/or.
 - kanban_update's parameters (index.ts, kanban_update tool) are file, name, priority, complexity, summary, specs, openQuestions, blockedBy with additionalProperties: false - no notes, so Notes cannot be written with the documented tool.
 
-## Expected change / decision
+## Decision (user, 2026-10-12)
+Answered open questions refine the Specs directly: the PM folds each answer into the task's Specs, replacing the ambiguous either/or acceptance with the decided acceptance, so a Developer can implement from the Specs alone ("The Specs are the contract" stays as written). Notes may still carry the decision as provenance. The PM uses kanban_update(specs), which replaces the whole Specs section; answers never live in Notes alone.
+
+## Expected change
+Keep the skill's fold-into-Specs wording as the contract. The practice must match it: the PM replaces the ambiguous acceptance in the Specs with the decided acceptance (kanban_update(specs)), and the Developer prompt keeps "The Specs are the contract." No code change: kanban_update already replaces the whole Specs section.
+
 
 One of:
 1. Fold answered questions into the task's Specs as the skill writes: the Specs' ambiguous acceptance is replaced by the decided acceptance (kanban_update replaces the whole Specs section), and the skill's wording stays as the contract. Notes may still carry the decision as provenance.
@@ -47,4 +52,3 @@ Blocked by #172 because both tasks rewrite the same SKILL.md Watcher-section bul
 # Notes
 
 # Open questions
-Should answered board questions be folded into the task's Specs, replacing the ambiguous acceptance, as the skill says, or is recording the choice in # Notes acceptable? If Notes is accepted, should the skill and the Developer prompt say so explicitly?

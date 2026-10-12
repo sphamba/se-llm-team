@@ -1,8 +1,8 @@
 ---
 name: "fix: createTask misses a same-number file with a different slug"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/174-createTask-number-collision"
 issuer: "#17"
 complexity: "simple"
 shortName: "createTask-number-collision"

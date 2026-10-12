@@ -1,8 +1,8 @@
 ---
 name: "docs: refine the per-role AGENTS file guidance (concise, rewrite allowed)"
 priority: "medium"
-state: "live-testing"
-worktree: "docs/170-agents-file-guidance-refine"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "trivial"
 shortName: "agents-file-guidance-refine"
