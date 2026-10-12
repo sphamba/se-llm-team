@@ -95,7 +95,7 @@ Setup: the root checkout's main had moved on to merge commit 7ecec18 (task #166 
 - Regression: a webui.ts-only change (page title) still reloads on the next fetch through the new copy-dir path.
 - Repo hygiene: no .webui-hot-* leftovers in src after every reload, the broken-file case, and the webui.ts change.
 - Cleanup: daemon killed, port 4488 down, hub lock released, isolated registry empty, scratch dirs removed. No leaked processes.
-- All four stated assumptions hold against the running system: mtime is the only version signal; the graph covers kannan.ts and pid.ts; the copy dir is transient; the graph needs no node_modules.
+- All four stated assumptions hold against the running system: mtime is the only version signal; the graph covers kanban.ts and pid.ts; the copy dir is transient; the graph needs no node_modules.
 
 Assumptions made by the live test: the scratch-clone run is equivalent to the root checkout because both are the same merged commit (ed55fe1 ancestor of root main 7ecec18); the fixture board's single done task is enough for the page to render.
 

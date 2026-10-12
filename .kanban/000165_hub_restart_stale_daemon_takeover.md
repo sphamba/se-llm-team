@@ -60,3 +60,20 @@ User's answers (2026-10-12): (1) Restrict hub candidacy so only a daemon running
 1. Preferred direction: restrict hub candidacy so only a daemon running the production/current checkout can win port 4242 (during a restart the dashboard is briefly down rather than served by old code), or keep every daemon eligible for failover and rely on hygiene plus a guarded restart procedure? If restricted, which daemons qualify - only the checkout the extension is installed from, or any daemon that is not a task worktree?
 2. Should leaked daemons be reaped automatically, and on which trigger (task done, worktree removed, board root missing, daemon older than N minutes)? Or is a documented manual cleanup plus the --no-webui rule for every non-production daemon enough?
 3. If an old-code hub stays possible, should the serving hub surface which checkout (root, commit, pid) it runs, so a takeover is visible to the user?
+
+# Implementation (Developer, 2026-10-12)
+
+Commit e423494 on fix/165-hub-restart-stale-daemon-takeover. All three decided parts are in.
+
+- src/kanban.ts: new exported splitWorktreeRoot(root) splits a task worktree root into [main root, worktree name] and returns null for a non-worktree root; one helper serves both the hub candidacy and the self-reap checks. Unit-covered in src/kanban.test.ts.
+- src/hub.ts: joinHub computes canHub = !splitWorktreeRoot(opts.root). A worktree-rooted daemon registers and heartbeats with the hub but never races the election, neither at startup (it logs "no hub answering; task worktree checkout stands down (the port is not ours to take)") nor on re-election after HEALTH_FAILS, so during a production restart the dashboard is briefly down instead of served by old code. Non-worktree daemons are unchanged: parts U/V/W of the hub election/failover tests pass as before (their scratch roots are not worktrees).
+- src/orchestrator.ts: a worktree-rooted daemon reaps itself when its owner task is done or gone (worktreeTaskEnded reads the main root's board, so the worktree's own .kanban can be gone). Checked at startup and on every sweep, before acquireLock and the lock self-heal, which would recreate a removed worktree's dirs; the reap line goes to stdout only for the same reason. A done task's daemon exits even when doneCleanup kept the worktree for a manual merge, since the daemon serves nothing there.
+- src/hub.ts + src/webui.ts: GET /api/hub returns { pid, root, commit } where root is realpath of src/hub.ts's parent (the code checkout this process serves, symlink-resolved) and commit is that checkout's HEAD resolved live per request. The dashboard renders it in a #hub footer (hidden until the first answer, refetched every refresh cycle): "hub pid N · <checkout> · <short commit>". A 404 shows "hub: old hub code (restart needed)", which is the webui-hot-reload mix state (new page, old hub.ts).
+- README.md Web dashboard section documents the footer, /api/hub, the candidacy restriction and the self-reap.
+- Tests: part Y in src/orchestrator.test.ts covers the stand-down at startup with no hub up, registration once the hub appears, never serving the ui, reap on done, and reap at startup when the task and worktree are gone (asserting no worktree shell is left behind). All five suites pass: kanban, orchestrator, webui, extension, index.
+
+Assumptions made while implementing (confirm or correct):
+- A task worktree is any root whose path contains a .worktrees path segment; no configured allow-list of a "production" root exists or is needed.
+- A daemon whose task is done exits even when doneCleanup kept the worktree for a manual merge (the daemon serves nothing in that worktree).
+- The reap line goes to stdout only (it lands in .kanban/.logs/orchestrator.log via the inherited fd when started by the orchestrator_start tool); no log file write that could recreate a removed worktree's dirs.
+- Scratch (/tmp) daemons stay hub-eligible; the --no-webui rules from #40 remain the hygiene layer for them.
