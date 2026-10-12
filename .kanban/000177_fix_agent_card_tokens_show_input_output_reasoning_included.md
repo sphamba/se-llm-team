@@ -1,8 +1,8 @@
 ---
 name: "fix: agent card tokens show input + output (reasoning included)"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/177-agent-card-tokens"
 ---
 
 # Summary
