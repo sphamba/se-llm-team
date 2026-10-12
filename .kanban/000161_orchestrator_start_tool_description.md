@@ -1,8 +1,8 @@
 ---
 name: "fix: orchestrator_start tool description omits the Merger and the new pipeline order"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/161-orchestrator-start-tool-description"
 issuer: "#156"
 complexity: "simple"
 shortName: "orchestrator-start-tool-description"
@@ -36,4 +36,4 @@ Acceptance:
 # Notes
 
 # Open questions
-None.
+

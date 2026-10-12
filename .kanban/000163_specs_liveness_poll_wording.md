@@ -36,4 +36,4 @@ Acceptance:
 # Notes
 
 # Open questions
-None.
+

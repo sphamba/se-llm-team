@@ -1,8 +1,8 @@
 ---
 name: "docs: SPECS Merger text hardcodes main and always runs the tests"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "docs/162-specs-merger-base-branch"
 issuer: "#156"
 complexity: "simple"
 shortName: "specs-merger-base-branch"
@@ -37,4 +37,4 @@ Acceptance:
 # Notes
 
 # Open questions
-None.
+
