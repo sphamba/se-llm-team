@@ -1747,7 +1747,7 @@ cleaned.push(rootAJ);
 mkdirSync(kanbanDir(rootAJ), { recursive: true });
 writeFileSync(
 	join(kanbanDir(rootAJ), "se-llm-team.json"),
-	JSON.stringify({ agent: loopStub(rootAJ), pollMinutes: 0.05, reviewerCap: { moderate: 1, complex: 0 } }),
+	JSON.stringify({ agent: loopStub(rootAJ), pollMinutes: 0.05, reviewerCap: { moderate: 1, complex: -1 } }),
 );
 const taskAJSimple = createTask(rootAJ, { name: "fix: simple cap", summary: "Per-complexity cap smoke", specs: "n/a", complexity: "simple" });
 const taskAJMod = createTask(rootAJ, { name: "fix: overridden cap", summary: "Per-complexity cap smoke", specs: "n/a" });
@@ -1756,7 +1756,7 @@ for (const t of [taskAJSimple, taskAJMod, taskAJComplex]) setState(rootAJ, t, "t
 
 const aj = await runDaemon(rootAJ);
 // invalid reviewerCap.complex warns at load; the cap falls back to the default 3
-await waitFor(() => aj.output().includes("invalid reviewerCap.complex 0, ignored (expected an integer >= 1)"), 10000, "invalid reviewerCap warning", aj.output);
+await waitFor(() => aj.output().includes("invalid reviewerCap.complex -1, ignored (expected an integer >= 0)"), 10000, "invalid reviewerCap warning", aj.output);
 // simple: default cap 1; moderate: the configured override 1; complex: fallback to the default 3
 await waitFor(() => aj.output().includes(`${taskAJSimple.file}: reviewer succeeded 1+ times, moving to to-live-test`), 60000, "simple cap 1", aj.output);
 await waitFor(() => aj.output().includes(`${taskAJMod.file}: reviewer succeeded 1+ times, moving to to-live-test`), 60000, "configured override cap 1", aj.output);
@@ -1767,6 +1767,50 @@ assert.equal(reviewerSpawns(taskAJMod.file), 1, "configured moderate override ap
 assert.equal(reviewerSpawns(taskAJComplex.file), 3, "invalid configured value fell back to the default 3");
 aj.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + per-complexity reviewer cap smoke passed");
+
+// --- part AJ-b: the trivial complexity: cap 0 force-advances to-review -> to-live-test on the
+// first sweep with no reviewer spawn (no armed marker, no pid), and reviewerCap accepts 0 while
+// negative and non-integer values warn and keep the default ---
+const rootAJT = fixture();
+cleaned.push(rootAJT);
+mkdirSync(kanbanDir(rootAJT), { recursive: true });
+writeFileSync(
+	join(kanbanDir(rootAJT), "se-llm-team.json"),
+	JSON.stringify({ agent: loopStub(rootAJT), pollMinutes: 0.05, reviewerCap: { trivial: 0, simple: -1, moderate: 1.5 } }),
+);
+const taskAJT = createTask(rootAJT, { name: "fix: trivial cap", summary: "Trivial cap smoke", specs: "n/a", complexity: "trivial" });
+const taskAJTMod = createTask(rootAJT, { name: "fix: moderate cap", summary: "Trivial cap smoke", specs: "n/a" });
+assert.equal(parseTask(rootAJT, taskAJT.file).complexity, "trivial", "trivial round-trips through parseTask");
+setState(rootAJT, taskAJT, "to-review");
+setState(rootAJT, taskAJTMod, "to-review");
+
+const ajt = await runDaemon(rootAJT);
+const slugAJT = taskAJT.file.replace(/\.md$/, "");
+// reviewerCap.trivial 0 is accepted; simple -1 and moderate 1.5 warn and keep the defaults
+await waitFor(() => ajt.output().includes("invalid reviewerCap.simple -1, ignored (expected an integer >= 0)"), 10000, "negative reviewerCap warning", ajt.output);
+await waitFor(() => ajt.output().includes("invalid reviewerCap.moderate 1.5, ignored (expected an integer >= 0)"), 10000, "non-integer reviewerCap warning", ajt.output);
+assert.ok(!ajt.output().includes("invalid reviewerCap.trivial"), "reviewerCap.trivial 0 accepted without a warning");
+// the trivial task advances straight to to-live-test: the first sweep reads reviewer-runs 0
+// >= cap 0, so no reviewer spawns
+await waitFor(() => ajt.output().includes(`${taskAJT.file}: reviewer succeeded 0+ times, moving to to-live-test`), 60000, "trivial forced advance", ajt.output);
+assert.ok(!ajt.output().split("\n").some((l) => l.includes("spawned reviewer") && l.includes(taskAJT.file)), "no reviewer spawn for a trivial task");
+assert.ok(!existsSync(join(kanbanDir(rootAJT), ".logs", `${slugAJT}.reviewer-armed`)), "no armed marker for a trivial task");
+assert.ok(!existsSync(join(kanbanDir(rootAJT), ".pids", `${slugAJT}.pid`)), "no agent pid written for a trivial task");
+const runsAJT = () => {
+	try {
+		return parseInt(readFileSync(join(kanbanDir(rootAJT), ".logs", `${slugAJT}.reviewer-runs.count`), "utf8").trim(), 10) || 0;
+	} catch {
+		return 0;
+	}
+};
+assert.equal(runsAJT(), 0, "the trivial task never ran a reviewer");
+// the warned values keep the default caps: the moderate task advances at the default 2
+await waitFor(() => ajt.output().includes(`${taskAJTMod.file}: reviewer succeeded 2+ times, moving to to-live-test`), 90000, "warned moderate keeps the default 2", ajt.output);
+assert.equal(ajt.output().split("\n").filter((l) => l.includes("spawned reviewer") && l.includes(taskAJTMod.file)).length, 2, "exactly two reviewer spawns for the moderate task");
+// the pipeline continues from the forced advance: the live-tester runs and the trivial task completes
+await waitFor(() => parseTask(rootAJT, taskAJT.file).state === "done" && parseTask(rootAJT, taskAJT.file).worktree === "", 60000, "trivial task completes", ajt.output);
+ajt.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + trivial complexity cap-0 smoke passed");
 // --- part AK: a recycled pid (discriminator mismatch) reads dead; a matching one stays alive ---
 // unit: pidAlive compares the discriminator when /proc is readable, so a pid reused by
 // another process no longer passes the liveness check

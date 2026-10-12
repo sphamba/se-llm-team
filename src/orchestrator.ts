@@ -33,7 +33,7 @@ const RESPAWN_CAP = 5;
 const REVIEWER_RUN_CAP = 3;
 // per-complexity forced-advance caps: successful reviewer runs before to-review moves on to
 // to-live-test; each overridable via the top-level reviewerCap config key
-const DEFAULT_REVIEWER_CAP: Record<string, number> = { simple: 1, moderate: 2, complex: 3 };
+const DEFAULT_REVIEWER_CAP: Record<string, number> = { simple: 1, moderate: 2, complex: 3, trivial: 0 };
 // consecutive failed auto-pushes before the daemon logs its once-only warning (a success
 // resets the count); the per-failure line is easy to miss, the warning names the consequence
 const PUSH_WARN_AFTER = 3;
@@ -50,7 +50,7 @@ interface LlmConfig {
 	thinking?: string;
 }
 
-// a roles entry may also hold per-complexity sub-objects keyed simple/moderate/complex, each
+// a roles entry may also hold per-complexity sub-objects keyed simple/moderate/complex/trivial, each
 // an LlmConfig that overrides the role defaults for tasks of that complexity
 interface RoleLlmConfig extends LlmConfig {
 	simple?: LlmConfig;
@@ -112,8 +112,8 @@ export function loadConfig(root: string): Config {
 		for (const cx of COMPLEXITIES) {
 			const v = (cfg.reviewerCap as Record<string, unknown>)[cx];
 			if (v === undefined) continue;
-			if (typeof v !== "number" || !Number.isInteger(v) || v < 1) {
-				log(root, `invalid reviewerCap.${cx} ${JSON.stringify(v)}, ignored (expected an integer >= 1)`);
+			if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+				log(root, `invalid reviewerCap.${cx} ${JSON.stringify(v)}, ignored (expected an integer >= 0)`);
 				continue;
 			}
 			reviewerCap[cx] = v;

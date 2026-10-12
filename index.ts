@@ -57,14 +57,14 @@ export default function (pi: ExtensionAPI) {
 		name: "kanban_create",
 		label: "Kanban create",
 		description:
-			"Create a kanban task in state backlog. Name tasks with a type prefix like 'feat: ', 'fix: ', 'perf: '. Write the specs with the user. Set issuer to '#<num>' when the task was created after live-testing of task #<num>; the default 'user' means the user requested it. The issuer is set at creation only and never changed afterwards. Set complexity to simple, moderate (default) or complex; it drives which per-complexity LLM config entry and reviewer-pass cap apply. Complexity stays updatable later via kanban_update.",
+			"Create a kanban task in state backlog. Name tasks with a type prefix like 'feat: ', 'fix: ', 'perf: '. Write the specs with the user. Set issuer to '#<num>' when the task was created after live-testing of task #<num>; the default 'user' means the user requested it. The issuer is set at creation only and never changed afterwards. Set complexity to trivial, simple, moderate (default) or complex; it drives which per-complexity LLM config entry and reviewer-pass cap apply (trivial gets no reviewer pass). Complexity stays updatable later via kanban_update.",
 		// additionalProperties: false so pi rejects an unrecognized field (e.g. notes)
 		// with a validation error instead of dropping it and reporting a false create
 		parameters: Type.Object({
 			name: Type.String({ description: "Task name with type prefix, e.g. 'feat: nice thing'" }),
 			shortName: Type.Optional(Type.String({ description: "Max 5 lowercase words joined by hyphens, e.g. 'this-is-a-short-name'; names the task file and the branch/worktree. Set at creation only, never updatable" })),
 			priority: Type.Optional(StringEnum(["low", "medium", "high", "critical"] as const)),
-			complexity: Type.Optional(StringEnum(["simple", "moderate", "complex"] as const)),
+			complexity: Type.Optional(StringEnum(["simple", "moderate", "complex", "trivial"] as const)),
 			issuer: Type.Optional(Type.String({ description: "'user' (default) or '#<num>' when created after live-testing of task #<num>, e.g. '#42'" })),
 			summary: Type.String({ description: "Concise goal, one to three sentences" }),
 			specs: Type.Optional(Type.String({ description: "Detailed description of needs" })),
@@ -92,7 +92,7 @@ export default function (pi: ExtensionAPI) {
 			file: Type.String({ description: "Task file name" }),
 			name: Type.Optional(Type.String()),
 			priority: Type.Optional(StringEnum(["low", "medium", "high", "critical"] as const)),
-			complexity: Type.Optional(StringEnum(["simple", "moderate", "complex"] as const)),
+			complexity: Type.Optional(StringEnum(["simple", "moderate", "complex", "trivial"] as const)),
 			summary: Type.Optional(Type.String({ description: "Replaces the whole Summary section" })),
 			specs: Type.Optional(Type.String({ description: "Replaces the whole Specs section" })),
 			openQuestions: Type.Optional(Type.String({ description: "User/client clarification questions, written to the task body's # Open questions section" })),

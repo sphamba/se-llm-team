@@ -426,7 +426,8 @@ assert.ok(cxCard.includes('<span class="chip p-medium">medium</span><span class=
 assert.ok(cardHtml({ file: "000004_d.md", name: "d", priority: "high", complexity: "<x>" }, "doing").includes('<span class="chip cx cx-&lt;x&gt;">&lt;x&gt;</span>'), "the complexity badge is escaped");
 assert.ok(userCard.includes('<span class="chip cx cx-moderate">moderate</span>'), "an absent complexity renders as moderate");
 assert.ok(page.includes(".chip.cx {"), "the base complexity chip style ships in the page css as the fallback");
-assert.ok(page.includes(".chip.cx-simple {") && page.includes(".chip.cx-moderate {") && page.includes(".chip.cx-complex {"), "the per-value complexity chip styles ship in the page css");
+assert.ok(page.includes(".chip.cx-simple {") && page.includes(".chip.cx-moderate {") && page.includes(".chip.cx-complex {") && page.includes(".chip.cx-trivial {"), "the per-value complexity chip styles ship in the page css");
+assert.ok(cardHtml({ file: "000005_e.md", name: "e", priority: "low", complexity: "trivial" }, "to-do").includes('<span class="chip cx cx-trivial">trivial</span>'), "a trivial task renders the cx-trivial chip");
 
 // relation lines: one dashed curve per stored relation between rendered cards, running from the
 // blocked task's card to the blocker's card, so the dashes flow blocked -> blocker. A done
