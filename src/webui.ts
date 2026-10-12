@@ -117,7 +117,7 @@ function indexRuns(files: string[], base: string): number[] {
 
 // one entry per existing run log `.logs/<slug>.<role>[.<n>].log`: roles in pipeline order then
 // merger, a legacy unsuffixed file before that role's indexed runs, the list then ordered by the
-// first in-log record timestamp so the detail card shows the runs oldest-first across roles — the
+// first in-log record timestamp so the detail card shows the runs oldest-first across roles; the
 // gzip sweep rewrites finished logs' mtimes in readdir order (compactFinishedLogs), so mtime no
 // longer reflects chronology once a run is swept; a log with no parseable timestamp (a legacy
 // unsuffixed log carries none) falls back to its mtime, equal keys keep the enumeration order
