@@ -197,6 +197,18 @@ assert.equal(createTask(staleRoot, { name: "fix: after crash", summary: "s" }).f
 assert.equal(existsSync(staleLock), false); // lock stolen, no leftovers
 rmSync(staleRoot, { recursive: true, force: true });
 
+// a lock under the threshold at call time but aging past it: the give-up window must
+// outlive the steal threshold, or createTask fails after about 1 s instead of waiting
+// for the steal (live #174 evidence: a lock held 8 s beat the old 1 s window)
+const heldRoot = mkdtempSync(join(tmpdir(), "kanban-held-"));
+const heldLock = join(heldRoot, ".kanban", ".create.lock");
+mkdirSync(join(heldRoot, ".kanban"), { recursive: true });
+writeFileSync(heldLock, "999999");
+utimesSync(heldLock, Date.now() / 1000 - 8, Date.now() / 1000 - 8); // seconds, not ms
+assert.equal(createTask(heldRoot, { name: "fix: held lock", summary: "s" }).file, "000001_held_lock.md");
+assert.equal(existsSync(heldLock), false); // stolen once it aged past the threshold
+rmSync(heldRoot, { recursive: true, force: true });
+
 // merge-conflict handling: a conflict-marked file is never rewritten
 const tc = createTask(root, { name: "fix: conflicted file", summary: "s", specs: "real specs" });
 writeFileSync(

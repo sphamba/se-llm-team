@@ -448,9 +448,9 @@ assert.deepEqual(flipDiff(stacked, stacked), {}, "an unchanged refresh animates 
 assert.ok(page.includes(String(flipDiff)), "the page ships the tested flipDiff source");
 assert.ok(page.includes('transition = "transform .4s ease"'), "sibling shifts reuse the moved-card timing");
 
-// 000047 stacked pairs: the eight middle states render as four .pair wrappers (to-do over doing,
-// to-review over reviewing, to-live-test over live-testing, to-merge over merging), backlog and done
-// stay single columns.
+// 000047 stacked pairs, 000181 tail stack: backlog stays a single column, the other nine states
+// render as four .pair wrappers (to-do over doing, to-review over reviewing, to-merge over merging,
+// then to-live-test over live-testing over done as one stacked tail group).
 // El is a minimal element stub: buildShell and syncBoard only touch this DOM surface.
 class El {
 	tag: string;
@@ -479,13 +479,13 @@ class El {
 }
 const boardEl = new El("main");
 const cols: Record<string, any> = buildShell(boardEl, { createElement: (tag: string) => new El(tag) });
-assert.deepEqual(boardEl.children.map((c) => c.className), ["col c-backlog", "pair", "pair", "pair", "pair", "col c-done"], "backlog and done stay single side columns, the eight middle states sit in four pairs");
+assert.deepEqual(boardEl.children.map((c) => c.className), ["col c-backlog", "pair", "pair", "pair", "pair"], "backlog stays a single side column, the other nine states sit in four pairs");
 assert.deepEqual(
 	boardEl.children.slice(1, 5).map((p) => p.children.map((c) => c.className)),
-	[["col c-to-do", "col c-doing"], ["col c-to-review", "col c-reviewing"], ["col c-to-merge", "col c-merging"], ["col c-to-live-test", "col c-live-testing"]],
-	"to-do over doing, to-review over reviewing, to-merge over merging, to-live-test over live-testing",
+	[["col c-to-do", "col c-doing"], ["col c-to-review", "col c-reviewing"], ["col c-to-merge", "col c-merging"], ["col c-to-live-test", "col c-live-testing", "col c-done"]],
+	"to-do over doing, to-review over reviewing, to-merge over merging, to-live-test over live-testing over done",
 );
-assert.deepEqual(LAYOUT, ["backlog", ["to-do", "doing"], ["to-review", "reviewing"], ["to-merge", "merging"], ["to-live-test", "live-testing"], "done"], "the states between backlog and done pair up in pipeline order");
+assert.deepEqual(LAYOUT, ["backlog", ["to-do", "doing"], ["to-review", "reviewing"], ["to-merge", "merging"], ["to-live-test", "live-testing", "done"]], "backlog stays single, the middle states pair two by two, the last three stack as one group");
 assert.deepEqual(pairLayout(STATE_NAMES), LAYOUT, "the pairs derive from the state list, with no state-specific wiring");
 assert.ok(LAYOUT.every((part) => (typeof part === "string" ? cols[part] : part.every((st) => cols[st]))), "every layout state gets a column");
 assert.ok(page.includes(JSON.stringify(LAYOUT)), "the page ships the tested layout");
