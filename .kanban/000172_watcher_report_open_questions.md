@@ -1,8 +1,8 @@
 ---
 name: "docs: Watcher report path is not backed by the watcher agent definition"
 priority: "medium"
-state: "live-testing"
-worktree: "docs/172-watcher-report-open-questions"
+state: "done"
+worktree: ""
 issuer: "#161"
 complexity: "simple"
 shortName: "watcher-report-open-questions"

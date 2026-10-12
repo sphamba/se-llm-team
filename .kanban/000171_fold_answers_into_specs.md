@@ -1,7 +1,7 @@
 ---
 name: "fix: answered board questions land in # Notes, not the Specs the skill and Developer contract require"
 priority: "medium"
-state: "to-live-test"
+state: "live-testing"
 worktree: "fix/171-fold-answers-into-specs"
 issuer: "#161"
 complexity: "simple"
@@ -66,7 +66,3 @@ Blocked by #172 because both tasks rewrite the same SKILL.md Watcher-section bul
 
 # Open questions
 
-- Assumption: option 1 (fold into Specs) is the chosen fix, as the Decision block states; the skill's fold-into-Specs wording stays as the contract.
-- Assumption: the fix is docs-only in skills/se-llm-team/SKILL.md; no code change and no role-prompt change, because all four role prompts already point answers at the Specs.
-- Assumption: #167 and #168 stay as merged; their either/or Specs are not retrofitted because both tasks are done.
-- Assumption: step 6 and the Watcher bullet keep their short fold wording; only step 2's bullet gains the full fold semantics.
