@@ -329,7 +329,7 @@ await waitFor(() => bouncesB() >= 6, 90000, "six unconditional bounces past the 
 assert.ok(b.output().includes("doing -> to-do"), "poll moved the dead developer back to to-do");
 // under the cap each respawn was immediate: the first six runs kept pace with the 3s poll
 for (let n = 0; n <= 5; n++) {
-// the sweep may have gzipped a finished run's log; either form counts as logged
+	// the sweep may have gzipped a finished run's log; either form counts as logged
 	assert.ok(existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.${n}.log`)) || existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.${n}.log.gz`)), `developer run ${n} logged`);
 }
 // the cooldown log fired once at cap+1, and the deferred spawn has not fired yet

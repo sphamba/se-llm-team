@@ -521,11 +521,18 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 	}
 	const n = parseInt(q.get("offset") ?? "", 10);
 	const off = Number.isInteger(n) && n >= 0 ? n : null;
-	// a .gz log is a finished, immutable run: decompressed whole and the walk indexes the
-	// decompressed text (byte offsets cannot seek into a gzip stream); a plain log reads by
-	// byte range so a live tail streams without loading the file
-	let full: string | null = null;
-	if (target.endsWith(".gz")) full = logText(target) ?? ""; // corrupt or vanished: empty windows, never the compressed bytes
+	// a .gz log is a finished, immutable run: decompressed whole and the walk slices the
+	// decompressed bytes, so offsets stay byte-based like the plain path (byte offsets cannot
+	// seek into a gzip stream, and a string index would misread a plain log's byte offset);
+	// a plain log reads by byte range so a live tail streams without loading the file
+	let full: Buffer | null = null;
+	if (target.endsWith(".gz")) {
+		try {
+			full = gunzipSync(readFileSync(target));
+		} catch {
+			full = Buffer.alloc(0); // corrupt or vanished: empty windows, never the compressed bytes
+		}
+	}
 	let text = "";
 	let head: number, tail: number;
 	if (q.get("before") === "1") {
@@ -546,9 +553,9 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 		const window = (start: number, end: number): [string, number] => {
 			if (full === null) return readRange(target, start, end);
 			if (end <= start) return ["", start];
-			const slice = full.slice(start, end);
-			const nl = slice.lastIndexOf("\n");
-			return [slice, nl === -1 ? start : start + nl + 1];
+			const buf = full.subarray(start, end);
+			const nl = buf.lastIndexOf(0x0a);
+			return [buf.toString("utf8"), nl === -1 ? start : start + nl + 1];
 		};
 		// a finished log's tail is terminal records that render to nothing (assistant
 		// message_end, turn_end, agent_end, agent_settled): walk the window back until a
