@@ -1,8 +1,8 @@
 ---
 name: "fix: log loads collapsed lines, one block per line"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/158-collapsed-lines-log-load"
 blockedBy: ""
 issuer: "user"
 complexity: "moderate"
