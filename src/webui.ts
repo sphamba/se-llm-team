@@ -924,8 +924,7 @@ export function pairLayout(states: readonly string[]): (string | string[])[] {
 	const tail = states.slice(1);
 	let i = 0;
 	while (tail.length - i > 3) {
-		const pair = tail.slice(i, i + 2);
-		layout.push(pair.length > 1 ? pair : pair[0]);
+		layout.push(tail.slice(i, i + 2));
 		i += 2;
 	}
 	const rest = tail.slice(i);
