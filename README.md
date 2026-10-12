@@ -94,7 +94,7 @@ With `webUi.enabled: true` in `~/.pi/agent/se-llm-team.json`, the orchestrator d
 
 Only daemons outside a task worktree can win the hub election and bind the port: a worktree checkout can hold old code, so its daemon registers with the hub and never serves the ui. During a production restart the dashboard is briefly down instead of being served by old code. A daemon rooted in a task worktree exits itself when its task reaches `done` or is gone (checked at startup and on every sweep), so no stale worktree daemon lingers to hold the lock or contest the port.
 
-Both checks run inside each daemon's own code. A daemon started from a worktree checkout before this change does not run them, so it can still win the election and hold the port. After you upgrade, kill the old worktree daemons one time: run `pgrep -af orchestrator.ts` and kill each process whose `--root` contains `.worktrees` (for example: `pkill -f 'orchestrator.ts --root .*/\.worktrees'`; the pattern does not match a daemon at the project root). New worktree daemons run the current code and exclude themselves, so this residue does not come back.
+Both checks run inside each daemon's own code. A daemon started from a worktree checkout before this change does not run them, so it can still win the election and hold the port. After you upgrade, kill the old worktree daemons one time: run `pgrep -af orchestrator.ts` and kill each process whose `--root` contains `.worktrees` (for example: `pkill -f 'orchestrator.ts.*--root .*/\.worktrees'`; the pattern does not match a daemon at the project root). New worktree daemons run the current code and exclude themselves, so this residue does not come back.
 
 ## Agents
 
