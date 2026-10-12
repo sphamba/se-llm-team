@@ -1,8 +1,8 @@
 ---
 name: "docs: agents state their big assumptions affecting the feature"
 priority: "medium"
-state: "live-testing"
-worktree: "docs/145-agents-state-big-assumptions"
+state: "done"
+worktree: ""
 blockedBy: ""
 issuer: "user"
 complexity: "simple"
@@ -30,3 +30,23 @@ Added the big-assumptions instruction to the shared open-questions paragraph in 
 Sanity check run: all four role files (developer, reviewer, live-tester, merger) render through the renderPrompt placeholder chain with no unresolved {{...}} left, {{TASK_FILE}} resolves, and each new assumption sentence is present in its file.
 
 Review (commit ae6ac71): diff matches the Specs on all three agent prompts. developer.md states big assumptions about the feature (scope, behavior, constraints, integrations) as one-line entries in the # Open questions section, kept listed even when confident; reviewer.md calls out silent developer assumptions visible in the diff and treats unvoiced assumptions that affect the feature's direction as review findings; live-tester.md states its test-design assumptions and flags observed behavior that contradicts the task's stated assumptions. Append-only Notes and Open questions rules and the placeholder render are untouched; no src changes and SKILL.md untouched (diff touches only the 3 agent files). Reviewer re-ran the sanity check: renderPrompt placeholder chain over all four roles leaves no unresolved {{...}}, and each new assumption sentence is present. No fixes made.
+
+## Live test (2026-10-12)
+
+The live test rendered each changed role prompt the way src/orchestrator.ts does it (all six placeholders substituted, no {{...}} left) and delivered it to a real pi agent with the exact daemon spawn shape: `pi --approve --mode json --provider RCP --model <per-role model> --thinking max -p "<prompt>"`, cwd = a task worktree. The fixtures are scratch git repos in /tmp/live145, one per role, each with a task file and a worktree. Three runs, one per role, all exit 0. The unit test suite was not run.
+
+- Developer: the fixture Specs left the option behavior open (`demo.sh --greeting <text>`). The agent implemented the option, committed, appended the work, and wrote two one-line assumptions in the # Open questions section after # Notes: other options are rejected with exit 1, and the greeting is printed once with no decoration. The assumptions stayed listed although the agent was confident. Pass.
+- Reviewer: the fixture diff silently made JSON the default output and moved the old output behind an undocumented `--plain` flag. The review called this out as a silent interface inversion and treated it as a finding ("The developer silently inverted the interface (default became JSON, old output moved behind an undocumented flag)"), then fixed the diff. Pass.
+- Live-tester: the fixture Specs say `--tag` prints to stdout and exits 0, while the branch writes to stderr and exits 1. The report flagged the contradiction explicitly ("Observed behavior contradicts the task's stated assumption"), stated four test-design assumptions, set the state to to-merge, and created two follow-up tasks (the missing-value case) through the PM flow. Pass.
+
+No product issue found. The diff touches only the three agent files. merger.md and src are untouched, the append-only Notes rule holds, and the placeholder render leaves no unresolved {{...}}.
+
+# Open questions
+
+No open questions.
+
+Live-test design assumptions:
+- The rendered prompt text is the interface under test. The daemon spawn command and the per-role model flags from ~/.pi/agent/se-llm-team.json for a simple task reproduce the real delivery.
+- A scratch git repo in /tmp with the same task frontmatter and one worktree per task is a valid stand-in for a real board task.
+- In the scratch worktrees .kanban is a real directory. In the real worktrees .kanban is a symlink to the main board, so I read the state and the reports from both copies.
+- One rollout per role is a sample of prompt compliance, not a statistical guarantee.
