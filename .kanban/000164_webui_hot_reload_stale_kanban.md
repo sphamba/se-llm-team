@@ -82,6 +82,23 @@ Merged in two steps, no conflicts anywhere, no fixes needed.
 - Step 2: merged fix/164-webui-hot-reload-stale-kanban into main at the project root (fast-forward 0aee405..ed55fe1).
 - The live test runs on merged commit ed55fe1 on the root checkout.
 
+## 2026-10-12, live-tester
+Result: PASS. No findings, no new tasks. The unit suites were not run.
+
+Setup: the root checkout's main had moved on to merge commit 7ecec18 (task #166 merged on top); ed55fe1 is an ancestor of that HEAD, so the tested code is the merged #164 change. I cloned the merged checkout to a scratch dir (/tmp/live164/repo) and started the real daemon from there with `node src/orchestrator.ts --root /tmp/live164/root`, plus a fixture project root (`webUi: {enabled, 127.0.0.1:4488}`) and an isolated HOME. I ran the daemon from the clone, not the root checkout, because the served webui graph must be editable to simulate a STATES change and the real checkout must stay untouched. Browser flow used real Chromium through the local Playwright install (paseo/node_modules).
+
+- Baseline (webui.ts and kanban.ts untouched): GET / serves `LAYOUT = ["backlog",["to-do","doing"],["to-review","reviewing"],["to-merge","merging"],["to-live-test","live-testing"],"done"]`; real Chromium shows to-merge at x=959 left of to-live-test at x=1269.
+- Core flow: I swapped the to-merge and to-live-test pairs in the served src/kanban.ts only (src/webui.ts mtime unchanged). Without any daemon restart, a fresh browser load shows the new order: to-live-test at x=959, to-merge at x=1269, DOM column order backlog | to-do | doing | to-review | reviewing | to-live-test | live-testing | to-merge | merging | done. The reproduced backward-movement scenario is gone.
+- No restart: one daemon process (pid 3809772) ran for the whole test (115s+), its log has only the two startup lines and no errors, and /api/projects kept the fixture entry.
+- A card ('done probe') still renders in its column after the reloads.
+- Broken file: with garbage written over src/kanban.ts, GET / still answers 200 with the last good LAYOUT, and /api/tasks and /health stay up. After a valid file with a newer mtime, the next request serves the new order (no permanent stick).
+- Regression: a webui.ts-only change (page title) still reloads on the next fetch through the new copy-dir path.
+- Repo hygiene: no .webui-hot-* leftovers in src after every reload, the broken-file case, and the webui.ts change.
+- Cleanup: daemon killed, port 4488 down, hub lock released, isolated registry empty, scratch dirs removed. No leaked processes.
+- All four stated assumptions hold against the running system: mtime is the only version signal; the graph covers kannan.ts and pid.ts; the copy dir is transient; the graph needs no node_modules.
+
+Assumptions made by the live test: the scratch-clone run is equivalent to the root checkout because both are the same merged commit (ed55fe1 ancestor of root main 7ecec18); the fixture board's single done task is enough for the page to render.
+
 # Open questions
 No open questions: both recorded questions are answered by the # Decision above. Assumptions (confirm or correct any of these):
 
