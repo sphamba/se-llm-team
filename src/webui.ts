@@ -723,6 +723,50 @@ export function fmtDur(ms) {
 	return Math.floor(sec / 60) + "m" + (sec % 60 ? " " + (sec % 60) + "s" : "");
 }
 
+// the stats line under an agent card's label (42k · 3.5s): tokens then duration, empty when both
+// are missing; agentCardHtml and the in-place stats pass share it, so both render the same string
+export function agentStatsText(tokens, duration) {
+	return [fmtTokens(tokens), fmtDur(duration)].filter(Boolean).join(" · ");
+}
+
+// the open detail card's poll cadence (000142): a live agent's tokens and duration advance with
+// the run log, so while the open task has one the poll ticks at 1 s; otherwise the 5 s board poll
+export function refreshMs(t) {
+	return t && (t.agents || []).some((a) => a.alive) ? 1000 : 5000;
+}
+
+// the agent row's structure: role, run, aliveness, status and handle per run. A changed set
+// rebuilds the row (sub boxes carry over by handle), an unchanged one moves only the stats lines
+export function agentRowSig(runs) {
+	return runs.map((a) => [a.role, a.run, a.alive ? "live" : a.status, a.handle].join("/")).join("|");
+}
+
+// 000142: an unchanged agent row updates its cards' stats lines in place, so the live run's
+// spinner animation survives the poll; a structure change (a run added or gone, live -> dead)
+// returns false and the caller rebuilds, re-seeding the signature. The stats span joins the card
+// html only when the stats are non-empty, matching agentCardHtml's markup; doc is injected so
+// tests run this without a DOM.
+export function syncAgentStats(el, runs, doc) {
+	if (el.__sig !== agentRowSig(runs) || el.children.length !== runs.length) return false;
+	for (let i = 0; i < runs.length; i++) {
+		const stats = agentStatsText(runs[i].tokens, runs[i].duration);
+		const card = el.children[i].children[0];
+		if (card.__stats === stats) continue;
+		card.__stats = stats;
+		const span = [...card.children].find((c) => c.className === "agent-stats");
+		if (span) {
+			if (stats) span.textContent = stats;
+			else span.remove();
+		} else if (stats) {
+			const s = doc.createElement("span");
+			s.className = "agent-stats";
+			s.textContent = stats;
+			card.appendChild(s);
+		}
+	}
+	return true;
+}
+
 // board layout, left to right: a string is a single column, an array is a stacked pair with the
 // first state on top. backlog and done stay single side columns, the states between them stack two
 // by two in pipeline order (to-do over doing, to-review over reviewing, ...), so the queued
@@ -1158,6 +1202,10 @@ ${mergeBoards}
 ${agentLabel}
 ${fmtTokens}
 ${fmtDur}
+${agentStatsText}
+${agentRowSig}
+${syncAgentStats}
+${refreshMs}
 // tabs: one per registered project, the active one renders that project's board
 function renderTabs() {
 	const el = document.getElementById("tabs");
@@ -1296,7 +1344,8 @@ function openTask(file) {
 	document.getElementById("modal").classList.remove("hidden");
 }
 // the 5 s refresh of the open detail card: every block re-derives from the fresh payload with no
-// close/reopen; renderAgent's keep mode re-renders the run cards and leaves the log pane alone
+// close/reopen; renderAgent's keep mode moves only the stats lines on an unchanged run set and
+// leaves the log pane alone
 function updateOpenTask(t) {
 	writeHead(t);
 	renderAgent(t, true);
@@ -1347,23 +1396,31 @@ function ingest(html, where) {
 // one agent card: the role label, then a tokens/duration stats line (42k · 5m 12s); mark is the
 // live spinner or the past check, empty on a sub card
 function agentCardHtml(extraCls, attrs, label, tokens, duration, mark) {
-	const stats = [fmtTokens(tokens), fmtDur(duration)].filter(Boolean).join(" · ");
+	const stats = agentStatsText(tokens, duration);
 	return '<button class="agent-card' + (extraCls ? " " + extraCls : "") + '" ' + attrs + ">" + mark + esc(label) + (stats ? '<span class="agent-stats">' + esc(stats) + "</span>" : "") + "</button>";
 }
 // the agent history as one horizontal row of columns: every run a card with its subagent cards
 // stacked below, always visible (fetched for every run on open), oldest leftmost (payload order
 // is log mtime order), the live run rightmost; a role with several runs labels them 1-based.
-// keep=true is the 5 s refresh of the open card: the run cards re-render, each run's fetched sub
-// box is carried over by handle, only the live run's sub list re-fetched, and the log pane beside
-// the row is untouched
+// keep=true is the poll refresh of the open card: an unchanged run set moves only the stats lines
+// (syncAgentStats), so the live run's spinner animation survives the poll; a structure change
+// rebuilds the row, each run's fetched sub box carried over by handle, and only the live run's
+// sub list re-fetched; the log pane beside the row is untouched
 function renderAgent(t, keep) {
 	const el = document.getElementById("m-agent-btns");
 	const runs = (t.agents || []).slice();
 	const live = runs.find(a => a.alive);
 	if (live) { runs.splice(runs.indexOf(live), 1); runs.push(live); }
+	if (!runs.length) { el.innerHTML = ""; el.__sig = ""; return; }
+	// the run set is the row's structure: role, run, aliveness, status, handle. Unchanged, the
+	// stats lines update in place and the live run's spinner keeps spinning across the poll
+	if (keep && syncAgentStats(el, runs, document)) {
+		if (live) fetchSubs(agentGen, live, el.querySelector(".agent-col:last-child > .agent-subs"));
+		return;
+	}
+	el.__sig = agentRowSig(runs);
 	const oldSubs = keep ? new Map() : null;
 	if (oldSubs) for (const c of el.querySelectorAll(".agent-col > .agent-card")) oldSubs.set(c.dataset.handle, c.parentElement.querySelector(".agent-subs"));
-	if (!runs.length) { el.innerHTML = ""; return; }
 	const count = {};
 	for (const a of runs) count[a.role] = (count[a.role] || 0) + 1;
 	el.innerHTML = runs.map(a =>
@@ -1506,17 +1563,20 @@ function refresh() {
 		render();
 		// the open detail card re-derives from the fresh payload: a state change or a new agent run
 		// shows in place, and a task gone from the board closes the card
+		let open = null;
 		if (modalFile && !document.getElementById("modal").classList.contains("hidden")) {
-			const t = activeBoard().tasks.find(x => x.file === modalFile);
-			if (t) updateOpenTask(t); else closeModal();
+			open = activeBoard().tasks.find(x => x.file === modalFile);
+			if (open) updateOpenTask(open); else closeModal();
 		}
 		// stamp only a served board: during a hub outage the old stamp stays visible
 		const current = rows.find(([id]) => id === active);
 		if (current && current[1]) document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
-	}).catch(() => {});
+		// the next tick keys on the fresh open card (000142): while it shows a live agent the stats
+		// advance at log speed, so the cadence is 1 s; no live agent keeps the 5 s board poll
+		setTimeout(refresh, refreshMs(open));
+	}).catch(() => setTimeout(refresh, 5000)); // a failed cycle retries at the board cadence
 }
 refresh();
-setInterval(refresh, 5000);
 </script>
 </body>
 </html>
