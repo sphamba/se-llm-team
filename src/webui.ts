@@ -22,7 +22,8 @@ const LOG_ROLES = [...Object.values(AGENT_ROLE), "merger"];
 const SUB_ROOT = "/tmp/pi-subagents-1000/";
 
 // one agent run: run is the index in `<slug>.<role>.<n>.log`, null for a legacy unsuffixed file;
-// tokens sums the run's turn_end totals, duration is the last record timestamp minus the first,
+// tokens sums the run's turn_end totals, duration is the last record timestamp minus the first
+// (000169: the live run ticks with now - first instead, so a quiet stretch does not freeze it),
 // both null when the log carries none; status is live for the newest run of the live role, dead
 // when the bounce left a sibling .dead marker, ok when the run advanced the state itself
 interface AgentEntry {
@@ -134,6 +135,7 @@ function agentHistory(root: string, t: Task, files: string[]): AgentEntry[] {
 	const dir = join(kanbanDir(root), ".logs");
 	const liveRole = AGENT_ROLE[t.state];
 	const live = !!liveRole && agentAlive(root, slug);
+	const now = Date.now();
 	const entries: (AgentEntry & { mtime: number; start: number | null })[] = [];
 	for (const role of LOG_ROLES) {
 		const base = `${slug}.${role}`;
@@ -156,7 +158,10 @@ function agentHistory(root: string, t: Task, files: string[]): AgentEntry[] {
 			// completed-run counter clear reads; a marker can never name the live run, indexes
 			// are never reused
 			const status: AgentEntry["status"] = alive ? "live" : existsSync(join(dir, `${r.handle}.dead`)) ? "dead" : "ok";
-			entries.push({ role, run: r.run, alive, status, handle: r.handle, tokens: stats.tokens, duration: stats.duration, mtime, start: stats.first });
+			// a live run can go quiet for minutes mid-tool-call, so its duration ticks with
+			// now - first per request; finished runs keep the parsed last - first (000169)
+			const duration = alive && stats.first != null ? Math.max(0, now - stats.first) : stats.duration;
+			entries.push({ role, run: r.run, alive, status, handle: r.handle, tokens: stats.tokens, duration, mtime, start: stats.first });
 		}
 	}
 	// stable sort: the enumeration order (role order, legacy first, index ascending) breaks the ties

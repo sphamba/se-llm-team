@@ -1290,17 +1290,25 @@ const walkedRun = await (await get(`${slug}.developer.1`)).json();
 assert.ok(walkedRun.text.includes("<p>final output line</p>") && walkedRun.head === 0, "an unrenderable tail of a run log walks back to renderable content");
 
 // 000120 usage stats: agentHistory entries carry tokens (the sum of the turn_end
-// message.usage.totalTokens, cache reads included) and duration (the last record timestamp minus
-// the first); timestamps arrive as ISO strings and epoch-ms numbers alike
+// message.usage.totalTokens, cache reads included) and duration; timestamps arrive as ISO
+// strings and epoch-ms numbers alike
 writeFileSync(dev1, [
-	JSON.stringify({ type: "session", version: 3, id: "s", timestamp: "2026-10-11T09:35:54.121Z" }),
+	JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date(Date.now() - 600000).toISOString() }),
 	JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "working" } }),
-	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 1500, cost: { total: 0 } }, model: "m-1", thinkingLevel: "low" }, timestamp: Date.parse("2026-10-11T09:36:24.121Z") }),
-	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 27500 }, model: "m-2", thinkingLevel: "high" }, timestamp: "2026-10-11T09:37:24.121Z" }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 1500, cost: { total: 0 } }, model: "m-1", thinkingLevel: "low" }, timestamp: Date.now() - 570000 }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 27500 }, model: "m-2", thinkingLevel: "high" }, timestamp: new Date(Date.now() - 540000).toISOString() }),
 ].join("\n") + "\n");
 const statEntry = (await (await fetch(`${base}/api/tasks`)).json())[0].agents.find((a) => a.handle === `${slug}.developer.1`);
 assert.equal(statEntry.tokens, 29000, "tokens sums the turn_end totals across the run log");
-assert.equal(statEntry.duration, 90000, "duration is the last record timestamp minus the first (the session record here), ISO and epoch-ms alike");
+assert.ok(statEntry.duration >= 600000, "a live run's duration ticks with now - first (the session record here), not the frozen parsed last - first");
+// 000169: a finished run is not live, so its duration stays the parsed last - first even when
+// the run ended long ago
+writeFileSync(lt1, [
+	JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date(Date.now() - 600000).toISOString() }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 10 } }, timestamp: new Date(Date.now() - 595000).toISOString() }),
+].join("\n") + "\n");
+const finishedEntry = (await (await fetch(`${base}/api/tasks`)).json())[0].agents.find((a) => a.handle === `${slug}.live-tester.1`);
+assert.equal(finishedEntry.duration, 5000, "a finished run keeps the parsed last - first");
 // 000146: the chunked payload carries the meta off the latest usage-bearing record, so the log
 // pane's meta line refreshes on every poll
 const statPayload = await (await get(`${slug}.developer.1`)).json();
