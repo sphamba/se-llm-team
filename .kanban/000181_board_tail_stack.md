@@ -1,7 +1,7 @@
 ---
 name: "feat: board stacks to-live-test, live-testing and done in one column group"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "feat/181-board-tail-stack"
 issuer: "user"
 complexity: "simple"
@@ -28,10 +28,9 @@ In the webui board, stack the to-live-test, live-testing and done states togethe
 - The number 000180 was taken by a concurrently filed finding task (race unit test rescan path), so this file took the next free number.
 - Implemented in the worktree (commit c5d7d6f): pairLayout now pairs two by two while more than three states remain after backlog, then stacks the remaining tail (to-live-test over live-testing over done) as the last group. No state-specific wiring, no CSS change (.pair is a flex column, columns keep their .col c-<state> accent colors).
 - Updated the webui.test.ts assertions: LAYOUT, the boardEl children structure (done no longer a side column) and the pair wrappers test. Both webui.test.ts and index.test.ts pass.
+- Review (2026-10-13): implementation matches the specs. The diff touches only pairLayout, its doc comment and the webui.test.ts assertions; buildShell already renders any-length stacked groups and .pair is a flex column, so the triple needs no CSS change. Verified against the code, the developer's three assumptions all hold: the tail slice keeps STATE_NAMES order and .pair renders first-on-top (to-live-test, live-testing, done); nothing outside pairLayout/tests changed; no CHANGELOG.md or version scheme exists to bump. Reviewer fix (commit 46d695b): removed the provably dead `pair.length > 1 ? pair : pair[0]` guard in the pairing loop (tail.length - i > 3 always leaves a full pair); webui.test.ts and index.test.ts re-passed.
+- Merge (2026-10-13): both steps clean, nothing to resolve. Step 1 (merge main into feat/181-board-tail-stack in the worktree) was already up to date (merge-base == main tip 8ea9467), so no test suites ran per the clean-merge rule. Step 2 (merge feat/181-board-tail-stack into main in the project root) fast-forwarded main 8ea9467 -> 46d695b (src/webui.ts, src/webui.test.ts). No conflicts, no fix commits.
 
 # Open questions
 
-None. Assumptions made (confirm or correct before live-test):
-- The stacked tail group keeps pipeline order top to bottom: to-live-test above live-testing above done.
-- All existing webui behavior beyond the column layout (syncBoard, cardHtml, relations, spinner, fold toggles) stays unchanged.
-- No webui version bump or changelog entry is needed for this visual layout change.
+None.

@@ -1,8 +1,8 @@
 ---
 name: "feat: task summary cards show total tokens and time across all agents"
 priority: "medium"
-state: "live-testing"
-worktree: "feat/178-card-total-tokens-time"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "card-total-tokens-time"
@@ -31,6 +31,8 @@ In the task summary (preview) cards, below the chips, show the total tokens (inp
 - Review confirmation: totals span every entry in the agents array (all roles, all runs, finished and live). This matches the spec's "totals across all agent entries", so it is not an open question. No code fixes.
 
 - 2026-10-12 (merge): step 1, base main already contained in feat/178-card-total-tokens-time ("Already up to date"), no conflicts, so no test suites run. Step 2, main fast-forwarded 966ce04 -> 8ea9467 (src/webui.ts +16, src/webui.test.ts +5). Both merges clean, no conflict resolution needed.
+- 2026-10-12 (live-test): hub-only live test of the merged commit 8ea9467 with the real src/webui.ts, an isolated root (/tmp/t178/repo, 5 synthetic tasks, isolated HOME) and port 4967; no unit suite. A two-run task (developer 420 tok/1500 ms, reviewer 1580 tok/2000 ms) renders "2k · 3.5s" in a `.card-stats` span that is the last element of the card, below the chips, muted 10px block. A task with no runs and a task with only 0/null totals hide the line. A live run's totals include the now-based duration and the rendered line advances with the board poll (+5 s over 6.2 s, api in step); the card node and the chip layout stay, and the modal still shows per-agent stats (developer "420 · 1.5s", reviewer "2k · 2.0s") with no `.card-stats`. Assumption: log record shapes as in #177 (`turn_end` with `message.usage.input/output`), duration = last minus first timestamp, live duration = now minus first timestamp. Observed and accepted: the live card's markup changes each poll, so its `.spin` node is recreated (the task's open-question default; the card node itself is kept).
+- 2026-10-12 (live-test, finding reported to the PM): a task whose entries carry a duration but no usage record shows "0 · Ns" on the summary card, because taskStatsText sums null tokens to 0 and fmtTokens(0) returns "0", while the same run's agent card in the modal shows just "Ns". This hits legacy/no-usage logs (observed card "0 · 3.0s", agent card "3.0s") and every live run before its first usage record (observed card "0 · 59s", agent card "59s"), so the spec's "reads like the agent cards' stats" is not met for usage-less entries.
 
 # Open questions
 - Live cards (a live agent's duration ticks with now - first per payload, 000169) now rewrite their markup on every poll, so the spinner animation restarts each tick. Accept the stutter, or should the stats line update in place (an in-place card-stats pass like syncAgentStats)? The spec's "syncBoard stays unchanged" excludes the in-place pass, so the developer accepted the stutter as-is. Default: accept.

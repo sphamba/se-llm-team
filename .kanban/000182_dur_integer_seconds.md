@@ -1,8 +1,8 @@
 ---
 name: "fix: duration labels show integer seconds, no fractions"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/182-dur-integer-seconds"
 issuer: "user"
 complexity: "trivial"
 shortName: "dur-integer-seconds"

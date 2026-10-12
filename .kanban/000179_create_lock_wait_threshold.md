@@ -1,7 +1,7 @@
 ---
 name: "fix: createTask lock wait is shorter than the stale-lock steal threshold"
 priority: "low"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/179-create-lock-wait-threshold"
 issuer: "#174"
 complexity: "simple"
@@ -31,12 +31,25 @@ In `src/kanban.ts` `createTask` the lock acquisition loop waits about 1 s (100 i
 # Notes
 - Filed from the #174 live-test report (merged commit e33bf83). The lock loop and the steal threshold are both in `src/kanban.ts`.
 
+## 2026-10-12, reviewer
+
+- Reviewed 8f63b8f against the Specs. The fix matches the accepted approach: both the steal threshold and the give-up deadline derive from one LOCK_STALE_MS constant, so the two values can no longer cross; deadline = threshold + 5 s margin. Age-based steal semantics unchanged.
+- The new test reproduces the #174 live evidence (8 s-backdated lock, under the threshold at call time) and asserts createTask waits, steals, succeeds and leaves no lock file. utimesSync seconds-vs-ms usage is correct.
+- node src/kanban.test.ts passed 4x (allocation path touched, per load-sensitive guidance), including the multi-process concurrent create test. No other lock staleness values in src.
+- Assumptions are documented in the task's # Assumptions section (visible, not silent). No unvoiced assumptions that affect the direction. No user/client questions.
+
 ## 2026-10-12, developer
 
 - Replaced the 100-iteration give-up loop with a real-time deadline derived from one `LOCK_STALE_MS` constant (10 s): deadline = threshold + 5 s, so the give-up window can no longer be shorter than the steal threshold. Steal check now uses the same constant. Age-based steal semantics unchanged, so a live holder is never stolen mid-critical-section.
 - Added a test in `src/kanban.test.ts`: a `.create.lock` backdated 8 s (the #174 live evidence) is under the threshold at call time and ages past it while `createTask` waits. Old code failed after about 1 s. New code waits, steals, succeeds, and leaves no lock file.
 - `node src/kanban.test.ts` passes (2.5 s, the new wait included). `orchestrator.test.ts` and `extension.test.ts` pass. The multi-process concurrent create test is unchanged and still passes.
 - Committed as 8f63b8f on fix/179-create-lock-wait-threshold.
+
+## 2026-10-12, merger
+
+- Step 1: merged main into fix/179-create-lock-wait-threshold in the worktree. Clean merge (ort strategy, no conflicts), commit 8521d5b. main had moved ahead with webui work (src/webui.ts, src/webui.test.ts); no overlap with the fix. Test suites skipped per the clean-merge rule.
+- Step 2: merged fix/179-create-lock-wait-threshold into main in the project root. Fast-forward to 8521d5b, no conflicts.
+- No user/client questions.
 
 # Open questions
 
