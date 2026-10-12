@@ -267,8 +267,8 @@ function replaceSections(root: string, task: Task, updates: Record<string, strin
 }
 
 // "#42, #43" -> [42, 43]; parses refs with or without the leading # and ignores malformed
-// parts, matching the promotion failsafe's blockedBy parse so the guard checks every ref
-// the failsafe honors
+// parts, matching the orchestrator's promotion gate (blockedByUndone) so the guard checks
+// every ref the gate honors
 function blockedNums(blockedBy: string): number[] {
 	const nums: number[] = [];
 	for (const part of blockedBy.split(",")) {
