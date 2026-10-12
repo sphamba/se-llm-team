@@ -1,7 +1,7 @@
 ---
 name: "fix: hub lock is global so a restart can hand the production port to a leaked old-code daemon"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/165-hub-restart-stale-daemon-takeover"
 issuer: "#157"
 complexity: "moderate"

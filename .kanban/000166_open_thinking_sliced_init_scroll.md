@@ -1,8 +1,8 @@
 ---
 name: "fix: open thinking block is sliced on init and scroll-up"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/166-open-thinking-sliced-init-scroll"
+state: "done"
+worktree: ""
 issuer: "#158"
 complexity: "moderate"
 shortName: "open-thinking-sliced-init-scroll"
@@ -44,6 +44,19 @@ Tests: the 000148 init test rewritten (init of a mid-thinking log now asserts th
 
 Merge (2026-10-12, 7ecec18): step 1 merged main (4 new commits: per-role notes in .kanban, webui hot reload module graph, role-notes filter) into fix/166-open-thinking-sliced-init-scroll in the worktree; only src/webui.test.ts overlapped and auto-merged with the 'ort' strategy, no conflicts, so test suites were skipped per the clean-merge rule. Step 2 fast-forwarded main in the project root to 7ecec18, root clean. Merged main carries the full fix (src/webui.ts linesBack openThink state) and both test blocks.
 
+Live test (2026-10-12, merged 7ecec18): passed, no issues. Tested on the real interface: an isolated single-project hub (src/hub.ts startHub, port 4321, HOME redirected to a scratch dir so the real ~/.pi/agent hub registry stays untouched) served the merged src/webui.ts, and Chromium (Playwright) drove the real UI: board card, detail card, agent card, log pane, mouse wheel. The logs were synthetic run logs in the exact real record shapes (message_update/assistantMessageEvent). A pid file naming a live sleep process kept the run live, so the 1 s log poll ran.
+
+- Init, open block of 150 deltas preceded by 130 records: payload head = 2790 = the byte offset of the 31st preceding record, 99 collapsed lines before the block start (the open block counts as ONE line, as decided). atStart false. The window holds the block whole from its thinking_start: exactly one `<details class="lg-think" data-open="think">` with the full run d000..d149 and zero lg-cont spans. The old symptom (init = a single orphan lg-cont span) is gone.
+- Scroll-up: with 130 long text records before the block the pane is scrollable; a real mouse wheel to scrollTop 0 fired the onscroll request `&offset=2790&before=1`. That payload carried zero lg-think, zero lg-cont and no delta token of the open block, so no part of the live block was re-served. The DOM stayed on exactly one open Thinking block with the full run. In the first fixture the pane was not scrollable (a Thinking block is a collapsed details), so the poll tick's scrollTop-0 path sent the identical request; same request, same client ingest.
+- Finalization: appending a real thinking_end record made the next 1 s poll deliver the data-final span, and logFixups replaced the open block's body in place. Final DOM: exactly one closed details.lg-think, data-open removed, pre text exactly the authoritative content, zero lg-cont, no stale fragment, no second block.
+- Abandoned run (open block, no thinking_end, 120 deltas): init returns atStart true and renders the full run as one open Thinking block (g000..g119), no content dropped.
+- .gz log through the same endpoint: one open block, no lg-cont; a back-fill from its head carried no deltas.
+- Closed blocks (the changed walk must keep them atomic): a closed block at the tail, and a closed block followed by an open block, each render as one block per phase with no orphan span (payload level).
+
+No console or page errors in any scenario. No contradiction with the Decision or the stated assumptions.
+
+Environment notes for future live tests: Playwright is not resolvable from the repo or the global node_modules; the usable copy is /home/phamba/.npm/_npx/e41f203b7505f1fb/node_modules/playwright (1.63.0, browsers cached). The hub's webuiLoader copies the webui module graph into src/.webui-hot-<pid>-<v> and sweeps .webui-hot-* after each import; an isolated hub with a redirected HOME keeps the real registry clean and the port distinct (4242 is the production hub).
+
 # Open questions
 
 None for the user. The direction question was answered (see Decision): an open, still-streaming block counts as ONE collapsed line.
@@ -54,3 +67,11 @@ Assumptions made (confirm or correct before this hardens):
 - The thinking_end finalization keeps using the existing data-final span mechanism (no new client code).
 - Scroll-up back-fill semantics stay as #158 shipped: the back-fill tail is the previous window's head, dedupe stays boundary-based, no overlap re-serving.
 - The same fix applies to subagent transcripts and .gz logs, which go through the same linesBack and agentLogPayload code.
+
+Live-test assumptions (usage tests, 2026-10-12):
+- No real agent was spawned. Synthetic run logs in the real record shapes stand in for a mid-thinking live log; the exercised paths are the real HTTP endpoint, the real client ingest/logFixups and the real 1 s poll.
+- Aliveness for the finalization flow came from a pid file naming a live sleep process, so the poll timer behaved like a live run.
+- .gz logs were exercised against the endpoint; the subagent transcript path (sub=n) shares linesBack and agentLogPayload but was not separately exercised.
+- One browser scenario opened the log of a past run and the others a live run; the client code path is the same.
+
+Observed behaviour that contradicts the task's stated assumptions: none. The init window held 249 records when the open block was in it, exactly as the task's assumption anticipates.
