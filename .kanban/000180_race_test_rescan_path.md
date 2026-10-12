@@ -1,7 +1,7 @@
 ---
 name: "fix: race unit test does not exercise the post-write rescan path"
 priority: "low"
-state: "reviewing"
+state: "merging"
 worktree: "fix/180-race-test-rescan-path"
 issuer: "#174"
 complexity: "simple"
@@ -41,9 +41,9 @@ Choose one:
 - Evidence, from an instrumented copy in /tmp (not committed): the net fired exactly once (`NET-FIRED 000006_racer.md`) in the strengthened case; a negative control with the net removed from `kanban.ts` fails the case at the racer assertion (`000006_racer.md` vs `000007_racer.md`).
 - The task premise on the concurrency block was off: a probe shows 0 net fires there. The #174 lock serializes scan+write and every concurrent slug differs, so no duplicate number can arise under it. Its comment now states it proves unique numbers under contention, not the net, so the strengthened race case is the net's sole exerciser.
 - `node src/kanban.test.ts` and `npm test` pass (exit 0).
+- Review of f8a4806 (merger candidate): re-verified the developer's claims independently on the merged HEAD with my own instrumented copy in /tmp, logging fires to a file because the parent discards the racer child's stderr on success. Exactly one net fire (`000006_racer.md`) and 0 in the concurrency block. The negative control with the net removed fails the case at the racer assertion (`000006_racer.md` vs `000007_racer.md`), matching the Notes above.
+- main had moved past the branch's merge base (966ce04 -> 8521d5b, carrying #178, #179 and #181): merged main into the branch per convention, no conflicts, `npm test` green (merge commit f8a4806).
+- `node src/kanban.test.ts` passed 3/3 before and 3/3 after the merge.
+- Cleared the open questions: the Specs' "Choose one" authorizes the strengthen option, the Specs' fix option itself names interception (so no production seam is required), the child-spawn pattern is established by the concurrency block, and the coverage premise is verified above. None need user input.
 
 # Open questions
-- Assumption: no user input needed; the Specs offered a choice and the strengthen option was taken. Say if the documentation-only option was preferred instead.
-- Assumption: keeping `src/kanban.ts` unchanged (no test seam in production code) is preferred over adding a hook there.
-- Assumption: the net's intended coverage is a hand-written or external file landing between the scan and the post-write rescan; the lock-serialized concurrency block cannot produce a duplicate number, so the strengthened race case is its only exerciser.
-- Assumption: child-process fs interception (same spawn pattern as the existing concurrency block) is acceptable test machinery; the preload lives in the temp race root and is removed with it.
