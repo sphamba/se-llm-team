@@ -914,18 +914,22 @@ export function syncAgentStats(el, runs, doc) {
 	return true;
 }
 
-// board layout, left to right: a string is a single column, an array is a stacked pair with the
-// first state on top. backlog and done stay single side columns, the states between them stack two
-// by two in pipeline order (to-do over doing, to-review over reviewing, ...), so the queued
-// to-merge/merging states become another pair with no change here
+// board layout, left to right: a string is a single column, an array is a stacked group with the
+// first state on top. backlog stays a single side column, the states after it pair two by two in
+// pipeline order (to-do over doing, to-review over reviewing, ...) while more than three remain,
+// and the remaining tail (here to-live-test, live-testing, done, all non-blocking for the backlog)
+// stacks together as the last group
 export function pairLayout(states: readonly string[]): (string | string[])[] {
 	const layout: (string | string[])[] = [states[0]];
-	const middle = states.slice(1, -1);
-	for (let i = 0; i < middle.length; i += 2) {
-		const pair = middle.slice(i, i + 2);
+	const tail = states.slice(1);
+	let i = 0;
+	while (tail.length - i > 3) {
+		const pair = tail.slice(i, i + 2);
 		layout.push(pair.length > 1 ? pair : pair[0]);
+		i += 2;
 	}
-	layout.push(states[states.length - 1]);
+	const rest = tail.slice(i);
+	if (rest.length) layout.push(rest.length > 1 ? rest : rest[0]);
 	return layout;
 }
 
