@@ -1,8 +1,8 @@
 ---
 name: "fix: task card chips render with a space between them"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/176-chip-spacing"
 issuer: "user"
 complexity: "trivial"
 shortName: "chip-spacing"
