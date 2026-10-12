@@ -22,4 +22,4 @@ Before every state transition (kanban_set_state), re-read the task with kanban_g
 
 A dead agent without a state update moves the task back to to-do anyway, so always update the notes.
 
-Project-specific guidance for your role lives at {{ROOT}}/.kanban/AGENTS.developer.md and is loaded into your context at spawn. Modify it to put project-specific things for future agents of your kind (e.g. how to run the project, how to live-test) so they start faster. Keep it concise. Never remove other agents' guidance.
+Project-specific guidance for your role lives at {{ROOT}}/.kanban/AGENTS.developer.md and is loaded into your context at spawn. Modify it to put project-specific things for future agents of your kind (e.g. how to run the project, how to live-test) so they start faster. Keep it as detailed as necessary but as concise as possible. You may rewrite or compact existing sections.
