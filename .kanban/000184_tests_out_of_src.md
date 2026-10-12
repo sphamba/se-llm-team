@@ -6,7 +6,7 @@ worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "tests-out-of-src"
-blockedBy: "#182, #183"
+blockedBy: "#183"
 ---
 
 # Summary
