@@ -6,7 +6,7 @@ worktree: ""
 issuer: "#149"
 complexity: "simple"
 shortName: "quiet-test-changed-probes"
-blockedBy: "#149, #148"
+blockedBy: "#148"
 ---
 
 # Summary
