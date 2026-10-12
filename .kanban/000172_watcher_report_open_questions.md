@@ -55,3 +55,23 @@ Whichever is chosen, SKILL.md and .pi/agents/watcher.md must agree.
 - Open questions cleared: all three entries were answered by the user decision in the Specs (Watcher definition stays as is with its 100-word cap; board check on every report through kanban_list; consistency edits inside SKILL.md are the decided scope).
 - No fixes. State set to to-merge. Acceptance criterion 1 holds in the worktree; criterion 2 is the live-tester check (hint above).
 - Merge: step 1 merged main into the docs branch in the worktree (already up to date, no conflicts, so no test suites were run). Step 2 merged docs/172-watcher-report-open-questions into main in the project root as a fast-forward to 7b39251 (skills/se-llm-team/SKILL.md, 2 lines changed). Merged content verified on main: the Watcher bullet says the report carries board events only and the PM runs the blocked-questions board check itself on every report. State set to to-live-test.
+
+## Live test (2026-10-12)
+
+PASS, no findings. No PM task created.
+
+Flow exercised (real interfaces):
+- Shipped text: `pi -p -nt --no-session "/skill:se-llm-team ..."` served the merged sentence from skills/se-llm-team/SKILL.md at 7b39251 verbatim ("Run the blocked-questions board check yourself on every report: kanban_list the backlog, ..."). `.pi/agents/watcher.md` still reports done/created only; `.kanban/AGENTS.watcher.md` does not exist; no tracked main-checkout text claims the watcher report carries questions (a stale copy lives only in the pre-merge #174 worktree, expected). SKILL.md and the watcher definition agree.
+- Real watcher #1 (Agent tool, subagent_type "watcher"): woke on `kanban: create 000176_chip_spacing.md` (a concurrent real task), reported "created #176, done none", carried no questions. No backlog task held openQuestions at that moment, so this run alone was not the acceptance fixture.
+- Fixture: temporary probe task #177 (state backlog, non-empty openQuestions with FIXTURE-QUESTION-ALPHA/BETA markers), created on the real board and deleted at the end of the test.
+- Real watcher #2, spawned while #177 existed, woke on this task's own `kanban: done 000172_watcher_report_open_questions.md` commit: report was "Done: #172 ... Created: none", and it did not carry #177's openQuestions. This matches the reworded bullet and the watcher definition (report carries board events only).
+- PM dry run after that report (fresh subagent reading the shipped SKILL.md, read-only): ran `kanban_list(scope="backlog")` exactly as the bullet prescribes and surfaced #177's openQuestions verbatim, so the questions reach the user through the PM's own board check, not through the report. Acceptance branch 2 holds.
+
+Cleanup: #177 deleted; the board again has no backlog task.
+
+Assumptions made while designing the tests:
+- The PM is not an interactive process here, so the PM half is a read-only subagent that reads the shipped SKILL.md and processes a real watcher report (the #161 recipe); the watcher half uses the real agent type and real board commits.
+- The acceptance fixture is a temporary probe task on the shared real board; a live PM session was active during the test, so the probe carried "live-test fixture, deleted right after the test" markers and existed for about four minutes. No live session had picked it up when it was deleted.
+- State was set to done before this report was written, per role instructions; the fixture delete commits the whole-board snapshot that carries this report.
+
+No observed behavior contradicts the task's stated assumptions. Difficulty in the harness only (not a project issue): watcher #1 woke on a concurrent real create commit (#176) before the fixture landed, because the board is shared with the live pipeline; the fix was a second watcher triggered deterministically by this task's own done transition. Recorded in .kanban/AGENTS.live-tester.md.

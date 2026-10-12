@@ -1,7 +1,7 @@
 ---
 name: "fix: task card chips render with a space between them"
 priority: "low"
-state: "merging"
+state: "live-testing"
 worktree: "fix/176-chip-spacing"
 issuer: "user"
 complexity: "trivial"
@@ -26,8 +26,7 @@ Task preview cards render the priority, complexity and issuer chips adjacent wit
 - Updated the one existing assertion that asserted chip adjacency (cxCard) to expect `</span> <span`, and added the new assertion that no card markup contains `</span><span class="chip`.
 - Ran src/webui.test.ts, src/kanban.test.ts and src/extension.test.ts: all pass. orchestrator.test.ts and index.test.ts do not use cardHtml, so they were not run (full npm test exceeds a 120 s timeout from daemon smoke tests, pre-existing slowness).
 - Note for future agents: run src/webui.test.ts plain (no SE_LLM_TEAM_NO_WEBUI=1). Its daemon smoke test sets HOME to a temp config with webUi port 0, so it is safe, and the env var makes its "daemon log shows the web ui url" assertion fail.
+- Merge step 1: merged main into fix/176-chip-spacing in the worktree. Clean, no conflicts (only skills/se-llm-team/SKILL.md carried over), so test suites were skipped per the merge protocol.
+- Merge step 2: merged fix/176-chip-spacing into main in the project root. Fast-forward ca621b3..c38a37b, carrying src/webui.ts and src/webui.test.ts. Ready for live test.
 
 # Open questions
-- Assumption: a plain single space (not CSS margin/gap) is the wanted fix, as the specs say.
-- Assumption: changing every card's identity is acceptable (one full board re-render), as the specs say.
-- Assumption: the detail modal attrs rows stay out of scope, as the specs say.
