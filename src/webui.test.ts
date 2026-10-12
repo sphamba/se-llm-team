@@ -521,7 +521,8 @@ assert.ok(issuedCard.includes('<span class="chip issuer">#42</span>'), "a task-i
 assert.ok(page.includes(".chip.issuer {") && page.includes(".issued {"), "the differentiation classes ship in the page css");
 // complexity badge on cards: a per-value color chip next to the priority chip, default moderate when absent
 const cxCard = cardHtml({ file: "000003_c.md", name: "c", priority: "medium", complexity: "complex" }, "doing");
-assert.ok(cxCard.includes('<span class="chip p-medium">medium</span><span class="chip cx cx-complex">complex</span>'), "the complexity badge carries its value class next to the priority badge");
+assert.ok(cxCard.includes('<span class="chip p-medium">medium</span> <span class="chip cx cx-complex">complex</span>'), "the complexity badge carries its value class next to the priority badge");
+assert.ok(!cardHtml({ file: "000006_f.md", name: "f", priority: "low" }, "to-do").includes('</span><span class="chip'), "a card puts a space between the priority, complexity and issuer chips");
 assert.ok(cardHtml({ file: "000004_d.md", name: "d", priority: "high", complexity: "<x>" }, "doing").includes('<span class="chip cx cx-&lt;x&gt;">&lt;x&gt;</span>'), "the complexity badge is escaped");
 assert.ok(userCard.includes('<span class="chip cx cx-moderate">moderate</span>'), "an absent complexity renders as moderate");
 assert.ok(page.includes(".chip.cx {"), "the base complexity chip style ships in the page css as the fallback");
@@ -834,6 +835,7 @@ assert.ok(!monoSelectors.includes("#m-log-text pre"), "the Thinking prose and th
 assert.ok(page.includes("button { font-family: inherit; }"), "buttons inherit the page font instead of the UA Arial default");
 assert.ok(page.includes(String(md)), "the page runs the tested md renderer for task bodies and log text");
 assert.ok(page.includes("#m-log-text pre { font: inherit;"), "log block bodies inherit the sans serif font");
+assert.ok(page.includes("#m-log-text pre { font: inherit; margin: 0; padding: 0; white-space: pre-wrap; overflow-wrap: break-word; }"), "expanded log block bodies wrap to the container width");
 assert.ok(page.includes("#m-log-text summary { cursor: pointer;"), "collapsed log summaries read as clickable");
 assert.ok(page.includes("#m-log-text details.lg-think, #m-log-text details.lg-tool { color: var(--muted); }"), "thinking and tool blocks render muted grey in both themes, collapsed and expanded alike");
 assert.ok(/display: flex; flex-wrap: wrap/.test(page.match(/#m-agent-btns \{[^}]*\}/)![0]), "the run columns render as one wrapping flex row");
