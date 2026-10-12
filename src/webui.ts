@@ -1104,6 +1104,8 @@ none so the card clicks pass through */
 .chip.cx-simple { background: var(--low-bg); color: var(--low-fg); }
 .chip.cx-moderate { background: var(--medium-bg); color: var(--medium-fg); }
 .chip.cx-complex { background: var(--critical-bg); color: var(--critical-fg); }
+/* 000143: calm blue-grey tint with the theme foreground, readable in both themes */
+.chip.cx-trivial { background: rgba(100, 130, 165, .18); color: var(--fg); }
 .empty { font-size: 12px; color: var(--faint); }
 .toggle { display: block; width: 100%; margin-top: 2px; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 .toggle:hover { background: var(--hover); }

@@ -283,6 +283,11 @@ const tcx = createTask(root, { name: "feat: complex work", summary: "s", complex
 assert.equal(tcx.complexity, "complex");
 assert.match(readFileSync(join(root, ".kanban", tcx.file), "utf8"), /^complexity: "complex"$/m);
 assert.equal(parseTask(root, tcx.file).complexity, "complex"); // the quoted value round-trips
+// trivial is a supported value and round-trips too
+const ttriv = createTask(root, { name: "feat: trivial work", summary: "s", complexity: "trivial" });
+assert.equal(ttriv.complexity, "trivial");
+assert.match(readFileSync(join(root, ".kanban", ttriv.file), "utf8"), /^complexity: "trivial"$/m);
+assert.equal(parseTask(root, ttriv.file).complexity, "trivial");
 updateTask(root, tcx, { complexity: "simple" });
 assert.equal(parseTask(root, tcx.file).complexity, "simple");
 assert.match(readFileSync(join(root, ".kanban", tcx.file), "utf8"), /^complexity: "simple"$/m);

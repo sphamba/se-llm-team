@@ -3,6 +3,10 @@
 	"private": true,
 	"type": "module",
 	"packageManager": "pnpm@12.11.2",
+	"scripts": {
+		"test": "node src/kanban.test.ts && node src/orchestrator.test.ts && node src/webui.test.ts && node src/extension.test.ts && node index.test.ts",
+		"test:changed": "node scripts/test-changed.mjs"
+	},
 	"engines": {
 		"pnpm": ">=12.11.2"
 	},

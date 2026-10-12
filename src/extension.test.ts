@@ -64,6 +64,8 @@ const createValidator = Compile(create.parameters);
 assert.equal(createValidator.Check({ name: "feat: x", summary: "s", notes: "anything" }), false, "unknown field must fail validation");
 assert.ok([...createValidator.Errors({ name: "feat: x", summary: "s", notes: "anything" })].some((e: any) => e.keyword === "additionalProperties"));
 assert.equal(createValidator.Check({ name: "feat: x", summary: "s", priority: "high", complexity: "complex", issuer: "#42", specs: "s", openQuestions: "q", blockedBy: "#42" }), true, "all supported fields must pass validation");
+assert.equal(createValidator.Check({ name: "feat: x", summary: "s", complexity: "trivial" }), true, "trivial complexity passes validation");
+assert.equal(createValidator.Check({ name: "feat: x", summary: "s", complexity: "nope" }), false, "unknown complexity fails validation");
 
 // execute with all supported fields keeps the "Created <file> (#N)" response
 const created = await run(create, { name: "feat: create guard", summary: "s", priority: "high", complexity: "complex", issuer: "#42", specs: "s", openQuestions: "q", blockedBy: "#42" });

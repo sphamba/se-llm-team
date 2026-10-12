@@ -19,7 +19,7 @@ export const PRIORITIES = ["low", "medium", "high", "critical"] as const;
 export type Scope = "backlog" | "in-progress" | "done";
 // sort rank for priority-first boards: critical first, low last; unknown priorities sort after all
 export const PRIORITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-export const COMPLEXITIES = ["simple", "moderate", "complex"] as const;
+export const COMPLEXITIES = ["simple", "moderate", "complex", "trivial"] as const;
 export type Complexity = (typeof COMPLEXITIES)[number];
 
 export interface Task {
