@@ -1055,6 +1055,8 @@ export const PAGE = `<!doctype html>
 ${DARK_VARS}
 html, body { height: 100%; }
 body { display: flex; flex-direction: column; margin: 0; background: var(--bg); color: var(--fg); font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+/* 000147: buttons inherit the page font instead of the UA Arial default */
+button { font-family: inherit; }
 header { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 6px; background: var(--code-bg); }
 h1 { font-size: 16px; margin: 0; }
 #theme { margin-left: auto; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
@@ -1149,6 +1151,8 @@ none so the card clicks pass through */
 #m-body pre { background: var(--code-bg); border-radius: 6px; padding: 8px 10px; overflow: auto; font-size: 12px; }
 #m-body code { background: var(--code-bg); border-radius: 4px; padding: 0 4px; font-size: 12px; }
 #m-body pre code { padding: 0; background: none; }
+/* 000147: explicit monospace stack for inline and fenced code, after the #m-log-text pre { font: inherit } shorthand so it wins the cascade */
+#m-log-text code, #m-log-text pre, #m-body code, #m-body pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
 #m-body a { color: var(--link); }
 /* one accent color per column, in pipeline order */
 .c-backlog { --ac: #94a3b8; }

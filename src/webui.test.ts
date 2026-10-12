@@ -714,11 +714,18 @@ assert.ok(agentCardCss.includes("font-size: 12px") && agentCardCss.includes("pad
 // 000122: the log text renders in the page's sans serif stack, blocks are collapsed details
 const logCss = page.match(/#m-log-text \{[^}]*\}/)![0];
 assert.ok(logCss.includes("font-size: 10px"), "the agent log text keeps its 10px size");
-assert.ok(logCss.includes("system-ui") && !logCss.includes("monospace"), "the agent log text renders in the page's sans serif stack");
+// 000147: the no-monospace check stays scoped to this font-family declaration now that the code/pre rule adds monospace elsewhere
+const logFont = logCss.match(/font-family: [^;]+;/)![0];
+assert.ok(logFont.includes("system-ui") && !logFont.includes("monospace"), "the agent log text font-family declaration stays sans serif, not monospace");
 // 000141: the Google Inter font loads in the page head and goes first in both font-family stacks
 assert.ok(page.includes('<link rel="preconnect" href="https://fonts.googleapis.com">') && page.includes('<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'), "the page preconnects to Google Fonts before the Inter stylesheet");
 assert.ok(page.includes('https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap" rel="stylesheet"'), "the page loads the Inter stylesheet from fonts.googleapis.com");
 assert.equal(page.match(/font-family: Inter, system-ui[^;]*;/g)?.length, 2, "Inter goes first in exactly the two font-family declarations (body and #m-log-text)");
+// 000147: inline and fenced code render in an explicit monospace stack in the log pane and task body; buttons inherit the page font
+const monoRule = '#m-log-text code, #m-log-text pre, #m-body code, #m-body pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }';
+assert.ok(page.includes(monoRule), "code and fenced code render in an explicit monospace stack in the log pane and task body");
+assert.ok(page.indexOf(monoRule) > page.indexOf("#m-log-text pre { font: inherit;"), "the monospace rule comes after the font: inherit shorthand so fenced log code renders monospace, not Inter");
+assert.ok(page.includes("button { font-family: inherit; }"), "buttons inherit the page font instead of the UA Arial default");
 assert.ok(page.includes(String(md)), "the page runs the tested md renderer for task bodies and log text");
 assert.ok(page.includes("#m-log-text pre { font: inherit;"), "log block bodies inherit the sans serif font");
 assert.ok(page.includes("#m-log-text summary { cursor: pointer;"), "collapsed log summaries read as clickable");
