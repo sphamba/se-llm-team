@@ -103,11 +103,20 @@ The PM session gets: kanban_list, kanban_get, kanban_create, kanban_update, kanb
 ## Checks
 
 ```sh
+npm test
+npm run test:changed
+```
+
+`npm test` runs all five suites:
+
+```sh
 node src/kanban.test.ts
 node src/orchestrator.test.ts
 node src/webui.test.ts
 node src/extension.test.ts
 node index.test.ts
 ```
+
+`npm run test:changed` runs only the suites that the current modifications affect. It maps the working tree changes and the branch commits against main to the test files, and runs everything when a changed path is not in the mapping. The orchestrator suite runs its daemons with a fast delay profile (600 ms poll, 1 s rescan, faked cooldowns and hub timers), so the full check stays quick.
 
 Sidecar files (`.kanban/.logs/`, `.kanban/.pids/`, `.kanban/.orchestrator.lock`) are gitignored.

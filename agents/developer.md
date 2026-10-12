@@ -7,7 +7,7 @@ Worktree: {{WORKTREE}}
 Work only inside {{WORKTREE}}. Never touch the main checkout or other worktrees.
 Task file edits are the exception: Notes appends, open-question edits and state changes must always edit the file at {{TASK_FILE}} in the main checkout, even though all other work happens inside {{WORKTREE}}. "Never touch the main checkout" applies to code, not the task file.
 
-List your open (user/client clarification) questions in a # Open questions section of the task body at {{TASK_FILE}}, placed after the # Notes section. Only questions for the user or client belong there, never technical questions whose answer is available in the codebase, the docs, or online. When an answer reaches the Specs, remove the question from the section. An empty or missing section is the normal state.
+List your open (user/client clarification) questions in a # Open questions section of the task body at {{TASK_FILE}}, placed after the # Notes section. Only questions for the user or client belong there, never technical questions whose answer is available in the codebase, the docs, or online. When an answer reaches the Specs, remove the question from the section. An empty or missing section is the normal state. Alongside the questions, state there the big assumptions you made about the feature (scope, behavior, constraints, integrations). Write each assumption as one line, so the PM and the user can confirm or correct it before the choice hardens into code. Keep an assumption listed even when you are confident in it.
 
 1. Read the task file for the Summary and Specs. The Specs are the contract.
 2. Implement the specs. Commit your work in the worktree with clear messages.

@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, PRIORITY_RANK, setState } from "./kanban.ts";
 import { startHub } from "./hub.ts";
-import { agentLabel, boardOf, buildShell, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_CHUNK, logFixups, md, mergeBoards, numLinkHtml, pairLayout, relationPaths, renderLogChunk, spinnerHtml, syncBoard, tabNames, tabsHtml } from "./webui.ts";
+import { agentLabel, agentRowSig, agentStatsText, boardOf, buildShell, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_CHUNK, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, tabNames, tabsHtml } from "./webui.ts";
 import { gzipSync } from "node:zlib";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -446,6 +446,7 @@ const same = relationPaths([
 ], rectOf);
 assert.equal(same.length, 1, "one curve per stored relation");
 assert.equal(same[0].file, "000002_b.md", "each path is keyed by the blocked task's file, so the hover highlight reaches its lines without re-deriving geometry");
+assert.equal(same[0].blocker, "000004_d.md", "each path also carries the blocker's file, so hovering the blocker highlights the line too (000144)");
 assert.ok(same[0].d.startsWith(`M ${310 + 280} ${midY(rects["000002_b.md"])}`), "same column: the path starts at the blocked card's right edge");
 assert.ok(same[0].d.endsWith(`${310 + 280} ${midY(rects["000004_d.md"])}`), "same column: both ends sprout from the right sides, the path ends at the blocker's right edge");
 // stacked pair columns share one x: different states at one x still loop out of the right sides
@@ -468,6 +469,22 @@ assert.equal(relationPaths([
 assert.equal(relationPaths([{ file: "000002_b.md", state: "to-do", blockedBy: "#9, junk, , " }], rectOf).length, 0, "ghost and unparseable refs draw nothing");
 assert.equal(relationPaths([{ file: "000002_b.md", state: "to-do", blockedBy: "#1" }], (f) => (f === "000001_a.md" ? rects["000001_a.md"] : null)).length, 0, "a ref whose card is not rendered draws nothing, and so does an unrendered blocked card");
 assert.deepEqual(relationPaths([{ file: "000002_b.md", state: "to-do" }], rectOf), [], "an older payload without blockedBy draws nothing");
+
+// hovering highlights both ways (000144): the served client script's hotRelations for the blocked
+// file and for the blocker file both raise the same path, an unrelated file raises nothing
+const hotPath: any = { dataset: { file: "000002_b.md", blocker: "000004_d.md" }, hot: new Set<string>() };
+hotPath.classList = { toggle: (cls: string, on: boolean) => (on ? hotPath.hot.add(cls) : hotPath.hot.delete(cls)) };
+const hotFn = (new Function("document", page.match(/<script>([\s\S]*?)<\/script>/)![1].match(/function hotRelations\(file, on\) \{[\s\S]*?\n\}/)![0] + "; return hotRelations;") as (d: unknown) => (file: string, on: boolean) => void)({ querySelectorAll: (sel: string) => (sel === "#relations path" ? [hotPath] : []) });
+hotFn("000002_b.md", true);
+assert.ok(hotPath.hot.has("relations-hot"), "hovering the blocked card highlights its outgoing line");
+hotFn("000002_b.md", false);
+assert.ok(!hotPath.hot.has("relations-hot"), "mouseleave reverts the highlight");
+hotFn("000004_d.md", true);
+assert.ok(hotPath.hot.has("relations-hot"), "hovering the blocker card highlights the same incoming line");
+hotFn("000004_d.md", false);
+assert.ok(!hotPath.hot.has("relations-hot"), "the blocker's mouseleave reverts it too");
+hotFn("000009_x.md", true);
+assert.ok(!hotPath.hot.has("relations-hot"), "an unrelated file highlights nothing");
 
 // 000127: far-apart columns bend the line into an S (the control offsets scale with the span,
 // capped); near pairs and same-column loops keep the fixed bow. The path format is fixed, so the
@@ -511,7 +528,8 @@ const hotOpacity = Number(page.match(/#relations path\.relations-hot \{ stroke-o
 assert.ok(hotOpacity > baseOpacity, "hovering a card raises its lines' opacity clearly above the subtle base");
 assert.match(pathRule, /transition: stroke-opacity/, "the opacity change transitions smoothly, the dash animation continues");
 assert.ok(page.includes("el.onmouseenter = () => hotRelations(file, true)") && page.includes("el.onmouseleave = () => hotRelations(file, false)"), "the card hover wires the highlight on mouseenter and reverts on mouseleave");
-assert.ok(page.includes('if (p.dataset.file === file) p.classList.toggle("relations-hot", on)'), "the hover matches paths by the blocked task's file in the dataset, no quote-unsafe selector interpolation");
+assert.ok(page.includes('if (p.dataset.file === file || p.dataset.blocker === file) p.classList.toggle("relations-hot", on)'), "the hover matches paths by either endpoint's file in the dataset, no quote-unsafe selector interpolation");
+assert.ok(page.includes('" data-blocker="'), "each relation path carries the blocker's file alongside the blocked task's file, so hovering either card finds it");
 assert.ok(page.includes('window.addEventListener("resize", drawRelations)'), "a resize recomputes the line endpoints");
 assert.match(page, /el\.ontransitionend = \(\) => \{ el\.style\.transition = ""; el\.ontransitionend = null; drawRelations\(\); \};/, "settled FLIP transitions recompute the line endpoints");
 assert.ok(page.includes('querySelectorAll("#m-attrs .num-link")'), "the detail card binds its id links to openTask after render");
@@ -629,7 +647,8 @@ assert.ok(modalZ && relationsZ && Number(modalZ) > Number(relationsZ), "the #mod
 assert.ok(modalZ && cardZ && Number(modalZ) > Number(cardZ), "the #modal bumps above the z-index-2 task cards (000124)");
 assert.ok(page.includes("render(true); // no FLIP across boards"), "a tab switch never flips from the other board's layout");
 assert.ok(page.includes("Promise.all(projects.map(t => fetch(url(t))"), "every tab polls each cycle");
-assert.ok(page.includes("setInterval(refresh, 5000)"), "the poll keeps the 5 s cadence");
+assert.ok(page.includes("setTimeout(refresh, refreshMs(open))"), "the poll chains, the next tick keyed on the fresh open card's cadence");
+assert.ok(page.includes(".catch(() => setTimeout(refresh, 5000))"), "a failed cycle retries at the board cadence");
 assert.ok(page.includes('(active ? "&project=" + encodeURIComponent(active) : "")'), "agent-log polls carry the active tab's project");
 // 000122: the live auto-scroll glides smoothly, reduced motion falls back to an instant auto;
 // the client post-processes every insert, joining cross-chunk tool results and thinking deltas
@@ -721,7 +740,7 @@ assert.ok(page.includes('if (gen !== agentGen || !box) return;'), "a superseded 
 // 000121: the 5 s refresh re-derives the open detail card in place: title and attrs freely, the
 // body html-gated, the run cards re-rendered without touching the log pane or its state
 const upd = page.match(/function updateOpenTask\(t\) \{[\s\S]*?\n\}/)![0];
-assert.ok(page.includes("if (t) updateOpenTask(t); else closeModal();"), "the refresh updates the open card in place and closes it when its task is gone");
+assert.ok(page.includes("if (open) updateOpenTask(open); else closeModal();"), "the refresh updates the open card in place and closes it when its task is gone");
 assert.ok(upd.includes("writeHead(t)") && upd.includes("renderAgent(t, true)") && upd.includes("setBody(t)"), "the refresh re-derives title, attrs, agent row and body from the fresh payload");
 assert.ok(!upd.includes("closeLog") && !upd.includes("logState"), "the refresh path never touches the log pane, logState or the log timer");
 assert.ok(page.includes('<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>'), "the log pane is static markup split from the buttons row, so a run-card rebuild never clears it");
@@ -740,6 +759,75 @@ const pollSrc = page.match(/function pollLog\(\) \{[\s\S]*?\n\}/)![0];
 assert.ok(pollSrc.includes("const live = !!liveRun && liveRun.handle === logState.handle;"), "a sub view of a still-alive parent stays live: the pane keeps its poll timer after an empty poll");
 assert.ok(!pollSrc.includes("logState.sub == null"), "a sub view is no longer hard-wired non-live, which froze the pane after the first empty poll");
 assert.ok(pollSrc.includes("if (!live && logState.idle) {"), "a past run's log still stops the timer after the first empty poll");
+
+// 000142 the poll refresh updates the agent row in place: an unchanged run set moves only the
+// cards' .agent-stats text, so the live run's .spin node keeps its animation across the poll; a
+// structure change (a run added or gone, live -> dead) rebuilds the row. runRow builds the row
+// the page's rebuild would have produced, with its seeded signature.
+const docStub = { createElement: (tag: string) => new El(tag) };
+const runRow = (runs: any[]) => {
+	const row = new El("div");
+	for (const a of runs) {
+		const card = new El("button");
+		card.className = "agent-card " + (a.alive ? "agent-live" : a.status === "dead" ? "agent-dead" : "agent-past");
+		card.dataset.handle = a.handle;
+		const mark = new El("span");
+		mark.className = a.alive ? "spin" : a.status === "dead" ? "cross" : "check";
+		card.appendChild(mark);
+		const stats = agentStatsText(a.tokens, a.duration);
+		if (stats) { const s = new El("span"); s.className = "agent-stats"; s.textContent = stats; card.appendChild(s); }
+		const col = new El("div");
+		col.className = "agent-col";
+		col.appendChild(card);
+		col.appendChild(new El("div")).className = "agent-subs";
+		row.appendChild(col);
+	}
+	row.__sig = agentRowSig(runs);
+	return row;
+};
+const liveRuns = [
+	{ role: "developer", run: 0, alive: false, status: "ok", handle: "t.developer.0", tokens: 999, duration: 60000 },
+	{ role: "reviewer", run: null, alive: true, status: "live", handle: "t.reviewer", tokens: 42311, duration: 3479 },
+];
+const agentRow = runRow(liveRuns);
+const spin = agentRow.children[1].children[0].children[0];
+assert.ok(spin.className === "spin", "the live card carries its spinner");
+const grew = [
+	{ role: "developer", run: 0, alive: false, status: "ok", handle: "t.developer.0", tokens: 1500, duration: 90000 },
+	{ role: "reviewer", run: null, alive: true, status: "live", handle: "t.reviewer", tokens: 999, duration: 90000 },
+];
+assert.ok(syncAgentStats(agentRow, grew, docStub), "an unchanged run set updates the row in place");
+assert.equal(agentRow.children[1].children[0].children[0], spin, "the same .spin node keeps its animation running");
+assert.equal(agentRow.children[1].children[0].children[1].textContent, "999 · 1m 30s", "the live card's stats text moved");
+assert.equal(agentRow.children[0].children[0].children[1].textContent, "2k · 1m 30s", "the past card's stats text moved too");
+assert.equal(agentRow.children[1].children[0].writes, 0, "the card's markup is not rewritten, so nothing restarts");
+assert.ok(syncAgentStats(agentRow, grew, docStub), "a second unchanged pass still matches");
+assert.equal(agentRow.children[1].children[0].children[1].textContent, "999 · 1m 30s", "unchanged stats keep their text");
+assert.equal(syncAgentStats(agentRow, [...grew, { role: "live-tester", run: null, alive: false, status: "ok", handle: "t.live-tester", tokens: null, duration: null }], docStub), false, "a run added rebuilds");
+assert.equal(syncAgentStats(agentRow, grew.slice(1), docStub), false, "a run gone rebuilds");
+assert.equal(syncAgentStats(agentRow, grew.map((a) => (a.alive ? { ...a, alive: false, status: "ok" } : a)), docStub), false, "live -> dead rebuilds");
+assert.equal(syncAgentStats(new El("div"), grew, docStub), false, "a missing row rebuilds");
+// a card whose stats were empty carries no span; the span joins when stats arrive and drops when
+// they vanish, the markup agentCardHtml renders
+const bare = runRow([{ role: "developer", run: null, alive: true, status: "live", handle: "t.developer", tokens: null, duration: null }]);
+assert.equal(bare.children[0].children[0].children.length, 1, "empty stats render no span");
+assert.ok(syncAgentStats(bare, [{ role: "developer", run: null, alive: true, status: "live", handle: "t.developer", tokens: 999, duration: 1200 }], docStub), "the unchanged run set still updates in place");
+assert.equal(bare.children[0].children[0].children[1].textContent, "999 · 1.2s", "the span joins the card when stats arrive");
+assert.ok(syncAgentStats(bare, [{ role: "developer", run: null, alive: true, status: "live", handle: "t.developer", tokens: null, duration: null }], docStub), "the unchanged run set still updates in place");
+assert.equal(bare.children[0].children[0].children.length, 1, "the span drops when the stats vanish");
+// the page wires the helpers: the rebuild seeds the signature, the keep pass syncs the stats
+assert.ok(ra.includes("if (keep && syncAgentStats(el, runs, document))"), "the keep pass updates an unchanged row's stats in place");
+assert.ok(ra.includes("el.__sig = agentRowSig(runs)"), "the rebuild seeds the structure signature the keep pass matches");
+assert.ok(ra.includes('el.__sig = "";'), "an empty run set clears the signature");
+assert.ok(page.includes(String(agentRowSig)) && page.includes(String(syncAgentStats)), "the page runs the tested agent-row helpers");
+// the cadence: 1 s while the open task has a live agent, 5 s otherwise, log pane open or closed
+assert.equal(refreshMs({ agents: [{ alive: true }] }), 1000, "a live agent on the open card ticks the poll at 1 s");
+assert.equal(refreshMs({ agents: [{ alive: false }] }), 5000, "no live agent keeps the 5 s cadence");
+assert.equal(refreshMs({ agents: [] }), 5000, "an empty agent history keeps the 5 s cadence");
+assert.equal(refreshMs({}), 5000, "a task without agents keeps the 5 s cadence");
+assert.equal(refreshMs(null), 5000, "a closed modal keeps the 5 s cadence");
+assert.ok(page.includes(String(refreshMs)), "the page runs the tested cadence helper");
+
 setState(root, getTask(root, task.file)!, "doing");
 const slug = task.file.replace(/\.md$/, "");
 mkdirSync(join(root, ".kanban", ".pids"), { recursive: true });
