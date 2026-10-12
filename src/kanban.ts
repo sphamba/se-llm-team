@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 
 export const STATES = [
@@ -378,6 +378,13 @@ export function createTask(
 		const file = `${num}_${shortName ? shortName.replaceAll("-", "_") : slugFile(input.name)}.md`;
 		try {
 			writeFileSync(join(kanbanDir(root), file), content, { flag: "wx" });
+			// wx guards only this exact path: a number claimed under a different basename
+			// between the max scan and the write (concurrent create, hand-written file)
+			// still succeeds; drop our file and retry so a number never has two files
+			if (taskFiles(root).some((f) => f !== file && taskNum(f) === parseInt(num, 10))) {
+				unlinkSync(join(kanbanDir(root), file));
+				continue;
+			}
 			return parseTask(root, file);
 		} catch (e) {
 			if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
