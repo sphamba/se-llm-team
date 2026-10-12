@@ -299,6 +299,8 @@ assert.equal(devLogA.split('"result echo"').length - 1, 1, "toolResult message_s
 assert.ok(devLogA.includes('"willRetry":false') && !devLogA.includes('"full replay"'), "agent_end messages dropped, the rest of the record kept");
 assert.ok(devLogA.includes("stub stderr diagnostic: not json"), "non-JSON stderr passes through the compactor");
 assert.ok(logOnDisk(`${slugA}.reviewer.0`) && logOnDisk(`${slugA}.live-tester.0`), "reviewer and live-tester runs got indexed log files");
+// every run here advanced the state itself, so no bounce fired and no death marker lingers
+assert.deepEqual(readdirSync(logsA).filter((f) => f.endsWith(".dead")), [], "a run that advances the state itself leaves no death marker");
 const legacyA = existsSync(join(logsA, `${slugA}.developer.log`))
 	? readFileSync(join(logsA, `${slugA}.developer.log`), "utf8")
 	: gunzipSync(readFileSync(join(logsA, `${slugA}.developer.log.gz`))).toString();
@@ -331,6 +333,11 @@ assert.ok(b.output().includes("doing -> to-do"), "poll moved the dead developer 
 for (let n = 0; n <= 5; n++) {
 	// the sweep may have gzipped a finished run's log; either form counts as logged
 	assert.ok(existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.${n}.log`)) || existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.${n}.log.gz`)), `developer run ${n} logged`);
+	// every bounce marks its own run: the marker names the dying run's index, never the
+	// counter files, and its one line is the dying pid
+	const deadPath = join(kanbanDir(rootB), ".logs", `${slugB}.developer.${n}.dead`);
+	assert.ok(existsSync(deadPath), `bounced developer run ${n} carries its death marker`);
+	assert.match(readFileSync(deadPath, "utf8").trim(), /^\d+$/, `death marker of run ${n} records the dying pid`);
 }
 // the cooldown log fired once at cap+1, and the deferred spawn has not fired yet
 await waitFor(() => b.output().includes("respawn waits for the idle cooldown"), 30000, "cooldown log at cap+1", b.output);

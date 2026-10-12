@@ -1134,6 +1134,13 @@ function bounceDead(root: string, task: Task, next: TaskState, pidName: string, 
 	// re-read + state-match: a task that moved on underneath (agent, PM or user) wins
 	const fresh = getTask(root, task.file);
 	if (!fresh || fresh.state !== task.state) return;
+	// per-run death marker for the webui's cross: the dying run is the newest run log of the
+	// bounced role (the index known at spawn); a fresh respawn (new index) is unaffected and
+	// a run that advanced the state itself (the early return above) leaves no marker. The
+	// marker lingers after the task moves on - harmless, and never a counter or armed file
+	const role = WORKING_STATES[task.state]?.role;
+	const n = role ? nextRunIndex(root, slug, role) - 1 : -1;
+	if (n >= 0) writeFileSync(join(kanbanDir(root), ".logs", `${slug}.${role}.${n}.dead`), `${pid}\n`);
 	setState(root, fresh, next);
 	// past the cap the fresh spawn waits for the idle cooldown (the sweep defers it);
 	// logged once at cap+1, like the old give-up line

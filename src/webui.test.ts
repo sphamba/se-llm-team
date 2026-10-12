@@ -506,6 +506,10 @@ assert.ok(
 assert.ok(page.includes("#m-log.hidden { display: none; }"), "log pane hides");
 assert.ok(page.includes("/api/agent-log"), "page uses the agent log endpoint");
 assert.ok(page.includes('<span class="check">✓</span>'), "past agent buttons render a green checkmark");
+assert.ok(page.includes('<span class="cross">✗</span>'), "a dead run's card renders a cross instead of the check");
+assert.ok(page.includes('a.status === "dead" ? "agent-dead" : "agent-past"'), "a dead run's card carries its own class, ok keeps agent-past");
+assert.match(page, /\.cross \{ color: var\(--critical-fg\); margin-right: 5px; \}/, "the cross renders in the muted red both themes carry");
+assert.match(page, /\.agent-dead \{ color: var\(--critical-fg\); \}/, "a dead card's label text reads in the muted red too");
 assert.ok(page.includes(".agent-card-active"), "the shown agent card gets an active class");
 // 000076: the small font belongs to the log text, not the selector cards; 000120: each run is a
 // bit larger card in one wrapping row of columns, the live run last, its subs stacked below it
@@ -554,7 +558,23 @@ const logText = Array.from({ length: 2600 }, () => "H".repeat(63) + "\n").join("
 writeFileSync(logFile, logText);
 const working = (await (await fetch(`${base}/api/tasks`)).json())[0];
 assert.deepEqual(working.agent, { role: "developer", alive: true, log: `${slug}.developer` });
-assert.deepEqual(working.agents, [{ role: "developer", run: null, alive: true, handle: `${slug}.developer`, tokens: null, duration: null }], "legacy role log, live agent only, no stats in a non-JSON log");
+assert.deepEqual(working.agents, [{ role: "developer", run: null, alive: true, status: "live", handle: `${slug}.developer`, tokens: null, duration: null }], "legacy role log, live agent only, no stats in a non-JSON log");
+
+// 000128: the bounce's per-run .dead marker drives the entry status: a run with a sibling
+// marker is dead, a markerless run advanced the state itself, the newest run of the live role
+// stays live; the stable mtime sort keeps the legacy file before the indexed runs
+writeFileSync(join(root, ".kanban", ".logs", `${slug}.developer.0.log`), "run zero\n");
+writeFileSync(join(root, ".kanban", ".logs", `${slug}.developer.0.dead`), "424242\n");
+writeFileSync(join(root, ".kanban", ".logs", `${slug}.developer.1.log`), "run one\n");
+const marked = (await (await fetch(`${base}/api/tasks`)).json())[0];
+assert.deepEqual(
+	marked.agents.map((a) => [a.run, a.status]),
+	[[null, "ok"], [0, "dead"], [1, "live"]],
+	"the .dead marker marks its own run dead, markerless runs read ok, the newest run of the live role reads live",
+);
+rmSync(join(root, ".kanban", ".logs", `${slug}.developer.0.log`));
+rmSync(join(root, ".kanban", ".logs", `${slug}.developer.0.dead`));
+rmSync(join(root, ".kanban", ".logs", `${slug}.developer.1.log`));
 
 // tail: no offset returns only the last chunk, with cursors for poll and history
 const enc = encodeURIComponent(`${slug}.developer`);
@@ -593,8 +613,8 @@ const past = (await (await fetch(`${base}/api/tasks`)).json())[0];
 assert.deepEqual(
 	past.agents,
 	[
-		{ role: "developer", run: null, alive: true, handle: `${slug}.developer`, tokens: null, duration: null },
-		{ role: "reviewer", run: null, alive: false, handle: `${slug}.reviewer`, tokens: null, duration: null },
+		{ role: "developer", run: null, alive: true, status: "live", handle: `${slug}.developer`, tokens: null, duration: null },
+		{ role: "reviewer", run: null, alive: false, status: "ok", handle: `${slug}.reviewer`, tokens: null, duration: null },
 	],
 	"past reviewer after the live developer, pipeline order",
 );
@@ -608,8 +628,8 @@ assert.equal(stale.agent.alive, false);
 assert.deepEqual(
 	stale.agents,
 	[
-		{ role: "developer", run: null, alive: false, handle: `${slug}.developer`, tokens: null, duration: null },
-		{ role: "reviewer", run: null, alive: false, handle: `${slug}.reviewer`, tokens: null, duration: null },
+		{ role: "developer", run: null, alive: false, status: "ok", handle: `${slug}.developer`, tokens: null, duration: null },
+		{ role: "reviewer", run: null, alive: false, status: "ok", handle: `${slug}.reviewer`, tokens: null, duration: null },
 	],
 	"a dead state-mapped agent is past too",
 );
@@ -739,14 +759,14 @@ const history = (await (await fetch(`${base}/api/tasks`)).json())[0];
 assert.deepEqual(
 	history.agents,
 	[
-		{ role: "merger", run: 0, alive: false, handle: `${slug}.merger.0`, tokens: null, duration: null },
-		{ role: "developer", run: null, alive: false, handle: `${slug}.developer`, tokens: null, duration: null },
-		{ role: "developer", run: 0, alive: false, handle: `${slug}.developer.0`, tokens: null, duration: null },
-		{ role: "developer", run: 1, alive: true, handle: `${slug}.developer.1`, tokens: null, duration: null },
-		{ role: "live-tester", run: 0, alive: false, handle: `${slug}.live-tester.0`, tokens: null, duration: null },
-		{ role: "reviewer", run: 0, alive: false, handle: `${slug}.reviewer.0`, tokens: null, duration: null },
-		{ role: "live-tester", run: 1, alive: false, handle: `${slug}.live-tester.1`, tokens: null, duration: null },
-		{ role: "merger", run: 1, alive: false, handle: `${slug}.merger.1`, tokens: null, duration: null },
+		{ role: "merger", run: 0, alive: false, status: "ok", handle: `${slug}.merger.0`, tokens: null, duration: null },
+		{ role: "developer", run: null, alive: false, status: "ok", handle: `${slug}.developer`, tokens: null, duration: null },
+		{ role: "developer", run: 0, alive: false, status: "ok", handle: `${slug}.developer.0`, tokens: null, duration: null },
+		{ role: "developer", run: 1, alive: true, status: "live", handle: `${slug}.developer.1`, tokens: null, duration: null },
+		{ role: "live-tester", run: 0, alive: false, status: "ok", handle: `${slug}.live-tester.0`, tokens: null, duration: null },
+		{ role: "reviewer", run: 0, alive: false, status: "ok", handle: `${slug}.reviewer.0`, tokens: null, duration: null },
+		{ role: "live-tester", run: 1, alive: false, status: "ok", handle: `${slug}.live-tester.1`, tokens: null, duration: null },
+		{ role: "merger", run: 1, alive: false, status: "ok", handle: `${slug}.merger.1`, tokens: null, duration: null },
 	],
 	"indexed runs are their own entries, a legacy file ties first within its role, mtime orders across roles, the newest run of the live role is the live one",
 );

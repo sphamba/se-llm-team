@@ -17,11 +17,13 @@ const SUB_ROOT = "/tmp/pi-subagents-1000/";
 
 // one agent run: run is the index in `<slug>.<role>.<n>.log`, null for a legacy unsuffixed file;
 // tokens sums the run's turn_end totals, duration is the last record timestamp minus the first,
-// both null when the log carries none
+// both null when the log carries none; status is live for the newest run of the live role, dead
+// when the bounce left a sibling .dead marker, ok when the run advanced the state itself
 interface AgentEntry {
 	role: string;
 	run: number | null;
 	alive: boolean;
+	status: "live" | "dead" | "ok";
 	handle: string;
 	tokens: number | null;
 	duration: number | null;
@@ -140,10 +142,15 @@ function agentHistory(root: string, t: Task, files: string[]): AgentEntry[] {
 				/* raced away between readdir and stat */
 			}
 			const stats = logStats(path);
-			entries.push({ role, run: r.run, alive: live && role === liveRole && r.handle === newest, handle: r.handle, tokens: stats.tokens, duration: stats.duration, mtime });
+			const alive = live && role === liveRole && r.handle === newest;
+			// no marker means the run advanced the state itself, the same signal the poll's
+			// completed-run counter clear reads; a marker can never name the live run, indexes
+			// are never reused
+			const status: AgentEntry["status"] = alive ? "live" : existsSync(join(dir, `${r.handle}.dead`)) ? "dead" : "ok";
+			entries.push({ role, run: r.run, alive, status, handle: r.handle, tokens: stats.tokens, duration: stats.duration, mtime });
 		}
 	}
-	return entries.sort((a, b) => a.mtime - b.mtime).map(({ role, run, alive, handle, tokens, duration }) => ({ role, run, alive, handle, tokens, duration }));
+	return entries.sort((a, b) => a.mtime - b.mtime).map(({ role, run, alive, status, handle, tokens, duration }) => ({ role, run, alive, status, handle, tokens, duration }));
 }
 
 // rebuild the log path from the handle: the task must exist on the board and the handle must be
@@ -947,12 +954,14 @@ none so the card clicks pass through */
 .agent-card { display: block; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 12px; text-align: left; }
 .agent-card:hover { background: var(--hover); }
 .agent-card-active { border-color: var(--link); background: var(--medium-bg); }
+.agent-dead { color: var(--critical-fg); }
 .agent-stats { display: block; font-size: 10px; color: var(--muted); margin-top: 2px; }
 .agent-col { display: flex; flex-direction: column; gap: 4px; }
 .agent-subs { display: flex; flex-direction: column; gap: 4px; }
 .agent-subs:empty { display: none; }
 #m-agent-btns { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
 .check { color: var(--low-fg); margin-right: 5px; }
+.cross { color: var(--critical-fg); margin-right: 5px; }
 #m-agent { margin-bottom: 12px; }
 #m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 300px; overflow: auto; }
 #m-log.hidden { display: none; }
@@ -1302,7 +1311,7 @@ function renderAgent(t, keep) {
 	for (const a of runs) count[a.role] = (count[a.role] || 0) + 1;
 	el.innerHTML = runs.map(a =>
 		'<div class="agent-col">' +
-		agentCardHtml(a.alive ? "agent-live" : "agent-past", 'data-handle="' + esc(a.handle) + '"', agentLabel(a, count), a.tokens, a.duration, a.alive ? '<span class="spin"></span>' : '<span class="check">✓</span>') +
+		agentCardHtml(a.alive ? "agent-live" : a.status === "dead" ? "agent-dead" : "agent-past", 'data-handle="' + esc(a.handle) + '"', agentLabel(a, count), a.tokens, a.duration, a.alive ? '<span class="spin"></span>' : a.status === "dead" ? '<span class="cross">✗</span>' : '<span class="check">✓</span>') +
 		'<div class="agent-subs"></div></div>').join("");
 	// bind by dataset: a hand-written task file name can hold quotes or backslashes, which no
 	// amount of HTML escaping makes safe inside inline JS
