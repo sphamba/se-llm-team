@@ -1,8 +1,8 @@
 ---
 name: "fix: pre-#165 hub-aware worktree daemons still steal the port on restart"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/167-stale-daemon-steals-hub-port"
 issuer: "#165"
 complexity: "moderate"
 shortName: "stale-daemon-steals-hub-port"
@@ -34,5 +34,7 @@ Either the production daemon can reclaim/preempt the port from a worktree-rooted
 
 # Notes
 
+## Decision (user, 2026-10-12)
+One-time manual hygiene, not a port-reclaim follow-up. The task's code change is to document the cleanup (README or the #165 notes): kill any pre-#165 hub-aware worktree daemons once; new worktree daemons run post-#165 code and self-exclude, so the residue does not recur. The PM killed the leaked pre-fix daemons on this machine today.
+
 # Open questions
-Is this residual accepted as one-time manual hygiene (kill the pre-fix hub-aware worktree daemons once, document it), or must a follow-up make the production daemon reclaim or preempt the port from a worktree-rooted old-code hub?

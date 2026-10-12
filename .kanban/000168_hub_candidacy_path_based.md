@@ -1,8 +1,8 @@
 ---
 name: "fix: hub candidacy detection is path-based so a worktree outside .worktrees stays hub-eligible"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/168-hub-candidacy-path-based"
 issuer: "#165"
 complexity: "simple"
 shortName: "hub-candidacy-path-based"
@@ -28,5 +28,7 @@ Either the .worktrees path-segment rule is accepted and documented (manually pla
 
 # Notes
 
+## Decision (user, 2026-10-12)
+Switch detection to git worktree topology: a daemon is non-production when its git common dir differs from its working tree top level (compare git rev-parse --git-common-dir with --show-toplevel), catching worktrees created anywhere, not just .worktrees. Add a test covering a worktree outside .worktrees.
+
 # Open questions
-Accept the .worktrees path-segment rule (manually placed worktrees outside it stay hub-eligible), or switch detection to git worktree topology (for example compare git rev-parse --git-common-dir with --show-toplevel, or read the worktree's .git file)?
