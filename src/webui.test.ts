@@ -1029,18 +1029,16 @@ assert.equal(splitLog.tail, (JSON.stringify({ type: "session", id: "s" }) + "\n"
 writeFileSync(logFile, JSON.stringify({ type: "session", id: "s" }) + "\n" + bigRecord + "\n");
 assert.ok((await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${splitLog.tail}`)).json()).text.includes("zzz"), "the record renders whole once its newline arrives");
 
-// 000148: an init window that starts inside the open thinking block's delta run (thinking_start
-// far outside the window) renders the deltas as the joinable span, later polls' spans join the
-// promoted block client-side, and the cross-window thinking_end serves the closing span
+// 000166: an init window on a log mid-thinking holds the still-open block whole from its
+// thinking_start as one open Thinking block (never a delta-run orphan span); the later delta
+// polls' spans join it client-side and the cross-window thinking_end serves the closing span
 const filler = "F".repeat(79) + "\n"; // 80-byte lines
 const msStart = JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } }) + "\n";
-// the thinking_start record sits ~2000 records before the end, far outside the 100-line window,
-// so the init window starts inside the delta run
 const msBody = (deltas: string) => filler.repeat(2000) + msStart + filler.repeat(1100) + deltas;
 writeFileSync(logFile, msBody(thinkDelta("outside the window") + "\n"));
 const msInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
-assert.ok(msInit.text.includes('<span class="lg-cont">outside the window</span>'), "the init window renders the open block's deltas as the joinable span, the thinking_start record outside it");
-assert.ok(!msInit.text.includes("data-open"), "the window alone cannot render the block open");
+assert.ok(msInit.text.includes('<details class="lg-think" data-open="think"><summary>Thinking</summary><pre><p>outside the window</p></pre></details>'), "the init window holds the still-open thinking block whole from its thinking_start, one open block");
+assert.ok(!msInit.text.includes("lg-cont"), "no delta-run orphan span: the window never starts inside the open block");
 writeFileSync(logFile, msBody(thinkDelta("outside the window") + "\n" + thinkDelta(" joined") + "\n" + thinkDelta(" in place") + "\n"));
 const msPoll = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${msInit.tail}`)).json();
 assert.ok(msPoll.text.includes('<span class="lg-cont"> joined in place</span>'), "the next poll renders the new deltas as a joinable span too");
@@ -1066,6 +1064,19 @@ assert.ok(!blockInit.text.includes("lg-think"), "the init window holds the 100 p
 const blockHist = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${blockInit.head}&before=1`)).json();
 assert.ok(blockHist.text.includes('<details class="lg-think"><summary>Thinking</summary><pre><p>the whole plan</p></pre></details>'), "the back-fill serves the block whole, never split across the page boundary");
 assert.ok(!blockHist.text.includes("lg-cont"), "no continuation artifact in the back-fill either");
+
+// 000166: a thinking block still open at the tail (no thinking_end yet) is ONE collapsed line
+// too: init holds it whole from its thinking_start, and a scroll-up back-fill from that head
+// never re-serves it, so a live phase renders as one open block that the thinking_end finalizes
+const openBlock = (deltas: number) => msStart + Array.from({ length: deltas }, (_, i) => thinkDelta("d" + i) + "\n").join("");
+writeFileSync(logFile, JSON.stringify({ type: "session", id: "s" }) + "\n" + filler.repeat(100) + openBlock(150));
+const openInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.ok(openInit.text.includes('<details class="lg-think" data-open="think"><summary>Thinking</summary><pre><p>d0'), "the open block loads whole from its thinking_start as one open Thinking block");
+assert.ok(openInit.text.includes("d149"), "the open block's full delta run renders, a never-ending block is never dropped");
+assert.ok(!openInit.text.includes("lg-cont"), "no orphan delta span: the window never starts inside the open block");
+assert.equal(openInit.head, (JSON.stringify({ type: "session", id: "s" }) + "\n").length + filler.length, "the open block counts as one line: it plus the 99 filler lines above it make the last 100 collapsed lines");
+const openHist = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${openInit.head}&before=1`)).json();
+assert.ok(!openHist.text.includes("lg-think") && !openHist.text.includes("lg-cont") && !openHist.text.includes("data-open"), "the back-fill never re-serves the open block: one live phase, one open Thinking block, no stale fragment");
 
 // 000158: a tool call block (tool_execution_start..tool_execution_end) is ONE line too, so the
 // window never splits a tool block's result away from its call
