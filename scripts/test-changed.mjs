@@ -35,7 +35,7 @@ export const mapToTests = (paths) => {
 const changedPaths = () => {
 	const files = new Set();
 	const add = (cmd) => {
-		for (const f of execSync(cmd, { encoding: "utf8" }).split("\n")) if (f) files.add(f);
+		for (const f of execSync(cmd, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).split("\n")) if (f) files.add(f);
 	};
 	const tryAdd = (cmd) => {
 		try {
@@ -52,7 +52,7 @@ const changedPaths = () => {
 
 const main = () => {
 	try {
-		process.chdir(execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim());
+		process.chdir(execSync("git rev-parse --show-toplevel", { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim());
 	} catch {
 		/* not a git repo: run from the current directory */
 	}

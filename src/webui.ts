@@ -224,7 +224,7 @@ function tsMs(v: unknown): number | null {
 // subagent transcript, cache reads included), duration is the last record timestamp minus the
 // first, first is that first record timestamp in epoch ms (000139: the agent history sort's
 // primary key), model and thinkingLevel come off the latest usage-bearing record (000146: the log
-// pane's meta line; null when no such record exists). A plain log only ever grows, so a size match
+// pane's meta line; null when no such record exists or the latest one lacks them (000151)). A plain log only ever grows, so a size match
 // means the parse is current; a live log re-parses per poll. A .gz log is immutable, so its
 // compressed size keys the same cache.
 // Ceiling: a full re-read per growth, split-line the incremental scan when a live log passes
@@ -256,9 +256,10 @@ function logStats(path: string): { tokens: number | null; duration: number | nul
 		}
 		if ((rec?.type === "turn_end" || rec?.type === "assistant") && typeof rec?.message?.usage?.totalTokens === "number" && Number.isFinite(rec.message.usage.totalTokens)) {
 			tokens = (tokens ?? 0) + rec.message.usage.totalTokens;
-			// the loop reads top to bottom, so the latest usage-bearing record wins
-			if (typeof rec.message.model === "string" && rec.message.model) model = rec.message.model;
-			if (typeof rec.message.thinkingLevel === "string" && rec.message.thinkingLevel) thinkingLevel = rec.message.thinkingLevel;
+			// the loop reads top to bottom, so the latest usage-bearing record wins; a record without the
+			// fields clears them rather than carrying an older record's value forward (000151)
+			model = typeof rec.message.model === "string" && rec.message.model ? rec.message.model : null;
+			thinkingLevel = typeof rec.message.thinkingLevel === "string" && rec.message.thinkingLevel ? rec.message.thinkingLevel : null;
 		}
 		const ts = tsMs(rec?.timestamp) ?? tsMs(rec?.message?.timestamp);
 		if (ts != null) {
@@ -466,6 +467,11 @@ export function renderLogChunk(text: string): string {
 					out[thinkIdx] = thinkHtml(false);
 					think = null;
 					thinkIdx = -1;
+				} else if (typeof ev.content === "string") {
+					// the start lived in an earlier chunk: the final span closes the client's open
+					// block and replaces its reconstructed deltas with the authoritative text
+					flush();
+					out.push('<span class="lg-cont" data-final="1">' + esc(ev.content) + "</span>");
 				}
 			} else if (ev.type === "text_delta") {
 				pending += ev.delta ?? "";
@@ -989,8 +995,11 @@ export function syncBoard(cols, tasks, expanded, els, make, visible) {
 // (a record split across poll windows re-serves the start) drop keeping the first; a later tool
 // result joins its block by toolCallId, an orphan one promotes to a collapsible details (the
 // data-sum one-liner as the summary, a generic "result" without one, the result text as the body);
-// thinking deltas continuing the previous chunk's block append into it, an unjoined one promotes
-// to a collapsible details too; doc is injected so tests run this without a DOM
+// thinking deltas continuing the previous chunk's block append into the marked open block, an
+// unjoined one promotes to a collapsible details too (marked open so later delta polls join it);
+// a final close span (data-final, a cross-window thinking_end) replaces the marked block's body
+// with the authoritative text and unmarks it, or promotes to a closed block of its own; doc is
+// injected so tests run this without a DOM
 export function logFixups(el, doc) {
 	const seen = new Set();
 	for (const d of el.querySelectorAll("details.lg-tool[data-tc]")) {
@@ -1018,15 +1027,22 @@ export function logFixups(el, doc) {
 		s.replaceWith(d);
 	}
 	for (const s of el.querySelectorAll(".lg-cont")) {
+		const final = !!s.dataset.final;
 		let b = s.previousElementSibling;
 		while (b && !(b.classList.contains("lg-think") && b.dataset.open === "think")) b = b.previousElementSibling;
 		if (b) {
-			b.querySelector("pre").append(s.textContent);
+			if (final) {
+				b.querySelector("pre").textContent = s.textContent;
+				delete b.dataset.open;
+			} else {
+				b.querySelector("pre").append(s.textContent);
+			}
 			s.remove();
 			continue;
 		}
 		const d = doc.createElement("details");
 		d.className = "lg-think";
+		if (!final) d.dataset.open = "think"; // later delta polls walk back to this block and join it
 		const sum = doc.createElement("summary");
 		sum.textContent = "Thinking";
 		const pre = doc.createElement("pre");
@@ -1124,12 +1140,13 @@ none so the card clicks pass through */
 .check { color: var(--low-fg); margin-right: 5px; }
 .cross { color: var(--critical-fg); margin-right: 5px; }
 #m-agent { margin-bottom: 12px; }
-#m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 300px; overflow: auto; }
+/* 000152: the pane grows to 70vh so long logs show more content */
+#m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 70vh; overflow: auto; }
 #m-log.hidden { display: none; }
 #m-log-meta { padding: 6px 10px 0; font-size: 10px; line-height: 1.45; color: var(--muted); }
 #m-log-meta.hidden { display: none; }
-/* the log text renders in the page's Inter stack; blocks are collapsed <details> the client fills in */
-#m-log-text { margin: 0; padding: 8px 10px; font-size: 10px; line-height: 1.45; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; white-space: pre-wrap; overflow-wrap: break-word; }
+/* the log text renders in the page's Inter stack; 000152: the size matches the card body text, only the line-height stays tuned for logs; blocks are collapsed <details> the client fills in */
+#m-log-text { margin: 0; padding: 8px 10px; font-size: 13px; line-height: 1.45; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; white-space: pre-wrap; overflow-wrap: break-word; }
 #m-log-text pre { font: inherit; margin: 0; padding: 0; }
 #m-log-text details { margin: 2px 0; }
 #m-log-text summary { cursor: pointer; }
@@ -1151,8 +1168,8 @@ none so the card clicks pass through */
 #m-body pre { background: var(--code-bg); border-radius: 6px; padding: 8px 10px; overflow: auto; font-size: 12px; }
 #m-body code { background: var(--code-bg); border-radius: 4px; padding: 0 4px; font-size: 12px; }
 #m-body pre code { padding: 0; background: none; }
-/* 000147: explicit monospace stack for inline and fenced code, after the #m-log-text pre { font: inherit } shorthand so it wins the cascade */
-#m-log-text code, #m-log-text pre, #m-body code, #m-body pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+/* 000153: only inline and fenced code render monospace; the Thinking prose and the tool args/output pres are not code, so the bare #m-log-text pre stays outside this selector and inherits the Inter page font */
+#m-log-text code, #m-log-text pre code, #m-body code, #m-body pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
 #m-body a { color: var(--link); }
 /* one accent color per column, in pipeline order */
 .c-backlog { --ac: #94a3b8; }
@@ -1174,7 +1191,7 @@ none so the card clicks pass through */
 <div id="modal" class="hidden"><div id="m-box">
 <div id="m-head"><h2 id="m-title"></h2><button id="m-close" onclick="closeModal()">Close</button></div>
 <div id="m-attrs"></div>
-<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><div id="m-log-meta" class="hidden"></div><div id="m-log-text"></div></div></div>
+<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log-meta" class="hidden"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>
 <div id="m-body"></div>
 </div></div>
 <script>
@@ -1505,6 +1522,9 @@ function closeLog() {
 	logState = null;
 	const p = logPane();
 	if (p) p.classList.add("hidden");
+	// 000154: the meta line is a sibling above the pane now, so it must hide itself on close
+	const meta = document.getElementById("m-log-meta");
+	if (meta) { meta.textContent = ""; meta.classList.add("hidden"); }
 	markActiveAgent();
 }
 function pollLog() {

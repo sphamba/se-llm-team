@@ -182,6 +182,7 @@ contPane.appendChild(contSpan);
 logFixups(contPane, logDoc);
 assert.ok(contPane.children[0].tag === "details" && contPane.children[0].className === "lg-think", "a thinking delta with no open block to join promotes to a collapsible details.lg-think instead of staying a bare span");
 assert.ok(contPane.children[0].children[0].textContent === "Thinking" && contPane.children[0].children[1].textContent === "still mid-thought", "the promoted thinking block summarizes as Thinking with the delta text as its body");
+assert.ok(contPane.children[0].dataset.open === "think", "000148: the promoted block is marked open, so later delta polls walk back to it and join it instead of promoting a new block per poll");
 const contJoinPane = new LogEl("div");
 const openThink = new LogEl("details");
 openThink.className = "lg-think";
@@ -198,6 +199,62 @@ contJoinPane.appendChild(liveCont);
 logFixups(contJoinPane, logDoc);
 assert.equal(contJoinPane.children.length, 1);
 assert.ok(thinkBody.textContent === "started in the previous chunk continued here", "a thinking delta still appends into the previous chunk's open block");
+
+// 000148 live multi-chunk: the window's deltas promote to a marked open block, later delta polls
+// join it instead of promoting one block per poll, and the cross-window thinking_end (a final
+// close span) replaces the body with the authoritative text and closes the block
+const thinkDelta = (t: string) => JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: t } });
+const thinkEnd = (t: string) => JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: t } });
+const contSpanOf = (chunk: string) => {
+	const m = chunk.match(/<span class="lg-cont"( data-final="1")?>([^<]*)<\/span>/);
+	if (!m) throw new Error("chunk carries no cont span: " + chunk);
+	const s = new LogEl("span");
+	s.className = "lg-cont";
+	if (m[1]) s.dataset.final = "1";
+	s.textContent = m[2];
+	return s;
+};
+const contSpansOf = (chunk: string) => [...chunk.matchAll(/<span class="lg-cont"( data-final="1")?>([^<]*)<\/span>/g)].map((m) => {
+	const s = new LogEl("span");
+	s.className = "lg-cont";
+	if (m[1]) s.dataset.final = "1";
+	s.textContent = m[2];
+	return s;
+});
+const livePane = new LogEl("div");
+// poll 1: the window's deltas of a block whose thinking_start lies outside it
+livePane.appendChild(contSpanOf(renderLogChunk(thinkDelta("plan the fix") + "\n")));
+logFixups(livePane, logDoc);
+assert.equal(livePane.children.length, 1);
+const promotedLive = livePane.children[0];
+assert.ok(promotedLive.tag === "details" && promotedLive.className === "lg-think" && promotedLive.dataset.open === "think", "the promoted block is marked open so later delta polls join it");
+// poll 2: two deltas render one span, it joins the marked block
+livePane.appendChild(contSpanOf(renderLogChunk(thinkDelta(" and") + "\n" + thinkDelta(" grows") + "\n")));
+logFixups(livePane, logDoc);
+assert.equal(livePane.children.length, 1, "later delta polls join the marked open block, one Thinking block per stream");
+assert.ok(livePane.children[0] === promotedLive && promotedLive.children[1].textContent === "plan the fix and grows", "the joined block's body grew in place");
+// poll 3: the cross-window thinking_end closes the block with the authoritative text
+const crossEnd = renderLogChunk(thinkEnd("authoritative thinking") + "\n");
+assert.ok(crossEnd.includes('<span class="lg-cont" data-final="1">authoritative thinking</span>'), "a cross-window thinking_end renders the closing span with the authoritative text");
+livePane.appendChild(contSpanOf(crossEnd));
+logFixups(livePane, logDoc);
+assert.equal(livePane.children.length, 1, "the close span keeps exactly one Thinking block");
+assert.ok(!("open" in promotedLive.dataset), "the close removes the continuation marker");
+assert.ok(promotedLive.children[1].textContent === "authoritative thinking", "the close replaces the block's body with the authoritative text");
+// a close span with no open block before it promotes to a closed block of its own
+const closeAlone = new LogEl("div");
+closeAlone.appendChild(contSpanOf(renderLogChunk(thinkEnd("late authoritative") + "\n")));
+logFixups(closeAlone, logDoc);
+assert.equal(closeAlone.children.length, 1);
+assert.ok(closeAlone.children[0].tag === "details" && closeAlone.children[0].className === "lg-think" && !("open" in closeAlone.children[0].dataset), "a close span with no open block promotes to a closed details.lg-think");
+assert.ok(closeAlone.children[0].children[1].textContent === "late authoritative", "the promoted close block carries the authoritative text as its body");
+// one poll can carry the deltas and the close together: one promote, one close, one new block
+for (const s of contSpansOf(renderLogChunk(thinkDelta(" late") + "\n" + thinkEnd("final words") + "\n"))) livePane.appendChild(s);
+logFixups(livePane, logDoc);
+assert.equal(livePane.children.length, 2, "a poll carrying deltas and the close renders one new Thinking block beside the closed one");
+assert.ok(livePane.children[1].className === "lg-think" && !("open" in livePane.children[1].dataset), "the combo chunk's block closes");
+assert.ok(livePane.children[1].children[1].textContent === "final words", "the combo chunk's block carries the authoritative text");
+assert.ok(promotedLive.children[1].textContent === "authoritative thinking", "the earlier closed block keeps its authoritative text");
 
 const bareErr = renderLogChunk([
 	JSON.stringify({ type: "tool_execution_start", toolCallId: "t3", toolName: "bash", args: { command: "ls" } }),
@@ -711,9 +768,12 @@ assert.ok(page.includes(".agent-card-active"), "the shown agent card gets an act
 // bit larger card in one wrapping row of columns, the live run last, its subs stacked below it
 const agentCardCss = page.match(/\.agent-card \{[^}]*\}/)![0];
 assert.ok(agentCardCss.includes("font-size: 12px") && agentCardCss.includes("padding: 6px 10px"), ".agent-card is a bit larger than the old button");
-// 000122: the log text renders in the page's sans serif stack, blocks are collapsed details
+// 000122: the log text renders in the page's sans serif stack, blocks are collapsed details;
+// 000152: the size matches the card body text, no smaller log font-size remains
 const logCss = page.match(/#m-log-text \{[^}]*\}/)![0];
-assert.ok(logCss.includes("font-size: 10px"), "the agent log text keeps its 10px size");
+assert.ok(logCss.includes("font-size: 13px") && !/font-size: 1[0-2]px/.test(logCss), "the agent log text renders at the card body size, no smaller log font-size");
+const logPaneCss = page.match(/#m-log \{[^}]*\}/)![0];
+assert.ok(logPaneCss.includes("max-height: 70vh"), "the log pane grows to 70vh so long logs show more content");
 // 000147: the no-monospace check stays scoped to this font-family declaration now that the code/pre rule adds monospace elsewhere
 const logFont = logCss.match(/font-family: [^;]+;/)![0];
 assert.ok(logFont.includes("system-ui") && !logFont.includes("monospace"), "the agent log text font-family declaration stays sans serif, not monospace");
@@ -721,10 +781,14 @@ assert.ok(logFont.includes("system-ui") && !logFont.includes("monospace"), "the 
 assert.ok(page.includes('<link rel="preconnect" href="https://fonts.googleapis.com">') && page.includes('<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'), "the page preconnects to Google Fonts before the Inter stylesheet");
 assert.ok(page.includes('https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap" rel="stylesheet"'), "the page loads the Inter stylesheet from fonts.googleapis.com");
 assert.equal(page.match(/font-family: Inter, system-ui[^;]*;/g)?.length, 2, "Inter goes first in exactly the two font-family declarations (body and #m-log-text)");
-// 000147: inline and fenced code render in an explicit monospace stack in the log pane and task body; buttons inherit the page font
-const monoRule = '#m-log-text code, #m-log-text pre, #m-body code, #m-body pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }';
+// 000153: inline and fenced code render in an explicit monospace stack in the log pane and task
+// body; buttons inherit the page font; the Thinking prose and tool args/output pres are not code,
+// so the bare #m-log-text pre stays outside the selector and inherits the Inter page font
+const monoRule = '#m-log-text code, #m-log-text pre code, #m-body code, #m-body pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }';
 assert.ok(page.includes(monoRule), "code and fenced code render in an explicit monospace stack in the log pane and task body");
-assert.ok(page.indexOf(monoRule) > page.indexOf("#m-log-text pre { font: inherit;"), "the monospace rule comes after the font: inherit shorthand so fenced log code renders monospace, not Inter");
+const monoSelectors = monoRule.slice(0, monoRule.indexOf("{")).split(",").map((s) => s.trim());
+assert.ok(monoSelectors.includes("#m-log-text code") && monoSelectors.includes("#m-log-text pre code"), "inline code and fenced code stay in the log-pane monospace selector");
+assert.ok(!monoSelectors.includes("#m-log-text pre"), "the Thinking prose and the tool args/output pres are not inside the monospace selector, they stay Inter");
 assert.ok(page.includes("button { font-family: inherit; }"), "buttons inherit the page font instead of the UA Arial default");
 assert.ok(page.includes(String(md)), "the page runs the tested md renderer for task bodies and log text");
 assert.ok(page.includes("#m-log-text pre { font: inherit;"), "log block bodies inherit the sans serif font");
@@ -751,7 +815,7 @@ const upd = page.match(/function updateOpenTask\(t\) \{[\s\S]*?\n\}/)![0];
 assert.ok(page.includes("if (open) updateOpenTask(open); else closeModal();"), "the refresh updates the open card in place and closes it when its task is gone");
 assert.ok(upd.includes("writeHead(t)") && upd.includes("renderAgent(t, true)") && upd.includes("setBody(t)"), "the refresh re-derives title, attrs, agent row and body from the fresh payload");
 assert.ok(!upd.includes("closeLog") && !upd.includes("logState"), "the refresh path never touches the log pane, logState or the log timer");
-assert.ok(page.includes('<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><div id="m-log-meta" class="hidden"></div><div id="m-log-text"></div></div></div>'), "the log pane ships the meta line above the log text, hidden until a payload carries meta");
+assert.ok(page.includes('<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log-meta" class="hidden"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>'), "000154: the meta line ships as a sibling above the log pane, hidden until a payload carries meta");
 assert.ok(page.includes('meta.classList.toggle("hidden", !label)') && page.includes('" \u00b7 thinking "'), "openLog/pullLog fill the meta line on init and every poll, model name then thinking level");
 assert.ok(!page.includes(`+ '</div><div id="m-log"`), "renderAgent no longer rebuilds the log pane with the run cards");
 const setBodySrc = page.match(/function setBody\(t\) \{[\s\S]*?\n\}/)![0];
@@ -942,12 +1006,40 @@ assert.ok(servedLog.text.includes("not json at all\n"), "endpoint passes non-JSO
 assert.equal(servedLog.model, null, "a log without usage-bearing records carries a null model, the meta line stays hidden");
 assert.equal(servedLog.thinkingLevel, null, "a log without usage-bearing records carries a null thinking level too");
 
+// 000151: the meta comes off the latest usage-bearing record only; when that record lacks
+// model/thinkingLevel both clear instead of keeping an older record's values
+writeFileSync(logFile, [
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 100 }, model: "m-1", thinkingLevel: "low" }, timestamp: "2026-10-11T09:36:24.121Z" }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 200 } }, timestamp: "2026-10-11T09:37:24.121Z" }),
+].join("\n") + "\n");
+const clearedLog = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.equal(clearedLog.model, null, "a latest usage-bearing record without a model clears the meta's model");
+assert.equal(clearedLog.thinkingLevel, null, "a latest usage-bearing record without a thinking level clears it too");
+
 // a record split at the chunk head (init fetch of a log bigger than LOG_CHUNK) drops its partial
 // line instead of rendering raw JSON
 const bigRecord = JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "z".repeat(100000) } });
 writeFileSync(logFile, JSON.stringify({ type: "session", id: "s" }) + "\n" + bigRecord + "\n" + JSON.stringify({ type: "message_end", message: { role: "user", content: "tail" } }) + "\n");
 const splitLog = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
 assert.equal(splitLog.text, "[prompt] tail\n", "a record split at the chunk head drops its partial line, later records still render");
+
+// 000148: a >LOG_CHUNK init window mid-stream renders the open thinking block's deltas as the
+// joinable span (thinking_start outside the window), later polls' spans join the promoted block
+// client-side, and the cross-window thinking_end serves the closing span
+const filler = "F".repeat(79) + "\n"; // 80-byte lines: the window head lands inside one, it drops
+const msStart = JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } }) + "\n";
+// the thinking_start record sits > LOG_CHUNK bytes before the end, the deltas inside the window
+const msBody = (deltas: string) => filler.repeat(2000) + msStart + filler.repeat(1100) + deltas;
+writeFileSync(logFile, msBody(thinkDelta("outside the window") + "\n"));
+const msInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.ok(msInit.text.includes('<span class="lg-cont">outside the window</span>'), "the init window renders the open block's deltas as the joinable span, the thinking_start record outside it");
+assert.ok(!msInit.text.includes("data-open"), "the window alone cannot render the block open");
+writeFileSync(logFile, msBody(thinkDelta("outside the window") + "\n" + thinkDelta(" joined") + "\n" + thinkDelta(" in place") + "\n"));
+const msPoll = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${msInit.tail}`)).json();
+assert.ok(msPoll.text.includes('<span class="lg-cont"> joined in place</span>'), "the next poll renders the new deltas as a joinable span too");
+writeFileSync(logFile, msBody(thinkDelta("outside the window") + "\n" + thinkDelta(" joined") + "\n" + thinkDelta(" in place") + "\n") + thinkEnd("authoritative thinking") + "\n");
+const msClose = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${msPoll.tail}`)).json();
+assert.ok(msClose.text.includes('<span class="lg-cont" data-final="1">authoritative thinking</span>'), "the cross-window thinking_end serves the closing span with the authoritative text");
 
 // 000084: a JSONL record split across two poll windows renders exactly once, when its newline
 // arrives. The first poll's tail sits on the last record boundary, so the next poll re-reads the
