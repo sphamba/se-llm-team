@@ -1,7 +1,7 @@
 ---
 name: "fix: open thinking block is sliced on init and scroll-up"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/166-open-thinking-sliced-init-scroll"
 issuer: "#158"
 complexity: "moderate"
@@ -31,6 +31,8 @@ Tests: src/webui.test.ts covers whichever resolution is chosen (open block count
 
 # Notes
 
+Review (2026-10-12, commit bb188ae): passed, no fixes. Verified against the Specs and the code: the walk adds one openThink state, checked after inThink and openTool and before the delta branch, so a first thinking_delta with no thinking_end below the tail sets it, all records up to the block's thinking_start are consumed, the start counts ONE line and head lands on it. Init holds the whole open block from its thinking_start in one window as a single open Thinking block; a back-fill from that head cannot re-serve it because the block's deltas all lie below the tail. Traced edge cases: a closed thinking block above an open one counts correctly (inThink and openThink are independent states), an open block at the file start returns head 0 (atStart) and still renders the full delta run, and a large open block makes the window hold more than 100 records, consistent with the tool-block rule. Confirmed the listed assumptions in the diff: the #148 client promotion path (logFixups) is untouched, the thinking_end finalization keeps the data-final span mechanism, back-fill and dedupe semantics are unchanged, and subagent and .gz logs share the same linesBack and agentLogPayload path (all three call sites). The rewritten 000148 init test and the new 000166 block give exact byte-math and negative assertions; the client chain (cont span joins the marked open block, final span replaces its body and unmarks) stays covered by the existing logFixups tests with real DOM stubs. Full suite green (kanban, orchestrator, webui, extension, index). The branch holds exactly one commit over the merge-base with main and touches only src/webui.ts and src/webui.test.ts.
+
 # Decision
 Atomic live blocks (user's answer, 2026-10-12): an open, still-streaming thinking block counts as ONE collapsed line on init and scroll-up as well, so a live thinking phase renders as one open Thinking block that the thinking_end poll finalizes in place - no stale fragment, no split. Content of a block that never receives a thinking_end (abandoned run) must still render, never be dropped. The #148 client-side promotion stays only for genuinely orphaned artifacts; the #158 Specs sentence now holds for open blocks too.
 
@@ -39,6 +41,8 @@ Should an open, still-streaming thinking block count as ONE collapsed line on in
 Implemented in the worktree, commit bb188ae. Server-side fix in linesBack (src/webui.ts): a new openThink state consumes a still-open thinking block backward - deltas with no thinking_end below the tail set it, and the walk skips everything up to the block's thinking_start, where it counts the block as ONE line and head lands at the start record. So init holds the whole open block from its thinking_start in one window as a single open block (thinkHtml(true)), a scroll-up back-fill from that head never re-serves any part of it (heads never land mid-block), and the eventual thinking_end poll's data-final span finalizes the block in place through the unchanged #148 client path. A block that never receives thinking_end (abandoned run) still renders its full delta run - when the walk reaches the file start first, linesBack returns 0 (atStart), never dropping content. The #148 client-side promotion (orphan lg-cont to an open block) stays untouched for the live delta-streaming path and genuinely orphaned artifacts. Comments on LOG_LINES, linesBack and the init path updated.
 
 Tests: the 000148 init test rewritten (init of a mid-thinking log now asserts the open block loads whole from its thinking_start, no lg-cont orphan; the delta-poll and cross-window thinking_end assertions kept). New 000166 block: an open block at the tail with 150 deltas loads as one open Thinking block with the full delta run, head counts it as one line, and the back-fill from that head carries no lg-think/lg-cont/data-open at all. Full suite green (kanban, orchestrator, webui, extension, index). Throwaway end-to-end check (not committed): init + back-fill + delta poll + thinking_end payloads replayed through renderLogChunk and the real logFixups - final pane holds exactly one closed Thinking block with the authoritative text, no stale fragment, no split.
+
+Merge (2026-10-12, 7ecec18): step 1 merged main (4 new commits: per-role notes in .kanban, webui hot reload module graph, role-notes filter) into fix/166-open-thinking-sliced-init-scroll in the worktree; only src/webui.test.ts overlapped and auto-merged with the 'ort' strategy, no conflicts, so test suites were skipped per the clean-merge rule. Step 2 fast-forwarded main in the project root to 7ecec18, root clean. Merged main carries the full fix (src/webui.ts linesBack openThink state) and both test blocks.
 
 # Open questions
 

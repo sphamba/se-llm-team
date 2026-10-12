@@ -1,8 +1,8 @@
 ---
 name: "fix: webui hot reload leaves stale kanban.ts, so pipeline-order changes need a daemon restart"
 priority: "medium"
-state: "reviewing"
-worktree: "fix/164-webui-hot-reload-stale-kanban"
+state: "done"
+worktree: ""
 issuer: "#157"
 complexity: "moderate"
 shortName: "webui-hot-reload-stale-kanban"
@@ -65,6 +65,22 @@ Implemented the # Decision in the worktree (commit 856bcf6):
 - The copy dir is removed after each import (node keeps the modules in memory) and stale .webui-hot-* dirs are swept on every reload, so the repo tree stays clean; the test cleanup also removes leftovers from a crashed run.
 - webui.test.ts: a new block starts a hub on a stub webui that imports a stub kanban, rewrites ONLY the stub kanban (the webui file keeps its mtime), and asserts the next fetch serves the new states. The #134 stub test and the real-graph mtime-bump test still pass through the new copy-dir path.
 - node src/webui.test.ts, src/kanban.test.ts, src/orchestrator.test.ts, src/extension.test.ts and index.test.ts all pass. kanban.ts and the daemon lifecycle are untouched.
+
+## 2026-10-12, reviewer
+Reviewed commit 856bcf6 against main (diff: src/hub.ts, src/webui.test.ts). No fixes made; the branch holds only this task's commit.
+
+- The implementation matches the # Decision: the loader walks the static relative-import graph from webui.ts, copies it into .webui-hot-<pid>-<newestGraphMtime> beside the webui file, and imports the copy, so a reloaded webui.ts sees fresh sibling modules. The version is the newest mtime in the graph, concurrent reloads serialize through one in-flight promise, and a failed version keeps the last good module until the version changes again. The restart-based direction is gone.
+- All four assumptions in the Open questions section hold against the code: the signal is mtime-based with no content hashing; coverage is webui.ts plus its static relative-import graph (kanban.ts, pid.ts) while hub.ts and orchestrator.ts still need a restart; the copy dir is transient, swept after each import, and no .webui-hot-* leftovers stayed in src after the test runs; the graph imports only node builtins and relative src modules today.
+- Copy-approach safety checks pass: webui.ts, kanban.ts and pid.ts use no import.meta.url or __dirname paths, kanbanDir(root) is argument-driven, and no module in the graph dynamic-imports at call time (the ceiling the loader comment names).
+- Tests run in the worktree: src/webui.test.ts with the new graph-fresh reload block, src/kanban.test.ts, src/orchestrator.test.ts, src/extension.test.ts and index.test.ts (repo root) all pass. scripts/test-changed.mjs already maps src/hub.ts to the webui and orchestrator tests.
+- Minor, no action: two hub processes that share one src dir could sweep each other's hot dir mid-import; that import fails and the catch keeps the last good module. One daemon per repo in practice.
+
+## 2026-10-12, merger
+Merged in two steps, no conflicts anywhere, no fixes needed.
+
+- Step 1: merged main (0aee405) into fix/164-webui-hot-reload-stale-kanban in the worktree (merge commit ed55fe1). Clean ort merge: main carried agents/*.md role notes, src/kanban.ts, src/orchestrator.ts and src/orchestrator.test.ts changes; the branch carries src/hub.ts and src/webui.test.ts. No overlap, so test suites were skipped per merge policy.
+- Step 2: merged fix/164-webui-hot-reload-stale-kanban into main at the project root (fast-forward 0aee405..ed55fe1).
+- The live test runs on merged commit ed55fe1 on the root checkout.
 
 # Open questions
 No open questions: both recorded questions are answered by the # Decision above. Assumptions (confirm or correct any of these):
