@@ -7,8 +7,8 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readHubRegistry, startHub } from "./hub.ts";
-import { createTask, kanbanDir, parseTask, setState, setWorktree } from "./kanban.ts";
-import { compactFinishedLogs, compactLogLine, loadConfig, nextRunIndex, poll, removeTask, waitForBoardCommits } from "./orchestrator.ts";
+import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, updateTask } from "./kanban.ts";
+import { compactFinishedLogs, compactLogLine, loadConfig, nextRunIndex, poll, promoteBacklog, removeTask, waitForBoardCommits } from "./orchestrator.ts";
 import { gunzipSync } from "node:zlib";
 import { pidAlive } from "./pid.ts";
 
@@ -2078,3 +2078,31 @@ try {
 	/* already gone */
 }
 console.log("orchestrator.test.ts: ... + daemon-restart survival smoke passed");
+
+// --- part AR: promotion re-checks its gates on a fresh board read just before setState ---
+// the sweep's snapshot can be tens of seconds old (a slow state loop): an edit that lands
+// mid-sweep must win, or a done task restarts and a gated task starts ungated
+const rootAR = fixture();
+cleaned.push(rootAR);
+mkdirSync(kanbanDir(rootAR), { recursive: true });
+const victimDoneAR = createTask(rootAR, { name: "feat: cancelled mid-sweep", summary: "Fresh-read gates", specs: "n/a" });
+const victimQuestionsAR = createTask(rootAR, { name: "feat: questions mid-sweep", summary: "Fresh-read gates", specs: "n/a" });
+const victimBlockedAR = createTask(rootAR, { name: "feat: blocked mid-sweep", summary: "Fresh-read gates", specs: "n/a" });
+const blockerAR = createTask(rootAR, { name: "feat: fresh blocker", summary: "Fresh-read gates", specs: "n/a" });
+const snapshotAR = listAll(rootAR);
+// the edits land after the snapshot, before the promotion pass
+setState(rootAR, victimDoneAR, "done");
+updateTask(rootAR, victimQuestionsAR, { openQuestions: "- [user] Which API?" });
+updateTask(rootAR, victimBlockedAR, { blockedBy: `#${parseInt(blockerAR.file, 10)}` });
+promoteBacklog(rootAR, snapshotAR);
+assert.equal(parseTask(rootAR, victimDoneAR.file).state, "done", "a mid-sweep done rewrite is not promoted back to to-do");
+assert.equal(parseTask(rootAR, victimQuestionsAR.file).state, "backlog", "open questions added mid-sweep hold promotion");
+assert.equal(parseTask(rootAR, victimQuestionsAR.file).openQuestions, "- [user] Which API?", "the mid-sweep open question survived the promotion pass");
+assert.equal(parseTask(rootAR, victimBlockedAR.file).state, "backlog", "a blockedBy ref added mid-sweep holds promotion");
+assert.ok(parseTask(rootAR, victimBlockedAR.file).blockedBy.includes(`#${parseInt(blockerAR.file, 10)}`), "the mid-sweep blockedBy ref survived the promotion pass");
+// a candidate the gates pass on both reads still promotes
+const cleanAR = createTask(rootAR, { name: "feat: clean promote", summary: "Fresh-read gates", specs: "n/a" });
+promoteBacklog(rootAR, listAll(rootAR));
+assert.equal(parseTask(rootAR, cleanAR.file).state, "to-do", "an unchanged candidate still promotes");
+cleanupAll(rootAR);
+console.log("orchestrator.test.ts: ... + fresh-read promotion gates smoke passed");

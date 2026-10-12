@@ -1002,7 +1002,7 @@ function rescan(root: string, cfg: Config): void {
 	janitorPids(root, tasks);
 	// the sweep promotes: drop done blocker refs first (board hygiene, same snapshot), then
 	// promote every schedulable backlog task; a ref pointing at a done task does not hold
-	// promotion, so no fresh board re-read sits between the two passes
+	// promotion, and promoteBacklog re-checks its gates on a fresh board read before setState
 	dropDoneBlockers(root, tasks);
 	promoteBacklog(root, tasks);
 	// every sweep: finished agents' logs compact into .log.gz (idempotent; live pids are skipped)
@@ -1080,8 +1080,8 @@ function dropDoneBlockers(root: string, tasks: Task[]): void {
 // promotion is event-driven, the replacement for the old idle failsafe: every sweep and every
 // poll promotes EVERY schedulable backlog task, not one per idle window. Unchained tasks
 // promote and run as parallel lanes the moment a lane frees; the blockedBy chain (the PM
-// encodes it at creation) serializes what must serialize
-function promoteBacklog(root: string, tasks: Task[]): void {
+// encodes it at creation) serializes what must serialize. Exported for the tests
+export function promoteBacklog(root: string, tasks: Task[]): void {
 	for (const task of tasks) {
 		// conflicted files parse bogus state values: never promotable
 		if (task.conflicted || task.state !== "backlog") continue;
@@ -1089,9 +1089,16 @@ function promoteBacklog(root: string, tasks: Task[]): void {
 		if (task.openQuestions) continue;
 		// unfinished blockers hold the task
 		if (blockedByUndone(tasks, task)) continue;
+		// the snapshot predates this pass by the whole state loop (tens of seconds on a big or
+		// slow board): an edit that landed mid-sweep (a done rewrite, a blockedBy ref, open
+		// questions) must win, so the three gates re-check on a fresh board read just before
+		// the promotion. A vanished task is gone: skip
+		const board = listAll(root);
+		const fresh = board.find((t) => t.file === task.file);
+		if (!fresh || fresh.conflicted || fresh.state !== "backlog" || fresh.openQuestions || blockedByUndone(board, fresh)) continue;
 		log(root, `promoting ${task.file} to to-do (blockers done)`);
 		try {
-			setState(root, task, "to-do");
+			setState(root, fresh, "to-do");
 		} catch (err) {
 			log(root, `promotion of ${task.file} failed: ${err instanceof Error ? err.message : err}`);
 		}
