@@ -726,10 +726,14 @@ assert.equal(agentLabel(devRuns[0], { developer: 3 }), "Developer", "a legacy un
 assert.equal(agentLabel({ role: "reviewer", run: 0 }, { reviewer: 1 }), "Reviewer", "a solo run keeps its unnumbered label");
 assert.ok(page.includes(String(agentLabel)), "the page ships the tested agentLabel source");
 
-// 000120 card stats: tokens render in kilo (42k), raw below 1000; duration keeps one decimal
-// below 10s then minutes; missing stats render empty
+// 000120 card stats: tokens render raw below 1000, kilo (42k), mega from a million (2.3M); duration
+// keeps one decimal below 10s then minutes; missing stats render empty
 assert.equal(fmtTokens(42311), "42k", "tokens render in kilo");
 assert.equal(fmtTokens(999), "999", "tokens below 1000 render raw");
+assert.equal(fmtTokens(842), "842", "tokens below 1000 render raw");
+assert.equal(fmtTokens(999499), "999k", "tokens just under a mega render in kilo");
+assert.equal(fmtTokens(999500), "1.0M", "tokens at the mega boundary render one decimal M");
+assert.equal(fmtTokens(1500000), "1.5M", "tokens from a million render one decimal M");
 assert.equal(fmtTokens(null), "", "missing tokens render empty");
 assert.equal(fmtDur(3479), "3.5s", "a duration below 10s keeps one decimal");
 assert.equal(fmtDur(60000), "1m", "a whole minute drops the zero seconds");

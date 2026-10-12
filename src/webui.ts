@@ -654,10 +654,12 @@ export function agentLabel(a, count) {
 	return a.role[0].toUpperCase() + a.role.slice(1) + (count[a.role] > 1 && a.run != null ? " " + (a.run + 1) : "");
 }
 
-// tokens on an agent card, in kilo (42k), raw below 1000; empty when the log carries no usage
+// tokens on an agent card: raw below 1000, kilo (42k), mega with one decimal from a million (2.3M);
+// empty when the log carries no usage
 export function fmtTokens(total) {
 	if (typeof total !== "number" || !Number.isFinite(total) || total < 0) return "";
 	if (total < 1000) return String(total);
+	if (total >= 999500) return (total / 1e6).toFixed(1) + "M";
 	return Math.round(total / 1000) + "k";
 }
 
@@ -938,7 +940,7 @@ none so the card clicks pass through */
 .agent-card-active { border-color: var(--link); background: var(--medium-bg); }
 .agent-stats { display: block; font-size: 10px; color: var(--muted); margin-top: 2px; }
 .agent-col { display: flex; flex-direction: column; gap: 4px; }
-.agent-subs { display: flex; flex-direction: column; gap: 4px; margin-left: 10px; }
+.agent-subs { display: flex; flex-direction: column; gap: 4px; }
 .agent-subs:empty { display: none; }
 #m-agent-btns { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
 .check { color: var(--low-fg); margin-right: 5px; }
