@@ -849,17 +849,15 @@ export function fmtTokens(total) {
 	return Math.round(total / 1000) + "k";
 }
 
-// duration on an agent card: one decimal below 10s, then whole seconds, then minutes
+// duration on an agent card: integer seconds, then minutes
 export function fmtDur(ms) {
 	if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "";
-	const s = ms / 1000;
-	if (s < 10) return s.toFixed(1) + "s";
-	const sec = Math.round(s);
+	const sec = Math.round(ms / 1000);
 	if (sec < 60) return sec + "s";
 	return Math.floor(sec / 60) + "m" + (sec % 60 ? " " + (sec % 60) + "s" : "");
 }
 
-// the stats line under an agent card's label (42k · 3.5s): tokens then duration, empty when both
+// the stats line under an agent card's label (42k · 42s): tokens then duration, empty when both
 // are missing; agentCardHtml and the in-place stats pass share it, so both render the same string
 export function agentStatsText(tokens, duration) {
 	return [fmtTokens(tokens), fmtDur(duration)].filter(Boolean).join(" · ");

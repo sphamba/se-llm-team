@@ -530,7 +530,7 @@ assert.ok(page.includes(".chip.cx-simple {") && page.includes(".chip.cx-moderate
 assert.ok(cardHtml({ file: "000005_e.md", name: "e", priority: "low", complexity: "trivial" }, "to-do").includes('<span class="chip cx cx-trivial">trivial</span>'), "a trivial task renders the cx-trivial chip");
 // #178: the card's stats line sums all agent entries' tokens and durations, the agentStatsText
 // format; hidden with no entries or both totals 0/null
-assert.ok(cardHtml({ file: "000007_g.md", name: "g", priority: "low", agents: [{ tokens: 420, duration: 1500 }, { tokens: 1580, duration: 2000 }] }, "doing").includes('<span class="card-stats">2k · 3.5s</span>'), "a card sums its agent entries' tokens and durations into the stats line");
+assert.ok(cardHtml({ file: "000007_g.md", name: "g", priority: "low", agents: [{ tokens: 420, duration: 1500 }, { tokens: 1580, duration: 2000 }] }, "doing").includes('<span class="card-stats">2k · 4s</span>'), "a card sums its agent entries' tokens and durations into the stats line");
 assert.ok(!cardHtml({ file: "000008_h.md", name: "h", priority: "low" }, "doing").includes("card-stats"), "a card without agent entries renders no stats line");
 assert.ok(page.includes(".card-stats {"), "the card stats line style ships in the page css");
 
@@ -934,7 +934,7 @@ assert.equal(syncAgentStats(new El("div"), grew, docStub), false, "a missing row
 const bare = runRow([{ role: "developer", run: null, alive: true, status: "live", handle: "t.developer", tokens: null, duration: null }]);
 assert.equal(bare.children[0].children[0].children.length, 1, "empty stats render no span");
 assert.ok(syncAgentStats(bare, [{ role: "developer", run: null, alive: true, status: "live", handle: "t.developer", tokens: 999, duration: 1200 }], docStub), "the unchanged run set still updates in place");
-assert.equal(bare.children[0].children[0].children[1].textContent, "999 · 1.2s", "the span joins the card when stats arrive");
+assert.equal(bare.children[0].children[0].children[1].textContent, "999 · 1s", "the span joins the card when stats arrive");
 assert.ok(syncAgentStats(bare, [{ role: "developer", run: null, alive: true, status: "live", handle: "t.developer", tokens: null, duration: null }], docStub), "the unchanged run set still updates in place");
 assert.equal(bare.children[0].children[0].children.length, 1, "the span drops when the stats vanish");
 // the page wires the helpers: the rebuild seeds the signature, the keep pass syncs the stats
@@ -1279,7 +1279,7 @@ assert.equal(fmtTokens(999499), "999k", "tokens just under a mega render in kilo
 assert.equal(fmtTokens(999500), "1.0M", "tokens at the mega boundary render one decimal M");
 assert.equal(fmtTokens(1500000), "1.5M", "tokens from a million render one decimal M");
 assert.equal(fmtTokens(null), "", "missing tokens render empty");
-assert.equal(fmtDur(3479), "3.5s", "a duration below 10s keeps one decimal");
+assert.equal(fmtDur(3479), "3s", "a duration rounds to integer seconds");
 assert.equal(fmtDur(60000), "1m", "a whole minute drops the zero seconds");
 assert.equal(fmtDur(86592), "1m 27s", "minutes and seconds");
 assert.equal(fmtDur(null), "", "a missing duration renders empty");
