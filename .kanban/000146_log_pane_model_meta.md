@@ -1,8 +1,8 @@
 ---
 name: "feat: log pane shows the model name and thinking level above the log"
 priority: "low"
-state: "to-merge"
-worktree: "feat/146-log-pane-model-meta"
+state: "done"
+worktree: ""
 blockedBy: ""
 issuer: "user"
 complexity: "simple"
@@ -47,6 +47,9 @@ Verified user flows, all as specced:
 
 Finding (low, a follow-up task will be created by the PM):
 - logStats writes model and thinkingLevel only when the field exists on a usage-bearing record. A field that is absent on the latest record keeps the value of an older record. UI evidence: a latest record with a model and no thinkingLevel showed "Model C · thinking high" ("high" is stale), and a latest record with a thinkingLevel and no model showed "Model C · thinking low" ("Model C" is stale). The Specs say the two fields come from the LATEST usage-bearing record, and the task assumption says that a thinkingLevel without a model hides the line. Both expect the absent field to clear. The effect is low because pi always sends message.model and message.thinkingLevel is optional, so only a mid-run thinking level change is affected. The developer and reviewer tests do not cover this case.
+
+## Merge (merger)
+Step 1: main merged into feat/146-log-pane-model-meta in the worktree (git merge main). Clean, no conflicts, so the test suites were skipped per the merge procedure. Step 2: feat/146-log-pane-model-meta merged into main in the project root (fast-forward 95c90b4..7a011a1). Clean, root side clean. The merged main carries the feature (m-log-meta node, CSS, and fill logic verified by grep). No conflicts to resolve, nothing requeued.
 
 # Open questions
 Assumptions (confirm or correct):

@@ -5,6 +5,7 @@ state: "backlog"
 worktree: ""
 issuer: "#146"
 complexity: "simple"
+blockedBy: "#150"
 shortName: "stale-log-meta-field"
 ---
 
