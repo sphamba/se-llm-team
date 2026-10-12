@@ -6,7 +6,12 @@ import { agentAlive } from "./pid.ts";
 
 const DEFAULT_HOST = "localhost";
 const DEFAULT_PORT = 4242;
-export const LOG_CHUNK = 81920;
+// 000158: init and back-fill load a fixed number of collapsed lines, not a byte chunk: a thinking
+// block (thinking_start..thinking_end records) and a tool call block (tool_execution_start..end)
+// each count as ONE line, so a window boundary always falls between blocks, never inside one, and
+// no block is ever broken on load or back-fill
+export const LOG_LINES = 100;
+const SCAN_WINDOW = 81920; // bytes per backward read in the collapsed-line scan
 // working state -> the agent role the orchestrator spawns for it (spawnAgent, src/orchestrator.ts)
 const AGENT_ROLE = { doing: "developer", reviewing: "reviewer", "live-testing": "live-tester" };
 // the roles the orchestrator writes per task log, in pipeline order, plus the merger
@@ -522,19 +527,101 @@ export function renderLogChunk(text: string): string {
 	return out.join("");
 }
 
-// [decoded text, byte offset just past the window's last newline-terminated record]
-function readRange(path: string, start: number, end: number): [string, number] {
-	if (end <= start) return ["", start];
+// [start, end) raw bytes of a plain log, fewer on a mid-read shrink; the decompressed .gz buffer
+// arrives whole, so the scan slices it in memory
+function readBytes(full: Buffer | null, target: string, start: number, end: number): Buffer {
+	if (end <= start) return Buffer.alloc(0);
+	if (full !== null) return full.subarray(start, end);
 	const buf = Buffer.alloc(end - start);
-	const fh = openSync(path, "r");
+	const fh = openSync(target, "r");
 	try {
 		const n = readSync(fh, buf, 0, buf.length, start);
-		const nl = buf.subarray(0, n).lastIndexOf(0x0a);
-		// lenient decode: a multi-byte char split at the chunk edge becomes one replacement glyph
-		return [buf.subarray(0, n).toString("utf8"), nl === -1 ? start : start + nl + 1];
+		return buf.subarray(0, n);
 	} finally {
 		closeSync(fh);
 	}
+}
+
+// [decoded text, byte offset just past the window's last newline-terminated record]
+function readRange(path: string, start: number, end: number): [string, number] {
+	if (end <= start) return ["", start];
+	const buf = readBytes(null, path, start, end);
+	const nl = buf.lastIndexOf(0x0a);
+	// lenient decode: a multi-byte char split at the chunk edge becomes one replacement glyph
+	return [buf.toString("utf8"), nl === -1 ? start : start + nl + 1];
+}
+
+// the last record boundary at or before size: an unterminated tail record is not a line yet, so
+// init counts collapsed lines from the boundary below it and the next poll re-reads the record
+// whole; 0 when no complete record exists
+function lastBoundary(full: Buffer | null, target: string, size: number): number {
+	let lo = Math.max(0, size - SCAN_WINDOW);
+	for (;;) {
+		const nl = readBytes(full, target, lo, size).lastIndexOf(0x0a);
+		if (nl !== -1) return lo + nl + 1;
+		if (lo === 0) return 0;
+		lo = Math.max(0, lo - SCAN_WINDOW);
+	}
+}
+
+// 000158: the byte offset that starts `count` collapsed lines before a record-boundary tail: a
+// thinking block (thinking_start..thinking_end records) and a tool call block
+// (tool_execution_start..tool_execution_end) each count as ONE line, every other record its own,
+// so init and back-fill windows always start between blocks and no block is ever broken; returns 0
+// when the file starts first. Ceiling: a record outgrowing the scan window doubles it per step
+function linesBack(full: Buffer | null, target: string, tail: number, count: number): number {
+	let pos = tail; // walks record boundaries backward
+	let head = tail;
+	let inThink = false; // consuming a thinking block backward, back to its thinking_start
+	let openTool: string | null = null; // consuming a tool block backward, back to its matching start
+	let wlo = Math.max(0, tail - SCAN_WINDOW); // the scan window held in memory, grows backward
+	let win = readBytes(full, target, wlo, tail);
+	while (pos > 0 && count > 0) {
+		// the record ending at pos spans [rstart, pos); find the newline before its terminator
+		let rel = Math.min(pos - 2 - wlo, win.length - 1);
+		let nl = rel >= 0 ? win.lastIndexOf(0x0a, rel) : -1;
+		while (nl === -1 && wlo > 0) {
+			const grow = Math.min(wlo, Math.max(SCAN_WINDOW, win.length));
+			wlo -= grow;
+			win = Buffer.concat([readBytes(full, target, wlo, wlo + grow), win]);
+			rel = Math.min(pos - 2 - wlo, win.length - 1);
+			nl = rel >= 0 ? win.lastIndexOf(0x0a, rel) : -1;
+		}
+		const rstart = nl === -1 ? 0 : wlo + nl + 1;
+		// only records carrying block markers can move the state; the rest are their own line
+		const raw = win.subarray(rstart - wlo, pos - wlo).toString("utf8");
+		let rec: any = null;
+		if (raw.includes('"thinking_') || raw.includes('"tool_execution_') || raw.includes('"toolcall_end"')) {
+			try {
+				rec = JSON.parse(raw);
+			} catch {
+				rec = null; // junk or a truncated record: its own line
+			}
+		}
+		pos = rstart;
+		const ev = rec?.type === "message_update" ? rec.assistantMessageEvent : null;
+		if (inThink) {
+			if (ev?.type === "thinking_start") {
+				inThink = false;
+				count--;
+				head = pos;
+			}
+		} else if (openTool !== null) {
+			if ((rec?.type === "tool_execution_start" && rec.toolCallId === openTool) || (ev?.type === "toolcall_end" && ev.toolCall?.id === openTool)) {
+				openTool = null;
+				count--;
+				head = pos;
+			}
+		} else if (ev?.type === "thinking_end") {
+			inThink = true;
+		} else if (rec?.type === "tool_execution_end" && typeof rec.toolCallId === "string" && rec.toolCallId) {
+			openTool = rec.toolCallId;
+		} else {
+			count--;
+			head = pos;
+		}
+	}
+	return count > 0 ? 0 : head;
 }
 
 // one payload per task, from board files and pid files of one project root; the single-project
@@ -602,7 +689,7 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 	let head: number, tail: number;
 	if (q.get("before") === "1") {
 		tail = off ?? 0;
-		head = Math.max(0, tail - LOG_CHUNK);
+		head = linesBack(full, target, tail, LOG_LINES);
 	} else {
 		let size = 0;
 		try {
@@ -610,8 +697,15 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 		} catch {
 			// agent spawned but no output yet
 		}
-		head = off ? Math.min(off, size) : Math.max(0, size - LOG_CHUNK);
-		tail = size;
+		if (off) {
+			head = Math.min(off, size);
+			tail = size;
+		} else {
+			// 000158: init serves the last LOG_LINES collapsed lines; an unterminated tail record
+			// is not a line yet, so counting starts at the boundary below it
+			tail = lastBoundary(full, target, size);
+			head = linesBack(full, target, tail, LOG_LINES);
+		}
 	}
 	let next = tail;
 	try {
@@ -642,7 +736,7 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 			}
 			text = renderLogChunk(text);
 			if (text || head === 0 || !walk) break;
-			head = Math.max(0, head - LOG_CHUNK);
+			head = linesBack(full, target, head, LOG_LINES);
 		}
 		tail = next;
 	} catch {

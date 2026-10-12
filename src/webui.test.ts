@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, PRIORITY_RANK, setState } from "./kanban.ts";
 import { startHub } from "./hub.ts";
-import { agentLabel, agentRowSig, agentStatsText, boardOf, buildShell, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_CHUNK, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, tabNames, tabsHtml } from "./webui.ts";
+import { agentLabel, agentRowSig, agentStatsText, boardOf, buildShell, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, tabNames, tabsHtml } from "./webui.ts";
 import { gzipSync } from "node:zlib";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -907,7 +907,7 @@ mkdirSync(join(root, ".kanban", ".pids"), { recursive: true });
 writeFileSync(join(root, ".kanban", ".pids", `${slug}.pid`), String(process.pid));
 mkdirSync(join(root, ".kanban", ".logs"), { recursive: true });
 const logFile = join(root, ".kanban", ".logs", `${slug}.developer.log`);
-const logText = Array.from({ length: 2600 }, () => "H".repeat(63) + "\n").join(""); // 64-byte lines: chunk boundaries never split one, 2+ history pages
+const logText = Array.from({ length: 350 }, () => "H".repeat(63) + "\n").join(""); // 64-byte lines: far under the old byte chunk, so the collapsed-line cap is what pages
 writeFileSync(logFile, logText);
 const working = (await (await fetch(`${base}/api/tasks`)).json())[0];
 assert.deepEqual(working.agent, { role: "developer", alive: true, log: `${slug}.developer` });
@@ -929,12 +929,12 @@ rmSync(join(root, ".kanban", ".logs", `${slug}.developer.0.log`));
 rmSync(join(root, ".kanban", ".logs", `${slug}.developer.0.dead`));
 rmSync(join(root, ".kanban", ".logs", `${slug}.developer.1.log`));
 
-// tail: no offset returns only the last chunk, with cursors for poll and history
+// tail: no offset returns the last 100 collapsed lines, with cursors for poll and history
 const enc = encodeURIComponent(`${slug}.developer`);
 const tail = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
 assert.equal(tail.tail, logText.length);
-assert.equal(tail.head, logText.length - LOG_CHUNK);
-assert.equal(tail.text, logText.slice(logText.length - LOG_CHUNK));
+assert.equal(tail.head, (350 - LOG_LINES) * 64);
+assert.equal(tail.text, logText.slice(tail.head));
 assert.equal(tail.atStart, false);
 
 // poll from an offset returns only new content
@@ -945,14 +945,17 @@ const appended = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${
 assert.equal(appended.text, "NEW\n");
 assert.equal(appended.tail, logText.length + 4);
 
-// history: chunks before an offset down to the start of the file
+// history: the previous 100 collapsed lines per page, down to the start of the file
 const h1 = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${tail.head}&before=1`)).json();
-assert.equal(h1.head, tail.head - LOG_CHUNK);
+assert.equal(h1.head, tail.head - LOG_LINES * 64);
 assert.equal(h1.text, logText.slice(h1.head, tail.head));
 const h2 = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${h1.head}&before=1`)).json();
-assert.equal(h2.head, 0);
-assert.equal(h2.atStart, true);
-assert.equal(h2.text + h1.text + tail.text, logText);
+assert.equal(h2.head, h1.head - LOG_LINES * 64);
+assert.equal(h2.text, logText.slice(h2.head, h1.head));
+const h3 = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${h2.head}&before=1`)).json();
+assert.equal(h3.head, 0);
+assert.equal(h3.atStart, true);
+assert.equal(h3.text + h2.text + h1.text + tail.text, logText);
 
 // unknown files and unknown roles are rejected; merger handles are allowlisted now
 assert.equal((await fetch(`${base}/api/agent-log?file=nope.developer`)).status, 404, "a handle needs its task on the board");
@@ -1016,19 +1019,23 @@ const clearedLog = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json
 assert.equal(clearedLog.model, null, "a latest usage-bearing record without a model clears the meta's model");
 assert.equal(clearedLog.thinkingLevel, null, "a latest usage-bearing record without a thinking level clears it too");
 
-// a record split at the chunk head (init fetch of a log bigger than LOG_CHUNK) drops its partial
-// line instead of rendering raw JSON
+// 000158: an unterminated tail record (an agent mid-write) is not a line yet: init counts
+// collapsed lines from the boundary below it and the next poll re-reads the record whole
 const bigRecord = JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "z".repeat(100000) } });
-writeFileSync(logFile, JSON.stringify({ type: "session", id: "s" }) + "\n" + bigRecord + "\n" + JSON.stringify({ type: "message_end", message: { role: "user", content: "tail" } }) + "\n");
+writeFileSync(logFile, JSON.stringify({ type: "session", id: "s" }) + "\n" + bigRecord);
 const splitLog = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
-assert.equal(splitLog.text, "[prompt] tail\n", "a record split at the chunk head drops its partial line, later records still render");
+assert.equal(splitLog.text, "", "an unterminated tail record is not a line: init renders nothing of it");
+assert.equal(splitLog.tail, (JSON.stringify({ type: "session", id: "s" }) + "\n").length, "init's tail sits on the boundary below the partial record");
+writeFileSync(logFile, JSON.stringify({ type: "session", id: "s" }) + "\n" + bigRecord + "\n");
+assert.ok((await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${splitLog.tail}`)).json()).text.includes("zzz"), "the record renders whole once its newline arrives");
 
-// 000148: a >LOG_CHUNK init window mid-stream renders the open thinking block's deltas as the
-// joinable span (thinking_start outside the window), later polls' spans join the promoted block
-// client-side, and the cross-window thinking_end serves the closing span
-const filler = "F".repeat(79) + "\n"; // 80-byte lines: the window head lands inside one, it drops
+// 000148: an init window that starts inside the open thinking block's delta run (thinking_start
+// far outside the window) renders the deltas as the joinable span, later polls' spans join the
+// promoted block client-side, and the cross-window thinking_end serves the closing span
+const filler = "F".repeat(79) + "\n"; // 80-byte lines
 const msStart = JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } }) + "\n";
-// the thinking_start record sits > LOG_CHUNK bytes before the end, the deltas inside the window
+// the thinking_start record sits ~2000 records before the end, far outside the 100-line window,
+// so the init window starts inside the delta run
 const msBody = (deltas: string) => filler.repeat(2000) + msStart + filler.repeat(1100) + deltas;
 writeFileSync(logFile, msBody(thinkDelta("outside the window") + "\n"));
 const msInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
@@ -1040,6 +1047,38 @@ assert.ok(msPoll.text.includes('<span class="lg-cont"> joined in place</span>'),
 writeFileSync(logFile, msBody(thinkDelta("outside the window") + "\n" + thinkDelta(" joined") + "\n" + thinkDelta(" in place") + "\n") + thinkEnd("authoritative thinking") + "\n");
 const msClose = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${msPoll.tail}`)).json();
 assert.ok(msClose.text.includes('<span class="lg-cont" data-final="1">authoritative thinking</span>'), "the cross-window thinking_end serves the closing span with the authoritative text");
+
+// 000158 block-aware lines: a thinking block spanning many records is ONE collapsed line, so the
+// init window holds it whole even when it outgrows the old byte chunk, and the back-fill page
+// never splits a block either
+const userPrompt = JSON.stringify({ type: "message_end", message: { role: "user", content: "next" } }) + "\n";
+const thinkBlock = (deltas: number) =>
+	msStart + Array.from({ length: deltas }, (_, i) => thinkDelta("d" + i) + "\n").join("") + thinkEnd("the whole plan") + "\n";
+writeFileSync(logFile, JSON.stringify({ type: "session", id: "s" }) + "\n" + thinkBlock(1500) + userPrompt.repeat(99));
+const thinkInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.ok(thinkInit.text.includes('<details class="lg-think"><summary>Thinking</summary><pre><p>the whole plan</p></pre></details>'), "a 1500-record thinking block loads as one unbroken collapsed line with its authoritative content");
+assert.ok(!thinkInit.text.includes("lg-cont"), "no split-thinking artifact: a window never starts inside a block");
+assert.ok(!thinkInit.text.includes("data-open"), "the block is closed in the window");
+assert.equal(thinkInit.head, (JSON.stringify({ type: "session", id: "s" }) + "\n").length, "the window starts at the block: it plus the 99 prompt lines make the last 100 collapsed lines");
+writeFileSync(logFile, JSON.stringify({ type: "session", id: "s" }) + "\n" + thinkBlock(300) + userPrompt.repeat(100));
+const blockInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.ok(!blockInit.text.includes("lg-think"), "the init window holds the 100 prompt lines, the block sits before it");
+const blockHist = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${blockInit.head}&before=1`)).json();
+assert.ok(blockHist.text.includes('<details class="lg-think"><summary>Thinking</summary><pre><p>the whole plan</p></pre></details>'), "the back-fill serves the block whole, never split across the page boundary");
+assert.ok(!blockHist.text.includes("lg-cont"), "no continuation artifact in the back-fill either");
+
+// 000158: a tool call block (tool_execution_start..tool_execution_end) is ONE line too, so the
+// window never splits a tool block's result away from its call
+const toolLog = [
+	JSON.stringify({ type: "session", id: "s" }),
+	JSON.stringify({ type: "tool_execution_start", toolCallId: "t9", toolName: "bash", args: { command: "big tool call" } }),
+	JSON.stringify({ type: "tool_execution_end", toolCallId: "t9", toolName: "bash", result: { content: [{ type: "text", text: "the whole output" }] }, isError: false }),
+].join("\n") + "\n" + userPrompt.repeat(99);
+writeFileSync(logFile, toolLog);
+const toolInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.ok(toolInit.text.includes('<details class="lg-tool" data-tc="t9"><summary>bash: big tool call</summary>'), "the tool call block loads whole in the window");
+assert.ok(toolInit.text.includes('<pre class="lg-out">the whole output</pre>'), "the tool result stays joined to its call");
+assert.ok(!toolInit.text.includes("lg-tres"), "no orphan-result span: the window never splits start from end");
 
 // 000084: a JSONL record split across two poll windows renders exactly once, when its newline
 // arrives. The first poll's tail sits on the last record boundary, so the next poll re-reads the
@@ -1071,7 +1110,7 @@ assert.equal((await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${uni
 // a finished log: the tail is terminal records (assistant message_end, turn_end, agent_end,
 // agent_settled) that render to nothing, so an unrenderable tail chunk walks back instead of
 // serving an empty pane
-const pad = "z".repeat(100000); // one assistant message_end record bigger than LOG_CHUNK
+const pad = "z".repeat(100000); // one assistant message_end record bigger than the old byte chunk, and still one collapsed line
 const terminalLog = [
 	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "final output line" } }),
 	JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: pad }], timestamp: 2 } }),
@@ -1091,18 +1130,22 @@ const finishedPoll = await (await fetch(`${base}/api/agent-log?file=${enc}&offse
 assert.equal(finishedPoll.text, "");
 assert.equal(finishedPoll.head, finished.tail);
 
-// a history page inside an unrenderable record walks back to the nearest earlier renderable chunk
-const paddedLog = [
-	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "early delta" } }),
-	JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: pad }], timestamp: 2 } }),
-	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "tail delta" } }),
-].join("\n") + "\n";
+// 000158: a back-fill page of terminal records renders empty and walks back by collapsed lines to
+// the renderable content before them, so history never lands on an empty pane
+const turn = JSON.stringify({ type: "turn_end", timestamp: 9 }) + "\n";
+const paddedLog =
+	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "early delta" } }) + "\n" +
+	turn.repeat(250) +
+	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "tail delta" } }) + "\n" +
+	turn.repeat(50);
 writeFileSync(logFile, paddedLog);
 const padded = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
-assert.ok(padded.text.includes("<p>tail delta</p>"), "a renderable tail chunk serves without walking back");
+assert.ok(padded.text.includes("<p>tail delta</p>"), "a renderable tail window serves without walking back");
+assert.ok(!padded.text.includes("<p>early delta</p>"), "the init window holds the last 100 collapsed lines only");
 const paddedHist = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${padded.head}&before=1`)).json();
-assert.ok(paddedHist.text.includes("<p>early delta</p>"), "a history page inside an unrenderable record walks back to renderable content");
+assert.ok(paddedHist.text.includes("<p>early delta</p>"), "a back-fill page of terminal records walks back by lines to renderable content");
 assert.equal(paddedHist.head, 0);
+assert.equal(paddedHist.atStart, true);
 
 
 // 000088 per-run agent history: every `<slug>.<role>.<n>.log` is an entry of its own, a legacy
@@ -1275,7 +1318,7 @@ assert.deepEqual(grown.map(s => s.id), ["aaaaaaaa-0000-0000-0000-000000000000", 
 const out3 = join(subDir, "11111111-0000-0000-0000-000000000000.output");
 writeFileSync(out3, [
 	JSON.stringify({ isSidechain: true, agentId: "11111111", type: "user", message: { role: "user", content: "walk back to me" } }),
-	JSON.stringify({ isSidechain: true, agentId: "11111111", type: "system", message: { role: "system", content: "x".repeat(LOG_CHUNK) } }),
+	JSON.stringify({ isSidechain: true, agentId: "11111111", type: "system", message: { role: "system", content: "x".repeat(81920) } }),
 	JSON.stringify({ type: "session", version: 3, id: "s", timestamp: "now", cwd: "/r" }),
 ].join("\n") + "\n");
 appendFileSync(rv0, subPath("11111111-0000-0000-0000-000000000000", out3) + "\n");
