@@ -984,6 +984,26 @@ for (const f of [dev0, dev1, lt0, lt1, rv0, mg0, mg1, `${dev0}.gz`, `${rv0}.gz`,
 rmSync(subDir, { recursive: true, force: true });
 setState(root, getTask(root, task.file)!, "backlog");
 
+// 000139 the gzip sweep rewrites finished logs' mtimes in readdir order, so mtime no longer
+// reflects chronology: the history sorts by the first in-log record timestamp, a log without a
+// parseable timestamp still sorts by its mtime
+const sweepT = Date.parse("2026-10-12T07:33:03.000Z");
+writeFileSync(logFile, "LEGACY\n"); // timestamp-less, sorts by its mtime between the swept runs
+at(logFile, (sweepT + 50_000) / 1000);
+writeFileSync(`${dev0}.gz`, gzipSync(Buffer.from(JSON.stringify({ type: "session", id: "s", timestamp: "2026-10-12T07:34:03.000Z" }) + "\n")));
+at(`${dev0}.gz`, sweepT / 1000); // the sweep's fresh mtime, inverted against the in-log order
+writeFileSync(`${dev1}.gz`, gzipSync(Buffer.from(JSON.stringify({ type: "session", id: "s", timestamp: "2026-10-12T07:33:13.000Z" }) + "\n")));
+at(`${dev1}.gz`, (sweepT + 100_000) / 1000);
+const swept = (await (await fetch(`${base}/api/tasks`)).json())[0];
+assert.deepEqual(
+	swept.agents.map((a) => a.handle),
+	[`${slug}.developer.1`, `${slug}.developer`, `${slug}.developer.0`],
+	"in-log first-record timestamps order the swept runs chronologically, the timestamp-less legacy log still sorts by mtime",
+);
+rmSync(logFile, { force: true });
+rmSync(`${dev0}.gz`, { force: true });
+rmSync(`${dev1}.gz`, { force: true });
+
 // a second hub on the taken port reports failure instead of throwing
 assert.equal(await startHub({ name: "webui-test", root, host: "localhost", port: ui.port }), null);
 ui.close();
