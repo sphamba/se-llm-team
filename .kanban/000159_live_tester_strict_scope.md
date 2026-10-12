@@ -1,8 +1,8 @@
 ---
 name: "docs: live-tester prompt strictly scoped to the task's change"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "docs/159-live-tester-strict-scope"
 blockedBy: ""
 issuer: "user"
 complexity: "trivial"
