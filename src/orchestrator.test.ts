@@ -2250,6 +2250,9 @@ const homeAS = mkdtempSync(join(tmpdir(), "orch-home-"));
 cleaned.push(homeAS);
 mkdirSync(kanbanDir(rootAS), { recursive: true });
 writeFileSync(join(kanbanDir(rootAS), "se-llm-team.json"), JSON.stringify({ agent: argvStub(rootAS), pollMinutes: 0.01 }));
+// a bare AGENTS.md in .kanban (the pi context-file name a user might try here) is board noise
+// too: no frontmatter, so without the filter it parses as a phantom backlog task and promotes
+writeFileSync(join(kanbanDir(rootAS), "AGENTS.md"), "# notes\n");
 const taskAS = createTask(rootAS, { name: "feat: role notes", summary: "Role notes smoke", specs: "n/a" });
 setState(rootAS, taskAS, "to-do");
 const as = await runDaemon(rootAS, join(HERE, "orchestrator.ts"), homeAS);
@@ -2279,6 +2282,7 @@ for (const role of ["developer", "reviewer", "merger", "live-tester"]) {
 	}
 }
 assert.ok(!listAll(rootAS).some((t) => ROLE_NOTES_RE.test(t.file)), "role notes files are not tasks");
+assert.ok(!readFileSync(join(kanbanDir(rootAS), "AGENTS.md"), "utf8").match(/^state: /m), "a bare AGENTS.md never parses as a task");
 for (const role of ["developer", "reviewer", "merger", "live-tester"]) {
 	assert.ok(showTip(rootAS, `AGENTS.${role}.md`) !== null, `the board mirror carries the ${role} notes file`);
 }
