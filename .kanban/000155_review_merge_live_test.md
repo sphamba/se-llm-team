@@ -1,7 +1,7 @@
 ---
 name: "feat: pipeline reorders to review, merge, live-test"
 priority: "high"
-state: "live-testing"
+state: "to-merge"
 worktree: "feat/155-review-merge-live-test"
 blockedBy: ""
 issuer: "user"
@@ -51,3 +51,25 @@ Review pass (commit be932c9):
 - Second review pass (no fixes): re-verified spec coverage against `git diff main...HEAD` and the code. Reviewer cap -> to-merge with the log line and counter reset moved and the armed-marker machinery kept (consumeReviewerRun now at the sweepToMerge head, so the approval and the cap advance both count exactly once); merger sets merging -> to-live-test; live tester spawns with cwd=root on the merged commit; live-testing -> done on pass with no merger spawn; findings travel as PM tasks with the task still moving to done; WORKING_STATES bounce re-map (live-testing -> to-live-test, merging -> to-merge); one shared BLOCKER_SATISFIED set (done, to-live-test, live-testing) used by blockedByUndone and dropDoneBlockers, to-merge/merging still blocking, conflicted files never proving satisfaction. Unmerged-branch and no-worktree to-live-test tasks route to to-merge (condition `!task.worktree || merge-base --is-ancestor ... === null`), so an in-flight task from an old-order daemon never gets main tested unmerged. Full suite green on this pass: npm test (kanban, orchestrator, webui, extension, index).
 - Verified the stub-ordering risk from the Notes: every test stub checks Merger before Live-tester now (the merger prompt mentions the Live-tester); the loopStub's merger branch exits before its Live-tester check. Suite green confirms no misroute.
 - README.md and SPECS.md still describe the old order (README lines 66 and 75-79; SPECS.md lines 37-46 and 58-75), confirmed still stale. No board task exists for it yet: the PM may want to file one docs task for both files.
+
+## Live test
+Tested the branch code (worktree, commit be932c9) by running its orchestrator daemon against scratch git projects. Real pi agents ran the happy path and the reviewer-cap path. Cheap stub agents ran the edge flows (blockers, dead agents) so the state transitions stay observable. The unit suites were not run, the developer and reviewer own them.
+
+Flows verified (scratch roots under /tmp/se155-live/):
+- Full pipeline with real pi agents (happy): backlog -> to-do -> doing -> to-review -> reviewing -> to-merge -> merging -> to-live-test -> live-testing -> done, in about 2.5 minutes. The reviewer approval went to to-merge, with no to-live-test step and no cap log line. The merger merged the branch into the root's current branch (main commit 5a53881) and set to-live-test. The live tester spawned with cwd = the project root (its JSONL session log has "cwd":"/tmp/se155-live/happy"), ran the merged commit, and its output matched the task Specs ("hello, world", "hello, Ada", "HELLO, ADA"). No merger spawned after the live test. Done cleanup removed the worktree and deleted the branch.
+- Reviewer cap (cap): the reviewer made fixes and the task bounced, so the run counter reached the cap. The log line "reviewer succeeded 1+ times, moving to to-merge" appeared, the counter reset to 0, and the armed marker was consumed. The merger then merged the branch.
+- Dead live-testing agent (crash): after a kill the poll logged "live-testing -> to-live-test, bump=1", and the next sweep respawned the live tester with cwd = root. The second run passed and set done.
+- Dead merging agent (deadmerge): after the merger process died the poll logged "merging -> to-merge", and the task stayed in to-merge.
+- Blockers (block): a dependent of a to-live-test task was promoted and the ref dropped ("dropped satisfied blocker ref(s) #1"). A dependent of a live-testing task behaved the same (#2). A dependent of a to-merge task stayed in backlog with the ref kept, also while that task was merging (#3). The mixed dependent lost #1 and kept #3.
+- In-flight routes (block): a to-live-test task with an unmerged branch moved to to-merge ("branch not merged yet, moving to to-merge for the merger"). A to-live-test task with no worktree moved to to-merge ("no worktree, moving to to-merge for the merger"), and the nothing-to-merge path set done with no live test.
+- SKILL.md states the new order, the merger transition to to-live-test, and the new blocker rule ("done, or in the live test").
+
+Assumptions and contradictions:
+- The change was not merged into main when this live test ran (main HEAD ea327b2 does not contain the reorder), so the live test could not run on the merged commit as the Specs assume. It ran the worktree code instead, against scratch projects.
+- The production daemon that spawned this live test still runs the old order, and its old live-tester prompt says to set to-merge. This task therefore stays on the old path: the state goes to to-merge so the merger lands the branch. The new rule ("the change is already merged, set done") does not apply to this task itself. A done state here would skip the merge, and the done cleanup would delete the unmerged branch.
+- Scratch daemons ran with --no-webui, because they inherit the global webUi port 4242 from ~/.pi/agent/se-llm-team.json.
+
+Findings (reported to the Project manager):
+- README.md and SPECS.md still document the old order: README.md line 66 (states list), the promotion rules (blockers "point at done tasks", dropped "when a blocker reaches done"), the reviewer-cap line ("force-advances to to-live-test"), the per-state lines 75-79 (to-live-test spawns the Live-tester, merging sets done, dead live-testing goes to to-merge), and the SPECS.md Orchestrator and Agents sections (lines 37-46 and 58-75). One docs task can cover both files.
+- The webui board layout still shows the old order: LAYOUT in src/webui.ts derives from STATES in src/kanban.ts, which lists to-live-test, live-testing before to-merge, merging. Under the new order a card moves right to to-merge and then back left to to-live-test. STATES order is used only for this layout and for state validation (src/kanban.ts line 149), so the change is small, but src/webui.test.ts line 389 asserts the current LAYOUT.
+- Residual risk, no task filed: in one sweep a dependent of a to-live-test task whose branch is unmerged (an old-order in-flight placement) can be promoted, because the promotion reads the state snapshot before the unmerged-branch bounce. This follows the Specs' state-based satisfaction rule, and it needs an unmerged to-live-test task with dependents to trigger.
