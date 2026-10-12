@@ -6,7 +6,7 @@ worktree: ""
 issuer: "#161"
 complexity: "simple"
 shortName: "fold-answers-into-specs"
-blockedBy: "#170"
+blockedBy: ""
 ---
 
 # Summary
@@ -42,7 +42,7 @@ Whichever is chosen, skill, Developer prompt and observed practice must agree.
 
 ## Blocker note
 
-Blocked by #170 because both tasks rewrite the same SKILL.md Watcher-section bullet (the "fold the answers into the tasks' Specs" sentence lives there); whichever lands first sets the wording the other must respect.
+Blocked by #172 because both tasks rewrite the same SKILL.md Watcher-section bullet (the "fold the answers into the tasks' Specs" sentence lives there); whichever lands first sets the wording the other must respect.
 
 # Notes
 
