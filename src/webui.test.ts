@@ -768,9 +768,12 @@ assert.ok(page.includes(".agent-card-active"), "the shown agent card gets an act
 // bit larger card in one wrapping row of columns, the live run last, its subs stacked below it
 const agentCardCss = page.match(/\.agent-card \{[^}]*\}/)![0];
 assert.ok(agentCardCss.includes("font-size: 12px") && agentCardCss.includes("padding: 6px 10px"), ".agent-card is a bit larger than the old button");
-// 000122: the log text renders in the page's sans serif stack, blocks are collapsed details
+// 000122: the log text renders in the page's sans serif stack, blocks are collapsed details;
+// 000152: the size matches the card body text, no smaller log font-size remains
 const logCss = page.match(/#m-log-text \{[^}]*\}/)![0];
-assert.ok(logCss.includes("font-size: 10px"), "the agent log text keeps its 10px size");
+assert.ok(logCss.includes("font-size: 13px") && !/font-size: 1[0-2]px/.test(logCss), "the agent log text renders at the card body size, no smaller log font-size");
+const logPaneCss = page.match(/#m-log \{[^}]*\}/)![0];
+assert.ok(logPaneCss.includes("max-height: 70vh"), "the log pane grows to 70vh so long logs show more content");
 // 000147: the no-monospace check stays scoped to this font-family declaration now that the code/pre rule adds monospace elsewhere
 const logFont = logCss.match(/font-family: [^;]+;/)![0];
 assert.ok(logFont.includes("system-ui") && !logFont.includes("monospace"), "the agent log text font-family declaration stays sans serif, not monospace");

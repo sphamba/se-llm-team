@@ -1140,12 +1140,13 @@ none so the card clicks pass through */
 .check { color: var(--low-fg); margin-right: 5px; }
 .cross { color: var(--critical-fg); margin-right: 5px; }
 #m-agent { margin-bottom: 12px; }
-#m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 300px; overflow: auto; }
+/* 000152: the pane grows to 70vh so long logs show more content */
+#m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 70vh; overflow: auto; }
 #m-log.hidden { display: none; }
 #m-log-meta { padding: 6px 10px 0; font-size: 10px; line-height: 1.45; color: var(--muted); }
 #m-log-meta.hidden { display: none; }
-/* the log text renders in the page's Inter stack; blocks are collapsed <details> the client fills in */
-#m-log-text { margin: 0; padding: 8px 10px; font-size: 10px; line-height: 1.45; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; white-space: pre-wrap; overflow-wrap: break-word; }
+/* the log text renders in the page's Inter stack; 000152: the size matches the card body text, only the line-height stays tuned for logs; blocks are collapsed <details> the client fills in */
+#m-log-text { margin: 0; padding: 8px 10px; font-size: 13px; line-height: 1.45; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; white-space: pre-wrap; overflow-wrap: break-word; }
 #m-log-text pre { font: inherit; margin: 0; padding: 0; }
 #m-log-text details { margin: 2px 0; }
 #m-log-text summary { cursor: pointer; }
