@@ -1168,8 +1168,8 @@ none so the card clicks pass through */
 #m-body pre { background: var(--code-bg); border-radius: 6px; padding: 8px 10px; overflow: auto; font-size: 12px; }
 #m-body code { background: var(--code-bg); border-radius: 4px; padding: 0 4px; font-size: 12px; }
 #m-body pre code { padding: 0; background: none; }
-/* 000147: explicit monospace stack for inline and fenced code, after the #m-log-text pre { font: inherit } shorthand so it wins the cascade */
-#m-log-text code, #m-log-text pre, #m-body code, #m-body pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+/* 000153: only inline and fenced code render monospace; the Thinking prose and the tool args/output pres are not code, so the bare #m-log-text pre stays outside this selector and inherits the Inter page font */
+#m-log-text code, #m-log-text pre code, #m-body code, #m-body pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
 #m-body a { color: var(--link); }
 /* one accent color per column, in pipeline order */
 .c-backlog { --ac: #94a3b8; }
