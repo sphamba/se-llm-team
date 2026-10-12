@@ -1,8 +1,8 @@
 ---
 name: "fix: createTask misses a same-number file with a different slug"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/174-createTask-number-collision"
+state: "done"
+worktree: ""
 issuer: "#17"
 complexity: "simple"
 shortName: "createTask-number-collision"
@@ -40,3 +40,21 @@ Task #17 made createTask retry on a filename collision (wx flag), but a concurre
 - Step 1: main was already merged into the branch (e33bf83, done at review) and no new main commits existed, so the merge in the worktree was "Already up to date". Clean, no conflicts, test suites skipped per the no-conflict rule.
 - Step 2: merged fix/174-createTask-number-collision into main in the project root (main had not moved from 4f8f2ea). Fast-forward to e33bf83, no conflicts. Changes carried: src/kanban.ts (+51/-11 lines of the lock-file allocation) and src/kanban.test.ts (+40/-3 test additions).
 - Nothing was resolved by hand; both merges were clean. Live test runs next on the merged commit at the project root.
+
+## Live test (2026-10-12)
+
+- Environment: isolated board /tmp/lt174/repo/.kanban (no daemon, no git). Interface: the kanban_create tool in `pi -p --no-session --no-context-files --approve --mode json` sessions with cwd in the fixture root. `~/.pi/agent/extensions/se-llm-team` resolves to the merged checkout, so every session ran the merged code. No unit suite ran.
+- Hand-written number: five hand-written files 000001-000005 (000005 without frontmatter). One create gave 000006_probe_one.md. The six files have six distinct numbers. The hand-written bytes did not change (000005 md5 f4c4a92902955c49b3afde1bca47294d). No .create.lock remained.
+- Concurrent creators (the reported bug): 4 pi processes x 2 creates, then 8 pi processes x 3 creates, all at the same time on one board. All 32 calls succeeded and all numbers are distinct (000007-000014, then 000016-000039 after the stale-lock case). The full board had 39 files and 39 distinct numbers. No .create.lock remained. Under this real load no lock failure occurred.
+- Stale lock: a .create.lock backdated 60 s did not stop the next create. It returned 000015 and removed the lock.
+- Created frontmatter is unchanged (name, priority, state backlog, worktree, issuer, complexity, shortName). The hand-written files stayed untouched.
+
+### Findings
+
+- A live but stuck lock holder fails creates: a fresh .create.lock held for 8 s made the tool return `could not lock "/tmp/lt174/repo/.kanban" for task creation` after about 1 s. The wait loop stops after 100 x 10 ms (about 1 s), but a lock is stolen only when it is older than 10 s. So after a creator crash, creates fail for up to about 10 s. The error is clear and a retry after 10 s succeeds. Reported to the Project manager as a low-priority finding.
+- Observation, not a user-visible defect: the single-file case of the Specs (a pre-existing 000006_some_other_task.md when the next number is 6) never reaches the post-write rescan. The max scan already sees that file, so the allocation computes 000007 before any write. A strace of that exact fixture showed no unlink of the new file (only the lock). The 000007_racer.md assertion holds because of the max scan, not the unlink-and-retry net. Only the concurrent test exercises the fix. Reported to the Project manager as a low-priority finding.
+
+### Assumptions
+
+- The post-write same-number rescan needs a hand-written file in the short window between the max scan and the write. The live tool cannot open that window on purpose, so the live test verified the user-visible result (distinct numbers under real concurrency and with hand-written files present). The developer concurrency test covers the window itself.
+- Only the task change was exercised. The daemon, git commits, promotion and the other tools were out of scope and untouched.
