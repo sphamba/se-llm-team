@@ -1,8 +1,8 @@
 ---
 name: "fix: race unit test does not exercise the post-write rescan path"
 priority: "low"
-state: "merging"
-worktree: "fix/180-race-test-rescan-path"
+state: "done"
+worktree: ""
 issuer: "#174"
 complexity: "simple"
 shortName: "race-test-rescan-path"
@@ -45,5 +45,24 @@ Choose one:
 - main had moved past the branch's merge base (966ce04 -> 8521d5b, carrying #178, #179 and #181): merged main into the branch per convention, no conflicts, `npm test` green (merge commit f8a4806).
 - `node src/kanban.test.ts` passed 3/3 before and 3/3 after the merge.
 - Cleared the open questions: the Specs' "Choose one" authorizes the strengthen option, the Specs' fix option itself names interception (so no production seam is required), the child-spawn pattern is established by the concurrency block, and the coverage premise is verified above. None need user input.
+- Merging (final pass): main had moved past the branch's merge base again (8521d5b -> 83c758f, carrying #182). Merged main into the branch in the worktree, clean (only src/webui.ts and src/webui.test.ts touched, unrelated to this task's file), so suites skipped per convention (merge commit b2566ae). Merged the branch into main in the project root, fast-forward 83c758f..b2566ae, no conflicts.
+- No open questions from merging.
+
+## 2026-10-12, live-tester
+
+- Live test on merged commit b2566ae in the project root. The change is test-only, so the unit suite is the developer/reviewer gate and was not run (live-test rules). Instead the named race case's scenario was reproduced on the merged production `createTask` from `src/kanban.ts` (the function behind the `kanban_create` tool) in a scratch root, with the same `--require` preload interception in a child process that the case uses.
+- Results:
+
+| # | Scenario | Result |
+|---|---|---|
+| 1 | Merged code: 5 sequential creates, then a racer whose `000006_racer.md` write injects `000006_other_creator.md` | rival injected inside the scan/write window, net fired exactly once (`unlink 000006_racer.md`), final `000007_racer.md`, no `000006_racer.md` left, rival intact, all numbers unique |
+| 2 | Negative control: pre-net code 2411704~1, same scenario | racer file `000006_racer.md`, no unlink, duplicate number 000006, so the harness detects a missing net |
+| 3 | Merged code: 4 processes x 20 creates under contention | 80 tasks, numbers 000001-000080 unique, 0 net fires |
+
+- Scenario 1 fs event order, logged by the preload: `write .create.lock`, `write 000006_other_creator.md`, `write 000006_racer.md`, `unlink 000006_racer.md`, `write 000007_racer.md`, `unlink .create.lock`. This is the post-scan injection and the post-write rescan the case claims.
+- Scenario 3 confirms the Notes' coverage correction: under contention the lock serializes scan+write and every slug differs, so no duplicate number can arise and the net never fires. The race case is the net's sole exerciser, and the concurrency comment now states that.
+- Assumptions of the usage tests: (a) `createTask` is the real production interface for task creation, so driving it directly is a valid stand-in for the case under test; (b) the `--require` preload interception reaches the ESM named import under Node v24, verified by `injected: true` in the child.
+- Technical difficulty, not a finding: my first harness preload logged through `fs.appendFileSync`, which internally calls the patched `writeFileSync` and recursed. Logging through a file descriptor fixed it. This is a harness artifact, not a defect of the change.
+- Findings: none. The production code is unchanged, and both claims of the strengthened case (the net runs in the race case, the concurrency block has 0 net fires) hold on the merged commit. The literal test file was not executed, per the live-test rules.
 
 # Open questions
