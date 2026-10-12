@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execSync, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
@@ -167,7 +167,8 @@ assert.equal(new Set(raceNums).size, raceNums.length); // never two files with o
 rmSync(raceRoot, { recursive: true, force: true });
 
 // simultaneous creators racing through repeated creates: the wx flag only guards the
-// exact path, so each creator re-scans after its write and retries on a same-number clash
+// exact path, so createTask holds a lock file across scan+write and retries on a
+// same-number clash with a hand-written file
 const concRoot = mkdtempSync(join(tmpdir(), "kanban-conc-"));
 const mod = JSON.stringify(pathToFileURL(join(import.meta.dirname, "kanban.ts")).href);
 const creator = `import(${mod}).then(({ createTask }) => { for (let i = 0; i < 20; i++) createTask(${JSON.stringify(concRoot)}, { name: "feat: concurrent " + process.pid + " " + i, summary: "s" }); })`;
@@ -185,6 +186,16 @@ const concNums = taskFiles(concRoot).map(taskNum);
 assert.equal(concNums.length, 80); // every creator landed its 20 tasks
 assert.equal(new Set(concNums).size, concNums.length); // never two files with one number
 rmSync(concRoot, { recursive: true, force: true });
+
+// a lock left behind by a crashed creator is stolen, not fatal
+const staleRoot = mkdtempSync(join(tmpdir(), "kanban-stale-"));
+const staleLock = join(staleRoot, ".kanban", ".create.lock");
+mkdirSync(join(staleRoot, ".kanban"), { recursive: true });
+writeFileSync(staleLock, "999999");
+utimesSync(staleLock, Date.now() / 1000 - 20000, Date.now() / 1000 - 20000);
+assert.equal(createTask(staleRoot, { name: "fix: after crash", summary: "s" }).file, "000001_after_crash.md");
+assert.equal(existsSync(staleLock), false); // lock stolen, no leftovers
+rmSync(staleRoot, { recursive: true, force: true });
 
 // merge-conflict handling: a conflict-marked file is never rewritten
 const tc = createTask(root, { name: "fix: conflicted file", summary: "s", specs: "real specs" });
