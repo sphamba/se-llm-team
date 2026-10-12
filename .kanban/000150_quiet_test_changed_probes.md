@@ -1,12 +1,12 @@
 ---
 name: "fix: quiet test-changed probes in degraded git repos"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/150-quiet-test-changed-probes"
 issuer: "#149"
 complexity: "simple"
 shortName: "quiet-test-changed-probes"
-blockedBy: "#148"
+blockedBy: ""
 ---
 
 # Summary
