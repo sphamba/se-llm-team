@@ -466,6 +466,11 @@ export function renderLogChunk(text: string): string {
 					out[thinkIdx] = thinkHtml(false);
 					think = null;
 					thinkIdx = -1;
+				} else if (typeof ev.content === "string") {
+					// the start lived in an earlier chunk: the final span closes the client's open
+					// block and replaces its reconstructed deltas with the authoritative text
+					flush();
+					out.push('<span class="lg-cont" data-final="1">' + esc(ev.content) + "</span>");
 				}
 			} else if (ev.type === "text_delta") {
 				pending += ev.delta ?? "";
@@ -989,8 +994,11 @@ export function syncBoard(cols, tasks, expanded, els, make, visible) {
 // (a record split across poll windows re-serves the start) drop keeping the first; a later tool
 // result joins its block by toolCallId, an orphan one promotes to a collapsible details (the
 // data-sum one-liner as the summary, a generic "result" without one, the result text as the body);
-// thinking deltas continuing the previous chunk's block append into it, an unjoined one promotes
-// to a collapsible details too; doc is injected so tests run this without a DOM
+// thinking deltas continuing the previous chunk's block append into the marked open block, an
+// unjoined one promotes to a collapsible details too (marked open so later delta polls join it);
+// a final close span (data-final, a cross-window thinking_end) replaces the marked block's body
+// with the authoritative text and unmarks it, or promotes to a closed block of its own; doc is
+// injected so tests run this without a DOM
 export function logFixups(el, doc) {
 	const seen = new Set();
 	for (const d of el.querySelectorAll("details.lg-tool[data-tc]")) {
@@ -1018,15 +1026,22 @@ export function logFixups(el, doc) {
 		s.replaceWith(d);
 	}
 	for (const s of el.querySelectorAll(".lg-cont")) {
+		const final = !!s.dataset.final;
 		let b = s.previousElementSibling;
 		while (b && !(b.classList.contains("lg-think") && b.dataset.open === "think")) b = b.previousElementSibling;
 		if (b) {
-			b.querySelector("pre").append(s.textContent);
+			if (final) {
+				b.querySelector("pre").textContent = s.textContent;
+				delete b.dataset.open;
+			} else {
+				b.querySelector("pre").append(s.textContent);
+			}
 			s.remove();
 			continue;
 		}
 		const d = doc.createElement("details");
 		d.className = "lg-think";
+		if (!final) d.dataset.open = "think"; // later delta polls walk back to this block and join it
 		const sum = doc.createElement("summary");
 		sum.textContent = "Thinking";
 		const pre = doc.createElement("pre");
