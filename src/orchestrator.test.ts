@@ -112,12 +112,12 @@ if (prompt.includes("Merger agent")) {
 			try { execSync("git merge --abort", { stdio: "ignore" }); } catch (e2) {}
 		}
 	}
-	writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: " + (merged ? "done" : "to-merge")));
+	writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: " + (merged ? "to-live-test" : "to-merge")));
 	process.exit(0);
 }
 const next = prompt.includes("Developer agent") ? "to-review"
-	: prompt.includes("Reviewer agent") ? "to-live-test"
-	: prompt.includes("Live-tester") ? "to-merge" : null;
+	: prompt.includes("Reviewer agent") ? "to-merge"
+	: prompt.includes("Live-tester") ? "done" : null;
 if (next) writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: " + next));
 `,
 	);
@@ -242,9 +242,10 @@ const a = await runDaemon(rootA);
 const readA = () => parseTask(rootA, taskA.file);
 
 const taskClean = () => mirrorSubjects(rootA).includes(`kanban: done ${taskA.file}`);
-// to-do -> doing -> to-review -> reviewing -> to-live-test -> live-testing -> to-merge -> merging -> done ->
-// done mirror commit (the merger merged the branch, the done cleanup removed the worktree).
-// The stub transitions in milliseconds, so intermediate states are asserted through the daemon log.
+// to-do -> doing -> to-review -> reviewing -> to-merge -> merging -> to-live-test -> live-testing -> done ->
+// done mirror commit (the merger merged the branch, the live test passed, the done cleanup
+// removed the worktree). The stub transitions in milliseconds, so intermediate states are
+// asserted through the daemon log.
 await waitFor(() => readA().state === "done" && readA().worktree === "" && taskClean(), 60000, "full pipeline + merge + done mirror commit", a.output);
 for (const marker of ["spawned developer", "spawned reviewer", "spawned live-tester", "spawned merger", "merged feat/1-smoke-test"]) {
 	assert.ok(a.output().includes(marker), `expected daemon log to contain: ${marker}`);
@@ -305,7 +306,7 @@ const legacyA = existsSync(join(logsA, `${slugA}.developer.log`))
 	? readFileSync(join(logsA, `${slugA}.developer.log`), "utf8")
 	: gunzipSync(readFileSync(join(logsA, `${slugA}.developer.log.gz`))).toString();
 assert.equal(legacyA, "legacy\n", "legacy unsuffixed log content survives the sweep; spawns never renamed or rewrote it");
-// the reviewer's approval (to-live-test) is a successful run: counted once per task
+// the reviewer's approval (to-merge) is a successful run: counted once per task
 assert.equal(readFileSync(join(logsA, `${slugA}.reviewer-runs.count`), "utf8").trim(), "1", "reviewer approval counted as one successful run");
 a.daemon.kill("SIGTERM");
 
@@ -316,8 +317,8 @@ mkdirSync(kanbanDir(rootB), { recursive: true });
 writeFileSync(join(kanbanDir(rootB), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootB), pollMinutes: 0.01 }));
 const taskB = createTask(rootB, { name: "fix: dead agent", summary: "Liveness smoke", specs: "n/a" });
 setState(rootB, taskB, "to-do");
-// a second task in live-testing with a branch: covers the poll's live-testing -> to-merge
-// advance and the dead merger's merging -> to-merge requeue
+// a second task in live-testing with a branch: covers the poll's live-testing -> to-live-test
+// bounce, the unmerged-branch requeue to to-merge and the dead merger's merging -> to-merge requeue
 const taskB2 = createTask(rootB, { name: "fix: dead merger", summary: "Liveness smoke", specs: "n/a" });
 execSync("git checkout -qb feat/dead-merger && git commit -q --allow-empty -m x && git checkout -q main", { cwd: rootB, shell: "/bin/bash" });
 setWorktree(rootB, taskB2, "feat/dead-merger");
@@ -353,10 +354,12 @@ utimesSync(taskBPath, aged, aged);
 await waitFor(() => existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.6.log`)) || existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.6.log.gz`)), 30000, "fresh spawn after the idle cooldown", b.output);
 // the 7th death bounced again with no second cooldown log
 assert.equal(b.output().split("respawn waits for the idle cooldown").length - 1, 1, "still one cooldown log past the cap");
-// the dead live-tester advances live-testing -> to-merge, the sweep spawns a merger for it
-// (the dead stub exits instantly), and the poll requeues the dead merger's task to to-merge;
-// the failed-merge marker keeps it there for the rest of the run
-await waitFor(() => b.output().includes("live-testing -> to-merge"), 30000, "poll advanced the dead live-tester to to-merge", b.output);
+// the dead live-tester bounces live-testing -> to-live-test (the merge already happened);
+// the branch is unmerged, so the rescan sends the task to the merger first, the dead stub
+// exits instantly, and the poll requeues the dead merger's task to to-merge; the failed-merge
+// marker keeps it there for the rest of the run
+await waitFor(() => b.output().includes("live-testing -> to-live-test"), 30000, "poll bounced the dead live-tester to to-live-test", b.output);
+await waitFor(() => b.output().includes("not merged yet, moving to to-merge"), 30000, "unmerged branch sent to the merger first", b.output);
 await waitFor(() => b.output().includes("merging -> to-merge"), 30000, "poll requeued the dead merger's task to to-merge", b.output);
 assert.equal(parseTask(rootB, taskB2.file).state, "to-merge", "requeued task waits for the idle cooldown");
 // a completed run re-arms the streak: a stale pidfile on a task outside the mapped states
@@ -456,7 +459,8 @@ assert.equal(
 );
 d.daemon.kill("SIGTERM");
 
-// --- part E: to-review and to-live-test tasks get their worktree ensured before the spawn ---
+// --- part E: to-review tasks get their worktree ensured before the spawn (to-live-test no
+// longer needs one: the live test runs on the merged commit) ---
 const rootE = fixture();
 cleaned.push(rootE);
 mkdirSync(kanbanDir(rootE), { recursive: true });
@@ -491,32 +495,45 @@ assert.deepEqual(
 assert.ok(!existsSync(join(kanbanDir(rootE), ".logs", `${slugE}.reviewer-runs.count`)), "died reviewer runs never counted as successful");
 e.daemon.kill("SIGTERM");
 
-// a to-live-test task whose worktree cannot be created stays in to-live-test, never reaches done
+// a to-live-test task whose branch is not merged yet goes to the merger first: the live test
+// runs on the merged commit on main, so an unmerged branch must never spawn a live-tester;
+// a to-live-test task with no worktree at all routes to to-merge too, where the
+// nothing-to-merge path sets done without a live test
 const rootF = fixture();
 cleaned.push(rootF);
 mkdirSync(kanbanDir(rootF), { recursive: true });
-writeFileSync(join(rootF, ".worktrees"), "not a dir\n"); // regular file blocks worktree creation
-writeFileSync(join(kanbanDir(rootF), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootF) }));
-const taskF = createTask(rootF, { name: "fix: blocked live test", summary: "Uncreatable worktree", specs: "n/a" });
+writeFileSync(join(kanbanDir(rootF), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootF), pollMinutes: 0.01 }));
+const taskF = createTask(rootF, { name: "fix: unmerged live test", summary: "Unmerged branch smoke", specs: "n/a" });
+execSync("git checkout -qb feat/unmerged-live && git commit -q --allow-empty -m x && git checkout -q main", { cwd: rootF, shell: "/bin/bash" });
+setWorktree(rootF, taskF, "feat/unmerged-live");
 setState(rootF, taskF, "to-live-test");
+const taskF2 = createTask(rootF, { name: "fix: worktree-less live test", summary: "No-worktree smoke", specs: "n/a" });
+setState(rootF, taskF2, "to-live-test");
 
 const f = await runDaemon(rootF);
-await waitFor(() => f.output().includes("live-tester not spawned"), 30000, "spawn skipped for uncreatable worktree", f.output);
-assert.equal(parseTask(rootF, taskF.file).state, "to-live-test", "stayed in to-live-test instead of reaching done");
-assert.ok(!f.output().includes("spawned live-tester"), "live-tester never spawned");
+await waitFor(() => f.output().includes("not merged yet, moving to to-merge"), 30000, "unmerged branch sent to the merger first", f.output);
+assert.ok(!f.output().includes("spawned live-tester"), "live-tester never spawned for an unmerged branch");
+await waitFor(() => f.output().includes("merging -> to-merge"), 30000, "the dead stub's merge requeued through merging", f.output);
+assert.equal(parseTask(rootF, taskF.file).state, "to-merge", "task waits for the merger instead of testing unmerged code");
+await waitFor(() => parseTask(rootF, taskF2.file).state === "done", 30000, "no-worktree task done without a live test", f.output);
+assert.ok(f.output().includes("nothing to merge, set done"), "no-worktree task routed through the nothing-to-merge path");
 f.daemon.kill("SIGTERM");
 
-// --- part G: the merger spawn waits for the task's registered agent to die ---
+// --- part G: the merger spawn waits for the task's registered agent to die, and the live
+// test runs on the merged commit on main ---
 const rootG = fixture();
 cleaned.push(rootG);
 mkdirSync(kanbanDir(rootG), { recursive: true });
-// live-tester stub that sets to-merge, appends its report, then lingers alive before exiting;
-// the merger role merges the branch into main and sets done
+// reviewer stub that waits for the armed marker, re-affirms to-review (a fixes run), then
+// lingers alive before exiting: the per-complexity cap advance lands while it lingers, so
+// the merger role must wait for its pid. The merger merges the branch into main and sets
+// to-live-test; the live-tester runs on main, appends its report and sets done
 const lingerStub = join(rootG, "linger-agent.cjs");
 writeFileSync(
 	lingerStub,
 	`#!/usr/bin/env node
-const { readFileSync, writeFileSync, appendFileSync } = require("node:fs");
+const { readFileSync, writeFileSync, appendFileSync, existsSync } = require("node:fs");
+const { basename, dirname, join } = require("node:path");
 const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
@@ -524,24 +541,38 @@ if (!file) process.exit(0);
 if (prompt.includes("Merger agent")) {
 	const wt = (readFileSync(file, "utf8").match(/^worktree: "(.*)"$/m) ?? [])[1];
 	if (wt) execSync("git merge --no-edit " + wt, { stdio: "ignore" });
+	writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, 'state: "to-live-test"'));
+	process.exit(0);
+}
+if (!readFileSync(file, "utf8").match(/^state: /m)) process.exit(0);
+const armed = () => join(dirname(file), ".logs", basename(file, ".md") + ".reviewer-armed");
+const waitUntil = (cond, ms) => {
+	const end = Date.now() + ms;
+	while (!cond() && Date.now() < end) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+};
+if (prompt.includes("Reviewer agent")) {
+	waitUntil(() => existsSync(armed()), 10000);
+	writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, 'state: "to-review"'));
+	waitUntil(() => !existsSync(armed()), 10000);
+	setTimeout(() => process.exit(0), 3000);
+} else if (prompt.includes("Live-tester")) {
+	appendFileSync(file, "\\nLive test report: merger waited for the reviewer pid.\\n");
 	writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, 'state: "done"'));
 	process.exit(0);
 }
-if (!prompt.includes("Live-tester") || !readFileSync(file, "utf8").match(/^state: /m)) process.exit(0);
-writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, 'state: "to-merge"'));
-appendFileSync(file, "\\nLive test report: merger waited for the live-tester pid.\\n");
-setTimeout(() => process.exit(0), 3000);
 `,
 	{ mode: 0o755 },
 );
-writeFileSync(join(kanbanDir(rootG), "se-llm-team.json"), JSON.stringify({ agent: lingerStub, pollMinutes: 0.01 }));
+writeFileSync(join(kanbanDir(rootG), "se-llm-team.json"), JSON.stringify({ agent: lingerStub, pollMinutes: 0.01, reviewerCap: { moderate: 1 } }));
 const taskG = createTask(rootG, { name: "fix: defer merge while alive", summary: "Deferred merge smoke", specs: "n/a" });
-setState(rootG, taskG, "to-live-test");
+setState(rootG, taskG, "to-review");
 
 const g = await runDaemon(rootG);
 // "fix: defer merge while alive" caps at 4 words then drops the type word: defer-merge-while
 const wtG = join(rootG, ".worktrees", "fix/1-defer-merge-while");
-await waitFor(() => parseTask(rootG, taskG.file).state === "to-merge", 30000, "live-tester set to-merge", g.output);
+// cap 1: the first successful reviewer run advances the task to to-merge while the reviewer
+// still lingers; the merger spawn must wait for its pid
+await waitFor(() => parseTask(rootG, taskG.file).state === "to-merge", 30000, "cap advance to to-merge", g.output);
 // the stub lingers 3s before exiting, but its node startup eats into that window, so a fixed
 // sleep can land after the stub's death and the whole merger chain on a loaded machine. Poll
 // until the registered pid is actually dead instead, asserting the defer continuously while
@@ -556,22 +587,23 @@ const livePidG = () => {
 await waitFor(
 	() => {
 		if (!pidAlive(livePidG())) return true;
-		assert.ok(existsSync(wtG), "worktree kept while the live-tester pid is alive");
-		assert.ok(!g.output().includes("spawned merger"), "no merger spawned while the live-tester pid is alive");
-		assert.ok(!mirrorSubjects(rootG).includes(`kanban: done ${taskG.file}`), "no done mirror commit while the live-tester pid is alive");
+		assert.ok(existsSync(wtG), "worktree kept while the reviewer pid is alive");
+		assert.ok(!g.output().includes("spawned merger"), "no merger spawned while the reviewer pid is alive");
+		assert.ok(!mirrorSubjects(rootG).includes(`kanban: done ${taskG.file}`), "no done mirror commit while the reviewer pid is alive");
 		return false;
 	},
 	30000,
-	"live-tester pid death",
+	"reviewer pid death",
 	g.output,
 );
-// once the agent exits, the to-merge sweep spawns the merger, the merge completes and the
-// done mirror commit folds in the report
-await waitFor(() => !existsSync(wtG), 30000, "merge after agent death", g.output);
+// once the reviewer exits, the merger merges, the rescan spawns the live-tester on the merged
+// commit (cwd=root), and the done mirror commit folds in the live test report
+await waitFor(() => g.output().includes("spawned live-tester") && g.output().includes(`(cwd=${rootG})`), 30000, "live-tester runs on the merged commit", g.output);
+await waitFor(() => !existsSync(wtG), 30000, "worktree removed at done", g.output);
 await waitFor(() => mirrorSubjects(rootG).includes(`kanban: done ${taskG.file}`), 30000, "deferred done mirror commit", g.output);
-assert.ok(g.output().includes("spawned merger"), "merger spawned after the live-tester pid died");
+assert.ok(g.output().includes("spawned merger"), "merger spawned after the reviewer pid died");
 const committedG = execSync(`git show refs/heads/meta/kanban:.kanban/${taskG.file}`, { cwd: rootG, encoding: "utf8", shell: "/bin/bash" });
-assert.match(committedG, /Live test report: merger waited for the live-tester pid\./, "report folded into the done mirror commit");
+assert.match(committedG, /Live test report: merger waited for the reviewer pid\./, "live test report folded into the done mirror commit");
 g.daemon.kill("SIGTERM");
 
 // --- part H: the main-entry guard holds when the daemon is spawned through a symlink ---
@@ -710,16 +742,16 @@ const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
 if (!file || !readFileSync(file, "utf8").match(/^state: /m)) process.exit(0);
-if (prompt.includes("Live-tester")) {
-	writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: to-merge"));
-	process.exit(0);
-}
 if (prompt.includes("Merger agent")) {
 	setTimeout(() => {
 		const wt = (readFileSync(file, "utf8").match(/^worktree: "(.*)"$/m) ?? [])[1];
 		if (wt) { try { execSync("git merge --no-edit " + wt, { stdio: "ignore" }); } catch (e) {} }
-		writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: done"));
+		writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: to-live-test"));
 	}, 2500);
+}
+else if (prompt.includes("Live-tester")) {
+	writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: done"));
+	process.exit(0);
 }
 `,
 	{ mode: 0o755 },
@@ -967,7 +999,8 @@ const taskR1 = createTask(rootR, { name: "feat: lane one", priority: "low", summ
 const taskR2 = createTask(rootR, { name: "feat: lane two", priority: "low", summary: "Promotion smoke", specs: "n/a" });
 // unanswered open questions mean the task waits for the user: never promoted
 const taskRQ = createTask(rootR, { name: "feat: blocked by questions", priority: "critical", summary: "Promotion smoke", specs: "n/a", openQuestions: "- [user] Which API?" });
-// a task chained behind lane one: held until its blocker reaches done
+// a task chained behind lane one: held until its blocker stops blocking (reaches the live test
+// or done, never to-merge/merging)
 const taskR3 = createTask(rootR, { name: "feat: chained task", priority: "critical", summary: "Promotion smoke", specs: "n/a", blockedBy: `#${parseInt(taskR1.file, 10)}` });
 
 const r = await runDaemon(rootR);
@@ -982,14 +1015,14 @@ await waitFor(
 );
 assert.ok(readR(taskR0.file).state !== "done", "promotion fired while another task was still active");
 assert.equal(readR(taskRQ.file).state, "backlog", "task with unanswered open questions never promoted");
-assert.equal(readR(taskR3.file).state, "backlog", "chained task held while its blocker is not done");
-// the chain serializes: the chained task promotes only after its blocker reaches done, and
-// the daemon drops the done ref from blockedBy in the same sweep
+assert.equal(readR(taskR3.file).state, "backlog", "chained task held while its blocker still runs");
+// the chain serializes: the chained task promotes only after its blocker stops blocking, and
+// the daemon drops the ref from blockedBy in the same sweep
 await waitFor(() => readR(taskR1.file).state === "done", 60000, "lane one completed", r.output);
-await waitFor(() => r.output().includes(`promoting ${taskR3.file} to to-do`), 30000, "chained task promoted after its blocker reached done", r.output);
+await waitFor(() => r.output().includes(`promoting ${taskR3.file} to to-do`), 30000, "chained task promoted after its blocker stopped blocking", r.output);
 assert.notEqual(readR(taskR3.file).state, "backlog", "chained task active after promotion");
-assert.ok(!readR(taskR3.file).blockedBy.includes(`#${parseInt(taskR1.file, 10)}`), "done blocker ref dropped from blockedBy");
-assert.ok(r.output().includes(`dropped done blocker ref(s) #${parseInt(taskR1.file, 10)}`), "ref drop logged");
+assert.ok(!readR(taskR3.file).blockedBy.includes(`#${parseInt(taskR1.file, 10)}`), "satisfied blocker ref dropped from blockedBy");
+assert.ok(r.output().includes(`dropped satisfied blocker ref(s) #${parseInt(taskR1.file, 10)}`), "ref drop logged");
 assert.equal(r.output().split("promoting ").length - 1, 3, "each schedulable task promoted exactly once");
 r.daemon.kill("SIGTERM");
 
@@ -1267,10 +1300,10 @@ const argvStub = (root: string) => {
 const { readFileSync, writeFileSync, appendFileSync } = require("node:fs");
 const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
-const role = prompt.includes("Developer agent") ? "developer"
+const role = prompt.includes("Merger agent") ? "merger"
+	: prompt.includes("Developer agent") ? "developer"
 	: prompt.includes("Reviewer agent") ? "reviewer"
-	: prompt.includes("Live-tester") ? "live-tester"
-	: prompt.includes("Merger agent") ? "merger" : "";
+	: prompt.includes("Live-tester") ? "live-tester" : "";
 appendFileSync(${JSON.stringify(join(root, "argv.log"))}, JSON.stringify({ role, argv: process.argv }) + "\\n");
 const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
 if (!file || !readFileSync(file, "utf8").match(/^state: /m)) process.exit(0);
@@ -1289,9 +1322,9 @@ if (role === "merger") {
 			try { execSync("git merge --abort", { stdio: "ignore" }); } catch (e2) {}
 		}
 	}
-	writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: " + (merged ? "done" : "to-merge")));
+	writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: " + (merged ? "to-live-test" : "to-merge")));
 }
-const next = role === "developer" ? "to-review" : role === "reviewer" ? "to-live-test" : role === "live-tester" ? "to-merge" : null;
+const next = role === "developer" ? "to-review" : role === "reviewer" ? "to-merge" : role === "live-tester" ? "done" : null;
 if (next) writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: " + next));
 `,
 	);
@@ -1426,7 +1459,7 @@ console.log("orchestrator.test.ts: ... + restart preserves in-flight board state
 // --- part AA: the reviewer successful-run cap: for the default moderate complexity, 2
 // successful runs, the 3rd spawn is refused ---
 // a reviewer run is successful when it sets the task state itself (back to to-review after
-// changes, or forward to to-live-test on approval); died runs go through the dead counter
+// changes, or forward to to-merge on approval); died runs go through the dead counter
 const loopStub = (root: string) => {
 	const stub = join(root, "loop-agent.cjs");
 	writeFileSync(
@@ -1434,9 +1467,20 @@ const loopStub = (root: string) => {
 		`#!/usr/bin/env node
 const { readFileSync, writeFileSync, existsSync } = require("node:fs");
 const { basename, dirname, join } = require("node:path");
+const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
 if (!file || !readFileSync(file, "utf8").match(/^state: /m)) process.exit(0);
+if (prompt.includes("Merger agent")) {
+	const wt = (readFileSync(file, "utf8").match(/^worktree: "(.*)"$/m) ?? [])[1];
+	let merged = false;
+	if (wt) {
+		try { execSync("git merge --no-edit " + wt, { stdio: "ignore" }); merged = true; }
+		catch (e) { try { execSync("git merge --abort", { stdio: "ignore" }); } catch (e2) {} }
+	}
+	writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: " + (merged ? "to-live-test" : "to-merge")));
+	process.exit(0);
+}
 const isReviewer = prompt.includes("Reviewer agent");
 // a reviewer must not outrun the daemon's bookkeeping: it waits for the post-spawn armed
 // marker (the daemon took over), writes its state, then waits for the next sweep to consume
@@ -1475,9 +1519,9 @@ const runsAA = () => {
 	}
 };
 // two successful reviewer runs (each back to to-review), then the 3rd spawn is refused
-await waitFor(() => aa.output().includes(`${taskAA.file}: reviewer succeeded 2+ times, moving to to-live-test`), 60000, "reviewer cap refusal logged", aa.output);
+await waitFor(() => aa.output().includes(`${taskAA.file}: reviewer succeeded 2+ times, moving to to-merge`), 60000, "reviewer cap refusal logged", aa.output);
 assert.equal(aa.output().split("spawned reviewer").length - 1, 2, "exactly two reviewer spawns before the refusal");
-assert.equal(runsAA(), 0, "the counter cleared on the forced to-live-test advance");
+assert.equal(runsAA(), 0, "the counter cleared on the forced to-merge advance");
 assert.deepEqual(runIdx(rootAA, `${slugAA}.reviewer`), ["0", "1"], "two indexed reviewer run logs, no third");
 // the pipeline continues from the forced advance: the live-tester runs and the task completes
 await waitFor(() => parseTask(rootAA, taskAA.file).state === "done" && parseTask(rootAA, taskAA.file).worktree === "", 60000, "pipeline after the cap refusal", aa.output);
@@ -1682,8 +1726,8 @@ assert.ok((await removeTask(rootAG, "000999_ghost.md"))!.includes("No task"), "u
 
 console.log("orchestrator.test.ts: ... + task removal smoke passed");
 
-// --- part AH: the blockedBy gate holds a task with an unfinished blocker; a ghost ref is
-// ignored; when the blocker reaches done the daemon drops the ref and promotes in the sweep ---
+// --- part AH: the blockedBy gate holds a task with a blocker that still blocks; a ghost ref is
+// ignored; when the blocker stops blocking the daemon drops the ref and promotes in the sweep ---
 const rootAH = fixture();
 cleaned.push(rootAH);
 mkdirSync(kanbanDir(rootAH), { recursive: true });
@@ -1709,14 +1753,41 @@ writeFileSync(
 );
 await waitFor(() => ah.output().includes(`promoting ${taskAH1.file} to to-do`), 30000, "blocked task promoted after the blocker is done", ah.output);
 assert.notEqual(readAH(taskAH1.file).state, "backlog", "promoted task is active");
-assert.equal(readAH(taskAH1.file).blockedBy, "", "done blocker ref dropped from blockedBy");
-assert.ok(ah.output().includes(`dropped done blocker ref(s) #${parseInt(taskAH0.file, 10)}`), "ref drop logged");
+assert.equal(readAH(taskAH1.file).blockedBy, "", "satisfied blocker ref dropped from blockedBy");
+assert.ok(ah.output().includes(`dropped satisfied blocker ref(s) #${parseInt(taskAH0.file, 10)}`), "ref drop logged");
 assert.equal(ah.output().split("promoting ").length - 1, 3, "each schedulable task promoted exactly once");
 ah.daemon.kill("SIGTERM");
 // full exit before the removal: a sweep mid-flight still writes into the fixture
 await Promise.race([new Promise((r) => ah.daemon.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
 cleanupAll(rootAH);
 console.log("orchestrator.test.ts: ... + blockedBy gate and auto-drop smoke passed");
+
+// --- part AH2: a blocker in the live test no longer holds promotion: to-live-test and
+// live-testing count as satisfied everywhere blockers are evaluated, not just done ---
+const rootAH2 = fixture();
+cleaned.push(rootAH2);
+mkdirSync(kanbanDir(rootAH2), { recursive: true });
+// the dead stub keeps the blocker cycling between to-live-test and live-testing (the spawn
+// dies, the poll bounces it back), never done
+writeFileSync(join(kanbanDir(rootAH2), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAH2), pollMinutes: 0.01 }));
+const blockerAH2 = createTask(rootAH2, { name: "feat: live-test blocker", summary: "Blocker satisfaction smoke", specs: "n/a" });
+// a branch at HEAD (merged): a worktree-less to-live-test task would route to to-merge and
+// reach done through the nothing-to-merge path, so the blocker needs one to stay cycling
+execSync("git branch merged-blocker", { cwd: rootAH2, shell: "/bin/bash" });
+setWorktree(rootAH2, blockerAH2, "merged-blocker");
+setState(rootAH2, blockerAH2, "to-live-test");
+const blockedAH2 = createTask(rootAH2, { name: "feat: blocked by live test", priority: "critical", summary: "Blocker satisfaction smoke", specs: "n/a", blockedBy: `#${parseInt(blockerAH2.file, 10)}` });
+
+const ah2 = await runDaemon(rootAH2);
+// the satisfied blocker releases the dependent even though the blocker never reached done
+await waitFor(() => ah2.output().includes(`promoting ${blockedAH2.file} to to-do`), 30000, "blocker in the live test released the dependent", ah2.output);
+assert.ok(ah2.output().includes(`dropped satisfied blocker ref(s) #${parseInt(blockerAH2.file, 10)}`), "satisfied blocker ref dropped");
+assert.notEqual(parseTask(rootAH2, blockedAH2.file).state, "backlog", "dependent promoted");
+assert.equal(parseTask(rootAH2, blockedAH2.file).blockedBy, "", "ref cleared from blockedBy");
+const blockerStateAH2 = parseTask(rootAH2, blockerAH2.file).state;
+assert.ok(blockerStateAH2 === "to-live-test" || blockerStateAH2 === "live-testing", `blocker still in the live test (${blockerStateAH2}), never done`);
+ah2.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + live-test blocker satisfaction smoke passed");
 
 // --- part AI: a completed run clears the dead counter, so the cooldown applies to consecutive-death streaks only ---
 const rootAI = fixture();
@@ -1758,9 +1829,9 @@ const aj = await runDaemon(rootAJ);
 // invalid reviewerCap.complex warns at load; the cap falls back to the default 3
 await waitFor(() => aj.output().includes("invalid reviewerCap.complex -1, ignored (expected an integer >= 0)"), 10000, "invalid reviewerCap warning", aj.output);
 // simple: default cap 1; moderate: the configured override 1; complex: fallback to the default 3
-await waitFor(() => aj.output().includes(`${taskAJSimple.file}: reviewer succeeded 1+ times, moving to to-live-test`), 60000, "simple cap 1", aj.output);
-await waitFor(() => aj.output().includes(`${taskAJMod.file}: reviewer succeeded 1+ times, moving to to-live-test`), 60000, "configured override cap 1", aj.output);
-await waitFor(() => aj.output().includes(`${taskAJComplex.file}: reviewer succeeded 3+ times, moving to to-live-test`), 60000, "invalid value fell back to the default 3", aj.output);
+await waitFor(() => aj.output().includes(`${taskAJSimple.file}: reviewer succeeded 1+ times, moving to to-merge`), 60000, "simple cap 1", aj.output);
+await waitFor(() => aj.output().includes(`${taskAJMod.file}: reviewer succeeded 1+ times, moving to to-merge`), 60000, "configured override cap 1", aj.output);
+await waitFor(() => aj.output().includes(`${taskAJComplex.file}: reviewer succeeded 3+ times, moving to to-merge`), 60000, "invalid value fell back to the default 3", aj.output);
 const reviewerSpawns = (file: string) => aj.output().split("\n").filter((l) => l.includes("spawned reviewer") && l.includes(`for ${file}`)).length;
 assert.equal(reviewerSpawns(taskAJSimple.file), 1, "simple task force-advanced after one successful run");
 assert.equal(reviewerSpawns(taskAJMod.file), 1, "configured moderate override applied");
@@ -1768,7 +1839,7 @@ assert.equal(reviewerSpawns(taskAJComplex.file), 3, "invalid configured value fe
 aj.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + per-complexity reviewer cap smoke passed");
 
-// --- part AJ-b: the trivial complexity: cap 0 force-advances to-review -> to-live-test on the
+// --- part AJ-b: the trivial complexity: cap 0 force-advances to-review -> to-merge on the
 // first sweep with no reviewer spawn (no armed marker, no pid), and reviewerCap accepts 0 while
 // negative and non-integer values warn and keep the default ---
 const rootAJT = fixture();
@@ -1790,9 +1861,9 @@ const slugAJT = taskAJT.file.replace(/\.md$/, "");
 await waitFor(() => ajt.output().includes("invalid reviewerCap.simple -1, ignored (expected an integer >= 0)"), 10000, "negative reviewerCap warning", ajt.output);
 await waitFor(() => ajt.output().includes("invalid reviewerCap.moderate 1.5, ignored (expected an integer >= 0)"), 10000, "non-integer reviewerCap warning", ajt.output);
 assert.ok(!ajt.output().includes("invalid reviewerCap.trivial"), "reviewerCap.trivial 0 accepted without a warning");
-// the trivial task advances straight to to-live-test: the first sweep reads reviewer-runs 0
+// the trivial task advances straight to to-merge: the first sweep reads reviewer-runs 0
 // >= cap 0, so no reviewer spawns
-await waitFor(() => ajt.output().includes(`${taskAJT.file}: reviewer succeeded 0+ times, moving to to-live-test`), 60000, "trivial forced advance", ajt.output);
+await waitFor(() => ajt.output().includes(`${taskAJT.file}: reviewer succeeded 0+ times, moving to to-merge`), 60000, "trivial forced advance", ajt.output);
 assert.ok(!ajt.output().split("\n").some((l) => l.includes("spawned reviewer") && l.includes(taskAJT.file)), "no reviewer spawn for a trivial task");
 assert.ok(!existsSync(join(kanbanDir(rootAJT), ".logs", `${slugAJT}.reviewer-armed`)), "no armed marker for a trivial task");
 assert.ok(!existsSync(join(kanbanDir(rootAJT), ".pids", `${slugAJT}.pid`)), "no agent pid written for a trivial task");
@@ -1805,7 +1876,7 @@ const runsAJT = () => {
 };
 assert.equal(runsAJT(), 0, "the trivial task never ran a reviewer");
 // the warned values keep the default caps: the moderate task advances at the default 2
-await waitFor(() => ajt.output().includes(`${taskAJTMod.file}: reviewer succeeded 2+ times, moving to to-live-test`), 90000, "warned moderate keeps the default 2", ajt.output);
+await waitFor(() => ajt.output().includes(`${taskAJTMod.file}: reviewer succeeded 2+ times, moving to to-merge`), 90000, "warned moderate keeps the default 2", ajt.output);
 assert.equal(ajt.output().split("\n").filter((l) => l.includes("spawned reviewer") && l.includes(taskAJTMod.file)).length, 2, "exactly two reviewer spawns for the moderate task");
 // the pipeline continues from the forced advance: the live-tester runs and the trivial task completes
 await waitFor(() => parseTask(rootAJT, taskAJT.file).state === "done" && parseTask(rootAJT, taskAJT.file).worktree === "", 60000, "trivial task completes", ajt.output);

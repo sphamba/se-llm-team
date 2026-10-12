@@ -32,7 +32,7 @@ const RESPAWN_CAP = 5;
 // the task's complexity
 const REVIEWER_RUN_CAP = 3;
 // per-complexity forced-advance caps: successful reviewer runs before to-review moves on to
-// to-live-test; each overridable via the top-level reviewerCap config key
+// to-merge; each overridable via the top-level reviewerCap config key
 const DEFAULT_REVIEWER_CAP: Record<string, number> = { simple: 1, moderate: 2, complex: 3, trivial: 0 };
 // consecutive failed auto-pushes before the daemon logs its once-only warning (a success
 // resets the count); the per-failure line is easy to miss, the warning names the consequence
@@ -338,7 +338,7 @@ export function compactFinishedLogs(root: string): { files: number; before: numb
 }
 
 // consumes the armed marker at the state the armed reviewer wrote itself (back to to-review,
-// or forward to to-live-test on approval): a pid match counts one successful reviewer run; a
+// or forward to to-merge on approval): a pid match counts one successful reviewer run; a
 // mismatch (died run: the poll clears the pidfile first, or a later developer spawn overwrote
 // it) only drops the marker
 function consumeReviewerRun(root: string, slug: string): void {
@@ -796,20 +796,23 @@ function clearMergerAttempt(root: string, slug: string): void {
 	}
 }
 
-// the to-merge sweep, replacing merge-on-done: a task the live-tester passed sits in to-merge
-// until a Merger merges main into the branch worktree and then the branch into main. One
-// merger per project (the global pid file, spawned one at a time by the sequential sweep);
-// the task's own agent may still be writing its report, so the spawn defers while that pid
-// lives. The task moves to merging at spawn; a merger that requeues the task re-runs only
-// after the idle cooldown.
+// the to-merge sweep, replacing merge-on-done: a task the reviewer passed (approval, or the
+// per-complexity cap advance) sits in to-merge until a Merger merges main into the branch
+// worktree and then the branch into main. One merger per project (the global pid file,
+// spawned one at a time by the sequential sweep); the task's own agent may still be writing
+// its report, so the spawn defers while that pid lives. The task moves to merging at spawn;
+// a merger that requeues the task re-runs only after the idle cooldown.
 function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	const slug = taskSlug(task.file);
-	// the live-tester may still be committing and writing its report after setting to-merge
+	// a reviewer approval is a successful run too: consume the armed marker here, since the
+	// approval now lands the task straight in to-merge
+	consumeReviewerRun(root, slug);
+	// the reviewer may still be committing and writing its report after setting to-merge
 	if (agentAlive(root, slug)) return;
 	// at most one merger at a time, project-wide
 	if (agentAlive(root, "merger")) return;
-	// a task bounced here past the respawn cap (dead live-tester or merger) also waits for
-	// the idle cooldown before its merger spawns
+	// a task bounced here past the respawn cap (dead merger) also waits for the idle
+	// cooldown before its merger spawns
 	if (deadCooldownActive(root, cfg, task)) return;
 	// an earlier attempt on this task failed and requeued it: retry only after it sat idle in
 	// to-merge for the idle interval. Read before any write: ensureWorktree/setWorktree bump the
@@ -837,8 +840,9 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 }
 
 // a done task's worktree and branch: the Merger merged the branch into main before setting
-// done, so cleanup is all that is left here. -d refuses an unmerged branch, so a manual done
-// with unfinished work keeps both branch and worktree for a manual merge.
+// to-live-test and the live test passed, so cleanup is all that is left here. -d refuses an
+// unmerged branch, so a manual done with unfinished work keeps both branch and worktree for
+// a manual merge.
 function doneCleanup(root: string, task: Task): void {
 	const wt = task.worktree;
 	if (!wt) return;
@@ -948,10 +952,10 @@ function rescan(root: string, cfg: Config): void {
 						// re-read before the forced advance: a state changed underneath (PM or user) wins
 						const fresh = getTask(root, task.file);
 						if (fresh && fresh.state === "to-review") {
-							setState(root, fresh, "to-live-test");
+							setState(root, fresh, "to-merge");
 							// clears the count, so a future rework cycle starts fresh
 							writeFileSync(counterPath(root, `${slug}.reviewer-runs`), "0");
-							log(root, `${task.file}: reviewer succeeded ${cap}+ times, moving to to-live-test`);
+							log(root, `${task.file}: reviewer succeeded ${cap}+ times, moving to to-merge`);
 						}
 					} else if (!pidAlive(agentPid(root, slug))) {
 						// the previous agent for this task (usually the developer writing its report) may
@@ -963,18 +967,21 @@ function rescan(root: string, cfg: Config): void {
 					}
 				}
 			} else if (task.state === "to-live-test" && !deadCooldownActive(root, cfg, task)) {
-				const ensured = ensureWorktree(root, task);
-				if (!ensured) log(root, `${task.file}: worktree could not be created, live-tester not spawned (state unchanged)`);
-				else {
-					// a reviewer approval is a successful run too; the forced advance arrives with the
-					// marker already consumed at the to-review branch, so it never re-counts
-					const slug = taskSlug(task.file);
-					consumeReviewerRun(root, slug);
-					if (!pidAlive(agentPid(root, slug))) {
-						// the reviewer that approved it may still be alive: defer the spawn to a later sweep
-						setState(root, task, "live-testing");
-						spawnAgent(root, cfg, "live-tester", task, ensured.wtDir);
-					}
+				const slug = taskSlug(task.file);
+				consumeReviewerRun(root, slug);
+				// the live test runs on the merged commit on main, not the feature worktree: an
+				// unmerged branch (in-flight task from a daemon still on the old order, or a manual
+				// placement) or a task with no worktree at all goes to the merger first, so main
+				// never gets tested without this task's merged change
+				if (!task.worktree || git(root, ["merge-base", "--is-ancestor", task.worktree, "HEAD"], true) === null) {
+					setState(root, task, "to-merge");
+					log(root, task.worktree ? `${task.file}: branch not merged yet, moving to to-merge for the merger` : `${task.file}: no worktree, moving to to-merge for the merger`);
+				} else if (!agentAlive(root, "merger") && !pidAlive(agentPid(root, slug))) {
+					// a live merger would change main under the test (and may still be writing its
+					// report), and a stale agent for this task may still write the task file: defer
+					// the spawn to a later sweep
+					setState(root, task, "live-testing");
+					spawnAgent(root, cfg, "live-tester", task, root);
 				}
 			} else if (task.state === "to-merge") {
 				sweepToMerge(root, cfg, task);
@@ -982,10 +989,10 @@ function rescan(root: string, cfg: Config): void {
 				// its merger runs: the liveness poll requeues the task when the merger dies
 			} else if (task.state === "done") {
 				// cleanup always runs for a done worktree task (the merger merged before setting
-				// done, so only the worktree/branch removal is left); the commit is gated on the
-				// file actually differing from the mirror, since an unchanged done task would
-				// otherwise issue a whole-board commit every sweep and fold other tasks' pending
-				// changes under its label
+				// to-live-test and the live test passed, so only the worktree/branch removal is
+				// left); the commit is gated on the file actually differing from the mirror, since
+				// an unchanged done task would otherwise issue a whole-board commit every sweep and
+				// fold other tasks' pending changes under its label
 				doneCleanup(root, task);
 				if (code) commitKanban(root, `kanban: done ${task.file}`, files);
 			}
@@ -995,15 +1002,15 @@ function rescan(root: string, cfg: Config): void {
 	}
 	// merger spawn bookkeeping: clear the global merger pid once no task is merging and the
 	// merger is gone; the failed-merge markers stay while their task waits, and are dropped once
-	// the task moved on (a successful merge ends in done)
+	// the task moved on (a successful merge ends in to-live-test)
 	if (!tasks.some((t) => t.state === "merging") && !agentAlive(root, "merger")) clearPid(root, "merger");
 	for (const task of tasks) {
 		if (task.state !== "to-merge" && task.state !== "merging") clearMergerAttempt(root, taskSlug(task.file));
 	}
 	janitorPids(root, tasks);
-	// the sweep promotes: drop done blocker refs first (board hygiene, same snapshot), then
-	// promote every schedulable backlog task; a ref pointing at a done task does not hold
-	// promotion, and promoteBacklog re-checks its gates on a fresh board read before setState
+	// the sweep promotes: drop satisfied blocker refs first (board hygiene, same snapshot),
+	// then promote every schedulable backlog task; a blocker in done or the live test does not
+	// hold promotion, and promoteBacklog re-checks its gates on a fresh board read before setState
 	dropDoneBlockers(root, tasks);
 	promoteBacklog(root, tasks);
 	// every sweep: finished agents' logs compact into .log.gz (idempotent; live pids are skipped)
@@ -1016,7 +1023,7 @@ function rescan(root: string, cfg: Config): void {
 const WORKING_STATES: Partial<Record<TaskState, { next: TaskState; role: string }>> = {
 	doing: { next: "to-do", role: "developer" },
 	reviewing: { next: "to-review", role: "reviewer" },
-	"live-testing": { next: "to-merge", role: "live-tester" },
+	"live-testing": { next: "to-live-test", role: "live-tester" },
 	merging: { next: "to-merge", role: "merger" },
 };
 
@@ -1037,33 +1044,38 @@ const sortNum = (file: string) => {
 	return Number.isNaN(n) ? Number.MAX_SAFE_INTEGER : n;
 };
 
-// a blockedBy entry ("#<num>") holds the task while its blocker exists and is not done;
-// a ref resolving to no existing task is ignored
+// a blockedBy entry ("#<num>") holds the task while its blocker exists and still blocks;
+// done and the live test count as satisfied (the live test runs on the merged commit, so a
+// blocker that reached it no longer gates the dependent's start), and a ref resolving to no
+// existing task is ignored
+const BLOCKER_SATISFIED = new Set(["done", "to-live-test", "live-testing"]);
+
 function blockedByUndone(tasks: Task[], task: Task): boolean {
 	if (!task.blockedBy) return false;
 	const states = new Map(tasks.map((t) => [sortNum(t.file), t.state]));
 	return task.blockedBy.split(",").some((ref) => {
 		const num = parseInt(ref.trim().replace(/^#/, ""), 10);
-		return num > 0 && states.get(num) !== undefined && states.get(num) !== "done";
+		return num > 0 && states.get(num) !== undefined && !BLOCKER_SATISFIED.has(states.get(num));
 	});
 }
 
-// blockedBy always means undone blockers only: once a blocker reaches done, the daemon drops
-// its ref from every task that listed it, in the same sweep (the PM used to maintain the list
-// by hand). Attribute-only rewrite through updateAttrs: nothing else is touched, and a task
-// with nothing to drop stays byte-for-byte. Ghost or malformed refs stay: their blocker is
-// not done. The kept list is recomputed from a fresh read just before the write: the snapshot
-// predates this pass, so a ref the PM added or removed mid-sweep must win over the snapshot's
+// blockedBy always means blockers that still block: once a blocker reaches done or enters
+// the live test, the daemon drops its ref from every task that listed it, in the same sweep
+// (the PM used to maintain the list by hand). Attribute-only rewrite through updateAttrs:
+// nothing else is touched, and a task with nothing to drop stays byte-for-byte. Ghost or
+// malformed refs stay: their blocker never satisfied. The kept list is recomputed from a
+// fresh read just before the write: the snapshot predates this pass, so a ref the PM added
+// or removed mid-sweep must win over the snapshot's
 export function dropDoneBlockers(root: string, tasks: Task[]): void {
-	// a conflicted file parses bogus state values: never proof that a blocker is done
-	const done = new Set(tasks.filter((t) => t.state === "done" && !t.conflicted).map((t) => sortNum(t.file)));
+	// a conflicted file parses bogus state values: never proof that a blocker satisfied
+	const satisfied = new Set(tasks.filter((t) => BLOCKER_SATISFIED.has(t.state) && !t.conflicted).map((t) => sortNum(t.file)));
 	for (const task of tasks) {
-		// snapshot blockedBy as a cheap pre-filter: a task the snapshot shows without a done ref
-		// gets its drop, if any, on the next sweep that sees it (a mid-sweep done edit only defers)
+		// snapshot blockedBy as a cheap pre-filter: a task the snapshot shows without a satisfied
+		// ref gets its drop, if any, on the next sweep that sees it (a mid-sweep edit only defers)
 		if (!task.blockedBy || task.conflicted) continue;
 		const hasDoneRef = task.blockedBy.split(",").some((ref) => {
 			const num = parseInt(ref.trim().replace(/^#/, ""), 10);
-			return num > 0 && done.has(num);
+			return num > 0 && satisfied.has(num);
 		});
 		if (!hasDoneRef) continue;
 		// a vanished task is gone; a conflicted file parses bogus values: never rewrite it
@@ -1073,7 +1085,7 @@ export function dropDoneBlockers(root: string, tasks: Task[]): void {
 		const kept = current.blockedBy.split(",").map((ref) => ref.trim()).filter((ref) => {
 			if (!ref) return false;
 			const num = parseInt(ref.replace(/^#/, ""), 10);
-			if (num > 0 && done.has(num)) {
+			if (num > 0 && satisfied.has(num)) {
 				dropped.push(ref);
 				return false;
 			}
@@ -1082,7 +1094,7 @@ export function dropDoneBlockers(root: string, tasks: Task[]): void {
 		if (!dropped.length) continue;
 		try {
 			updateAttrs(root, current, { blockedBy: kept.join(", ") });
-			log(root, `${task.file}: dropped done blocker ref(s) ${dropped.join(", ")}`);
+			log(root, `${task.file}: dropped satisfied blocker ref(s) ${dropped.join(", ")}`);
 		} catch (err) {
 			log(root, `blockedBy update of ${task.file} failed: ${err instanceof Error ? err.message : err}`);
 		}
