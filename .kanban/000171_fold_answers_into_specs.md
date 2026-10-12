@@ -6,7 +6,7 @@ worktree: ""
 issuer: "#161"
 complexity: "simple"
 shortName: "fold-answers-into-specs"
-blockedBy: ""
+blockedBy: "#172"
 ---
 
 # Summary
