@@ -56,6 +56,7 @@ interface RoleLlmConfig extends LlmConfig {
 	simple?: LlmConfig;
 	moderate?: LlmConfig;
 	complex?: LlmConfig;
+	trivial?: LlmConfig;
 }
 
 interface Config {
