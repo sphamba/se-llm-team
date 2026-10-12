@@ -7,10 +7,10 @@ export const STATES = [
 	"doing",
 	"to-review",
 	"reviewing",
-	"to-live-test",
-	"live-testing",
 	"to-merge",
 	"merging",
+	"to-live-test",
+	"live-testing",
 	"done",
 ] as const;
 export type TaskState = (typeof STATES)[number];
@@ -58,10 +58,10 @@ const IN_PROGRESS = new Set<TaskState>([
 	"doing",
 	"to-review",
 	"reviewing",
-	"to-live-test",
-	"live-testing",
 	"to-merge",
 	"merging",
+	"to-live-test",
+	"live-testing",
 ]);
 
 export function kanbanDir(root: string): string {

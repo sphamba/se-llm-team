@@ -1177,10 +1177,10 @@ none so the card clicks pass through */
 .c-doing { --ac: #818cf8; }
 .c-to-review { --ac: #f59e0b; }
 .c-reviewing { --ac: #d97706; }
-.c-to-live-test { --ac: #14b8a6; }
-.c-live-testing { --ac: #0d9488; }
 .c-to-merge { --ac: #d946ef; }
 .c-merging { --ac: #c026d3; }
+.c-to-live-test { --ac: #14b8a6; }
+.c-live-testing { --ac: #0d9488; }
 .c-done { --ac: #22c55e; }
 </style>
 </head>
