@@ -6,7 +6,7 @@ worktree: ""
 issuer: "#178"
 complexity: "simple"
 shortName: "card-stats-usage-less"
-blockedBy: "#182"
+blockedBy: ""
 ---
 
 # Summary

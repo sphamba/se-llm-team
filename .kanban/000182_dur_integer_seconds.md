@@ -1,7 +1,7 @@
 ---
 name: "fix: duration labels show integer seconds, no fractions"
 priority: "medium"
-state: "doing"
+state: "live-testing"
 worktree: "fix/182-dur-integer-seconds"
 issuer: "user"
 complexity: "trivial"
@@ -24,3 +24,9 @@ Where time is shown in seconds in the webui (task summary cards' stats line and 
 
 # Notes
 - Filed by the PM (user request, 2026-10-12). Runs parallel to the in-flight #181 (pairLayout) and #179 (src/kanban.ts): the touched regions of src/webui.ts and src/webui.test.ts are disjoint per the standing parallelism order.
+- Done (2026-10-12, 7343f8f). fmtDur now rounds once (sec = Math.round(ms / 1000)), the below-10s one-decimal branch is gone, comments updated. The spec listed two fraction assertions, but a third existed (src/webui.test.ts:937, syncAgentStats span join with 1200 ms expecting "999 · 1.2s"); updated it to "999 · 1s" too. Full suite (kanban, orchestrator, webui, extension, index) passes.
+- Merged (2026-10-12, 83c758f). Step 1: merged main into fix/182-dur-integer-seconds in the worktree (auto-merged src/webui.ts and src/webui.test.ts, no conflicts; fmtDur verified correct in the result). Step 2: merged the branch into main at the root (fast-forward to 83c758f). Both merges clean, so test suites were not re-run; live test runs on the merged commit.
+
+# Open questions
+
+None. Assumptions: rounding is half-up via Math.round (3.5s -> "4s", 0.4s -> "0s"); sub-second durations render as "0s"; server-side duration stays in ms (#169) and only the label rounds.
