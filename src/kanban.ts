@@ -218,7 +218,10 @@ function serializeFrontmatter(attrs: Record<string, string>): string {
 	return `---\n${lines.join("\n")}\n---\n`;
 }
 
-function updateAttrs(root: string, task: Task, patch: Record<string, string>): void {
+// Attribute-only rewrite; skips unchanged keys and refuses a conflicted file. Exported for
+// the orchestrator's automatic blockedBy maintenance (updateTask would add a needless cycle
+// check and board re-read to a pure ref removal).
+export function updateAttrs(root: string, task: Task, patch: Record<string, string>): void {
 	const path = join(kanbanDir(root), task.file);
 	const raw = readFileSync(path, "utf8");
 	if (hasConflictMarkers(raw)) throw new Error(`unresolved merge conflict markers in ${task.file}; not rewriting`);

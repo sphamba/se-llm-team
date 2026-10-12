@@ -8,9 +8,9 @@ import {
 	getTask,
 	kanbanDir,
 	listAll,
-	PRIORITY_RANK,
 	setState,
 	setWorktree,
+	updateAttrs,
 	slugWorktree,
 	taskFiles,
 	taskSlug,
@@ -1000,7 +1000,11 @@ function rescan(root: string, cfg: Config): void {
 		if (task.state !== "to-merge" && task.state !== "merging") clearMergerAttempt(root, taskSlug(task.file));
 	}
 	janitorPids(root, tasks);
-	autoSchedule(root, cfg, tasks);
+	// the sweep promotes: drop done blocker refs first (board hygiene, same snapshot), then
+	// promote every schedulable backlog task; a ref pointing at a done task does not hold
+	// promotion, so no fresh board re-read sits between the two passes
+	dropDoneBlockers(root, tasks);
+	promoteBacklog(root, tasks);
 	// every sweep: finished agents' logs compact into .log.gz (idempotent; live pids are skipped)
 	compactFinishedLogs(root);
 }
@@ -1026,18 +1030,11 @@ const logSamples = new Map<string, { path: string; size: number; since: number }
 // process killed
 let mergerLogSlug: string | null = null;
 
-const rank = (priority: string) => PRIORITY_RANK[priority] ?? 4;
 // unprefixed files sort last (MAX_SAFE_INTEGER), distinct from kanban.ts taskNum (0)
 const sortNum = (file: string) => {
 	const n = parseInt(file.slice(0, 6), 10);
 	return Number.isNaN(n) ? Number.MAX_SAFE_INTEGER : n;
 };
-
-// failsafe for when nothing gets scheduled: PM promotion stays the primary path. idleSince is
-// null while any task is active or the backlog is empty, else the timestamp the board was last
-// seen idle with promotable backlog work; the promotion fires after autoScheduleMinutes of
-// continuous idle. Module state like lastMirrorHash: one locked daemon per project.
-let idleSince: number | null = null;
 
 // a blockedBy entry ("#<num>") holds the task while its blocker exists and is not done;
 // a ref resolving to no existing task is ignored
@@ -1050,33 +1047,54 @@ function blockedByUndone(tasks: Task[], task: Task): boolean {
 	});
 }
 
-function autoSchedule(root: string, cfg: Config, tasks: Task[]): void {
-	// conflicted files parse bogus state values: neither promotable nor proof of activity
-	const candidates = tasks.filter((t) => !t.conflicted);
-	// unanswered open questions mean the task waits for the user: never promote it
-	const backlog = candidates.filter((t) => t.state === "backlog" && !t.openQuestions);
-	if (!backlog.length || candidates.some((t) => t.state !== "backlog" && t.state !== "done")) {
-		idleSince = null;
-		return;
+// blockedBy always means undone blockers only: once a blocker reaches done, the daemon drops
+// its ref from every task that listed it, in the same sweep (the PM used to maintain the list
+// by hand). Attribute-only rewrite through updateAttrs: nothing else is touched, and a task
+// with nothing to drop stays byte-for-byte. Ghost or malformed refs stay: their blocker is
+// not done
+function dropDoneBlockers(root: string, tasks: Task[]): void {
+	// a conflicted file parses bogus state values: never proof that a blocker is done
+	const done = new Set(tasks.filter((t) => t.state === "done" && !t.conflicted).map((t) => sortNum(t.file)));
+	for (const task of tasks) {
+		if (!task.blockedBy || task.conflicted) continue;
+		const dropped: string[] = [];
+		const kept = task.blockedBy.split(",").map((ref) => ref.trim()).filter((ref) => {
+			if (!ref) return false;
+			const num = parseInt(ref.replace(/^#/, ""), 10);
+			if (num > 0 && done.has(num)) {
+				dropped.push(ref);
+				return false;
+			}
+			return true;
+		});
+		if (!dropped.length) continue;
+		try {
+			updateAttrs(root, task, { blockedBy: kept.join(", ") });
+			log(root, `${task.file}: dropped done blocker ref(s) ${dropped.join(", ")}`);
+		} catch (err) {
+			log(root, `blockedBy update of ${task.file} failed: ${err instanceof Error ? err.message : err}`);
+		}
 	}
-	const now = Date.now();
-	if (idleSince === null) {
-		idleSince = now;
-		return;
-	}
-	if (now - idleSince < cfg.autoScheduleMinutes * 60_000) return;
-	// taskFiles sorts by file name, so the stable sort keeps the oldest first within a rank;
-	// unfinished blockers hold the task: the failsafe never auto-promotes a blocked task
-	const next = [...backlog]
-		.filter((t) => !blockedByUndone(tasks, t))
-		.sort((a, b) => rank(a.priority) - rank(b.priority) || sortNum(a.file) - sortNum(b.file))[0];
-	if (!next) return;
-	idleSince = null;
-	log(root, `no active task for ${cfg.autoScheduleMinutes}min, promoting ${next.file} to to-do (failsafe)`);
-	try {
-		setState(root, next, "to-do");
-	} catch (err) {
-		log(root, `auto-schedule of ${next.file} failed: ${err instanceof Error ? err.message : err}`);
+}
+
+// promotion is event-driven, the replacement for the old idle failsafe: every sweep and every
+// poll promotes EVERY schedulable backlog task, not one per idle window. Unchained tasks
+// promote and run as parallel lanes the moment a lane frees; the blockedBy chain (the PM
+// encodes it at creation) serializes what must serialize
+function promoteBacklog(root: string, tasks: Task[]): void {
+	for (const task of tasks) {
+		// conflicted files parse bogus state values: never promotable
+		if (task.conflicted || task.state !== "backlog") continue;
+		// unanswered open questions mean the task waits for the user: never promote it
+		if (task.openQuestions) continue;
+		// unfinished blockers hold the task
+		if (blockedByUndone(tasks, task)) continue;
+		log(root, `promoting ${task.file} to to-do (blockers done)`);
+		try {
+			setState(root, task, "to-do");
+		} catch (err) {
+			log(root, `promotion of ${task.file} failed: ${err instanceof Error ? err.message : err}`);
+		}
 	}
 }
 
@@ -1154,7 +1172,10 @@ export function poll(root: string, stallMinutes: number, now = Date.now()): void
 	// a run ended this pass (a bounced working agent, or the stale pidfile of a completed one):
 	// the ended logs are raw, so the pass ends with their retro-compact
 	let ended = false;
-	for (const task of listAll(root)) {
+	// one snapshot serves the liveness loop and the promotion: tasks bounced mid-poll are no
+	// longer backlog, so the stale snapshot cannot promote them again
+	const tasks = listAll(root);
+	for (const task of tasks) {
 		try {
 			// no state rewrite on a conflicted file: the parse is bogus and the merger owns resolution
 			if (task.conflicted) continue;
@@ -1205,6 +1226,12 @@ export function poll(root: string, stallMinutes: number, now = Date.now()): void
 			log(root, `error polling ${task.file} (${task.state}): ${err instanceof Error ? err.message : err}`);
 		}
 	}
+	// the poll promotes too: it is the second event source (rescan is fs.watch-debounced, the
+	// poll covers boards without inotify), so promotion never waits for a timer. The done-ref
+	// drop runs here too, from the same snapshot: a blocker can reach done between sweeps, and
+	// a poll promotion must not leave the promoted task listing a done blocker
+	dropDoneBlockers(root, tasks);
+	promoteBacklog(root, tasks);
 	// the compactor lives in the retro pass now: a run's raw log is rewritten at its end (the
 	// write-time pipe is gone - the log fd must survive the daemon, so it cannot be a pipe).
 	// compactFinishedLogs skips logs whose writer is still alive
@@ -1270,7 +1297,7 @@ export function main(argv: string[]): void {
 		return;
 	}
 	for (const dir of [".logs", ".pids"]) mkdirSync(join(kanbanDir(root), dir), { recursive: true });
-	log(root, `orchestrator started (root=${root}, agent=${cfg.agent}, poll=${pollMinutes}min, rescan=${rescanSeconds}s, auto-schedule=${cfg.autoScheduleMinutes}min)`);
+	log(root, `orchestrator started (root=${root}, agent=${cfg.agent}, poll=${pollMinutes}min, rescan=${rescanSeconds}s)`);
 	bootstrapBoard(root);
 
 	const sweep = () => {

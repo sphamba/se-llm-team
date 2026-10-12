@@ -36,7 +36,7 @@ ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
 | --- | --- | --- |
 | `agent` | `pi` | Executable the orchestrator spawns for agents. |
 | `pollMinutes` | `1` | Agent liveness poll interval. |
-| `autoScheduleMinutes` | `5` | Failsafe: promote the oldest highest-priority backlog task to to-do after this many minutes with no active task. PM promotion stays the primary path. |
+| `autoScheduleMinutes` | `5` | Idle cooldown for retry paths only: a merger requeued by a failed merge, and a respawn past the 5-death cap, wait this many minutes before the agent spawns again. Backlog promotion does not use it: promotion is event-driven and immediate. |
 | `logStallMinutes` | `5` | A working agent whose log size stays unchanged for this many minutes is assumed dead: the task bounces one state back, the agent process is killed, and the respawn machinery takes over. An invalid value (non-number or <= 0) warns and keeps the default. |
 | `provider` | unset | LLM provider to pass as `--provider`. Requires `model`; a provider without a model is ignored with a warning. |
 | `model` | unset | LLM model or pattern to pass as `--model`. A `:<thinking>` suffix in the pattern keeps working natively. |
@@ -70,7 +70,8 @@ States: backlog, to-do, doing, to-review, reviewing, to-live-test, live-testing,
 `src/orchestrator.ts` is a non-LLM daemon. Start it with the `orchestrator_start` tool (or `node src/orchestrator.ts --root <project>`). One daemon per project: the lockfile is `.kanban/.orchestrator.lock`.
 
 - Watches `.kanban/` (fs.watch) and rescans every 10 s. The `orchestrator_poke` tool touches `.kanban/.poke` for an immediate scan and agent scheduling.
-- to-do: creates `.worktrees/<type>/<num>-<short-slug>` (e.g. feat/1-nice-thing) from the task, sets the worktree attribute, spawns a Developer, moves to doing. Unlimited lanes; the PM throttles by how many tasks it promotes to to-do.
+- backlog: promoted automatically, on every scan and poll: every backlog task whose blockedBy refs all point at done tasks, whose openQuestions section is empty and whose file has no conflict markers moves to to-do, all schedulable tasks at once (unchained tasks run as parallel lanes). When a blocker reaches done, the daemon drops its ref from every task that listed it in the same scan or poll, so blockedBy always lists undone blockers only.
+- to-do: creates `.worktrees/<type>/<num>-<short-slug>` (e.g. feat/1-nice-thing) from the task, sets the worktree attribute, spawns a Developer, moves to doing. Unlimited lanes; the blockedBy chain serializes what must serialize.
 - to-review: spawns a Reviewer, moves to reviewing. After `reviewerCap.<complexity>` successful reviewer runs (1 for simple, 2 for moderate, 3 for complex by default) the task force-advances to to-live-test.
 - to-live-test: spawns a Live-tester, moves to live-testing.
 - to-merge: spawns at most one Merger for the whole project (while the task's own agent is still alive the spawn waits), moves to merging. Only after the task sat idle in to-merge for `autoScheduleMinutes` does a merger requeued by a failed merge get a retry.

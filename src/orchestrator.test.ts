@@ -360,8 +360,9 @@ await waitFor(() => b.output().includes("live-testing -> to-merge"), 30000, "pol
 await waitFor(() => b.output().includes("merging -> to-merge"), 30000, "poll requeued the dead merger's task to to-merge", b.output);
 assert.equal(parseTask(rootB, taskB2.file).state, "to-merge", "requeued task waits for the idle cooldown");
 // a completed run re-arms the streak: a stale pidfile on a task outside the mapped states
-// clears the counter, so a second streak past the cap gets its own cooldown log, not silence
-setState(rootB, taskB, "backlog");
+// clears the counter, so a second streak past the cap gets its own cooldown log, not silence.
+// done, not backlog: the sweep would promote a backlog task back to to-do mid-check
+setState(rootB, taskB, "done");
 writeFileSync(join(kanbanDir(rootB), ".pids", `${slugB}.pid`), "999999999");
 await waitFor(() => b.output().includes("cleared the dead-agent counter"), 30000, "completed run cleared the dead counter", b.output);
 setState(rootB, taskB, "to-do");
@@ -758,7 +759,7 @@ const rootL = fixture();
 cleaned.push(rootL);
 mkdirSync(kanbanDir(rootL), { recursive: true });
 writeFileSync(join(kanbanDir(rootL), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootL), pollMinutes: 0.05 }));
-const taskL = createTask(rootL, { name: "fix: bootstrap board", summary: "Bootstrap smoke", specs: "n/a" });
+const taskL = createTask(rootL, { name: "fix: bootstrap board", summary: "Bootstrap smoke", specs: "n/a", openQuestions: "- [user] Which API?" });
 // board content on refs/heads/meta/kanban via the same plumbing the daemon uses, then the
 // working board file removed: the daemon must materialize it on startup (fresh clone)
 const shaL = execSync(`git hash-object -w .kanban/${taskL.file}`, { cwd: rootL, encoding: "utf8", shell: "/bin/bash" }).trim();
@@ -894,13 +895,13 @@ const rootP = fixture();
 cleaned.push(rootP);
 mkdirSync(kanbanDir(rootP), { recursive: true });
 writeFileSync(join(kanbanDir(rootP), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootP), pollMinutes: 0.05 }));
-const taskP = createTask(rootP, { name: "fix: external move", summary: "Reconcile smoke", specs: "n/a" });
+const taskP = createTask(rootP, { name: "fix: external move", summary: "Reconcile smoke", specs: "n/a", openQuestions: "- [user] Which API?" });
 const p = await runDaemon(rootP);
 await waitFor(() => mirrorSubjects(rootP) !== "", 30000, "task mirrored", p.output);
 const contentP = readFileSync(join(kanbanDir(rootP), taskP.file), "utf8");
 // the tip gains a task while the working tree lacks it: one scan must materialize it
 const externalP = "000002_feat_external_task.md";
-const externalContentP = taskContent("fix: external task");
+const externalContentP = taskContent("fix: external task", "done");
 const extP = externalCommit(rootP, { [taskP.file]: contentP, [externalP]: externalContentP }, "external: add a task");
 await waitFor(() => existsSync(join(kanbanDir(rootP), externalP)), 30000, "external add materialized within one scan", p.output);
 assert.equal(readFileSync(join(kanbanDir(rootP), externalP), "utf8"), externalContentP, "external content materialized byte-for-byte");
@@ -951,55 +952,48 @@ q.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: ... + mirror reconcile smoke passed");
 
-// --- part R: the failsafe promotes the oldest highest-priority backlog task after the idle window ---
+// --- part R: promotion is event-driven: every schedulable backlog task promotes on the
+// sweep, in parallel lanes, even while other tasks run; open questions hold a task ---
 const rootR = fixture();
 cleaned.push(rootR);
 mkdirSync(kanbanDir(rootR), { recursive: true });
-// 0.05min = 3s idle window; the dead stub keeps any started task active forever (to-do/doing cycle)
-writeFileSync(join(kanbanDir(rootR), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootR), pollMinutes: 0.05, autoScheduleMinutes: 0.05 }));
-const taskR0 = createTask(rootR, { name: "feat: active task", summary: "Failsafe smoke", specs: "n/a" });
-// the oldest candidate: without the open-questions guard it would win the sort and be promoted
-const taskRQ = createTask(rootR, { name: "feat: blocked by questions", priority: "critical", summary: "Failsafe smoke", specs: "n/a", openQuestions: "- [user] Which API?" });
-// the next critical: its explicitly empty questions section must not block promotion
-const taskRE = createTask(rootR, { name: "feat: empty questions", priority: "critical", summary: "Failsafe smoke", specs: "n/a" });
-appendFileSync(join(kanbanDir(rootR), taskRE.file), "\n# Open questions\n");
-const taskR1 = createTask(rootR, { name: "feat: older critical", priority: "critical", summary: "Failsafe smoke", specs: "n/a" });
-const taskR3 = createTask(rootR, { name: "feat: newer critical", priority: "critical", summary: "Failsafe smoke", specs: "n/a" });
-const taskR2 = createTask(rootR, { name: "feat: low task", priority: "low", summary: "Failsafe smoke", specs: "n/a" });
+// the working stub completes every promoted task, so the board is never idle: promotion
+// must not wait for idle (the old failsafe did)
+writeFileSync(join(kanbanDir(rootR), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootR), pollMinutes: 0.05 }));
+const taskR0 = createTask(rootR, { name: "feat: active task", summary: "Promotion smoke", specs: "n/a" });
 setState(rootR, taskR0, "to-do");
+// two unchained backlog tasks: both promote at once, in parallel lanes
+const taskR1 = createTask(rootR, { name: "feat: lane one", priority: "low", summary: "Promotion smoke", specs: "n/a" });
+const taskR2 = createTask(rootR, { name: "feat: lane two", priority: "low", summary: "Promotion smoke", specs: "n/a" });
+// unanswered open questions mean the task waits for the user: never promoted
+const taskRQ = createTask(rootR, { name: "feat: blocked by questions", priority: "critical", summary: "Promotion smoke", specs: "n/a", openQuestions: "- [user] Which API?" });
+// a task chained behind lane one: held until its blocker reaches done
+const taskR3 = createTask(rootR, { name: "feat: chained task", priority: "critical", summary: "Promotion smoke", specs: "n/a", blockedBy: `#${parseInt(taskR1.file, 10)}` });
 
 const r = await runDaemon(rootR);
 const readR = (file: string) => parseTask(rootR, file);
 assert.equal(readR(taskRQ.file).openQuestions, "- [user] Which API?", "precondition: unanswered open questions present");
-assert.equal(readR(taskRE.file).openQuestions, "", "precondition: explicit empty questions section");
-// while taskR0 cycles to-do/doing the board is never idle: no promotion despite the elapsed window
-await new Promise((res) => setTimeout(res, 10000));
-assert.ok(!r.output().includes("promoting"), "no promotion while a task is active");
-
-// past the respawn cap the poll bounces taskR0 back and the sweep defers its respawn:
-// settling it done makes the board idle
-await waitFor(() => r.output().includes("respawn waits for the idle cooldown"), 90000, "respawn cooldown on the active task", r.output);
-writeFileSync(
-	join(kanbanDir(rootR), taskR0.file),
-	readFileSync(join(kanbanDir(rootR), taskR0.file), "utf8").replace(/^state: .*/m, 'state: "done"'),
+// the sweep promotes while taskR0 is still active: no idle gate, both unchained tasks at once
+await waitFor(
+	() => r.output().includes(`promoting ${taskR1.file} to to-do`) && r.output().includes(`promoting ${taskR2.file} to to-do`),
+	30000,
+	"both unchained backlog tasks promoted",
+	r.output,
 );
-// the window elapses: the failsafe promotes the oldest critical task whose questions are
-// answered, never the older critical task that still has unanswered open questions
-await waitFor(() => r.output().includes(`promoting ${taskRE.file} to to-do`), 30000, "failsafe promotion of the empty-questions task", r.output);
-assert.ok(["to-do", "doing"].includes(readR(taskRE.file).state), "promoted task is active");
+assert.ok(readR(taskR0.file).state !== "done", "promotion fired while another task was still active");
 assert.equal(readR(taskRQ.file).state, "backlog", "task with unanswered open questions never promoted");
-assert.equal(readR(taskR2.file).state, "backlog", "lower priority not promoted first");
-assert.equal(readR(taskR3.file).state, "backlog", "newer task in the same priority not promoted first");
-assert.equal(readR(taskR1.file).state, "backlog", "critical task after the promoted one not promoted");
-// the promoted task stays active, so the window never re-arms: no second promotion
-await new Promise((res) => setTimeout(res, 8000));
-assert.equal(readR(taskR2.file).state, "backlog", "no second promotion while the promoted task is active");
-assert.equal(readR(taskR3.file).state, "backlog", "no second promotion while the promoted task is active");
-assert.equal(readR(taskRQ.file).state, "backlog", "no second promotion while the promoted task is active");
-assert.equal(r.output().split("promoting ").length - 1, 1, "exactly one promotion logged");
+assert.equal(readR(taskR3.file).state, "backlog", "chained task held while its blocker is not done");
+// the chain serializes: the chained task promotes only after its blocker reaches done, and
+// the daemon drops the done ref from blockedBy in the same sweep
+await waitFor(() => readR(taskR1.file).state === "done", 60000, "lane one completed", r.output);
+await waitFor(() => r.output().includes(`promoting ${taskR3.file} to to-do`), 30000, "chained task promoted after its blocker reached done", r.output);
+assert.notEqual(readR(taskR3.file).state, "backlog", "chained task active after promotion");
+assert.ok(!readR(taskR3.file).blockedBy.includes(`#${parseInt(taskR1.file, 10)}`), "done blocker ref dropped from blockedBy");
+assert.ok(r.output().includes(`dropped done blocker ref(s) #${parseInt(taskR1.file, 10)}`), "ref drop logged");
+assert.equal(r.output().split("promoting ").length - 1, 3, "each schedulable task promoted exactly once");
 r.daemon.kill("SIGTERM");
 
-console.log("orchestrator.test.ts: ... + failsafe auto-schedule smoke passed");
+console.log("orchestrator.test.ts: ... + event-driven promotion smoke passed");
 
 // --- part S: --no-webui / SE_LLM_TEAM_NO_WEBUI keep smoke daemons off the global webui config ---
 // the global config (like the production ~/.pi/agent/se-llm-team.json) enables the webui on a fixed
@@ -1688,46 +1682,41 @@ assert.ok((await removeTask(rootAG, "000999_ghost.md"))!.includes("No task"), "u
 
 console.log("orchestrator.test.ts: ... + task removal smoke passed");
 
-// --- part AH: the failsafe never auto-promotes a task with unfinished blockers; a ghost ref
-// is ignored, and the blocked task schedules normally once its blocker is done ---
+// --- part AH: the blockedBy gate holds a task with an unfinished blocker; a ghost ref is
+// ignored; when the blocker reaches done the daemon drops the ref and promotes in the sweep ---
 const rootAH = fixture();
 cleaned.push(rootAH);
 mkdirSync(kanbanDir(rootAH), { recursive: true });
-// 0.05min = 3s idle window and poll; the dead stub keeps a promoted task active forever
-writeFileSync(join(kanbanDir(rootAH), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAH), pollMinutes: 0.05, autoScheduleMinutes: 0.05 }));
-const taskAH0 = createTask(rootAH, { name: "feat: blocker task", summary: "Failsafe smoke", specs: "n/a" });
-const taskAH1 = createTask(rootAH, { name: "feat: blocked critical", priority: "critical", summary: "Failsafe smoke", specs: "n/a", blockedBy: `#${parseInt(taskAH0.file, 10)}` });
-const taskAH2 = createTask(rootAH, { name: "feat: ghost ref", priority: "critical", summary: "Failsafe smoke", specs: "n/a", blockedBy: "#999" });
+// 0.05min = 3s poll; the dead stub keeps a promoted task cycling to-do/doing, so the drop
+// and the promotion are asserted on the log and the task file
+writeFileSync(join(kanbanDir(rootAH), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAH), pollMinutes: 0.05 }));
+const taskAH0 = createTask(rootAH, { name: "feat: blocker task", summary: "BlockedBy smoke", specs: "n/a" });
+const taskAH1 = createTask(rootAH, { name: "feat: blocked critical", priority: "critical", summary: "BlockedBy smoke", specs: "n/a", blockedBy: `#${parseInt(taskAH0.file, 10)}` });
+const taskAH2 = createTask(rootAH, { name: "feat: ghost ref", priority: "critical", summary: "BlockedBy smoke", specs: "n/a", blockedBy: "#999" });
 
 const ah = await runDaemon(rootAH);
 const readAH = (file: string) => parseTask(rootAH, file);
-// the ghost ref is ignored: the critical ghost task is promotable and wins by priority over
-// the medium blocker task, while the blocked critical task stays held despite its priority
+// both schedulable tasks promote at once: the ghost ref resolves to no task and does not
+// hold, the real ref holds the blocked critical task despite its priority
 await waitFor(() => ah.output().includes(`promoting ${taskAH2.file} to to-do`), 30000, "ghost-only task promoted", ah.output);
+assert.ok(ah.output().includes(`promoting ${taskAH0.file} to to-do`), "blocker task promoted in the same sweep");
 assert.equal(readAH(taskAH1.file).state, "backlog", "blocked critical task not promoted despite priority");
-// settle the ghost task: past the respawn cap the poll bounces it back and the sweep defers
-// the respawn, so the board goes idle once it is settled done
-await waitFor(() => ah.output().includes(`${taskAH2.file.replace(/\.md$/, "")}: agent died`), 60000, "respawn cap on the ghost task", ah.output);
-writeFileSync(
-	join(kanbanDir(rootAH), taskAH2.file),
-	readFileSync(join(kanbanDir(rootAH), taskAH2.file), "utf8").replace(/^state: .*/m, 'state: "done"'),
-);
-// the blocker task is still backlog: the blocked critical task stays held, the medium task promotes
-await waitFor(() => ah.output().includes(`promoting ${taskAH0.file} to to-do`), 30000, "unblocked medium task promoted", ah.output);
-assert.equal(readAH(taskAH1.file).state, "backlog", "still held while the blocker is not done");
-// settle the blocker: the deferred respawn is parked, so the board goes idle once it is done
-await waitFor(() => ah.output().includes(`${taskAH0.file.replace(/\.md$/, "")}: agent died`), 60000, "respawn cap on the blocker task", ah.output);
+// settle the blocker by hand: the daemon drops the done ref from the held task and promotes
+// it in the same sweep
 writeFileSync(
 	join(kanbanDir(rootAH), taskAH0.file),
 	readFileSync(join(kanbanDir(rootAH), taskAH0.file), "utf8").replace(/^state: .*/m, 'state: "done"'),
 );
 await waitFor(() => ah.output().includes(`promoting ${taskAH1.file} to to-do`), 30000, "blocked task promoted after the blocker is done", ah.output);
-assert.ok(["to-do", "doing"].includes(readAH(taskAH1.file).state), "promoted task is active");
+assert.notEqual(readAH(taskAH1.file).state, "backlog", "promoted task is active");
+assert.equal(readAH(taskAH1.file).blockedBy, "", "done blocker ref dropped from blockedBy");
+assert.ok(ah.output().includes(`dropped done blocker ref(s) #${parseInt(taskAH0.file, 10)}`), "ref drop logged");
+assert.equal(ah.output().split("promoting ").length - 1, 3, "each schedulable task promoted exactly once");
 ah.daemon.kill("SIGTERM");
 // full exit before the removal: a sweep mid-flight still writes into the fixture
 await Promise.race([new Promise((r) => ah.daemon.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
 cleanupAll(rootAH);
-console.log("orchestrator.test.ts: ... + blockedBy failsafe smoke passed");
+console.log("orchestrator.test.ts: ... + blockedBy gate and auto-drop smoke passed");
 
 // --- part AI: a completed run clears the dead counter, so the cooldown applies to consecutive-death streaks only ---
 const rootAI = fixture();
