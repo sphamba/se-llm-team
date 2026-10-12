@@ -1,8 +1,8 @@
 ---
 name: "fix: createTask lock wait is shorter than the stale-lock steal threshold"
 priority: "low"
-state: "live-testing"
-worktree: "fix/179-create-lock-wait-threshold"
+state: "done"
+worktree: ""
 issuer: "#174"
 complexity: "simple"
 shortName: "create-lock-wait-threshold"
@@ -50,6 +50,28 @@ In `src/kanban.ts` `createTask` the lock acquisition loop waits about 1 s (100 i
 - Step 1: merged main into fix/179-create-lock-wait-threshold in the worktree. Clean merge (ort strategy, no conflicts), commit 8521d5b. main had moved ahead with webui work (src/webui.ts, src/webui.test.ts); no overlap with the fix. Test suites skipped per the clean-merge rule.
 - Step 2: merged fix/179-create-lock-wait-threshold into main in the project root. Fast-forward to 8521d5b, no conflicts.
 - No user/client questions.
+
+## 2026-10-12, live-tester
+
+- Live test on merged commit 8521d5b in the project root. Fixture: empty `/tmp/lt179/repo/.kanban`, no git and no daemon. All tool flows used the real `kanban_create` tool through `pi -p --no-session --no-context-files --approve --no-mcp --mode json` with the fixture as cwd. The tool duration is the `durationMs` field of the `tool_execution_end` JSONL record. The unit suites were not run, per the live-test rules.
+- Results:
+
+| # | Scenario | Result |
+|---|---|---|
+| 1 | no lock (baseline) | success, 2 ms |
+| 2 | fresh `.create.lock` from a dead holder | success after a 5011 ms wait, lock stolen, no lock file left |
+| 3 | live holder touches the lock every 0.5 s and releases after 13 s | success after an 8533 ms wait, lock not stolen, created on release |
+| 4 | live holder still held past the deadline | error `could not lock "/tmp/lt179/repo/.kanban" for task creation` after 15002 ms, no task file, lock intact |
+| 5 | old code 966ce04, fresh lock (direct call) | error after 1055 ms (the #174 failure) |
+| 6 | old code 966ce04, lock backdated 8 s (direct call) | error after 1055 ms |
+| 7 | merged code, fresh lock (direct call) | success after 10024 ms, no lock left |
+| 8 | merged code, lock backdated 8 s (direct call) | success after 2014 ms, no lock left |
+
+- Scenarios 3 and 4 prove the age-based steal semantics: a live holder never loses its lock. Scenario 4 proves the give-up window is 15 s (10 s threshold + 5 s margin).
+- The created tasks were well-formed (state `backlog`, issuer `user`, the requested name and summary).
+- Assumptions of the usage tests: (a) a `pi -p` session in the fixture root loads the merged extension through the global symlink `~/.pi/agent/extensions/se-llm-team`; (b) pi startup takes about 5 s to 6 s, so the lock ages during it (scenario 2 shows this effect).
+- Technical difficulty, not a finding: the model wrote a pseudo tool call as plain text in 2 of 6 `pi` runs, so no tool ran. A missing `tool_execution_start` record in the JSONL identifies the case. A retry fixed it. This is model flakiness, not a defect of the change.
+- Findings: none. The Specs are verified. The concurrency regression stays with `src/kanban.test.ts`, the developer and reviewer gate.
 
 # Open questions
 
