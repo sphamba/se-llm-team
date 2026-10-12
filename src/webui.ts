@@ -224,7 +224,7 @@ function tsMs(v: unknown): number | null {
 // subagent transcript, cache reads included), duration is the last record timestamp minus the
 // first, first is that first record timestamp in epoch ms (000139: the agent history sort's
 // primary key), model and thinkingLevel come off the latest usage-bearing record (000146: the log
-// pane's meta line; null when no such record exists). A plain log only ever grows, so a size match
+// pane's meta line; null when no such record exists or the latest one lacks them (000151)). A plain log only ever grows, so a size match
 // means the parse is current; a live log re-parses per poll. A .gz log is immutable, so its
 // compressed size keys the same cache.
 // Ceiling: a full re-read per growth, split-line the incremental scan when a live log passes
@@ -256,9 +256,10 @@ function logStats(path: string): { tokens: number | null; duration: number | nul
 		}
 		if ((rec?.type === "turn_end" || rec?.type === "assistant") && typeof rec?.message?.usage?.totalTokens === "number" && Number.isFinite(rec.message.usage.totalTokens)) {
 			tokens = (tokens ?? 0) + rec.message.usage.totalTokens;
-			// the loop reads top to bottom, so the latest usage-bearing record wins
-			if (typeof rec.message.model === "string" && rec.message.model) model = rec.message.model;
-			if (typeof rec.message.thinkingLevel === "string" && rec.message.thinkingLevel) thinkingLevel = rec.message.thinkingLevel;
+			// the loop reads top to bottom, so the latest usage-bearing record wins; a record without the
+			// fields clears them rather than carrying an older record's value forward (000151)
+			model = typeof rec.message.model === "string" && rec.message.model ? rec.message.model : null;
+			thinkingLevel = typeof rec.message.thinkingLevel === "string" && rec.message.thinkingLevel ? rec.message.thinkingLevel : null;
 		}
 		const ts = tsMs(rec?.timestamp) ?? tsMs(rec?.message?.timestamp);
 		if (ts != null) {

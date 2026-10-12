@@ -999,6 +999,16 @@ assert.ok(servedLog.text.includes("not json at all\n"), "endpoint passes non-JSO
 assert.equal(servedLog.model, null, "a log without usage-bearing records carries a null model, the meta line stays hidden");
 assert.equal(servedLog.thinkingLevel, null, "a log without usage-bearing records carries a null thinking level too");
 
+// 000151: the meta comes off the latest usage-bearing record only; when that record lacks
+// model/thinkingLevel both clear instead of keeping an older record's values
+writeFileSync(logFile, [
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 100 }, model: "m-1", thinkingLevel: "low" }, timestamp: "2026-10-11T09:36:24.121Z" }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 200 } }, timestamp: "2026-10-11T09:37:24.121Z" }),
+].join("\n") + "\n");
+const clearedLog = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.equal(clearedLog.model, null, "a latest usage-bearing record without a model clears the meta's model");
+assert.equal(clearedLog.thinkingLevel, null, "a latest usage-bearing record without a thinking level clears it too");
+
 // a record split at the chunk head (init fetch of a log bigger than LOG_CHUNK) drops its partial
 // line instead of rendering raw JSON
 const bigRecord = JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "z".repeat(100000) } });
