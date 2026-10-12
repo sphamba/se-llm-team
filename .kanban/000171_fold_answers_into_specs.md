@@ -1,8 +1,8 @@
 ---
 name: "fix: answered board questions land in # Notes, not the Specs the skill and Developer contract require"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/171-fold-answers-into-specs"
+state: "done"
+worktree: ""
 issuer: "#161"
 complexity: "simple"
 shortName: "fold-answers-into-specs"
@@ -63,6 +63,13 @@ Blocked by #172 because both tasks rewrite the same SKILL.md Watcher-section bul
 - No fixes. State set to to-review.
 - Review pass 2 done, no fixes. Verified: the diff is exactly 1 line (SKILL.md step 2's openQuestions bullet) and carries the decided fold semantics; kanban_update (index.ts:91-100) has no notes field, additionalProperties false, specs = "Replaces the whole Specs section", so the bullet's "kanban_update cannot write Notes" and "specs replaces the whole section" are accurate; agents/developer.md untouched and consistent ("The Specs are the contract." line 12, "When an answer reaches the Specs" line 10). Both acceptance criteria hold; no tests reference SKILL.md, so no checkable command applies. Branch sits on post-#172 main (7b39251) and preserves the #172 Watcher wording. The four developer assumptions are stated in # Open questions and match the Decision block; none silent. State set to to-merge.
 - Merge done: step 1 merged main (7b39251) into the branch in the worktree, already up to date, no conflicts, no test suites run (clean merge). Step 2 merged fix/171-fold-answers-into-specs into main in the project root, fast-forward to ca621b3, 1 file changed (SKILL.md, 1 line). Root checkout clean after merge.
+- Live test (pi CLI + merged daemon code from /home/phamba/repos/se-llm-team; no unit suite run). No findings.
+  - Text delivery (criterion 1): a fresh `pi -p -nt --no-session` session invoked `/skill:se-llm-team` (global skill symlink -> repo skill file) and quoted step 2's openQuestions bullet verbatim. The delivered text carries the fold semantics (kanban_update specs replaces the whole section, restate the ambiguous acceptance as the decided acceptance, Developer implements from the Specs alone) and the Notes clause (kanban_update cannot write Notes, Notes does not bind the Developer). agents/developer.md is unchanged and consistent: "The Specs are the contract." plus "When an answer reaches the Specs, remove the question from the section".
+  - Real PM fold (criterion 1, documented tool path): isolated fixture (scratch bare origin with refs/heads/meta/kanban deleted, clone at the merged commit), backlog probe task with an either/or acceptance and one open question. Real PM run: `pi -p --no-session --approve --mode json "/skill:se-llm-team ... The user has answered: Middle dot. No comma fallback. ..."`. The JSONL records exactly one `kanban_update` call with `specs` (the decided acceptance) and `openQuestions: ""`, no notes field. File after: Specs carry the decision, the "Either ... or ..." wording is gone, `# Open questions` is left as an empty section, Notes empty. Repeated on a second probe (answer "5 seconds") with the same result.
+  - Promotion + Developer spawn (criterion 2): the fixture daemon (fake-pi stand-in, isolated HOME, SE_LLM_TEAM_NO_WEBUI=1) promoted both folded probes backlog -> to-do -> doing and spawned a Developer per task; a control probe whose open questions were left unanswered stayed in backlog. The spawned Developer prompt points at the folded Specs ("The Specs are the contract."), so no Notes consultation is needed. The fixture's scratch origin got the `kanban: create 000001_probe_fold.md` mirror commit; the real checkout and its meta/kanban ref are untouched.
+- Assumptions made while designing the tests: (a) the observed defect is the PM's practice, so the test drives a real PM session with the shipped skill rather than reading the file; (b) "promotes" is verified with a real daemon on an isolated root and a fake-pi developer stand-in; (c) the fold is verified from the `kanban_update` arguments in `--mode json`, not from the PM's final summary.
+- No observed behavior contradicted the task's stated assumptions. Technical difficulty (fixture-side, not the project): a `.mjs` fake-pi without a shebang/exec bit fails with `spawn ... EACCES`; fixed with `#!/usr/bin/env node` + `chmod +x`, and AGENTS.live-tester.md updated.
+- State set to done.
 
 # Open questions
 
