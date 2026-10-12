@@ -5,6 +5,7 @@ state: "backlog"
 worktree: ""
 issuer: "#147"
 complexity: "simple"
+blockedBy: "#147, #152"
 shortName: "log-pre-mono-scope"
 ---
 

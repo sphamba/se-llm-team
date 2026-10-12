@@ -2,8 +2,8 @@
 name: "fix: code blocks stay monospace; buttons use Inter"
 blockedBy: ""
 priority: "low"
-state: "to-merge"
-worktree: "fix/147-inter-font-code-buttons"
+state: "done"
+worktree: ""
 issuer: "#141"
 complexity: "simple"
 shortName: "inter-font-code-buttons"
@@ -40,6 +40,7 @@ Tests: extend the flat assertion script - the PAGE ships the code/pre monospace 
   - The Specs repeat the #141 measurement "#m-log-text pre = Inter (fenced code blocks render as pre via md())". On the real logs a markdown fenced block is pre > code, while a plain pre in the log pane is the Thinking wrapper (md output) or a tool args/output block. #m-body has no such wrapper, so there pre is only a fenced block. The test measured both forms, and the discrepancy is the issue above. This contradicts the task assumption that a log-pane pre is a fenced code block.
   - No task body on the board has a real fenced block, so #m-body pre was exercised with a temporary element in the real open task modal. Writing a test task file would touch the shared .kanban board.
   - The fenced-block check needed history: the log pane opens on the tail chunk, so the test scrolled to the top repeatedly, which is a normal user gesture.
+- Merged (base branch main): step 1 merged main into fix/147-inter-font-code-buttons in the worktree, already up to date, no conflicts, so no test suites were re-run. Step 2 merged fix/147-inter-font-code-buttons into main in the project root, fast-forward 7a011a1..a6a07ec, clean. main is at a6a07ec with the two changed files (src/webui.ts +4, src/webui.test.ts +9/-1). No unresolvable conflicts, no failing tests.
 
 # Open questions
 - Should the log pane's Thinking prose and the tool argument/output blocks stay monospace, or should only inline code and fenced code be monospace? The new rule makes the whole Thinking body monospace, which is more than the Summary asked for.
