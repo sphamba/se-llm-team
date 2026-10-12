@@ -1,8 +1,8 @@
 ---
 name: "fix: task card chips render with a space between them"
 priority: "low"
-state: "live-testing"
-worktree: "fix/176-chip-spacing"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "trivial"
 shortName: "chip-spacing"
@@ -28,5 +28,14 @@ Task preview cards render the priority, complexity and issuer chips adjacent wit
 - Note for future agents: run src/webui.test.ts plain (no SE_LLM_TEAM_NO_WEBUI=1). Its daemon smoke test sets HOME to a temp config with webUi port 0, so it is safe, and the env var makes its "daemon log shows the web ui url" assertion fail.
 - Merge step 1: merged main into fix/176-chip-spacing in the worktree. Clean, no conflicts (only skills/se-llm-team/SKILL.md carried over), so test suites were skipped per the merge protocol.
 - Merge step 2: merged fix/176-chip-spacing into main in the project root. Fast-forward ca621b3..c38a37b, carrying src/webui.ts and src/webui.test.ts. Ready for live test.
+
+## Live test (merged commit c38a37b)
+- Fixture: hub-only on an isolated root (`/tmp/chip176/repo`, two probe tasks, one user-issued and one with issuer "#42"), isolated HOME, port 4488, page served from the merged `src/webui.ts`.
+- Real browser (Playwright) at `http://127.0.0.1:4488/`: both probe cards render their 3 chips on one row with a 5 px gap between the chip boxes (`high`/`complex`/`user` and `critical`/`simple`/`#42`). Each card's markup contains `</span> <span class="chip` and no `</span><span class="chip`, and each card has the whitespace text nodes between the chips.
+- Differential control: a clone of the rendered card with those whitespace text nodes removed measures a 0 px gap, so the 5 px gap comes from the fix, not from the pill padding.
+- Live board re-render: moving a probe from backlog to doing moved its card to the doing column on the next 5 s board poll, chips kept the 5 px gap and the spaced markup. The "one full board re-render" the Specs mention showed no behavior change.
+- Screenshot: /tmp/chip176/cards.png. Detail modal untouched, as specced. No findings.
+- Assumptions: the acceptance is the rendered, user-visible gap between chip boxes on a task preview card, and the documented 5 s board poll exercises the card-identity re-render path.
+- Contradictions with the task's stated assumptions: none observed.
 
 # Open questions
