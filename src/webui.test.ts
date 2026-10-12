@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -386,6 +386,15 @@ const page = await pageRes.text();
 assert.doesNotThrow(() => new Function(page.match(/<script>([\s\S]*?)<\/script>/)![1]), "the served client script parses");
 assert.ok(page.includes("Software Engineering LLM Team"), "page shows the new title");
 assert.ok(page.includes('id="theme"'), "page has the theme toggle");
+assert.ok(page.includes('id="hub"'), "page has the hub identity footer (000165)");
+// 000165: /api/hub reports the serving hub's identity (pid, code checkout, commit), so a
+// stale-code hub or a failover is visible at a glance
+const hubRes = await fetch(`${base}/api/hub`);
+assert.equal(hubRes.status, 200);
+const hub = await hubRes.json();
+assert.equal(hub.pid, process.pid, "/api/hub reports the serving process");
+assert.equal(hub.root, realpathSync(join(HERE, "..")), "/api/hub names the code checkout hub.ts runs from");
+assert.equal(hub.commit, execFileSync("git", ["rev-parse", "HEAD"], { cwd: join(HERE, "..") }).toString().trim(), "/api/hub reports the checkout's HEAD commit");
 for (const st of STATE_NAMES) assert.ok(page.includes(st), `page mentions state ${st}`);
 assert.equal((await fetch(`${base}/nope`)).status, 404);
 assert.equal((await fetch(`${base}/api/tasks`, { method: "POST" })).status, 404);

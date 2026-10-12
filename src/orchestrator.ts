@@ -8,6 +8,7 @@ import {
 	getTask,
 	kanbanDir,
 	listAll,
+	splitWorktreeRoot,
 	setState,
 	setWorktree,
 	updateAttrs,
@@ -1305,6 +1306,15 @@ function holdsLock(root: string): boolean {
 	}
 }
 
+// 000165: a task worktree daemon reaps itself when its owner task is done or gone, so no stale
+// daemon lingers to hold the lock or contest the hub port. The check reads the main root's
+// board: the worktree's own .kanban can be gone with the worktree.
+function worktreeTaskEnded([mainRoot, wtName]: [string, string]): boolean {
+	if (!wtName) return false;
+	const owner = listAll(mainRoot).find((t) => t.worktree === wtName);
+	return !owner || owner.state === "done";
+}
+
 export function main(argv: string[]): void {
 	const args = parseArgs(argv);
 	if (!args.root) {
@@ -1320,6 +1330,16 @@ export function main(argv: string[]): void {
 		process.stdout.write(summary + "\n");
 		return;
 	}
+	const worktreeSplit = splitWorktreeRoot(root);
+	// 000165 self-reap: checked at startup and on every sweep, before acquireLock and the lock
+	// self-heal, which would recreate a removed worktree's board dirs. stdout only: the worktree
+	// may already be removed, and a log(root, ...) write would recreate its dirs.
+	const reapIfTaskEnded = () => {
+		if (!worktreeSplit || !worktreeTaskEnded(worktreeSplit)) return;
+		process.stdout.write(`[${new Date().toISOString()}] task worktree daemon reaped: task done or gone (${root})\n`);
+		process.exit(0);
+	};
+	reapIfTaskEnded();
 	const cfg = loadConfig(root);
 	const pollMinutes = args.pollMinutes ?? cfg.pollMinutes;
 	const rescanSeconds = args.rescanSeconds ?? 10;
@@ -1332,6 +1352,7 @@ export function main(argv: string[]): void {
 	bootstrapBoard(root);
 
 	const sweep = () => {
+		reapIfTaskEnded();
 		// lock self-heal: an external cleanup or an acquire race can drop the lock mid-life;
 		// without this the daemon runs lockless forever and status/stop report "not running"
 		if (!holdsLock(root)) {

@@ -1,5 +1,5 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 export const STATES = [
 	"backlog",
@@ -66,6 +66,15 @@ const IN_PROGRESS = new Set<TaskState>([
 
 export function kanbanDir(root: string): string {
 	return join(root, ".kanban");
+}
+
+// [main root, worktree name] of a task worktree root, e.g. /repo/.worktrees/fix/1-x ->
+// ["/repo", "fix/1-x"]; null when root is not a task worktree (no .worktrees segment)
+export function splitWorktreeRoot(root: string): [string, string] | null {
+	const parts = root.split(sep);
+	const i = parts.indexOf(".worktrees");
+	if (i < 1) return null;
+	return [parts.slice(0, i).join(sep), parts.slice(i + 1).join(sep)];
 }
 
 export function taskFiles(root: string): string[] {

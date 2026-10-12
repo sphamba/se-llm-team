@@ -1287,6 +1287,62 @@ assert.equal(parseInt(readFileSync(join(homeW, ".pi", "agent", "se-llm-team-hub.
 survProc.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + hub failover smoke passed");
 
+// --- part Y: 000165 a worktree daemon never serves the ui and reaps itself when its task ends ---
+const rootWt = fixture();
+const homeWt = mkdtempSync(join(tmpdir(), "orch-hub-wt-home-"));
+cleaned.push(rootWt, homeWt);
+const portWt = await freePort();
+mkdirSync(join(homeWt, ".pi", "agent"), { recursive: true });
+writeFileSync(join(homeWt, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portWt } }));
+// the owner task: open (openQuestions keep the sweep from promoting it), worktree attribute set
+const taskWt = createTask(rootWt, { name: "feat: worktree daemon", summary: "Hub candidacy smoke", specs: "n/a", openQuestions: "smoke: stays open" });
+setWorktree(rootWt, taskWt, "fix/1-wt");
+setState(rootWt, taskWt, "doing");
+execSync("git worktree add .worktrees/fix/1-wt -b fix/1-wt", { cwd: rootWt, shell: "/bin/bash" });
+const wtPath = join(rootWt, ".worktrees", "fix", "1-wt");
+const envWt = { ...process.env, HOME: homeWt, SE_LLM_TEAM_HUB_HEALTH_MS: "500" };
+delete envWt.SE_LLM_TEAM_NO_WEBUI;
+// the hub comes up AFTER the worktree daemon: its startup election stands down instead of racing
+const dWt = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", wtPath, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: envWt });
+daemons.push({ daemon: dWt, root: wtPath });
+let outWt = "";
+dWt.stdout.on("data", (d) => (outWt += d));
+dWt.stderr.on("data", (d) => (outWt += d));
+const exitWt = new Promise<string>((r) => dWt.on("exit", (code) => r(String(code))));
+await waitFor(() => outWt.includes("stands down"), 15000, "worktree daemon stands down at startup with no hub", () => outWt);
+assert.ok(!outWt.includes("web ui on"), "a worktree daemon never races for the port");
+const realHomeWt = process.env.HOME;
+process.env.HOME = homeWt;
+const hubWt = await startHub({ name: basename(rootWt), root: rootWt, host: "127.0.0.1", port: portWt, healthMs: 500, staleMs: 3000 });
+assert.ok(hubWt, "the hub starts in-process");
+await waitForAsync(async () => {
+	try {
+		return (await (await fetch(`http://127.0.0.1:${portWt}/api/projects`)).json()).some((e: any) => e.root === wtPath);
+	} catch {
+		return false;
+	}
+}, 15000, "worktree daemon registers with the hub once it appears");
+await new Promise((r) => setTimeout(r, 2000)); // several hub ticks: still never served
+assert.ok(!outWt.includes("web ui on"), "a worktree daemon never serves the ui");
+assert.equal(await Promise.race([exitWt, Promise.resolve("alive")]), "alive", "the worktree daemon stays alive while its task is open");
+// the task goes done: the daemon reaps itself on its next sweep
+setState(rootWt, taskWt, "done");
+assert.equal(await Promise.race([exitWt, new Promise<string>((r) => setTimeout(() => r("timeout"), 15000))]), "0", "the worktree daemon reaped itself when its task went done");
+// the task gone: a fresh daemon reaps at startup, before anything recreates the removed worktree's dirs
+rmSync(join(rootWt, ".kanban", taskWt.file));
+rmSync(join(rootWt, ".worktrees"), { recursive: true, force: true });
+const dWt2 = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", wtPath, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: envWt });
+daemons.push({ daemon: dWt2, root: wtPath });
+let outWt2 = "";
+dWt2.stdout.on("data", (d) => (outWt2 += d));
+dWt2.stderr.on("data", (d) => (outWt2 += d));
+const exitWt2 = new Promise<string>((r) => dWt2.on("exit", (code) => r(String(code))));
+assert.equal(await Promise.race([exitWt2, new Promise<string>((r) => setTimeout(() => r("timeout"), 15000))]), "0", "a worktree daemon whose task is gone reaps at startup");
+assert.ok(!existsSync(wtPath), "the startup reap ran before the dirs were recreated, no worktree shell left behind");
+process.env.HOME = realHomeWt;
+hubWt.close();
+console.log("orchestrator.test.ts: ... + worktree hub candidacy smoke passed");
+
 // --- part X: provider/model/thinking config flags, with per-role overrides ---
 // the llm flags sit between "--mode json" and "-p", in resolution order provider, model, thinking
 const llmArgs = (argv: string[]) => argv.slice(argv.indexOf("--mode") + 2, argv.indexOf("-p"));

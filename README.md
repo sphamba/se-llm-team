@@ -90,7 +90,9 @@ Role agents run in the task worktree or at the project root, but pi loads the ex
 
 ## Web dashboard
 
-With `webUi.enabled: true` in `~/.pi/agent/se-llm-team.json`, the orchestrator daemon serves a read-only dashboard at `http://<host>:<port>` (default `http://localhost:4242`): one column per task state, cards with a priority chip, and a popup with the full task (attributes and rendered body). The board is re-read on every request and the page refreshes itself every 5 s. A failed start (port taken) is logged and the pipeline continues.
+With `webUi.enabled: true` in `~/.pi/agent/se-llm-team.json`, the orchestrator daemon serves a read-only dashboard at `http://<host>:<port>` (default `http://localhost:4242`): one column per task state, cards with a priority chip, and a popup with the full task (attributes and rendered body). The board is re-read on every request and the page refreshes itself every 5 s. A failed start (port taken) is logged and the pipeline continues. The page footer shows the serving hub's identity (`pid`, code checkout, `commit`), so a stale-code hub or a failover is visible at a glance; the same payload is at `GET /api/hub`.
+
+Only daemons outside a task worktree can win the hub election and bind the port: a worktree checkout can hold old code, so its daemon registers with the hub and never serves the ui. During a production restart the dashboard is briefly down instead of being served by old code. A daemon rooted in a task worktree exits itself when its task reaches `done` or is gone (checked at startup and on every sweep), so no stale worktree daemon lingers to hold the lock or contest the port.
 
 ## Agents
 

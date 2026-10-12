@@ -1172,6 +1172,9 @@ h1 { font-size: 16px; margin: 0; }
 #theme { margin-left: auto; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 #theme:hover { background: var(--hover); }
 #updated { font-size: 12px; color: var(--muted); }
+/* 000165: the serving hub's identity, hidden until the first /api/hub answer fills it */
+#hub { padding: 2px 18px 8px; font-size: 11px; color: var(--muted); }
+#hub:empty { display: none; }
 /* 000091: a relative #tabs at z-index 1 keeps the bar above the overlay and clickable while a modal is open; 000119: #modal must sit above #tabs and #relations (both z-index 1) or the relation lines paint over it; 000124: the task cards stack at z-index 2, so #modal bumps to 3 */
 #tabs { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; }
 #tabs:empty { display: none; }
@@ -1282,6 +1285,7 @@ none so the card clicks pass through */
 <header><h1>Software Engineering LLM Team</h1><span id="updated"></span><button id="theme" onclick="toggleTheme()">Dark</button></header>
 <nav id="tabs"></nav>
 <main id="board"></main>
+<footer id="hub"></footer>
 <div id="modal" class="hidden"><div id="m-box">
 <div id="m-head"><h2 id="m-title"></h2><button id="m-close" onclick="closeModal()">Close</button></div>
 <div id="m-attrs"></div>
@@ -1686,7 +1690,17 @@ pane.onscroll = () => {
 	if (!logState || logState.busy || logState.atStart || pane.scrollTop > 0) return;
 	pullLog(logUrl("&offset=" + logState.head + "&before=1"), "history");
 };
+// the serving hub's identity (000165): pid, code checkout and commit; null keeps the last text
+function renderHub(info) {
+	const el = document.getElementById("hub");
+	if (!el || !info) return;
+	const text = info.old ? "hub: old hub code (restart needed)" : "hub pid " + info.pid + " \u00b7 " + info.root + (info.commit ? " \u00b7 " + info.commit.slice(0, 7) : "");
+	if (el.textContent !== text) el.textContent = text;
+}
 function refresh() {
+	// the serving hub's identity in the footer (000165): a stale-code hub or a failover shows
+	// at a glance; a 404 means old hub code that predates the endpoint (a webui hot reload mix)
+	fetch("/api/hub").then(r => r.status === 404 ? { old: true } : r.ok ? r.json() : null).catch(() => null).then(renderHub);
 	fetch("/api/projects").then(r => r.ok ? r.json() : null).catch(() => null).then(list => {
 		// the single-project server 404s here, and a transient hub failure keeps the last known
 		// tabs: only a real projects list replaces them

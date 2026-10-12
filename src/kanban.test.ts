@@ -3,7 +3,7 @@ import { execSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTask, getTask, listAll, listTasks, parseTask, setState, setWorktree, slugFile, slugWorktree, taskFiles, taskNum, updateTask } from "./kanban.ts";
+import { createTask, getTask, listAll, listTasks, parseTask, setState, setWorktree, slugFile, slugWorktree, splitWorktreeRoot, taskFiles, taskNum, updateTask } from "./kanban.ts";
 
 const root = mkdtempSync(join(tmpdir(), "kanban-test-"));
 const fail = (msg: string) => {
@@ -22,6 +22,11 @@ assert.equal(
 assert.equal(slugWorktree("feat: nice thing", 42), "feat/42-nice-thing");
 assert.equal(slugWorktree("nice thing", "000042_nice_thing.md"), "task/42-nice-thing");
 assert.equal(slugWorktree("feat: nice thing"), "feat/nice-thing"); // no file, no number
+// 000165: the hub candidacy and self-reap checks split a worktree root into main root + name
+assert.deepEqual(splitWorktreeRoot("/repo/.worktrees/fix/1-x"), ["/repo", "fix/1-x"]);
+assert.deepEqual(splitWorktreeRoot("/repo/.worktrees/x"), ["/repo", "x"]);
+assert.equal(splitWorktreeRoot("/repo"), null, "a main root is not a task worktree");
+assert.equal(splitWorktreeRoot("/repo/sub/dir"), null, "a nested non-worktree root is not a task worktree");
 assert.equal(slugWorktree("feat: nice thing", "000042_nice_thing.md", "this-is-a-short-name"), "feat/42-this-is-a-short-name");
 assert.equal(slugWorktree("feat: nice thing", 42, "this-is-a-short-name"), "feat/42-this-is-a-short-name");
 assert.equal(slugWorktree("nice thing", "000042_nice_thing.md", "this-is-a-short-name"), "task/42-this-is-a-short-name");

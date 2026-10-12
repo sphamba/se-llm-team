@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { splitWorktreeRoot } from "./kanban.ts";
 import { pidAlive } from "./pid.ts";
 
 // Hub backend: daemons register on spawn, the hub is elected by a lock race, the registry is
@@ -30,6 +31,16 @@ export interface HubOptions {
 
 type WebuiModule = typeof import("./webui.ts");
 const DEFAULT_WEBUI_PATH = fileURLToPath(new URL("./webui.ts", import.meta.url));
+// the checkout whose code this process serves: hub.ts is <code root>/src/hub.ts and realpath
+// resolves the install symlink, so a worktree-launched daemon names its own worktree (000165)
+const CODE_ROOT = (() => {
+	const src = dirname(fileURLToPath(import.meta.url));
+	try {
+		return realpathSync(join(src, ".."));
+	} catch {
+		return join(src, "..");
+	}
+})();
 
 // The webui module (page, rendering, payload builders) reloads when its file changes: node
 // cache-busts the dynamic import with the mtime as the version query, so a browser reload
@@ -72,6 +83,15 @@ const REQUEST_TIMEOUT = 1000;
 export function currentBranch(root: string): string {
 	try {
 		return execFileSync("git", ["branch", "--show-current"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+	} catch {
+		return "";
+	}
+}
+
+// the checkout's HEAD commit, resolved live; "" on a non-git root (000165: the /api/hub identity)
+export function currentCommit(root: string): string {
+	try {
+		return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 	} catch {
 		return "";
 	}
@@ -198,6 +218,9 @@ async function route(
 		// no-cache: a browser reload re-fetches the page instead of serving a stale one
 		res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache", connection: "close" });
 		res.end(PAGE);
+	} else if (req.method === "GET" && path === "/api/hub") {
+		// 000165: the serving hub's identity, so a stale-code hub or a failover is visible at a glance
+		json(res, { pid: process.pid, root: CODE_ROOT, commit: currentCommit(CODE_ROOT) });
 	} else if (req.method === "GET" && path === "/api/projects") {
 		json(res, [...entries.values()]);
 	} else if (req.method === "GET" && path === "/api/tasks") {
@@ -322,12 +345,17 @@ export async function startHub(opts: HubOptions): Promise<{ port: number; close:
 // The daemon side of the hub: at startup (webUi enabled) check /health; when no hub answers,
 // race for the shared lock. The winner serves the ui in-process, losers stand down and
 // register with the winner. Every daemon heartbeats and polls /health: repeated failures
-// re-run the election, so a dead hub fails over to a surviving daemon. Runs for the daemon's
-// lifetime.
+// re-run the election, so a dead hub fails over to a surviving daemon. A daemon rooted in a
+// task worktree never races (its checkout can hold old code): it registers and heartbeats
+// only, so a production restart leaves the port free for the new production daemon (000165).
+// Runs for the daemon's lifetime.
 export function joinHub(opts: HubOptions): void {
 	const log = opts.log ?? (() => {});
 	const tickMs = opts.healthMs ?? envMs("SE_LLM_TEAM_HUB_HEALTH_MS", DEFAULT_HEALTH_MS);
 	const base = `http://${dialHost(opts.host)}:${opts.port}`;
+	// 000165: a task worktree checkout can hold old code, so its daemon never races for the
+	// port; the election stays with non-worktree daemons
+	const canHub = !splitWorktreeRoot(opts.root);
 	let timer: NodeJS.Timeout | undefined;
 	let busy = false;
 	let failures = 0;
@@ -403,7 +431,7 @@ export function joinHub(opts: HubOptions): void {
 					registered = true;
 					log(`registered ${opts.name} with the hub at ${base}`);
 				}
-			} else if (++failures >= HEALTH_FAILS) {
+			} else if (canHub && ++failures >= HEALTH_FAILS) {
 				failures = 0;
 				clearInterval(timer);
 				await becomeHub();
@@ -417,8 +445,12 @@ export function joinHub(opts: HubOptions): void {
 
 	void (async () => {
 		// startup election: no hub answered, so race for the lock; the winner serves the ui,
-		// the loser joins the winner's hub
-		if (!(await healthy())) await becomeHub();
+		// the loser joins the winner's hub. A worktree checkout never races: its code can be
+		// stale, so it stands down and waits for a hub to register with (000165)
+		if (!(await healthy())) {
+			if (canHub) await becomeHub();
+			else log("no hub answering; task worktree checkout stands down (the port is not ours to take)");
+		}
 		timer = setInterval(() => void tick(), tickMs);
 		void tick();
 	})();
