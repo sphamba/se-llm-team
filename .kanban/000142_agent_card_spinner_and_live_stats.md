@@ -1,9 +1,9 @@
 ---
 name: "fix: agent card spinner survives the poll; time and tokens update at log cadence"
 priority: "medium"
-state: "backlog"
-worktree: ""
-blockedBy: "#141"
+state: "doing"
+worktree: "fix/142-agent-card-spinner-and-live-stats"
+blockedBy: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "agent-card-spinner-and-live-stats"

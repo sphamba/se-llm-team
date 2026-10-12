@@ -61,3 +61,8 @@ Passed:
 - The 13 MB developer log opens, renders thinking blocks, code fences and tool blocks, and history scrolling works.
 Issue:
 - Inter is not everywhere. The <code> elements render in the browser default monospace, and the <button> elements render in the browser default Arial. Measured computed styles on the real page: #m-log-text pre = Inter, #m-log-text code = monospace, #m-body code = monospace, and #theme, #m-close, .agent-card, .toggle = Arial. The UA stylesheet sets code to monospace and button to Arial, and no rule overrides these. The spec claims that code and everything else inherit Inter from the two font-family declarations. A task for the fix went to the Project manager.
+
+Merge (Merger agent): completed with both merges clean.
+- Step 1: resolved the base branch of the root checkout as main; merged main into feat/141-markdown-log-text-inter-font in the worktree. Already up to date (the branch head 03c450b sits directly on main head 18db541), no conflicts, so the test suites were skipped per the merge procedure.
+- Step 2: resolved the base branch again as main (unchanged); merged feat/141-markdown-log-text-inter-font into main at the root. Fast-forward 18db541..03c450b, touching only src/webui.ts and src/webui.test.ts. Repo clean after the merge.
+- The live-test issue above was resolved by the Project manager as a separate fix task (#147, inter-font-code-buttons), so the branch merged as live-tested.
