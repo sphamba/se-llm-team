@@ -316,12 +316,41 @@ interface ToolBlock {
 	fail: string | null;
 }
 
+// minimal Markdown renderer for the board subset (headings, lists, code fences, inline code, bold,
+// links, paragraphs), shared by task-card bodies and the agent log text; esc() runs before markup
+// applies, so rendered text can never inject tags; ceiling: swap for a full renderer when the
+// subset grows
+const inline = (s) => s
+	.replace(/`([^`]+)`/g, "<code>$1</code>")
+	.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+	.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+export function md(src) {
+	let html = "", list = false, fence = false;
+	const closeList = () => { if (list) { html += "</ul>"; list = false; } };
+	for (const line of esc(src).split("\n")) {
+		if (line.trim().slice(0, 3) === "```") { closeList(); fence = !fence; html += fence ? "<pre><code>" : "</code></pre>"; continue; }
+		if (fence) { html += line + "\n"; continue; }
+		const h = line.match(/^(#{1,6}) (.+)$/);
+		if (h) { closeList(); html += "<h" + h[1].length + ">" + inline(h[2]) + "</h" + h[1].length + ">"; continue; }
+		const li = line.match(/^[-*] (.+)$/);
+		if (li) { if (!list) { html += "<ul>"; list = true; } html += "<li>" + inline(li[1]) + "</li>"; continue; }
+		closeList();
+		if (line.trim()) html += "<p>" + inline(line) + "</p>";
+	}
+	closeList();
+	if (fence) html += "</code></pre>";
+	return html;
+}
+
 export function renderLogChunk(text: string): string {
 	const out: string[] = [];
 	let pending = "";
+	// each chunk renders standalone, so a construct split across a chunk boundary renders as two
+	// pieces: md auto-closes an open fence at the end of its input and the continuation chunk
+	// re-opens its own; upgrade path: carry per-slug render state across polls
 	const flush = () => {
 		if (pending) {
-			out.push(esc(pending) + "\n");
+			out.push(md(pending));
 			pending = "";
 		}
 	};
@@ -344,7 +373,7 @@ export function renderLogChunk(text: string): string {
 	let think: string | null = null; // the open thinking block's deltas, filled at thinking_end or chunk end
 	let thinkIdx = -1;
 	const thinkHtml = (open: boolean) =>
-		'<details class="lg-think"' + (open ? ' data-open="think"' : "") + "><summary>Thinking</summary><pre>" + esc(think ?? "") + "</pre></details>";
+		'<details class="lg-think"' + (open ? ' data-open="think"' : "") + "><summary>Thinking</summary><pre>" + md(think ?? "") + "</pre></details>";
 	let cont: string | null = null; // thinking deltas continuing the previous chunk's block, one span per chunk
 	let contIdx = -1;
 	const openTool = (id: unknown, name: unknown, args: unknown) => {
@@ -463,7 +492,7 @@ export function renderLogChunk(text: string): string {
 						openTool(block.id, block.name, block.arguments);
 					} else if (block?.type === "thinking" && typeof block.thinking === "string" && block.thinking) {
 						flush();
-						out.push('<details class="lg-think"><summary>Thinking</summary><pre>' + esc(block.thinking) + "</pre></details>");
+						out.push('<details class="lg-think"><summary>Thinking</summary><pre>' + md(block.thinking) + "</pre></details>");
 					} else if (block?.type === "text" && typeof block.text === "string" && block.text) {
 						pending += block.text;
 					}
@@ -961,6 +990,9 @@ export const PAGE = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Software Engineering LLM Team</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap" rel="stylesheet">
 <style>
 * { box-sizing: border-box; }
 /* Ayu Light palette (ayu-theme/ayu-colors); 000129: medium moved to a deeper yellow so the priority chips read apart */
@@ -968,7 +1000,7 @@ export const PAGE = `<!doctype html>
 --low-bg: rgba(134, 179, 0, .15); --low-fg: #86b300; --medium-bg: rgba(201, 151, 0, .15); --medium-fg: #c99700; --high-bg: rgba(250, 133, 50, .15); --high-fg: #fa8532; --critical-bg: rgba(230, 80, 80, .15); --critical-fg: #e65050; }
 ${DARK_VARS}
 html, body { height: 100%; }
-body { display: flex; flex-direction: column; margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+body { display: flex; flex-direction: column; margin: 0; background: var(--bg); color: var(--fg); font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
 header { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 6px; background: var(--code-bg); }
 h1 { font-size: 16px; margin: 0; }
 #theme { margin-left: auto; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
@@ -1036,8 +1068,8 @@ none so the card clicks pass through */
 #m-agent { margin-bottom: 12px; }
 #m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 300px; overflow: auto; }
 #m-log.hidden { display: none; }
-/* the log text renders in the page's sans serif stack; blocks are collapsed <details> the client fills in */
-#m-log-text { margin: 0; padding: 8px 10px; font-size: 10px; line-height: 1.45; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; white-space: pre-wrap; overflow-wrap: break-word; }
+/* the log text renders in the page's Inter stack; blocks are collapsed <details> the client fills in */
+#m-log-text { margin: 0; padding: 8px 10px; font-size: 10px; line-height: 1.45; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; white-space: pre-wrap; overflow-wrap: break-word; }
 #m-log-text pre { font: inherit; margin: 0; padding: 0; }
 #m-log-text details { margin: 2px 0; }
 #m-log-text summary { cursor: pointer; }
@@ -1101,29 +1133,8 @@ function toggleTheme() {
 }
 try { const stored = localStorage.getItem("theme"); if (stored === "dark" || stored === "light") rootEl.dataset.theme = stored; } catch {}
 syncThemeBtn();
-// minimal Markdown renderer for the board subset (headings, lists, code fences, inline code, bold,
-// links, paragraphs); ceiling: swap for a full renderer when the subset grows
-const inline = s => s
-	.replace(/\`([^\`]+)\`/g, "<code>$1</code>")
-	.replace(/\\*\\*([^*]+)\\*\\*/g, "<b>$1</b>")
-	.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-function md(src) {
-	let html = "", list = false, fence = false;
-	const closeList = () => { if (list) { html += "</ul>"; list = false; } };
-	for (const line of esc(src).split("\\n")) {
-		if (line.trim().slice(0, 3) === "\`\`\`") { closeList(); fence = !fence; html += fence ? "<pre><code>" : "</code></pre>"; continue; }
-		if (fence) { html += line + "\\n"; continue; }
-		const h = line.match(/^(#{1,6}) (.+)$/);
-		if (h) { closeList(); html += "<h" + h[1].length + ">" + inline(h[2]) + "</h" + h[1].length + ">"; continue; }
-		const li = line.match(/^[-*] (.+)$/);
-		if (li) { if (!list) { html += "<ul>"; list = true; } html += "<li>" + inline(li[1]) + "</li>"; continue; }
-		closeList();
-		if (line.trim()) html += "<p>" + inline(line) + "</p>";
-	}
-	closeList();
-	if (fence) html += "</code></pre>";
-	return html;
-}
+const inline = ${inline};
+${md}
 // FLIP across a refresh: measure old positions, sync the cards, invert, play. Every card whose
 // board-content position changed moves, the siblings shifting when a card enters or leaves a
 // column included; positions are board-content relative, so a scrolled refresh animates nothing.

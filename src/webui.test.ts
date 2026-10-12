@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, PRIORITY_RANK, setState } from "./kanban.ts";
 import { startHub } from "./hub.ts";
-import { agentLabel, boardOf, buildShell, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_CHUNK, logFixups, mergeBoards, numLinkHtml, pairLayout, relationPaths, renderLogChunk, spinnerHtml, syncBoard, tabNames, tabsHtml } from "./webui.ts";
+import { agentLabel, boardOf, buildShell, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_CHUNK, logFixups, md, mergeBoards, numLinkHtml, pairLayout, relationPaths, renderLogChunk, spinnerHtml, syncBoard, tabNames, tabsHtml } from "./webui.ts";
 import { gzipSync } from "node:zlib";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -101,8 +101,8 @@ const jsonl = [
 	"pi: diagnostic that never was JSON",
 ].join("\n") + "\n";
 const rendered = renderLogChunk(jsonl);
-assert.ok(rendered.includes('<details class="lg-think" data-open="think"><summary>Thinking</summary><pre>Read the specs first.</pre></details>'), "the thinking block renders as a collapsed details with a Thinking summary, left open at the chunk end for the next chunk's deltas");
-assert.ok(rendered.includes("Starting the run.\n"), "text delta renders as text");
+assert.ok(rendered.includes('<details class="lg-think" data-open="think"><summary>Thinking</summary><pre><p>Read the specs first.</p></pre></details>'), "the thinking block renders as a collapsed details with a Thinking summary, left open at the chunk end for the next chunk's deltas");
+assert.ok(rendered.includes("<p>Starting the run.</p>"), "a plain text delta renders through md() unchanged apart from the paragraph wrapping");
 assert.equal(rendered.split('data-tc="t1"').length - 1, 1, "one tool block per call: toolcall_end and execution start dedupe by id");
 assert.ok(rendered.includes("<summary>bash failed: boom: exit 1</summary>"), "a failed tool execution surfaces its error in the collapsed summary");
 assert.ok(rendered.includes('<pre class="lg-args">{\n  &quot;command&quot;: &quot;git status --short&quot;\n}</pre>'), "the tool block body holds the full args");
@@ -116,7 +116,7 @@ const legacy = "first paragraph\n\nsecond paragraph\n\nthird paragraph\n";
 assert.equal(renderLogChunk(legacy), legacy, "blank paragraph lines in non-JSON text pass through");
 // a blank line also flushes buffered JSONL text instead of being skipped
 const mixed = JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "paragraph" } }) + "\n\nlegacy line\n";
-assert.equal(renderLogChunk(mixed), "paragraph\n\nlegacy line\n", "a blank line flushes pending text and passes through");
+assert.equal(renderLogChunk(mixed), "<p>paragraph</p>\nlegacy line\n", "a blank line flushes pending markdown text and passes through");
 
 // 000122 collapsible log blocks: thinking_end closes with the authoritative content, the tool
 // summary one-liner caps at 80 chars on the first line only, and a tool end whose block lives in
@@ -126,7 +126,7 @@ const closed = renderLogChunk([
 	JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "reconstructed" } }),
 	JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "authoritative thinking" } }),
 ].join("\n") + "\n");
-assert.ok(closed.includes('<details class="lg-think"><summary>Thinking</summary><pre>authoritative thinking</pre></details>'), "thinking_end closes the block with the authoritative content");
+assert.ok(closed.includes('<details class="lg-think"><summary>Thinking</summary><pre><p>authoritative thinking</p></pre></details>'), "thinking_end closes the block with the authoritative content");
 assert.ok(!closed.includes("data-open"), "a closed thinking block carries no continuation marker");
 
 const longCmd = "curl -s " + "x".repeat(120) + " \\\n  --header 'Accept: application/json'";
@@ -216,7 +216,7 @@ const sidechain = [
 ].join("\n") + "\n";
 const side = renderLogChunk(sidechain);
 assert.ok(side.includes("[prompt] Review the diff\n"), "a sidechain user record renders the prompt text");
-assert.ok(side.includes("Reading the diff.\n"), "sidechain text blocks render as message text");
+assert.ok(side.includes("<p>Reading the diff.</p>"), "sidechain text blocks render as message text");
 assert.ok(side.includes('<span class="lg-tres" data-tc="t9">diff looks fine</span>'), "a sidechain toolResult without its toolcall renders the joinable result span");
 // an orphan without a data-sum promotes with a generic result summary
 const sidePane = new LogEl("div");
@@ -227,12 +227,27 @@ sideOrphan.textContent = "diff looks fine";
 sidePane.appendChild(sideOrphan);
 logFixups(sidePane, logDoc);
 assert.ok(sidePane.children[0].children[0].textContent === "result" && sidePane.children[0].children[1].textContent === "diff looks fine", "an orphan tool result without a data-sum promotes with a generic result summary");
-assert.ok(side.includes('<details class="lg-think"><summary>Thinking</summary><pre>Plan the fix.</pre></details>'), "a sidechain thinking block renders as a collapsed details");
+assert.ok(side.includes('<details class="lg-think"><summary>Thinking</summary><pre><p>Plan the fix.</p></pre></details>'), "a sidechain thinking block renders as a collapsed details");
 assert.equal(side.split("<summary>read: /r/SPECS.md</summary>").length - 1, 1, "one tool block per call: the toolcall args render once");
 assert.ok(!side.includes('lg-tres" data-tc="t8'), "a sidechain toolResult dedupes against its toolcall within the chunk");
 assert.ok(side.includes('<pre class="lg-out">specs</pre>'), "the sidechain toolResult fills its tool block");
 assert.ok(!side.includes('"type"'), "sidechain records never leak raw JSON");
 assert.ok(!renderLogChunk(sidechain + "partial-without-newline").includes("partial"), "a partial trailing sidechain record is dropped too");
+
+// 000141 log text renders markdown through md(): bold, inline code, and fenced blocks become
+// elements, an unclosed fence at the chunk end auto-closes, and HTML escapes before markup applies
+const rich = renderLogChunk(JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Bold **text** and `inline code`\n\n```\nlet x = 1;\n```" } }) + "\n");
+assert.ok(rich.includes("<p>Bold <b>text</b> and <code>inline code</code></p>"), "a text delta with bold and inline code markers renders b/code via md()");
+assert.ok(rich.includes("<pre><code>let x = 1;\n</code></pre>"), "a fenced block in a text delta renders pre/code via md()");
+const unclosed = renderLogChunk(JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "listing\n```\nfile one" } }) + "\n");
+assert.ok(unclosed.includes("<p>listing</p><pre><code>file one\n</code></pre>"), "a chunk ending with an unclosed fence renders the partial as a closed fenced block (md auto-close)");
+const injected = renderLogChunk(JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "<img src=x onerror=alert(1)> **bold**" } }) + "\n");
+assert.ok(!injected.includes("<img") && injected.includes("&lt;img src=x onerror=alert(1)&gt; <b>bold</b>"), "markdown escapes HTML before applying markup, so log text cannot inject tags");
+const thinkMd = renderLogChunk([
+	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } }),
+	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "**Plan**\n- step one" } }),
+].join("\n") + "\n");
+assert.ok(thinkMd.includes('<details class="lg-think"><summary>Thinking</summary><pre><p><b>Plan</b></p><ul><li>step one</li></ul></pre></details>'), "a thinking body containing markdown renders through md() inside the lg-think details");
 
 // the hub serves the dashboard endpoints; HOME at the temp home keeps the hub registry and
 // lock out of the real pi agent dir
@@ -679,6 +694,11 @@ assert.ok(agentCardCss.includes("font-size: 12px") && agentCardCss.includes("pad
 const logCss = page.match(/#m-log-text \{[^}]*\}/)![0];
 assert.ok(logCss.includes("font-size: 10px"), "the agent log text keeps its 10px size");
 assert.ok(logCss.includes("system-ui") && !logCss.includes("monospace"), "the agent log text renders in the page's sans serif stack");
+// 000141: the Google Inter font loads in the page head and goes first in both font-family stacks
+assert.ok(page.includes('<link rel="preconnect" href="https://fonts.googleapis.com">') && page.includes('<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'), "the page preconnects to Google Fonts before the Inter stylesheet");
+assert.ok(page.includes('https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap" rel="stylesheet"'), "the page loads the Inter stylesheet from fonts.googleapis.com");
+assert.equal(page.match(/font-family: Inter, system-ui[^;]*;/g)?.length, 2, "Inter goes first in exactly the two font-family declarations (body and #m-log-text)");
+assert.ok(page.includes(String(md)), "the page runs the tested md renderer for task bodies and log text");
 assert.ok(page.includes("#m-log-text pre { font: inherit;"), "log block bodies inherit the sans serif font");
 assert.ok(page.includes("#m-log-text summary { cursor: pointer;"), "collapsed log summaries read as clickable");
 assert.ok(page.includes("#m-log-text details.lg-think, #m-log-text details.lg-tool { color: var(--muted); }"), "thinking and tool blocks render muted grey in both themes, collapsed and expanded alike");
@@ -841,7 +861,7 @@ for (const at of [1, 20, splitRecord.length >> 1, splitRecord.length - 1]) {
 	assert.equal(first.tail, splitPrefix.length, `split at ${at}: the tail sits on the last record boundary`);
 	writeFileSync(logFile, splitPrefix + splitRecord + "\n");
 	const second = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${first.tail}`)).json();
-	assert.equal(second.text, "splittable record\n", `split at ${at}: the record renders once its newline arrives`);
+	assert.equal(second.text, "<p>splittable record</p>", `split at ${at}: the record renders once its newline arrives`);
 	assert.equal(second.tail, (splitPrefix + splitRecord + "\n").length, `split at ${at}: the tail advances past the completed record`);
 	const third = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${second.tail}`)).json();
 	assert.equal(third.text, "", `split at ${at}: the already-served prefix is not rendered twice`);
@@ -854,7 +874,7 @@ const uniFirst = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json()
 assert.equal(uniFirst.text, splitPrefix, "a mid-multibyte split serves only the terminated line");
 assert.equal(uniFirst.tail, splitPrefix.length, "a mid-multibyte split still reports the boundary before the record");
 writeFileSync(logFile, uniRecord);
-assert.equal((await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${uniFirst.tail}`)).json()).text, "→ done\n", "a record split mid-multibyte renders whole once its newline arrives");
+assert.equal((await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${uniFirst.tail}`)).json()).text, "<p>→ done</p>", "a record split mid-multibyte renders whole once its newline arrives");
 
 // a finished log: the tail is terminal records (assistant message_end, turn_end, agent_end,
 // agent_settled) that render to nothing, so an unrenderable tail chunk walks back instead of
@@ -869,7 +889,7 @@ const terminalLog = [
 ].join("\n") + "\n";
 writeFileSync(logFile, terminalLog);
 const finished = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
-assert.ok(finished.text.includes("final output line\n"), "an unrenderable tail chunk walks back to the last chunk with renderable content");
+assert.ok(finished.text.includes("<p>final output line</p>"), "an unrenderable tail chunk walks back to the last chunk with renderable content");
 assert.equal(finished.head, 0);
 assert.equal(finished.tail, terminalLog.length);
 assert.equal(finished.atStart, true);
@@ -887,9 +907,9 @@ const paddedLog = [
 ].join("\n") + "\n";
 writeFileSync(logFile, paddedLog);
 const padded = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
-assert.ok(padded.text.includes("tail delta\n"), "a renderable tail chunk serves without walking back");
+assert.ok(padded.text.includes("<p>tail delta</p>"), "a renderable tail chunk serves without walking back");
 const paddedHist = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${padded.head}&before=1`)).json();
-assert.ok(paddedHist.text.includes("early delta\n"), "a history page inside an unrenderable record walks back to renderable content");
+assert.ok(paddedHist.text.includes("<p>early delta</p>"), "a history page inside an unrenderable record walks back to renderable content");
 assert.equal(paddedHist.head, 0);
 
 
@@ -979,7 +999,7 @@ assert.equal((await get("nope.developer.0")).status, 404, "a run handle needs it
 // the #67 walk-back applies to a run-suffixed handle too
 writeFileSync(dev1, terminalLog);
 const walkedRun = await (await get(`${slug}.developer.1`)).json();
-assert.ok(walkedRun.text.includes("final output line\n") && walkedRun.head === 0, "an unrenderable tail of a run log walks back to renderable content");
+assert.ok(walkedRun.text.includes("<p>final output line</p>") && walkedRun.head === 0, "an unrenderable tail of a run log walks back to renderable content");
 
 // 000120 usage stats: agentHistory entries carry tokens (the sum of the turn_end
 // message.usage.totalTokens, cache reads included) and duration (the last record timestamp minus
@@ -1074,11 +1094,11 @@ rmSync(dev0);
 const gzEntry = (await (await fetch(`${base}/api/tasks`)).json())[0].agents.find((a) => a.handle === `${slug}.developer.0`);
 assert.ok(gzEntry, "a gzipped run stays in the agent history");
 assert.equal(gzEntry.tokens, 29000, "the gzipped run's stats parse from the decompressed records");
-assert.ok((await (await get(`${slug}.developer.0`)).json()).text.includes("from the gzipped run\n"), "/api/agent-log serves the gzipped run with renderable content");
+assert.ok((await (await get(`${slug}.developer.0`)).json()).text.includes("<p>from the gzipped run</p>"), "/api/agent-log serves the gzipped run with renderable content");
 // the unrenderable tail walk-back indexes the decompressed text the same way
 writeFileSync(`${dev0}.gz`, gzipSync(Buffer.from(terminalLog)));
 const gzWalk = await (await get(`${slug}.developer.0`)).json();
-assert.ok(gzWalk.text.includes("final output line\n") && gzWalk.head === 0, "an unrenderable tail of a gzipped log walks back on the decompressed text");
+assert.ok(gzWalk.text.includes("<p>final output line</p>") && gzWalk.head === 0, "an unrenderable tail of a gzipped log walks back on the decompressed text");
 assert.equal((await (await fetch(`${base}/api/agent-log?file=${encodeURIComponent(`${slug}.developer.0`)}&offset=${gzWalk.tail}`)).json()).text, "", "a poll of a finished gzipped log is a no-op");
 // subagent matching parses decompressed records: a gzipped parent log still enumerates its subs
 writeFileSync(`${rv0}.gz`, gzipSync(readFileSync(rv0)));
