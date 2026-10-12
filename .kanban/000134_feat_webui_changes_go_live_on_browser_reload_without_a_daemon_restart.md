@@ -58,3 +58,6 @@ Setup: I copied the branch checkout to /tmp/live134/checkout (fixture, so the se
 - Hub state survives: /api/projects keeps the entry and the hub registry file keeps the same entry through every reload.
 - Ceiling is respected and its comment is in hub.ts. webui.ts is untouched. The branch diff against main touches only src/hub.ts and src/webui.test.ts. The worktree is clean.
 - Cleanup: daemon killed, port 4399 down, hub lock released, registry empty. No leaked daemons.
+
+## Merge (2026-10-12)
+Base branch both times: main. Step 1: main was already an ancestor of feat/134-webui-changes-go, so the worktree merge reported "Already up to date" with no conflicts; no test suites run (clean-merge rule). Step 2: main fast-forwarded 00e35bf..d5a1ca1, carrying src/hub.ts (+49/-7 lines region) and src/webui.test.ts (+41/-1). Root checkout was clean before and after; no conflicts anywhere. Merged state: main at d5a1ca1.
