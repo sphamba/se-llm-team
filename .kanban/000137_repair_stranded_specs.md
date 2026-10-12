@@ -1,12 +1,12 @@
 ---
 name: "fix: repair stranded duplicate spec blocks in #126, #127 and #129"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/137-repair-stranded-specs"
 issuer: "#136"
 complexity: "simple"
 shortName: "repair-stranded-specs"
-blockedBy: "#136, #134"
+blockedBy: ""
 ---
 
 # Summary
