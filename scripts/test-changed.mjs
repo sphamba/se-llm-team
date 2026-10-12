@@ -37,13 +37,16 @@ const changedPaths = () => {
 	const add = (cmd) => {
 		for (const f of execSync(cmd, { encoding: "utf8" }).split("\n")) if (f) files.add(f);
 	};
-	try {
-		add("git diff --name-only HEAD");
-		add("git ls-files --others --exclude-standard");
-		add(`git diff --name-only ${execSync("git merge-base main HEAD", { encoding: "utf8" }).trim()} HEAD`);
-	} catch {
-		/* not a git repo or no main branch: the working-tree commands above still apply */
-	}
+	const tryAdd = (cmd) => {
+		try {
+			add(cmd);
+		} catch {
+			/* not a git repo, no commits, or no main branch: the other commands still apply */
+		}
+	};
+	tryAdd("git ls-files --others --exclude-standard");
+	tryAdd("git diff --name-only HEAD");
+	tryAdd("git merge-base main HEAD >/dev/null && git diff --name-only $(git merge-base main HEAD) HEAD");
 	return [...files];
 };
 
