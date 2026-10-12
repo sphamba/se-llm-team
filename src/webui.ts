@@ -116,16 +116,19 @@ function indexRuns(files: string[], base: string): number[] {
 }
 
 // one entry per existing run log `.logs/<slug>.<role>[.<n>].log`: roles in pipeline order then
-// merger, a legacy unsuffixed file before that role's indexed runs, the list then ordered by log
-// mtime so the detail card shows the runs oldest-first across roles; equal mtimes keep the
-// enumeration order (role order, legacy first, index ascending). Only the newest run of the
-// state-mapped role is the live agent
+// merger, a legacy unsuffixed file before that role's indexed runs, the list then ordered by the
+// first in-log record timestamp so the detail card shows the runs oldest-first across roles; the
+// gzip sweep rewrites finished logs' mtimes in readdir order (compactFinishedLogs), so mtime no
+// longer reflects chronology once a run is swept; a log with no parseable timestamp (a legacy
+// unsuffixed log carries none) falls back to its mtime, equal keys keep the enumeration order
+// (role order, legacy first, index ascending). Only the newest run of the state-mapped role is the
+// live agent
 function agentHistory(root: string, t: Task, files: string[]): AgentEntry[] {
 	const slug = taskSlug(t.file);
 	const dir = join(kanbanDir(root), ".logs");
 	const liveRole = AGENT_ROLE[t.state];
 	const live = !!liveRole && agentAlive(root, slug);
-	const entries: (AgentEntry & { mtime: number })[] = [];
+	const entries: (AgentEntry & { mtime: number; start: number | null })[] = [];
 	for (const role of LOG_ROLES) {
 		const base = `${slug}.${role}`;
 		const runs: { run: number | null; handle: string }[] = [];
@@ -147,10 +150,13 @@ function agentHistory(root: string, t: Task, files: string[]): AgentEntry[] {
 			// completed-run counter clear reads; a marker can never name the live run, indexes
 			// are never reused
 			const status: AgentEntry["status"] = alive ? "live" : existsSync(join(dir, `${r.handle}.dead`)) ? "dead" : "ok";
-			entries.push({ role, run: r.run, alive, status, handle: r.handle, tokens: stats.tokens, duration: stats.duration, mtime });
+			entries.push({ role, run: r.run, alive, status, handle: r.handle, tokens: stats.tokens, duration: stats.duration, mtime, start: stats.first });
 		}
 	}
-	return entries.sort((a, b) => a.mtime - b.mtime).map(({ role, run, alive, status, handle, tokens, duration }) => ({ role, run, alive, status, handle, tokens, duration }));
+	// stable sort: the enumeration order (role order, legacy first, index ascending) breaks the ties
+	return entries
+		.sort((a, b) => (a.start ?? a.mtime) - (b.start ?? b.mtime) || a.mtime - b.mtime)
+		.map(({ role, run, alive, status, handle, tokens, duration }) => ({ role, run, alive, status, handle, tokens, duration }));
 }
 
 // rebuild the log path from the handle: the task must exist on the board and the handle must be
@@ -216,22 +222,23 @@ function tsMs(v: unknown): number | null {
 // per-file usage stats, memoized by size like subsCache: tokens sums the provider-reported
 // message.usage.totalTokens over the usage-bearing records (turn_end in a run log, assistant in a
 // subagent transcript, cache reads included), duration is the last record timestamp minus the
-// first. A plain log only ever grows, so a size match means the parse is current; a live log
-// re-parses per poll. A .gz log is immutable, so its compressed size keys the same cache.
+// first, first is that first record timestamp in epoch ms (000139: the agent history sort's
+// primary key). A plain log only ever grows, so a size match means the parse is current; a live
+// log re-parses per poll. A .gz log is immutable, so its compressed size keys the same cache.
 // Ceiling: a full re-read per growth, split-line the incremental scan when a live log passes
 // tens of MB
-const statsCache = new Map<string, { size: number; tokens: number | null; duration: number | null }>();
-function logStats(path: string): { tokens: number | null; duration: number | null } {
+const statsCache = new Map<string, { size: number; tokens: number | null; duration: number | null; first: number | null }>();
+function logStats(path: string): { tokens: number | null; duration: number | null; first: number | null } {
 	let size = 0;
 	try {
 		size = statSync(path).size;
 		const hit = statsCache.get(path);
 		if (hit && hit.size === size) return hit;
 	} catch {
-		return { tokens: null, duration: null }; // log gone or not written yet
+		return { tokens: null, duration: null, first: null }; // log gone or not written yet
 	}
 	const text = logText(path);
-	if (text === null) return { tokens: null, duration: null }; // unreadable: a corrupt .gz
+	if (text === null) return { tokens: null, duration: null, first: null }; // unreadable: a corrupt .gz
 	let tokens: number | null = null;
 	let first: number | null = null;
 	let last: number | null = null;
@@ -252,7 +259,7 @@ function logStats(path: string): { tokens: number | null; duration: number | nul
 			last = ts;
 		}
 	}
-	const stats = { tokens, duration: first != null && last != null ? Math.max(0, last - first) : null };
+	const stats = { tokens, duration: first != null && last != null ? Math.max(0, last - first) : null, first };
 	statsCache.set(path, { size, ...stats });
 	return stats;
 }
@@ -518,7 +525,13 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 	const log = agentLogPath(root, q.get("file") ?? "");
 	if (!log) return null;
 	const sub = q.get("sub");
-	if (sub === "list") return JSON.stringify(subagentLogs(log).map((s, index) => ({ id: s.id, index, ...logStats(s.path) })));
+	if (sub === "list")
+		return JSON.stringify(
+			subagentLogs(log).map((s, index) => {
+				const { tokens, duration } = logStats(s.path);
+				return { id: s.id, index, tokens, duration }; // first stays internal to the history sort
+			}),
+		);
 	let target = log;
 	if (sub !== null) {
 		const subIndex = /^\d+$/.test(sub) ? parseInt(sub, 10) : -1;
