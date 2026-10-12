@@ -3,8 +3,8 @@ name: "fix: agent log thinking and tool blocks render grey; incomplete blocks st
 complexity: "moderate"
 blockedBy: ""
 priority: "medium"
-state: "live-testing"
-worktree: "fix/140-agent-log-thinking"
+state: "done"
+worktree: ""
 ---
 
 # Summary
@@ -31,3 +31,8 @@ Fix, src/webui.ts plus src/webui.test.ts only:
 - renderLogChunk output stays the same, with one change: it skips an empty continuation. An empty .lg-cont would promote into a visible empty Thinking block. The server still emits span.lg-tres and span.lg-cont for unjoined artifacts. So the two span assertions at :89 and :109 stay as server-output pins. New fake-DOM tests cover the promotion: orphan with data-sum, orphan without, join into an existing block, cont promotion, cont append into an open block.
 - Tests: a LogEl stub, a selector matcher, and a CSS.escape polyfill went in at the top of the test file. The dead display:block CSS assertion at :503 now asserts that the page ships the logFixups source. A new assertion pins the grey CSS rule.
 - 2026-10-12 (Reviewer): reviewed commit 31d160c in worktree fix/140-agent-log-thinking. The work meets the Specs, no fixes made. The grey rule styles details.lg-think and details.lg-tool with var(--muted) in both themes; the summary and the pre body inherit the color because no other rule sets one, so both states read grey. logFixups is exported, interpolated into the page before ingest, and runs after every chunk insert, so no bare span stays in the pane. The promoted blocks carry no data-tc, so the dedupe pass never drops them, and no data-open marker, so later deltas do not join them. The server still emits span.lg-tres and span.lg-cont for unjoined artifacts, so the two span assertions stay as server-output pins instead of expecting details, and the new fake-DOM tests cover the promotion directly. That deviates from the spec letter ("update the two assertions") but covers its intent more truly. Full suite green (node src/webui.test.ts, all assertions passed).
+- 2026-10-12 (Live-tester): live test of commit 31d160c in worktree fix/140-agent-log-thinking. No unit suite was run. The worktree hub (src/hub.ts, port 4356) served a scratch project through the real web UI, and Chromium with Playwright drove the real user flow: open the board, open a task card, open an agent run, read the log pane, expand blocks, switch themes, scroll for history chunks, and append to a live log to watch the 1 s poll.
+- Result: 42 of 42 checks passed. Grey: every details.lg-think and details.lg-tool reads var(--muted) (dark rgb(90,102,115), light rgb(173,174,177)) with the summary and the pre body in both collapsed and expanded states, while plain text stays var(--fg). Promotion: an orphan thinking delta and an orphan tool result at the init chunk boundary both become collapsed collapsible details, and no bare span remains. An unterminated thinking block stays details.lg-think[data-open="think"], grey and collapsed. thinking_end keeps the authoritative content. Joins are unchanged: a live poll result joins its details.lg-tool[data-tc], and a live poll delta appends into the open thinking block. The 5 s board refresh and the history scroll keep the pane intact.
+- The same flows ran on one real 3.2 MB reviewer log (a copy of the 000140 reviewer.0 log): the tail chunk promoted its orphan result, and the history chunks showed real thinking and tool blocks as grey collapsed details. No page errors.
+- Observation, not a defect: after an unjoined .lg-cont promotes to its own collapsible block, a later history chunk that holds the real open block does not merge with it, so one long thought can show as two "Thinking" blocks. This is the agreed Specs behavior (a promoted block carries no data-open marker).
+- Findings: none. No new tasks.
