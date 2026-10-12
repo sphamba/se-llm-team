@@ -834,6 +834,7 @@ assert.ok(!monoSelectors.includes("#m-log-text pre"), "the Thinking prose and th
 assert.ok(page.includes("button { font-family: inherit; }"), "buttons inherit the page font instead of the UA Arial default");
 assert.ok(page.includes(String(md)), "the page runs the tested md renderer for task bodies and log text");
 assert.ok(page.includes("#m-log-text pre { font: inherit;"), "log block bodies inherit the sans serif font");
+assert.ok(page.includes("#m-log-text pre { font: inherit; margin: 0; padding: 0; white-space: pre-wrap; overflow-wrap: break-word; }"), "expanded log block bodies wrap to the container width");
 assert.ok(page.includes("#m-log-text summary { cursor: pointer;"), "collapsed log summaries read as clickable");
 assert.ok(page.includes("#m-log-text details.lg-think, #m-log-text details.lg-tool { color: var(--muted); }"), "thinking and tool blocks render muted grey in both themes, collapsed and expanded alike");
 assert.ok(/display: flex; flex-wrap: wrap/.test(page.match(/#m-agent-btns \{[^}]*\}/)![0]), "the run columns render as one wrapping flex row");

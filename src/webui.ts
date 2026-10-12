@@ -1265,7 +1265,7 @@ none so the card clicks pass through */
 #m-log-meta.hidden { display: none; }
 /* the log text renders in the page's Inter stack; 000152: the size matches the card body text, only the line-height stays tuned for logs; blocks are collapsed <details> the client fills in */
 #m-log-text { margin: 0; padding: 8px 10px; font-size: 13px; line-height: 1.45; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; white-space: pre-wrap; overflow-wrap: break-word; }
-#m-log-text pre { font: inherit; margin: 0; padding: 0; }
+#m-log-text pre { font: inherit; margin: 0; padding: 0; white-space: pre-wrap; overflow-wrap: break-word; }
 #m-log-text details { margin: 2px 0; }
 #m-log-text summary { cursor: pointer; }
 #m-log-text details.lg-think, #m-log-text details.lg-tool { color: var(--muted); }
