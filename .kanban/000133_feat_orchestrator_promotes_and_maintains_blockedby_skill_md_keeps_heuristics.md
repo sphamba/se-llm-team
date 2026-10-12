@@ -1,8 +1,8 @@
 ---
 name: "feat: orchestrator promotes and maintains blockedBy; SKILL.md keeps heuristics"
 priority: "high"
-state: "to-merge"
-worktree: "feat/133-orchestrator-promotes-and"
+state: "done"
+worktree: ""
 complexity: "complex"
 blockedBy: ""
 ---
