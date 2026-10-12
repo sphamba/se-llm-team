@@ -1,8 +1,8 @@
 ---
 name: "docs: README Agents paragraph says every agent runs in the task worktree"
 priority: "low"
-state: "live-testing"
-worktree: "docs/160-readme-agent-cwd-roles"
+state: "done"
+worktree: ""
 issuer: "#156"
 complexity: "simple"
 shortName: "readme-agent-cwd-roles"
