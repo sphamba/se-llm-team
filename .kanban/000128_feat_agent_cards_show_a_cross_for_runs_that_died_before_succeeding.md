@@ -59,3 +59,7 @@ complex (user-ordered complexity assignment; multi-file, two subsystems). Files:
 - Not exercised live: a marker that lingers after the task reaches done (the scratch task stayed in to-review before the respawn cap), and the two-tasks-in-merging merger case (review-covered).
 - Evidence: screenshots in /tmp/lt128-evidence/ (board, modal light and dark, dead-card log).
 - Live-test result: no issues found.
+- Merge (8992a12): step 1 merged base main into feat/128-agent-cards-show in the worktree, already up to date, no conflicts, suites skipped per clean-merge rule. Step 2 merged feat/128-agent-cards-show into main at the root, fast-forward 12ebabd..8992a12, no conflicts. Both merges complete; # Open questions section empty.
+
+# Open questions
+
