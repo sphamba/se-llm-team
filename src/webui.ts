@@ -865,6 +865,17 @@ export function agentStatsText(tokens, duration) {
 	return [fmtTokens(tokens), fmtDur(duration)].filter(Boolean).join(" · ");
 }
 
+// the summary card's stats line under the chips: totals across all agent entries, input + output
+// tokens and durations summed per entry (#178), the same agentStatsText format the agent cards'
+// stats lines use; hidden when the task has no entries or both totals are 0/null
+export function taskStatsText(t) {
+	const agents = t.agents || [];
+	const toks = agents.reduce((s, a) => s + (typeof a.tokens === "number" ? a.tokens : 0), 0);
+	const dur = agents.reduce((s, a) => s + (typeof a.duration === "number" ? a.duration : 0), 0);
+	if (!toks && !dur) return "";
+	return '<span class="card-stats">' + agentStatsText(toks, dur) + "</span>";
+}
+
 // the open detail card's poll cadence (000142): a live agent's tokens and duration advance with
 // the run log, so while the open task has one the poll ticks at 1 s; otherwise the 5 s board poll
 export function refreshMs(t) {
@@ -953,7 +964,8 @@ export function cardHtml(t: Task, st: string) {
 		(issued ? " issuer" : "") +
 		'">' +
 		(issued ? esc(t.issuer) : "user") +
-		"</span>"
+		"</span>" +
+		taskStatsText(t)
 	);
 }
 
@@ -1237,6 +1249,7 @@ none so the card clicks pass through */
 .chip.issuer { background: var(--code-bg); color: var(--muted); }
 .chip.cx { background: var(--code-bg); color: var(--muted); }
 .issued { color: var(--muted); }
+.card-stats { display: block; font-size: 10px; color: var(--muted); margin-top: 2px; }
 .p-low { background: var(--low-bg); color: var(--low-fg); }
 .p-medium { background: var(--medium-bg); color: var(--medium-fg); }
 .p-high { background: var(--high-bg); color: var(--high-fg); }
@@ -1362,6 +1375,7 @@ ${agentLabel}
 ${fmtTokens}
 ${fmtDur}
 ${agentStatsText}
+${taskStatsText}
 ${agentRowSig}
 ${syncAgentStats}
 ${refreshMs}

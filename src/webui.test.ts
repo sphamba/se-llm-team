@@ -528,6 +528,11 @@ assert.ok(userCard.includes('<span class="chip cx cx-moderate">moderate</span>')
 assert.ok(page.includes(".chip.cx {"), "the base complexity chip style ships in the page css as the fallback");
 assert.ok(page.includes(".chip.cx-simple {") && page.includes(".chip.cx-moderate {") && page.includes(".chip.cx-complex {") && page.includes(".chip.cx-trivial {"), "the per-value complexity chip styles ship in the page css");
 assert.ok(cardHtml({ file: "000005_e.md", name: "e", priority: "low", complexity: "trivial" }, "to-do").includes('<span class="chip cx cx-trivial">trivial</span>'), "a trivial task renders the cx-trivial chip");
+// #178: the card's stats line sums all agent entries' tokens and durations, the agentStatsText
+// format; hidden with no entries or both totals 0/null
+assert.ok(cardHtml({ file: "000007_g.md", name: "g", priority: "low", agents: [{ tokens: 420, duration: 1500 }, { tokens: 1580, duration: 2000 }] }, "doing").includes('<span class="card-stats">2k · 3.5s</span>'), "a card sums its agent entries' tokens and durations into the stats line");
+assert.ok(!cardHtml({ file: "000008_h.md", name: "h", priority: "low" }, "doing").includes("card-stats"), "a card without agent entries renders no stats line");
+assert.ok(page.includes(".card-stats {"), "the card stats line style ships in the page css");
 
 // relation lines: one dashed curve per stored relation between rendered cards, running from the
 // blocked task's card to the blocker's card, so the dashes flow blocked -> blocker. A done
