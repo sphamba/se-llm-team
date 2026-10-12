@@ -1,8 +1,8 @@
 ---
 name: "fix: webui hot reload leaves stale kanban.ts, so pipeline-order changes need a daemon restart"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "fix/164-webui-hot-reload-stale-kanban"
 issuer: "#157"
 complexity: "moderate"
 shortName: "webui-hot-reload-stale-kanban"
@@ -51,6 +51,25 @@ The reproduced scenario no longer needs a daemon restart to serve the new pipeli
 
 # Notes
 
-# Open questions
+# Decision
+Reload the whole graph (user's answer, 2026-10-12): the mtime-based reload version-busts/invalidates the whole webui import graph (src/kanban.ts and every other module src/webui.ts imports, e.g. src/pid.ts), so a reloaded webui.ts recomputes LAYOUT from fresh STATES. No daemon restart is needed for a kanban.ts change; the #134 dashboard-reload promise now covers kanban.ts too. The restart-based candidate direction is dropped.
+
 1. Should the hub reload or invalidate the whole webui import graph (including src/kanban.ts), or should the daemon/hub restart after a kanban.ts change?
 2. If a restart is the answer, how should it avoid SIGKILL-ing in-flight child agents (developer, reviewer, live-tester, merger)?
+
+## 2026-10-12, developer
+Implemented the # Decision in the worktree (commit 856bcf6):
+
+- src/hub.ts webuiLoader no longer imports webui.ts with a bare ?v= query. It walks the static relative-import graph from webui.ts (webui.ts -> kanban.ts, pid.ts; pid.ts -> kanban.ts), copies the whole graph into a per-version dir .webui-hot-<pid>-<newestGraphMtime> next to the webui file, and imports the copy, so relative imports inside the copy resolve to fresh sibling modules. A kanban.ts-only change now goes live on browser reload, no daemon restart.
+- The reload version is the newest mtime across the whole graph, so a kanban.ts-only change triggers the reload even though webui.ts keeps its mtime. A failed version (broken file, edit mid-write) keeps the last good module until the version changes again, the same last-good semantics as #134. Concurrent reloads serialize through one in-flight promise.
+- The copy dir is removed after each import (node keeps the modules in memory) and stale .webui-hot-* dirs are swept on every reload, so the repo tree stays clean; the test cleanup also removes leftovers from a crashed run.
+- webui.test.ts: a new block starts a hub on a stub webui that imports a stub kanban, rewrites ONLY the stub kanban (the webui file keeps its mtime), and asserts the next fetch serves the new states. The #134 stub test and the real-graph mtime-bump test still pass through the new copy-dir path.
+- node src/webui.test.ts, src/kanban.test.ts, src/orchestrator.test.ts, src/extension.test.ts and index.test.ts all pass. kanban.ts and the daemon lifecycle are untouched.
+
+# Open questions
+No open questions: both recorded questions are answered by the # Decision above. Assumptions (confirm or correct any of these):
+
+- The reload signal stays mtime-based: a changed mtime means changed code; no content hashing.
+- Hot reload covers src/webui.ts and its whole static relative-import graph (today src/kanban.ts and src/pid.ts, plus any module they reach); hub.ts and orchestrator.ts still need a daemon restart.
+- A reload transiently creates and then removes a .webui-hot-* copy dir inside the directory of the webui file; no long-lived state is added to the repo tree.
+- npm/node_modules resolution in the webui graph keeps working while the graph stays inside one package (true today: the graph imports only node builtins and relative src modules).

@@ -1,8 +1,8 @@
 ---
 name: "fix: open thinking block is sliced on init and scroll-up"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "fix/166-open-thinking-sliced-init-scroll"
 issuer: "#158"
 complexity: "moderate"
 shortName: "open-thinking-sliced-init-scroll"
@@ -31,5 +31,22 @@ Tests: src/webui.test.ts covers whichever resolution is chosen (open block count
 
 # Notes
 
-# Open questions
+# Decision
+Atomic live blocks (user's answer, 2026-10-12): an open, still-streaming thinking block counts as ONE collapsed line on init and scroll-up as well, so a live thinking phase renders as one open Thinking block that the thinking_end poll finalizes in place - no stale fragment, no split. Content of a block that never receives a thinking_end (abandoned run) must still render, never be dropped. The #148 client-side promotion stays only for genuinely orphaned artifacts; the #158 Specs sentence now holds for open blocks too.
+
 Should an open, still-streaming thinking block count as ONE collapsed line on init and scroll-up as well, so a live thinking phase never shows as several open Thinking blocks and never leaves a stale open fragment when thinking_end arrives? Or is the current #148 client-side promotion (orphan cont span promoted to an open block, later joined) the accepted behavior for live blocks, with atomicity guaranteed only for completed thinking_start..thinking_end blocks?
+
+Implemented in the worktree, commit bb188ae. Server-side fix in linesBack (src/webui.ts): a new openThink state consumes a still-open thinking block backward - deltas with no thinking_end below the tail set it, and the walk skips everything up to the block's thinking_start, where it counts the block as ONE line and head lands at the start record. So init holds the whole open block from its thinking_start in one window as a single open block (thinkHtml(true)), a scroll-up back-fill from that head never re-serves any part of it (heads never land mid-block), and the eventual thinking_end poll's data-final span finalizes the block in place through the unchanged #148 client path. A block that never receives thinking_end (abandoned run) still renders its full delta run - when the walk reaches the file start first, linesBack returns 0 (atStart), never dropping content. The #148 client-side promotion (orphan lg-cont to an open block) stays untouched for the live delta-streaming path and genuinely orphaned artifacts. Comments on LOG_LINES, linesBack and the init path updated.
+
+Tests: the 000148 init test rewritten (init of a mid-thinking log now asserts the open block loads whole from its thinking_start, no lg-cont orphan; the delta-poll and cross-window thinking_end assertions kept). New 000166 block: an open block at the tail with 150 deltas loads as one open Thinking block with the full delta run, head counts it as one line, and the back-fill from that head carries no lg-think/lg-cont/data-open at all. Full suite green (kanban, orchestrator, webui, extension, index). Throwaway end-to-end check (not committed): init + back-fill + delta poll + thinking_end payloads replayed through renderLogChunk and the real logFixups - final pane holds exactly one closed Thinking block with the authoritative text, no stale fragment, no split.
+
+# Open questions
+
+None for the user. The direction question was answered (see Decision): an open, still-streaming block counts as ONE collapsed line.
+
+Assumptions made (confirm or correct before this hardens):
+- The fix is server-side only; the #148 client-side promotion path in logFixups stays exactly as shipped for the live delta-streaming path and genuinely orphaned artifacts.
+- A still-open block loads whole into one window even when it outgrows the old byte-chunk size: one block is one collapsed line regardless of its record count, so a window may hold far more than 100 records when a large open block is in it.
+- The thinking_end finalization keeps using the existing data-final span mechanism (no new client code).
+- Scroll-up back-fill semantics stay as #158 shipped: the back-fill tail is the previous window's head, dedupe stays boundary-based, no overlap re-serving.
+- The same fix applies to subagent transcripts and .gz logs, which go through the same linesBack and agentLogPayload code.

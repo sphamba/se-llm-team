@@ -1,8 +1,8 @@
 ---
 name: "fix: hub lock is global so a restart can hand the production port to a leaked old-code daemon"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/165-hub-restart-stale-daemon-takeover"
 issuer: "#157"
 complexity: "moderate"
 shortName: "hub-restart-stale-daemon-takeover"
@@ -54,7 +54,9 @@ Found in the live test of #157 (merge commit 42b6e50, 2026-10-12). The sibling f
 
 # Notes
 
-# Open questions
+# Decision
+User's answers (2026-10-12): (1) Restrict hub candidacy so only a daemon running the production/current checkout can win the port - during a restart the dashboard is briefly down rather than served by old code; qualifying daemons are any that are not a task worktree. (2) Auto-reap: a daemon whose root is a task worktree whose task is done or gone is reaped automatically (e.g. on the sweep); no stale daemon lingers to steal the port. (3) Surface checkout info: the serving hub surfaces which checkout it runs (root, commit, pid), e.g. in the dashboard footer, so a takeover or stale hub is visible at a glance. (4) The agent-kill concern is moot: role agents are spawned detached and survive restarts.
+
 1. Preferred direction: restrict hub candidacy so only a daemon running the production/current checkout can win port 4242 (during a restart the dashboard is briefly down rather than served by old code), or keep every daemon eligible for failover and rely on hygiene plus a guarded restart procedure? If restricted, which daemons qualify - only the checkout the extension is installed from, or any daemon that is not a task worktree?
 2. Should leaked daemons be reaped automatically, and on which trigger (task done, worktree removed, board root missing, daemon older than N minutes)? Or is a documented manual cleanup plus the --no-webui rule for every non-production daemon enough?
 3. If an old-code hub stays possible, should the serving hub surface which checkout (root, commit, pid) it runs, so a takeover is visible to the user?
