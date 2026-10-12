@@ -698,6 +698,7 @@ assert.ok(
 	"the detail card keeps the priority row with only the priority chip",
 );
 assert.ok(page.includes("#m-log.hidden { display: none; }"), "log pane hides");
+assert.ok(page.includes("#m-log-meta { padding: 6px 10px 0; font-size: 10px; line-height: 1.45; color: var(--muted); }") && page.includes("#m-log-meta.hidden { display: none; }"), "the log meta line renders muted grey and hides while no meta is available");
 assert.ok(page.includes("/api/agent-log"), "page uses the agent log endpoint");
 assert.ok(page.includes('<span class="check">✓</span>'), "past agent buttons render a green checkmark");
 assert.ok(page.includes('<span class="cross">✗</span>'), "a dead run's card renders a cross instead of the check");
@@ -742,7 +743,8 @@ const upd = page.match(/function updateOpenTask\(t\) \{[\s\S]*?\n\}/)![0];
 assert.ok(page.includes("if (open) updateOpenTask(open); else closeModal();"), "the refresh updates the open card in place and closes it when its task is gone");
 assert.ok(upd.includes("writeHead(t)") && upd.includes("renderAgent(t, true)") && upd.includes("setBody(t)"), "the refresh re-derives title, attrs, agent row and body from the fresh payload");
 assert.ok(!upd.includes("closeLog") && !upd.includes("logState"), "the refresh path never touches the log pane, logState or the log timer");
-assert.ok(page.includes('<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>'), "the log pane is static markup split from the buttons row, so a run-card rebuild never clears it");
+assert.ok(page.includes('<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><div id="m-log-meta" class="hidden"></div><div id="m-log-text"></div></div></div>'), "the log pane ships the meta line above the log text, hidden until a payload carries meta");
+assert.ok(page.includes('meta.classList.toggle("hidden", !label)') && page.includes('" \u00b7 thinking "'), "openLog/pullLog fill the meta line on init and every poll, model name then thinking level");
 assert.ok(!page.includes(`+ '</div><div id="m-log"`), "renderAgent no longer rebuilds the log pane with the run cards");
 const setBodySrc = page.match(/function setBody\(t\) \{[\s\S]*?\n\}/)![0];
 assert.ok(setBodySrc.includes("if (el.__html === html) return;"), "the body rewrite is html-gated: an unchanged body keeps its node and the reader's scroll");
@@ -929,6 +931,8 @@ const servedLog = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json(
 assert.ok(servedLog.text.includes('<span class="lg-cont">Checking the board.</span>'), "endpoint renders continuing thinking deltas as the joinable span");
 assert.ok(servedLog.text.includes('<details class="lg-tool" data-tc="t1"><summary>read: src/webui.ts</summary>'), "endpoint renders the collapsed tool block");
 assert.ok(servedLog.text.includes("not json at all\n"), "endpoint passes non-JSON lines through");
+assert.equal(servedLog.model, null, "a log without usage-bearing records carries a null model, the meta line stays hidden");
+assert.equal(servedLog.thinkingLevel, null, "a log without usage-bearing records carries a null thinking level too");
 
 // a record split at the chunk head (init fetch of a log bigger than LOG_CHUNK) drops its partial
 // line instead of rendering raw JSON
@@ -1095,12 +1099,17 @@ assert.ok(walkedRun.text.includes("<p>final output line</p>") && walkedRun.head 
 writeFileSync(dev1, [
 	JSON.stringify({ type: "session", version: 3, id: "s", timestamp: "2026-10-11T09:35:54.121Z" }),
 	JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "working" } }),
-	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 1500, cost: { total: 0 } } }, timestamp: Date.parse("2026-10-11T09:36:24.121Z") }),
-	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 27500 } }, timestamp: "2026-10-11T09:37:24.121Z" }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 1500, cost: { total: 0 } }, model: "m-1", thinkingLevel: "low" }, timestamp: Date.parse("2026-10-11T09:36:24.121Z") }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 27500 }, model: "m-2", thinkingLevel: "high" }, timestamp: "2026-10-11T09:37:24.121Z" }),
 ].join("\n") + "\n");
 const statEntry = (await (await fetch(`${base}/api/tasks`)).json())[0].agents.find((a) => a.handle === `${slug}.developer.1`);
 assert.equal(statEntry.tokens, 29000, "tokens sums the turn_end totals across the run log");
 assert.equal(statEntry.duration, 90000, "duration is the last record timestamp minus the first (the session record here), ISO and epoch-ms alike");
+// 000146: the chunked payload carries the meta off the latest usage-bearing record, so the log
+// pane's meta line refreshes on every poll
+const statPayload = await (await get(`${slug}.developer.1`)).json();
+assert.equal(statPayload.model, "m-2", "the payload's model comes off the latest usage-bearing record");
+assert.equal(statPayload.thinkingLevel, "high", "the payload's thinking level comes off the latest usage-bearing record");
 
 // 000088 subagent transcripts: the Agent tool result in the parent log names each background agent
 // and its .output file; sub=list enumerates them, sub=<n> serves the n-th through the same payload
@@ -1111,7 +1120,7 @@ const out1 = join(subDir, "bbbbbbbb-0000-0000-0000-000000000000.output");
 writeFileSync(out0, "SUB ZERO\n");
 writeFileSync(out1, [
 	JSON.stringify({ isSidechain: true, agentId: "bbbbbbbb", type: "user", message: { role: "user", content: "do the thing" }, timestamp: "2026-10-11T09:40:00.000Z" }),
-	JSON.stringify({ isSidechain: true, type: "assistant", message: { role: "assistant", usage: { totalTokens: 11000 } }, timestamp: "2026-10-11T09:40:11.239Z" }),
+	JSON.stringify({ isSidechain: true, type: "assistant", message: { role: "assistant", usage: { totalTokens: 11000 }, model: "sub-model", thinkingLevel: "medium" }, timestamp: "2026-10-11T09:40:11.239Z" }),
 	"plain fallback",
 ].join("\n") + "\n");
 const subPath = (id: string, file: string) =>
@@ -1148,6 +1157,8 @@ const subZero = await (await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=0`))
 assert.equal(subZero.text, "SUB ZERO\n", "sub=0 serves the first subagent transcript through the chunked payload");
 const subOne = await (await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=1`)).json();
 assert.equal(subOne.text, "[prompt] do the thing\nplain fallback\n", "a sidechain user record renders the prompt, its non-JSON line still passes through");
+assert.equal(subOne.model, "sub-model", "a subagent transcript's payload carries the model off its latest usage-bearing assistant record");
+assert.equal(subOne.thinkingLevel, "medium", "a subagent transcript's payload carries the thinking level too");
 assert.equal((await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=9`)).status, 404, "an out-of-range subagent index is rejected");
 assert.equal((await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=x`)).status, 404, "a non-numeric subagent index is rejected");
 assert.equal((await fetch(`${base}/api/agent-log?file=${rvEnc}&sub=1abc`)).status, 404, "a partially numeric subagent index is rejected too");

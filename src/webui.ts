@@ -223,25 +223,29 @@ function tsMs(v: unknown): number | null {
 // message.usage.totalTokens over the usage-bearing records (turn_end in a run log, assistant in a
 // subagent transcript, cache reads included), duration is the last record timestamp minus the
 // first, first is that first record timestamp in epoch ms (000139: the agent history sort's
-// primary key). A plain log only ever grows, so a size match means the parse is current; a live
-// log re-parses per poll. A .gz log is immutable, so its compressed size keys the same cache.
+// primary key), model and thinkingLevel come off the latest usage-bearing record (000146: the log
+// pane's meta line; null when no such record exists). A plain log only ever grows, so a size match
+// means the parse is current; a live log re-parses per poll. A .gz log is immutable, so its
+// compressed size keys the same cache.
 // Ceiling: a full re-read per growth, split-line the incremental scan when a live log passes
 // tens of MB
-const statsCache = new Map<string, { size: number; tokens: number | null; duration: number | null; first: number | null }>();
-function logStats(path: string): { tokens: number | null; duration: number | null; first: number | null } {
+const statsCache = new Map<string, { size: number; tokens: number | null; duration: number | null; first: number | null; model: string | null; thinkingLevel: string | null }>();
+function logStats(path: string): { tokens: number | null; duration: number | null; first: number | null; model: string | null; thinkingLevel: string | null } {
 	let size = 0;
 	try {
 		size = statSync(path).size;
 		const hit = statsCache.get(path);
 		if (hit && hit.size === size) return hit;
 	} catch {
-		return { tokens: null, duration: null, first: null }; // log gone or not written yet
+		return { tokens: null, duration: null, first: null, model: null, thinkingLevel: null }; // log gone or not written yet
 	}
 	const text = logText(path);
-	if (text === null) return { tokens: null, duration: null, first: null }; // unreadable: a corrupt .gz
+	if (text === null) return { tokens: null, duration: null, first: null, model: null, thinkingLevel: null }; // unreadable: a corrupt .gz
 	let tokens: number | null = null;
 	let first: number | null = null;
 	let last: number | null = null;
+	let model: string | null = null;
+	let thinkingLevel: string | null = null;
 	for (const line of text.split("\n")) {
 		if (!line.includes('"timestamp"') && !line.includes('"totalTokens"')) continue; // cheap filter before JSON.parse
 		let rec: any;
@@ -252,6 +256,9 @@ function logStats(path: string): { tokens: number | null; duration: number | nul
 		}
 		if ((rec?.type === "turn_end" || rec?.type === "assistant") && typeof rec?.message?.usage?.totalTokens === "number" && Number.isFinite(rec.message.usage.totalTokens)) {
 			tokens = (tokens ?? 0) + rec.message.usage.totalTokens;
+			// the loop reads top to bottom, so the latest usage-bearing record wins
+			if (typeof rec.message.model === "string" && rec.message.model) model = rec.message.model;
+			if (typeof rec.message.thinkingLevel === "string" && rec.message.thinkingLevel) thinkingLevel = rec.message.thinkingLevel;
 		}
 		const ts = tsMs(rec?.timestamp) ?? tsMs(rec?.message?.timestamp);
 		if (ts != null) {
@@ -259,7 +266,7 @@ function logStats(path: string): { tokens: number | null; duration: number | nul
 			last = ts;
 		}
 	}
-	const stats = { tokens, duration: first != null && last != null ? Math.max(0, last - first) : null, first };
+	const stats = { tokens, duration: first != null && last != null ? Math.max(0, last - first) : null, first, model, thinkingLevel };
 	statsCache.set(path, { size, ...stats });
 	return stats;
 }
@@ -570,6 +577,9 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 	}
 	const n = parseInt(q.get("offset") ?? "", 10);
 	const off = Number.isInteger(n) && n >= 0 ? n : null;
+	// 000146: the meta line's model and thinking level, computed per request so the 1 s poll
+	// refreshes them live (logStats re-parses when the log grew); nulls keep the line hidden
+	const { model, thinkingLevel } = logStats(target);
 	// a .gz log is a finished, immutable run: decompressed whole and the walk slices the
 	// decompressed bytes, so offsets stay byte-based like the plain path (byte offsets cannot
 	// seek into a gzip stream, and a string index would misread a plain log's byte offset);
@@ -632,7 +642,7 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 	} catch {
 		// log vanished mid-request
 	}
-	return JSON.stringify({ text, head, tail, atStart: head === 0 });
+	return JSON.stringify({ text, head, tail, atStart: head === 0, model, thinkingLevel });
 }
 
 // Ayu Dark palette (ayu-theme/ayu-colors), written once and applied twice: explicit choice via data-theme, browser default via media query
@@ -1112,6 +1122,8 @@ none so the card clicks pass through */
 #m-agent { margin-bottom: 12px; }
 #m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 300px; overflow: auto; }
 #m-log.hidden { display: none; }
+#m-log-meta { padding: 6px 10px 0; font-size: 10px; line-height: 1.45; color: var(--muted); }
+#m-log-meta.hidden { display: none; }
 /* the log text renders in the page's Inter stack; blocks are collapsed <details> the client fills in */
 #m-log-text { margin: 0; padding: 8px 10px; font-size: 10px; line-height: 1.45; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; white-space: pre-wrap; overflow-wrap: break-word; }
 #m-log-text pre { font: inherit; margin: 0; padding: 0; }
@@ -1156,7 +1168,7 @@ none so the card clicks pass through */
 <div id="modal" class="hidden"><div id="m-box">
 <div id="m-head"><h2 id="m-title"></h2><button id="m-close" onclick="closeModal()">Close</button></div>
 <div id="m-attrs"></div>
-<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>
+<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log" class="hidden"><div id="m-log-meta" class="hidden"></div><div id="m-log-text"></div></div></div>
 <div id="m-body"></div>
 </div></div>
 <script>
@@ -1473,6 +1485,9 @@ function openLog(handle, sub) {
 	const p = logPane();
 	if (!t || !p) return;
 	p.classList.remove("hidden");
+	// the previous view's meta line must not flash before the init payload arrives
+	const meta = document.getElementById("m-log-meta");
+	if (meta) { meta.textContent = ""; meta.classList.add("hidden"); }
 	logState = { handle, sub: sub == null ? null : sub, head: 0, tail: 0, atStart: false, busy: false, idle: false };
 	markActiveAgent();
 	pullLog(logUrl(""), "init");
@@ -1514,6 +1529,11 @@ function pullLog(qs, mode) {
 	fetch("/api/agent-log" + qs).then(r => r.ok ? r.json() : null).then(d => {
 		// a superseded open must not write into the new view
 		if (!d || logState !== st || !p || p.classList.contains("hidden")) return;
+		// 000146: the meta line above the log, model name and thinking level of the latest
+		// usage-bearing record; nulls hide it, every payload mode refreshes it
+		const meta = document.getElementById("m-log-meta");
+		const label = d.model ? d.model + (d.thinkingLevel ? " \u00b7 thinking " + d.thinkingLevel : "") : "";
+		if (meta) { meta.textContent = label; meta.classList.toggle("hidden", !label); }
 		const el = document.getElementById("m-log-text");
 		if (mode === "history") {
 			st.head = d.head;
