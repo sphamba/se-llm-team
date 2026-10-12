@@ -1056,12 +1056,15 @@ assert.equal(servedLog.thinkingLevel, null, "a log without usage-bearing records
 // 000151: the meta comes off the latest usage-bearing record only; when that record lacks
 // model/thinkingLevel both clear instead of keeping an older record's values
 writeFileSync(logFile, [
-	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 100 }, model: "m-1", thinkingLevel: "low" }, timestamp: "2026-10-11T09:36:24.121Z" }),
-	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 200 } }, timestamp: "2026-10-11T09:37:24.121Z" }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 60, output: 40, cacheRead: 500, cacheWrite: 300, reasoning: 10, totalTokens: 900 }, model: "m-1", thinkingLevel: "low" }, timestamp: "2026-10-11T09:36:24.121Z" }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 120, output: 80, cacheRead: 700, cacheWrite: 200, reasoning: 20, totalTokens: 1100 } }, timestamp: "2026-10-11T09:37:24.121Z" }),
 ].join("\n") + "\n");
 const clearedLog = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
 assert.equal(clearedLog.model, null, "a latest usage-bearing record without a model clears the meta's model");
 assert.equal(clearedLog.thinkingLevel, null, "a latest usage-bearing record without a thinking level clears it too");
+// 000177: the card tokens sum input + output over the records, cacheRead/cacheWrite excluded
+const tokenEntry = (await (await fetch(`${base}/api/tasks`)).json())[0].agents.find((a) => a.handle === `${slug}.developer`);
+assert.equal(tokenEntry.tokens, 300, "the card tokens sum input + output across the records, cache excluded");
 
 // 000158: an unterminated tail record (an agent mid-write) is not a line yet: init counts
 // collapsed lines from the boundary below it and the next poll re-reads the record whole
@@ -1292,16 +1295,16 @@ const walkedRun = await (await get(`${slug}.developer.1`)).json();
 assert.ok(walkedRun.text.includes("<p>final output line</p>") && walkedRun.head === 0, "an unrenderable tail of a run log walks back to renderable content");
 
 // 000120 usage stats: agentHistory entries carry tokens (the sum of the turn_end
-// message.usage.totalTokens, cache reads included) and duration; timestamps arrive as ISO
+// message.usage input + output, cacheRead/cacheWrite excluded) and duration; timestamps arrive as ISO
 // strings and epoch-ms numbers alike
 writeFileSync(dev1, [
 	JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date(Date.now() - 600000).toISOString() }),
 	JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "working" } }),
 	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 1500, cost: { total: 0 } }, model: "m-1", thinkingLevel: "low" }, timestamp: Date.now() - 570000 }),
-	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 27500 }, model: "m-2", thinkingLevel: "high" }, timestamp: new Date(Date.now() - 540000).toISOString() }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 25000, output: 2500, cacheRead: 30000, cacheWrite: 1200, reasoning: 800, totalTokens: 58700 }, model: "m-2", thinkingLevel: "high" }, timestamp: new Date(Date.now() - 540000).toISOString() }),
 ].join("\n") + "\n");
 const statEntry = (await (await fetch(`${base}/api/tasks`)).json())[0].agents.find((a) => a.handle === `${slug}.developer.1`);
-assert.equal(statEntry.tokens, 29000, "tokens sums the turn_end totals across the run log");
+assert.equal(statEntry.tokens, 27515, "tokens sums input + output across the run log, cacheRead/cacheWrite excluded");
 assert.ok(statEntry.duration >= 600000, "a live run's duration ticks with now - first (the session record here), not the frozen parsed last - first");
 // 000169: a finished run is not live, so its duration stays the parsed last - first even when
 // the run ended long ago
@@ -1326,7 +1329,7 @@ const out1 = join(subDir, "bbbbbbbb-0000-0000-0000-000000000000.output");
 writeFileSync(out0, "SUB ZERO\n");
 writeFileSync(out1, [
 	JSON.stringify({ isSidechain: true, agentId: "bbbbbbbb", type: "user", message: { role: "user", content: "do the thing" }, timestamp: "2026-10-11T09:40:00.000Z" }),
-	JSON.stringify({ isSidechain: true, type: "assistant", message: { role: "assistant", usage: { totalTokens: 11000 }, model: "sub-model", thinkingLevel: "medium" }, timestamp: "2026-10-11T09:40:11.239Z" }),
+	JSON.stringify({ isSidechain: true, type: "assistant", message: { role: "assistant", usage: { input: 10000, output: 1000, cacheRead: 0, cacheWrite: 0, reasoning: 400, totalTokens: 11000 }, model: "sub-model", thinkingLevel: "medium" }, timestamp: "2026-10-11T09:40:11.239Z" }),
 	"plain fallback",
 ].join("\n") + "\n");
 const subPath = (id: string, file: string) =>
@@ -1393,7 +1396,7 @@ assert.ok(subTwo.text.includes("[prompt] walk back to me\n") && subTwo.head === 
 // chunked payload all keep working on the gzipped file
 writeFileSync(`${dev0}.gz`, gzipSync(Buffer.from([
 	JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "from the gzipped run" } }),
-	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 29000 } }, timestamp: Date.parse("2026-10-11T09:36:24.121Z") }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 24000, output: 5000, cacheRead: 10000, cacheWrite: 2000, reasoning: 3000, totalTokens: 44000 } }, timestamp: Date.parse("2026-10-11T09:36:24.121Z") }),
 ].join("\n") + "\n")));
 rmSync(dev0);
 const gzEntry = (await (await fetch(`${base}/api/tasks`)).json())[0].agents.find((a) => a.handle === `${slug}.developer.0`);

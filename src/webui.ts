@@ -22,7 +22,8 @@ const LOG_ROLES = [...Object.values(AGENT_ROLE), "merger"];
 const SUB_ROOT = "/tmp/pi-subagents-1000/";
 
 // one agent run: run is the index in `<slug>.<role>.<n>.log`, null for a legacy unsuffixed file;
-// tokens sums the run's turn_end totals, duration is the last record timestamp minus the first
+// tokens sums the run's turn_end input + output, cache excluded (000177); duration is the last
+// record timestamp minus the first
 // (000169: the live run ticks with now - first instead, so a quiet stretch does not freeze it),
 // both null when the log carries none; status is live for the newest run of the live role, dead
 // when the bounce left a sibling .dead marker, ok when the run advanced the state itself
@@ -231,8 +232,9 @@ function tsMs(v: unknown): number | null {
 }
 
 // per-file usage stats, memoized by size like subsCache: tokens sums the provider-reported
-// message.usage.totalTokens over the usage-bearing records (turn_end in a run log, assistant in a
-// subagent transcript, cache reads included), duration is the last record timestamp minus the
+// message.usage input + output over the usage-bearing records (turn_end in a run log, assistant
+// in a subagent transcript; reasoning is a subset of output so it counts once, cacheRead/cacheWrite
+// excluded) (000177), duration is the last record timestamp minus the
 // first, first is that first record timestamp in epoch ms (000139: the agent history sort's
 // primary key), model and thinkingLevel come off the latest usage-bearing record (000146: the log
 // pane's meta line; null when no such record exists or the latest one lacks them (000151)). A plain log only ever grows, so a size match
@@ -258,15 +260,18 @@ function logStats(path: string): { tokens: number | null; duration: number | nul
 	let model: string | null = null;
 	let thinkingLevel: string | null = null;
 	for (const line of text.split("\n")) {
-		if (!line.includes('"timestamp"') && !line.includes('"totalTokens"')) continue; // cheap filter before JSON.parse
+		if (!line.includes('"timestamp"') && !line.includes('"usage"')) continue; // cheap filter before JSON.parse
 		let rec: any;
 		try {
 			rec = JSON.parse(line);
 		} catch {
 			continue;
 		}
-		if ((rec?.type === "turn_end" || rec?.type === "assistant") && typeof rec?.message?.usage?.totalTokens === "number" && Number.isFinite(rec.message.usage.totalTokens)) {
-			tokens = (tokens ?? 0) + rec.message.usage.totalTokens;
+		const usage = rec?.message?.usage;
+		const input = typeof usage?.input === "number" && Number.isFinite(usage.input) ? usage.input : null;
+		const output = typeof usage?.output === "number" && Number.isFinite(usage.output) ? usage.output : null;
+		if ((rec?.type === "turn_end" || rec?.type === "assistant") && input != null && output != null) {
+			tokens = (tokens ?? 0) + input + output;
 			// the loop reads top to bottom, so the latest usage-bearing record wins; a record without the
 			// fields clears them rather than carrying an older record's value forward (000151)
 			model = typeof rec.message.model === "string" && rec.message.model ? rec.message.model : null;
