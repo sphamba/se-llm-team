@@ -69,7 +69,7 @@ Base branch resolved at each step from the project root checkout (`git branch --
 - Step 1 (worktree): merged `main` into fix/150-quiet-test-changed-probes -> already up to date, no conflicts. Test suites skipped per the clean-merge rule.
 - Step 2 (project root): merged fix/150-quiet-test-changed-probes into `main` -> fast-forward b5e07c0..9eb7f40, clean. Root is clean, nothing to resolve.
 
-Both merges complete, no conflicts, no test fixes needed. Worktree left on fix/150-quiet-test-changed-probes at 9eb7f40.
+Both merges complete, no conflicts, no test fixes needed. The orchestrator has since deleted the fix/150-quiet-test-changed-probes branch (fully merged) and its worktree; 9eb7f40 is on `main`.
 
 # Open questions
 
