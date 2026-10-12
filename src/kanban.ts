@@ -373,8 +373,13 @@ export function createTask(
 	// the same max can otherwise write the same number under different slugs; the lock
 	// makes scan+write one critical section. A live holder commits in microseconds.
 	const lock = join(kanbanDir(root), ".create.lock");
+	// a crashed holder's lock is only stolen after LOCK_STALE_MS, so the give-up window
+	// must outlive the threshold: shorter, and a dead holder fails every create for its
+	// whole duration instead of being recovered
+	const LOCK_STALE_MS = 10_000;
+	const lockDeadline = Date.now() + LOCK_STALE_MS + 5_000;
 	let locked = false;
-	for (let wait = 0; wait < 100 && !locked; wait++) {
+	while (!locked && Date.now() < lockDeadline) {
 		try {
 			writeFileSync(lock, String(process.pid), { flag: "wx" });
 			locked = true;
@@ -382,7 +387,7 @@ export function createTask(
 			if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
 			try {
 				// steal a lock left behind by a crashed creator
-				if (Date.now() - statSync(lock).mtimeMs > 10000) unlinkSync(lock);
+				if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) unlinkSync(lock);
 			} catch {}
 			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
 		}
