@@ -1,8 +1,8 @@
 ---
 name: "fix: webui board columns show the old review -> live-test -> merge order"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/157-webui-columns-pipeline-order"
 issuer: "#155"
 complexity: "simple"
 shortName: "webui-columns-pipeline-order"

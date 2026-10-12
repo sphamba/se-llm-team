@@ -1,8 +1,8 @@
 ---
 name: "feat: pipeline reorders to review, merge, live-test"
 priority: "high"
-state: "to-merge"
-worktree: "feat/155-review-merge-live-test"
+state: "done"
+worktree: ""
 blockedBy: ""
 issuer: "user"
 complexity: "complex"
@@ -51,6 +51,10 @@ Review pass (commit be932c9):
 - Second review pass (no fixes): re-verified spec coverage against `git diff main...HEAD` and the code. Reviewer cap -> to-merge with the log line and counter reset moved and the armed-marker machinery kept (consumeReviewerRun now at the sweepToMerge head, so the approval and the cap advance both count exactly once); merger sets merging -> to-live-test; live tester spawns with cwd=root on the merged commit; live-testing -> done on pass with no merger spawn; findings travel as PM tasks with the task still moving to done; WORKING_STATES bounce re-map (live-testing -> to-live-test, merging -> to-merge); one shared BLOCKER_SATISFIED set (done, to-live-test, live-testing) used by blockedByUndone and dropDoneBlockers, to-merge/merging still blocking, conflicted files never proving satisfaction. Unmerged-branch and no-worktree to-live-test tasks route to to-merge (condition `!task.worktree || merge-base --is-ancestor ... === null`), so an in-flight task from an old-order daemon never gets main tested unmerged. Full suite green on this pass: npm test (kanban, orchestrator, webui, extension, index).
 - Verified the stub-ordering risk from the Notes: every test stub checks Merger before Live-tester now (the merger prompt mentions the Live-tester); the loopStub's merger branch exits before its Live-tester check. Suite green confirms no misroute.
 - README.md and SPECS.md still describe the old order (README lines 66 and 75-79; SPECS.md lines 37-46 and 58-75), confirmed still stale. No board task exists for it yet: the PM may want to file one docs task for both files.
+
+Merge (both merges complete, state set to done):
+- Step 1: base branch resolved as main. Merged main into feat/155-review-merge-live-test in the worktree. Clean merge, no conflicts (scripts/test-changed.mjs, src/webui.test.ts, src/webui.ts). No test suites ran, because the merge was clean.
+- Step 2: base branch resolved as main again. Merged feat/155-review-merge-live-test into main in the project root. Fast-forward ea327b2..49ab271, no conflicts. Both branches are at the merge commit 49ab271.
 
 ## Live test
 Tested the branch code (worktree, commit be932c9) by running its orchestrator daemon against scratch git projects. Real pi agents ran the happy path and the reviewer-cap path. Cheap stub agents ran the edge flows (blockers, dead agents) so the state transitions stay observable. The unit suites were not run, the developer and reviewer own them.

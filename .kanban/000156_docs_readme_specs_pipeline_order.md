@@ -1,8 +1,8 @@
 ---
 name: "docs: README and SPECS describe the old review -> live-test -> merge order"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "docs/156-docs-readme-specs-pipeline-order"
 issuer: "#155"
 complexity: "trivial"
 shortName: "docs-readme-specs-pipeline-order"
