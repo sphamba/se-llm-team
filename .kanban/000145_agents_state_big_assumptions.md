@@ -50,3 +50,7 @@ Live-test design assumptions:
 - A scratch git repo in /tmp with the same task frontmatter and one worktree per task is a valid stand-in for a real board task.
 - In the scratch worktrees .kanban is a real directory. In the real worktrees .kanban is a symlink to the main board, so I read the state and the reports from both copies.
 - One rollout per role is a sample of prompt compliance, not a statistical guarantee.
+
+## Merge
+
+Base branch at both steps was main (root checkout did not move). Step 1: merged main into docs/145-agents-state-big-assumptions in the worktree, clean with the ort strategy (carried in src/webui.test.ts and src/webui.ts from main), no conflicts, so the test suites were skipped per merge policy. Step 2: merged docs/145-agents-state-big-assumptions into main in the project root, fast-forward e9a2d11..156556e, no conflicts. No fixes needed; no repo left in a merge state.
