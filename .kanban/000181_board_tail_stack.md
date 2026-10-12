@@ -1,8 +1,8 @@
 ---
 name: "feat: board stacks to-live-test, live-testing and done in one column group"
 priority: "medium"
-state: "live-testing"
-worktree: "feat/181-board-tail-stack"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "board-tail-stack"
@@ -30,6 +30,7 @@ In the webui board, stack the to-live-test, live-testing and done states togethe
 - Updated the webui.test.ts assertions: LAYOUT, the boardEl children structure (done no longer a side column) and the pair wrappers test. Both webui.test.ts and index.test.ts pass.
 - Review (2026-10-13): implementation matches the specs. The diff touches only pairLayout, its doc comment and the webui.test.ts assertions; buildShell already renders any-length stacked groups and .pair is a flex column, so the triple needs no CSS change. Verified against the code, the developer's three assumptions all hold: the tail slice keeps STATE_NAMES order and .pair renders first-on-top (to-live-test, live-testing, done); nothing outside pairLayout/tests changed; no CHANGELOG.md or version scheme exists to bump. Reviewer fix (commit 46d695b): removed the provably dead `pair.length > 1 ? pair : pair[0]` guard in the pairing loop (tail.length - i > 3 always leaves a full pair); webui.test.ts and index.test.ts re-passed.
 - Merge (2026-10-13): both steps clean, nothing to resolve. Step 1 (merge main into feat/181-board-tail-stack in the worktree) was already up to date (merge-base == main tip 8ea9467), so no test suites ran per the clean-merge rule. Step 2 (merge feat/181-board-tail-stack into main in the project root) fast-forwarded main 8ea9467 -> 46d695b (src/webui.ts, src/webui.test.ts). No conflicts, no fix commits.
+- Live test (2026-10-12, passed): real browser test of the rendered board. Setup: scratch clone /tmp/lt181/repo of the merged commit (HEAD 8521d5b, contains 46d695b), hub only (no daemon, no agents) on 127.0.0.1:4599 with an isolated HOME and root, and one probe task per state (all 10 states) in the fixture board. 10/10 checks passed: (1) the page embeds LAYOUT = ["backlog",["to-do","doing"],["to-review","reviewing"],["to-merge","merging"],["to-live-test","live-testing","done"]]; (2) #board children in order are one .col c-backlog, then four .pair groups with those column sets; (3) the tail group is one .pair wrapper holding exactly the 3 columns to-live-test/live-testing/done; (4) computed --ac is #14b8a6 / #0d9488 / #22c55e, unchanged; (5) within every group the columns stack vertically (same x, 10 px gap, increasing y) and the groups run left to right; (6) all 10 probe cards render in their own state column, including done nested in the tail pair; (7) editing a task file from live-testing to done moves its card into the .c-done column on the 5 s board poll (done count 1 -> 2, live-testing 1 -> 0); (8) no page errors. Assumptions: accent colors checked through the columns' computed --ac custom property; no unit suite was run per the live-test rules. No behavior contradicted the task's stated assumptions.
 
 # Open questions
 

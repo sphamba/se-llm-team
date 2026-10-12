@@ -25,3 +25,6 @@ A task whose agent entries carry a duration but no usage record (legacy/no-usage
 
 # Notes
 - Filed by the PM from #178's live-test finding (2026-10-12), hand-written with blockedBy "#182" because #182 is in doing and both tasks touch the card-stats assertions near src/webui.test.ts:533 and adjacent functions in src/webui.ts.
+
+# Open questions
+When no agent entry carries usage data, should the card omit the token part and show only the time (like the agent cards do), or keep showing "0"? The #178 spec's "reads like the agent cards' stats" points to omitting it.
