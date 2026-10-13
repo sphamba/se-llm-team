@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -361,6 +361,9 @@ assert.equal(hub.commit, execFileSync("git", ["rev-parse", "HEAD"], { cwd: join(
 for (const st of STATE_NAMES) assert.ok(page.includes(st), `page mentions state ${st}`);
 assert.equal((await fetch(`${base}/nope`)).status, 404);
 assert.equal((await fetch(`${base}/api/tasks`, { method: "POST" })).status, 404);
+// 000192: the hub serves the statically imported webui module, so a page load writes no
+// temp copies under src/ (they would restart a node --watch daemon)
+assert.ok(!readdirSync(join(HERE, "..", "src")).some((d) => d.startsWith(".webui-hot-")), "a page load writes no webui copy dirs under src/");
 
 // FLIP diff: which cards get transforms. a on top, b below in one column; 210px is the next column
 const stacked = { a: { x: 0, y: 0 }, b: { x: 0, y: 50 } };
