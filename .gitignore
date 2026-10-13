@@ -1,4 +1,6 @@
 .worktrees
+AGENTS.md
+SPECS.md
 node_modules/
 pnpm-lock.yaml
 .kanban/

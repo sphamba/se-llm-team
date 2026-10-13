@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { createTask, getTask, kanbanDir, listAll, listTasks, setState, setWorktree, taskNum, updateTask, STATES, type TaskState } from "./src/kanban.ts";
+import { createTask, getTask, kanbanDir, listAll, listTasks, resolveTaskFromCwd, setState, setWorktree, taskNum, updateTask, STATES, type TaskState } from "./src/kanban.ts";
 import { pidAlive } from "./src/pid.ts";
 import { removeTask, waitForBoardCommits } from "./src/orchestrator.ts";
 
@@ -18,6 +18,10 @@ export default function (pi: ExtensionAPI) {
 	const board = (ctx: ExtensionContext) => kanbanDir(ctx.cwd);
 	const daemonLog = (root: string) => join(kanbanDir(root), ".logs", "orchestrator.log");
 	const notified = new Set<string>();
+	// the task from the file parameter, or from the cwd SPECS.md symlink (a role agent session
+	// in its worktree) when omitted
+	const resolveTask = (ctx: ExtensionContext, file?: string) => (file ? getTask(ctx.cwd, file) : resolveTaskFromCwd(ctx.cwd));
+	const NO_TASK = "no task; pass the file name or run from a worktree with SPECS.md";
 
 	pi.registerTool({
 		name: "kanban_list",
@@ -41,13 +45,13 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "kanban_get",
 		label: "Kanban get",
-		description: "Read one kanban task in full detail (state, worktree, issuer, complexity, blockedBy, summary, specs, notes, openQuestions). openQuestions is the task body's # Open questions section, empty when none.",
-		parameters: Type.Object({ file: Type.String({ description: "Task file name, e.g. 000001_nice_thing.md" }) }),
+		description: "Read one kanban task in full detail (state, worktree, issuer, complexity, blockedBy, summary, specs, notes, openQuestions). openQuestions is the task body's # Open questions section, empty when none. file is optional; resolved from the cwd SPECS.md symlink when omitted.",
+		parameters: Type.Object({ file: Type.Optional(Type.String({ description: "Task file name, e.g. 000001_nice_thing.md. Optional: resolved from the cwd SPECS.md symlink when omitted" })) }),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
-			const task = getTask(ctx.cwd, params.file);
+			const task = resolveTask(ctx, params.file);
 			return {
-				content: [{ type: "text", text: task ? JSON.stringify(task, null, 2) : `No task ${params.file}` }],
+				content: [{ type: "text", text: task ? JSON.stringify(task, null, 2) : params.file ? `No task ${params.file}` : NO_TASK }],
 				details: task ?? undefined,
 			};
 		},
@@ -85,11 +89,11 @@ export default function (pi: ExtensionAPI) {
 		name: "kanban_update",
 		label: "Kanban update",
 		description:
-			"Update an existing task. Use this instead of creating a duplicate when a not-done task already covers the same need. Omitted fields stay unchanged.",
+			"Update an existing task. Use this instead of creating a duplicate when a not-done task already covers the same need. Omitted fields stay unchanged. file is optional; resolved from the cwd SPECS.md symlink when omitted.",
 		// additionalProperties: false so pi rejects an unrecognized field (e.g. notes)
 		// with a validation error instead of dropping it and reporting a false update
 		parameters: Type.Object({
-			file: Type.String({ description: "Task file name" }),
+			file: Type.Optional(Type.String({ description: "Task file name. Optional: resolved from the cwd SPECS.md symlink when omitted" })),
 			name: Type.Optional(Type.String()),
 			priority: Type.Optional(StringEnum(["low", "medium", "high", "critical"] as const)),
 			complexity: Type.Optional(StringEnum(["simple", "moderate", "complex", "trivial"] as const)),
@@ -100,8 +104,8 @@ export default function (pi: ExtensionAPI) {
 		}, { additionalProperties: false }),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
-			const task = getTask(ctx.cwd, params.file);
-			if (!task) return text(`No task ${params.file}`);
+			const task = params.file ? getTask(ctx.cwd, params.file) : resolveTaskFromCwd(ctx.cwd);
+			if (!task) return text(params.file ? `No task ${params.file}` : NO_TASK);
 			const hasField = Object.entries(params).some(([k, v]) => k !== "file" && v !== undefined);
 			if (!hasField) return text(`Nothing to update in ${task.file}`);
 			updateTask(ctx.cwd, task, params);
@@ -112,17 +116,17 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "kanban_set_state",
 		label: "Kanban set state",
-		description: `Move a task to a new state. States: ${STATES.join(", ")}.`,
+		description: `Move a task to a new state. States: ${STATES.join(", ")}. file is optional; resolved from the cwd SPECS.md symlink when omitted.`,
 		// additionalProperties: false so pi rejects an unrecognized field (e.g. notes)
 		// with a validation error instead of dropping it and reporting a false success
 		parameters: Type.Object({
-			file: Type.String({ description: "Task file name" }),
+			file: Type.Optional(Type.String({ description: "Task file name. Optional: resolved from the cwd SPECS.md symlink when omitted" })),
 			state: StringEnum([...STATES] as unknown as [string, ...string[]]),
 		}, { additionalProperties: false }),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			ensureBoardWatcher(ctx);
-			const task = getTask(ctx.cwd, params.file);
-			if (!task) return text(`No task ${params.file}`);
+			const task = resolveTask(ctx, params.file);
+			if (!task) return text(params.file ? `No task ${params.file}` : NO_TASK);
 			setState(ctx.cwd, task, params.state as TaskState);
 			return text(`${task.file} (#${taskNum(task.file)}): state -> ${params.state}`);
 		},

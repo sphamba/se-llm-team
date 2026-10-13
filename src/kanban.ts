@@ -1,5 +1,5 @@
-import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { join, sep } from "node:path";
+import { mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, join, sep } from "node:path";
 
 export const STATES = [
 	"backlog",
@@ -195,6 +195,20 @@ export function listTasks(root: string, scope: Scope, priority?: Priority | stri
 export function getTask(root: string, file: string): Task | undefined {
 	const f = file.endsWith(".md") ? file : `${file}.md`;
 	return taskFiles(root).includes(f) ? parseTask(root, f) : undefined;
+}
+
+// the task behind the cwd's SPECS.md symlink (the orchestrator re-points it in the worktree
+// root before every agent spawn): the readlink target ".kanban/<taskFile>" feeds getTask
+// through the linked board. undefined when SPECS.md is missing or not a symlink (a PM
+// session in the main checkout, or the links removed after the agent terminated)
+export function resolveTaskFromCwd(root: string): Task | undefined {
+	let target: string;
+	try {
+		target = readlinkSync(join(root, "SPECS.md"));
+	} catch {
+		return undefined;
+	}
+	return getTask(root, basename(target));
 }
 
 // capped at 4 words with the leading type prefix ("feat: " ...) dropped from the slug;

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { kanbanDir, roleNotesPath, taskSlug, type Task } from "../kanban.ts";
@@ -9,27 +9,71 @@ import { log, logPath, nextRunIndex } from "./log.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-export function renderPrompt(root: string, role: string, task: Task, worktreeDir?: string): string {
+export function renderPrompt(root: string, role: string): string {
 	// the agents dir sits two levels up from src/orchestrator/
-	return readFileSync(join(HERE, "..", "..", "agents", `${role}.md`), "utf8")
-		.replaceAll("{{ROOT}}", root)
-		.replaceAll("{{TASK_FILE}}", join(kanbanDir(root), task.file))
-		.replaceAll("{{WORKTREE}}", worktreeDir ?? "")
-		.replaceAll("{{WORKTREE_NAME}}", task.worktree)
-		.replaceAll("{{NAME}}", task.name)
-		.replaceAll("{{PRIORITY}}", task.priority);
+	let prompt = readFileSync(join(HERE, "..", "..", "agents", `${role}.md`), "utf8");
+	// the reviewer's base-branch resolution is the one remaining {{ROOT}} use: it diffs against
+	// the branch the project root checkout has checked out. The other roles carry no absolute
+	// path: the cwd SPECS.md and AGENTS.md symlinks give them the task and the role notes
+	if (role === "reviewer") prompt = prompt.replaceAll("{{ROOT}}", root);
+	return prompt;
 }
 // per-role project notes: .kanban/AGENTS.<role>.md, created when missing with a one-line
 // starter header; agents append their project's guidance (how to run, how to live-test) so
-// future agents of the role start faster. Appended to the system prompt at spawn: pi reads
-// the value as file contents when the path exists, and the flag applies to all modes
-// including headless --mode json
+// future agents of the role start faster. The AGENTS.md cwd symlink points here, so pi loads
+// the file from the session cwd at startup with no spawn flag
 function ensureRoleNotes(root: string, role: string): string {
 	const path = roleNotesPath(root, role);
 	if (!existsSync(path)) {
 		writeFileSync(path, `# ${role}: append project-specific guidance for this role below (e.g. how to run the project, how to live-test) so future agents of your kind start faster.\n`);
 	}
 	return path;
+}
+
+// the two cwd context symlinks the agent session reads at startup: SPECS.md is the task file
+// through the linked board, AGENTS.md the role's notes. Re-pointed at every spawn so the
+// correct role guidance loads (idempotent: a matching link stays untouched)
+export function ensureContextSymlinks(root: string, cwd: string, taskFile: string, role: string): void {
+	repointContextSymlink(root, join(cwd, "SPECS.md"), join(".kanban", taskFile));
+	repointContextSymlink(root, join(cwd, "AGENTS.md"), join(".kanban", `AGENTS.${role}.md`));
+}
+
+function repointContextSymlink(root: string, link: string, target: string): void {
+	try {
+		if (readlinkSync(link) === target) return;
+	} catch {
+		/* missing or a real file: re-point */
+	}
+	try {
+		if (lstatSync(link).isDirectory()) {
+			log(root, `refusing to replace directory ${link} with the context symlink`);
+			return;
+		}
+	} catch {
+		/* missing: nothing to remove */
+	}
+	rmSync(link, { force: true, recursive: true });
+	try {
+		symlinkSync(target, link);
+	} catch (err) {
+		log(root, `could not symlink ${link} to ${target}: ${err instanceof Error ? err.message : err}`);
+	}
+}
+
+// after the agent terminated: remove both context symlinks from the task's worktree, so a
+// worktree without a running agent resolves no task (the kanban tools then say so). Hooked
+// where the orchestrator clears the agent pid; the done cleanup removes the whole worktree
+export function clearContextSymlinks(root: string, task: Task): void {
+	if (!task.worktree) return;
+	const cwd = join(root, ".worktrees", task.worktree);
+	for (const name of ["SPECS.md", "AGENTS.md"]) {
+		try {
+			const path = join(cwd, name);
+			if (lstatSync(path).isSymbolicLink()) rmSync(path);
+		} catch {
+			/* already gone */
+		}
+	}
 }
 
 // the exit-code file next to the pid file: the sh wrapper writes it when the agent exits, so
@@ -71,12 +115,14 @@ export function spawnAgent(root: string, cfg: Config, role: string, task: Task, 
 	// --approve trusts the project-local files of the worktree, so the headless session never waits for a trust prompt;
 	// --mode json streams the full JSONL event log (thinking, tool calls, text) instead of print mode's final text only;
 	// the provider/model/thinking flags come from the config, resolved per role
-	const notesPath = ensureRoleNotes(root, role);
+	ensureRoleNotes(root, role);
+	// the cwd symlinks give the session its task (SPECS.md) and role guidance (AGENTS.md) at startup
+	ensureContextSymlinks(root, cwd, task.file, role);
 	// the sh wrapper runs the agent and records its exit code into <name>.exit, so the poll can
 	// tell a successful finish (exit 0) from a crash even after a daemon restart. The agent
 	// command travels as positional args ($1..), so paths with spaces stay safe; $0 is a dummy
 	const exitPath = exitFilePath(root, name);
-	const child = spawn("sh", ["-c", `"$@" ; echo $? > "${exitPath}"`, "sh", cfg.agent, "--approve", "--mode", "json", ...llmFlags(root, cfg, role, task.complexity ?? "moderate"), "-p", renderPrompt(root, role, task, cwd === root ? undefined : cwd), "--append-system-prompt", notesPath], {
+	const child = spawn("sh", ["-c", `"$@" ; echo $? > "${exitPath}"`, "sh", cfg.agent, "--approve", "--mode", "json", ...llmFlags(root, cfg, role, task.complexity ?? "moderate"), "-p", renderPrompt(root, role)], {
 		cwd,
 		detached: true,
 		stdio: ["ignore", fd, fd],

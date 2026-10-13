@@ -98,7 +98,7 @@ Both checks run inside each daemon's own code. A daemon started from a worktree 
 
 ## Agents
 
-Agent prompts live in `agents/`. The orchestrator runs each agent as a headless `<executable> --approve --mode json [<llm flags>] -p <prompt>` process, with the task file path in the prompt, and the optional provider/model/thinking flags from the config. All four roles run with the task worktree as cwd:
+Agent prompts live in `agents/`. The orchestrator runs each agent as a headless `<executable> --approve --mode json [<llm flags>] -p <prompt>` process, with the optional provider/model/thinking flags from the config. The prompt carries no task path. Before each spawn the orchestrator puts two symlinks in the agent cwd: `SPECS.md` points at the task file through the linked board, and `AGENTS.md` points at the role's notes file (`.kanban/AGENTS.<role>.md`), which replaces the former `--append-system-prompt` flag. The agent reads the task and the role guidance from its cwd at startup. The orchestrator re-points both symlinks at every spawn and removes them when the agent terminates. All four roles run with the task worktree as cwd:
 
 | Role | cwd |
 | --- | --- |
@@ -111,7 +111,7 @@ The agent log (`.kanban/.logs/`) carries the full JSONL event stream; the web ui
 
 ## Tools
 
-The PM session gets: kanban_list, kanban_get, kanban_create, kanban_update, kanban_set_state, kanban_set_worktree, kanban_delete, orchestrator_start, orchestrator_status, orchestrator_stop, orchestrator_poke. kanban_delete removes a mistaken task: it deletes the task file and commits a whole-board mirror snapshot in one operation, so the daemon cannot restore the task. Never delete a board file by hand. The daemon restores hand-deleted files from the mirror. The extension also notifies the session when a task reaches done.
+The PM session gets: kanban_list, kanban_get, kanban_create, kanban_update, kanban_set_state, kanban_set_worktree, kanban_delete, orchestrator_start, orchestrator_status, orchestrator_stop, orchestrator_poke. kanban_get, kanban_update and kanban_set_state take an optional file parameter: when omitted, the task resolves from the session cwd through the SPECS.md symlink, so an agent session in a worktree never passes the file name. With no SPECS.md in the cwd the tool reports `no task; pass the file name or run from a worktree with SPECS.md`. kanban_delete removes a mistaken task: it deletes the task file and commits a whole-board mirror snapshot in one operation, so the daemon cannot restore the task. Never delete a board file by hand. The daemon restores hand-deleted files from the mirror. The extension also notifies the session when a task reaches done.
 
 ## Checks
 

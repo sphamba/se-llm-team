@@ -4,7 +4,7 @@ import { getTask, kanbanDir, listAll, setState, taskSlug, type Task, type TaskSt
 import { clearPid, killTree, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP } from "./config.ts";
 import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, logPath, nextRunIndex, readCounter } from "./log.ts";
-import { clearExitFile, getMergerLogSlug, readExitCode } from "./spawn.ts";
+import { clearContextSymlinks, clearExitFile, getMergerLogSlug, readExitCode } from "./spawn.ts";
 import { dropDoneBlockers, promoteBacklog } from "./pipeline.ts";
 
 // the working states with an agent out: next is the one-state-back bounce target when the
@@ -73,6 +73,9 @@ function bounceDead(root: string, task: Task, next: TaskState, pidName: string, 
 	clearPid(root, pidName);
 	// re-read + state-match: a task that moved on underneath (agent, PM or user) wins
 	const fresh = getTask(root, task.file);
+	// the agent terminated: remove its cwd context symlinks from the task's worktree (the next
+	// spawn re-points them)
+	clearContextSymlinks(root, fresh ?? task);
 	if (!fresh || fresh.state !== task.state) return;
 	// per-run death marker for the webui's cross: the dying run is the newest run log of the
 	// bounced role (the index known at spawn); a fresh respawn (new index) is unaffected and
@@ -151,6 +154,8 @@ export function poll(root: string, stallMinutes: number, now = Date.now()): void
 			// pass re-takes the exception path instead of crash-bouncing the now pid-less task
 			if (!(code === 0 && working && !working.success)) clearExitFile(root, pidName);
 			clearPid(root, pidName);
+			// the agent terminated (or its pid file is stale): remove its cwd context symlinks
+			clearContextSymlinks(root, task);
 			if (!working) {
 				// a completed run leaves its stale pidfile behind, a bounce clears it first, so a
 				// stale pidfile here means the agent advanced the task out of the mapped state by
