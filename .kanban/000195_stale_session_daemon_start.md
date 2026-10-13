@@ -42,3 +42,21 @@ Either way the trap must be spelled out where a PM would hit it. No change to th
 - If code changes, the existing suites still pass and a test covers the warn/silent cases.
 
 # Notes
+
+Implemented the warning remedy (option 2 of the Smallest useful remedy list).
+
+- `src/pid.ts`: added `procPpid` (stat field 4) and exported `orchestratorWatched(pid)`: true when the pid runs an orchestrator daemon (its cmdline carries `orchestrator.ts`) whose parent process is a `node --watch` supervisor (the parent's cmdline carries `--watch`, the 000192 spawn shape); false when the daemon's parent is gone or carries no `--watch`; null when /proc is unreadable (non-Linux) or the lock pid is no orchestrator daemon at all, so the caller stays silent instead of mis-warning.
+- `index.ts`: `orchestrator_start`'s already-running early return now warns when `orchestratorWatched(pid) === false`: "Orchestrator already running (pid N) without a node --watch supervisor: a merge that changes src/ will not restart it. Stop the orchestrator, then start it again to restore the self-restart." Watched daemons and undecidable cases keep the plain "already running" line. No change to the `--watch` spawn itself.
+- `index.test.ts`: three new cases. Warn: a real child whose cmdline carries `orchestrator.ts` with no `--watch` parent (lock = its pid) gets the warning and no new spawn. Silent (watched): a detached `node --watch` supervisor with a daemon child writing its own pid (the production spawn shape; the fixture dir needs a `package.json` with `"type": "module"`, otherwise node loads the `.ts` fixture as CJS and the child dies) keeps the plain line. Silent (undecidable): a lock pid that is no daemon (the test process itself) keeps the plain line.
+- Detection shape verified live on this machine before coding: `node --watch <script>` runs a supervisor (cmdline `node --watch <script>`) plus a daemon child (cmdline carries the script path, no `--watch`); the lock pid is the child, so the child's ppid + the parent's cmdline decide.
+- Verification: `npm test` all five suites pass, `npm run test:changed` passes (3 suites), `index.test.ts` re-run 3 times stable with no leaked fixtures. No typecheck command in this repo (see the SKILL rule); the module graph of index.ts is exercised by index.test.ts.
+- Not done, deliberately: no README/SKILL.md line (the specs say pick one remedy), no `orchestrator_status` warning (the specs name `orchestrator_start` only), no change to the tool description or to the `--watch` spawn.
+
+# Open questions
+
+Assumptions made (confirm or correct):
+
+- The warning is the chosen remedy (option 2), not the README/SKILL.md line: it fires at a touchpoint every fresh PM session hits (skill step 7 calls orchestrator_start), while a doc line cannot reach the stale session that causes the trap (its context is frozen at session start).
+- A stale session never sees the warning (its loaded extension code predates it), so the warning targets fresh sessions: it flags any unwatched daemon already running, however it was spawned.
+- A daemon started by hand (`node src/orchestrator.ts --root <project>`, documented in the README) also gets the warning, since it genuinely lacks the merge self-restart.
+- The warning is tool output text only (no ui.notify): the PM agent reads the orchestrator_start result directly.

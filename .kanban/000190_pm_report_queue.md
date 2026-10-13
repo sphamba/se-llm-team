@@ -1,8 +1,8 @@
 ---
 name: "feat: orchestrator PM reports queued to the chat"
 priority: "high"
-state: "live-testing"
-worktree: "feat/190-pm-report-queue"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "pm-report-queue"
