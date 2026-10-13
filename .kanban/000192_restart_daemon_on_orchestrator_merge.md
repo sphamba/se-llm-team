@@ -1,8 +1,8 @@
 ---
 name: "fix: restart the daemon after a merge that changes the orchestrator"
 priority: "high"
-state: "live-testing"
-worktree: "fix/192-restart-daemon-on-orchestrator-merge"
+state: "done"
+worktree: ""
 issuer: "#187"
 complexity: "simple"
 shortName: "restart-daemon-on-orchestrator-merge"
