@@ -210,8 +210,9 @@ nodes, so untouched siblings never re-animate and only new content moves */
 block's text, the nested pre and summary children included, and color: transparent hides the box,
 so the band passing reads as letters brightening, never a highlight bar; the details.pulse
 selectors outrank the muted color rule (color: transparent must stick there) and --shine-base
-follows the block's own color */
-#m-log-text > .pulse, #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { --shine-base: var(--fg); background-image: linear-gradient(90deg, var(--shine-base) 0%, color-mix(in srgb, #fff var(--shine), var(--shine-base)) 50%, var(--shine-base) 100%); background-size: 300% 100%; background-repeat: no-repeat; -webkit-background-clip: text; background-clip: text; color: transparent; animation: chunkIn var(--fade) ease-out, shimmer var(--pulse) linear infinite; }
+follows the block's own color; 000198: flat shoulders (base 0-33% and 67-100%) so the 300%
+window sits on flat base at both loop endpoints, no partial-bright tail at the wrap */
+#m-log-text > .pulse, #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { --shine-base: var(--fg); background-image: linear-gradient(90deg, var(--shine-base) 0%, var(--shine-base) 33%, color-mix(in srgb, #fff var(--shine), var(--shine-base)) 50%, var(--shine-base) 67%, var(--shine-base) 100%); background-size: 300% 100%; background-repeat: no-repeat; -webkit-background-clip: text; background-clip: text; color: transparent; animation: chunkIn var(--fade) ease-out, shimmer var(--pulse) linear infinite; }
 #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { --shine-base: var(--muted); }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 #modal { position: fixed; inset: 0; z-index: 3; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
