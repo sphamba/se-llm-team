@@ -1,8 +1,8 @@
 ---
 name: "fix: seamless shimmer loop; flat gradient shoulders"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "live-testing"
+worktree: "fix/198-shimmer-flat-shoulders"
 issuer: "user"
 complexity: "simple"
 shortName: "shimmer-flat-shoulders"
@@ -37,3 +37,18 @@ Acceptance:
 - Browser check: open the task detail card and a live agent log pane with a pulsed block, watch at least one full 2s loop: the bright band enters and exits fully, with no jump or flash at the wrap, in both themes.
 
 # Notes
+
+- Verified in code before the fix: only one shimmer gradient exists at HEAD (origin/main, c2b5dc7): the #194 letter-only shine at src/webui/page.ts:214. The #191 pulse gradient (transparent + var(--link) 14%, commit 0e5b620) was replaced by #194's background-clip: text shine, so the decision's Pulse gradient has no target in the code. It was not re-added, since re-adding it would regress the reviewed #194 letter-only change. Every pulsed element (.pulse, .lg-think.pulse, .lg-tool.pulse) paints through the single shine gradient, so the shoulder fix covers them all.
+- Applied the decided shoulders to the shine gradient, byte-exact as decided: base 0% and 33%, bright core 50% (color-mix), base 67% and 100%.
+- Untouched: @keyframes shimmer (byte-identical, test :573 passes unchanged), background-size/repeat/clip, the knobs, the .pulse application logic, the reduced-motion rules, markLiveLine().
+- Updated test :575, the only pin on the old gradient string, to the new shoulders string in the same commit (76c7478).
+- node tests/webui.test.ts passes; full npm test passes.
+- The acceptance browser check (task detail card and a live log pane with a pulsed block, one full 2s loop, no jump at the wrap, both themes) is left for the live-test stage on the merged commit.
+- Review pass: shoulders byte-exact as decided, keyframes verified byte-identical to base by diff, test :575 updated in the same commit, webui.test.ts passes, endpoint math checked (~1.8% max bright sliver at the window edge, flat in practice). No fixes needed.
+
+# Open questions
+
+None. Assumptions for the PM and user to confirm:
+- The #191 pulse gradient no longer exists at HEAD (replaced by the reviewed #194 letter-only shine), so the decision's second gradient has no target and the fix lands on the single remaining shine gradient.
+- With shoulders at 33%/67% the loop endpoints sit about 0.33% inside the flat base, leaving at most about 2% of the bright mix at the window edge, which reads as flat in practice; widening background-size or the position range stays off the table per the decision.
+- The browser visual check in both themes is covered by the pipeline's live-test stage on the merged commit.

@@ -1,7 +1,7 @@
 ---
 name: "fix: report tasks unblocked by the same done sweep"
 priority: "low"
-state: "doing"
+state: "reviewing"
 worktree: "fix/197-report-same-sweep-unblocked"
 issuer: "#190"
 complexity: "simple"
@@ -28,5 +28,12 @@ Acceptance: an orchestrator-flow fix, checked against the real daemon path (fixt
 
 # Notes
 
+- Fix in `src/orchestrator/pipeline.ts` (commit 064592d): `rescan` re-read the board (`listAll`) after the state loop and passed the fresh list to `dropDoneBlockers` and `promoteBacklog`; `reportDone` keeps the pre-loop snapshot, so a done move the sweep itself made stays this sweep's transition. The per-task fresh-read gates in `promoteBacklog` are unchanged.
+- Verified against the real daemon path, fixture from the repro (temp root, stub agent, `--rescan-seconds 1 --no-webui`): one sweep logs `000006_epsilon.md: nothing to merge, set done`, then `000009_schedblocked.md: dropped satisfied blocker ref(s) #6`, then `promoting 000009_schedblocked.md to to-do (blockers done)`, then queues the report. That report's Scheduled section lists 000008 and 000009. No one-sweep delay, no silent promotion.
+- Left a deterministic check behind: `orchestrator.test.ts` part AW drives `rescan` with the fixture and asserts the same-sweep promotion, the same-sweep ref drop, and the report naming 000009 under Scheduled. Full suite green (`npm test`, exit 0).
+- Residual ceiling, accepted: a done write landing in the sub-second window between the post-loop re-read and the promote pass still promotes one sweep later (no report). Narrower than the old whole-sweep window; closing it fully would need the report to cover promotions without a done transition (out of scope here).
+
 # Open questions
+
+Assumptions (no questions): the fix targets only the blocker-decision staleness the repro names. A done write landing in the sub-second window between the sweep's post-loop re-read and the promote pass still promotes one sweep later with no report; closing that residual race fully would need the report to cover promotions without a done transition, which I read as out of scope for this fix.
 
