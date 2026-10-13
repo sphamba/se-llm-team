@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
 import { registerHooks } from "node:module";
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { REPORT_MAX_AGE_MS } from "../src/orchestrator/report.ts";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createTask, getTask, taskNum } from "../src/kanban.ts";
@@ -33,10 +35,12 @@ registerHooks({
 
 const tools: Record<string, any> = {};
 const events: Record<string, () => unknown> = {};
+const sent: Array<{ message: any; options: any }> = [];
 const { default: extension } = await import("../index.ts");
 extension({
 	registerTool: (def: any) => { tools[def.name] = def; },
 	on: (event: string, handler: () => unknown) => { events[event] = handler; },
+	sendMessage: (message: any, options: any) => { sent.push({ message, options }); },
 } as any);
 
 const ctx = { cwd: root, hasUI: false, ui: { notify: () => {} } } as any;
@@ -121,6 +125,63 @@ const updated = await run(update, { file: t1.file, summary: "after" });
 assert.equal(updated.content[0].text, `Updated ${t1.file} (#${taskNum(t1.file)})`);
 assert.notEqual(readFileSync(taskFile(t1.file), "utf8"), before);
 assert.equal(getTask(root, t1.file)?.summary, "after");
+
+// session_start creates .kanban/.reports when the board dir exists: the dir was the only
+// guard on the queue watcher, so a session that starts before the first report (the dir
+// not there yet) must still get the watcher and consume reports live
+await events["session_start"]?.({ type: "session_start", reason: "startup" }, ctx);
+assert.ok(existsSync(join(root, ".kanban", ".reports")), "session_start creates the reports dir when the board exists");
+
+// PM report queue: a repo-root session drains .kanban/.reports oldest first and deletes
+// each delivered report, a stale one is discarded at startup, a busy session gets the
+// report as a follow-up, and a linked-worktree session never consumes (git-topology gate)
+const reportsRoot = mkdtempSync(join(tmpdir(), "extension-reports-"));
+execSync("git init -q", { cwd: reportsRoot });
+execSync("git config user.email t@t && git config user.name t && git config commit.gpgsign false", {
+	cwd: reportsRoot,
+	shell: "/bin/bash",
+});
+writeFileSync(join(reportsRoot, "README.md"), "x\n");
+execSync("git add -A && git commit -qm init", { cwd: reportsRoot, shell: "/bin/bash" });
+const reportsPath = join(reportsRoot, ".kanban", ".reports");
+mkdirSync(reportsPath, { recursive: true });
+const reportOld = join(reportsPath, "2020-01-01T00-00-00-000Z.md");
+const reportNew = join(reportsPath, "2020-01-02T00-00-00-000Z.md");
+writeFileSync(reportOld, "# Board report\nfirst\n");
+writeFileSync(reportNew, "# Board report\nsecond\n");
+const staleReport = join(reportsPath, "2019-12-31T00-00-00-000Z.md");
+writeFileSync(staleReport, "# Board report\nstale\n");
+const aged = new Date(Date.now() - REPORT_MAX_AGE_MS - 60_000);
+utimesSync(staleReport, aged, aged);
+const idleCtx = { cwd: reportsRoot, hasUI: true, isIdle: () => true, ui: { notify: () => {} } } as any;
+await events["session_start"]?.({ type: "session_start", reason: "startup" }, idleCtx);
+assert.equal(sent.length, 2, "the root session drains the queue oldest first");
+assert.equal(sent[0].message.customType, "board-report");
+assert.match(sent[0].message.content, /first/);
+assert.match(sent[1].message.content, /second/);
+assert.deepEqual(sent[0].options, { triggerTurn: true }, "an idle session gets the report as its next turn");
+assert.ok(!existsSync(reportOld) && !existsSync(reportNew), "delivered reports are deleted");
+assert.ok(!existsSync(staleReport), "a stale report is discarded at startup");
+// the single reports watcher was claimed by the first session_start (it watches the main
+// fixture), so this dir is only exercised through the explicit session_start drains below
+rmSync(reportsPath, { recursive: true, force: true });
+// a busy session gets the report as a follow-up instead of a turn trigger
+mkdirSync(reportsPath, { recursive: true });
+writeFileSync(reportOld, "# Board report\nbusy\n");
+sent.length = 0;
+await events["session_start"]?.({ type: "session_start", reason: "new" }, { ...idleCtx, isIdle: () => false } as any);
+assert.equal(sent.length, 1, "the busy session consumes the report");
+assert.deepEqual(sent[0].options, { deliverAs: "followUp" }, "a busy session gets the report as a follow-up");
+// a linked-worktree session shares the board through the symlink but never consumes
+execSync("git worktree add -q -b feat/session .worktrees/feat/session", { cwd: reportsRoot, shell: "/bin/bash" });
+const wtReports = join(reportsRoot, ".worktrees", "feat/session");
+symlinkSync(join(reportsRoot, ".kanban"), join(wtReports, ".kanban"));
+writeFileSync(reportNew, "# Board report\nqueued\n");
+sent.length = 0;
+await events["session_start"]?.({ type: "session_start", reason: "new" }, { ...idleCtx, cwd: wtReports } as any);
+assert.equal(sent.length, 0, "a worktree session never consumes reports");
+assert.ok(existsSync(reportNew), "the report stays queued for the root session");
+rmSync(reportsRoot, { recursive: true, force: true });
 
 // the board watcher opened by execute is closed through the shutdown handler
 await events["session_shutdown"]?.();

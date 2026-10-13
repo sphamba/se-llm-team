@@ -15,7 +15,6 @@ export {
 	poll,
 	promoteBacklog,
 	removeTask,
-	waitForBoardCommits,
 } from "./orchestrator/index.ts";
 
 // the extension (loaded by jiti) keeps the symlink path in import.meta.url and spawns the

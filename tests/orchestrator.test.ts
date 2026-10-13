@@ -6,9 +6,10 @@ import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSyn
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isLinkedWorktree, readHubRegistry, startHub } from "../src/hub.ts";
-import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskSlug, updateTask, ROLE_NOTES_RE } from "../src/kanban.ts";
-import { compactFinishedLogs, compactLogLine, dropDoneBlockers, loadConfig, nextRunIndex, poll, promoteBacklog, removeTask, waitForBoardCommits } from "../src/orchestrator.ts";
+import { readHubRegistry, startHub } from "../src/hub.ts";
+import { createTask, isLinkedWorktree, kanbanDir, listAll, parseTask, setState, setWorktree, taskNum, taskSlug, updateTask, ROLE_NOTES_RE } from "../src/kanban.ts";
+import { REPORT_MAX_AGE_MS, reportsDir } from "../src/orchestrator/report.ts";
+import { compactFinishedLogs, compactLogLine, dropDoneBlockers, loadConfig, nextRunIndex, poll, promoteBacklog, removeTask } from "../src/orchestrator.ts";
 import { rescan } from "../src/orchestrator/pipeline.ts";
 import { gunzipSync } from "node:zlib";
 import { agentAlive, agentPid, killTree, pidAlive, pidPath } from "../src/pid.ts";
@@ -1085,33 +1086,50 @@ m.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: all smoke parts passed (pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard + conflict skip + merge cooldown + mirror board + bootstrap + fresh-clone bootstrap)");
 
-// --- part N: the board-feed wait resolves from the main checkout even when the session cwd is a worktree ---
+// --- part N: the PM report: one report per done sweep, queued for the PM session ---
 const rootN = fixture();
 cleaned.push(rootN);
-execSync("git worktree add -q -b feat/session .worktrees/feat/session", { cwd: rootN, shell: "/bin/bash" });
-const wtN = join(rootN, ".worktrees", "feat/session");
-// pin the session cwd's HEAD at its own advanced branch tip, like a task worktree: a
-// HEAD-based wait would satisfy itself on worktree commits and never see the board feed
-writeFileSync(join(wtN, "session.txt"), "session work\n");
-execSync("git add -A && git commit -qm 'session work'", { cwd: wtN, shell: "/bin/bash" });
-const mirrorCommit = (message: string) => {
-	const tree = execSync("git rev-parse HEAD^{tree}", { cwd: rootN, encoding: "utf8", shell: "/bin/bash" }).trim();
-	const commit = execSync(`git commit-tree ${tree} -m '${message}'`, { cwd: rootN, encoding: "utf8", shell: "/bin/bash" }).trim();
-	execSync(`git update-ref refs/heads/meta/kanban ${commit}`, { cwd: rootN, shell: "/bin/bash" });
-};
-// baseline mirror commit, wait starts from the worktree cwd, then the kanban: done commit lands
-// in the main checkout: the wait must report it
-mirrorCommit("kanban: create 000042_fix_feed.md");
-const waitN = waitForBoardCommits(wtN, 15);
-await new Promise((r) => setTimeout(r, 500));
-mirrorCommit("kanban: done 000042_fix_feed.md");
-assert.deepEqual(await waitN, ["kanban: done 000042_fix_feed.md"], "wait from a worktree cwd sees main-checkout board commits");
-// the wait started after that baseline: an unrelated mirror commit does not satisfy it
-const waitN2 = waitForBoardCommits(wtN, 1);
-mirrorCommit("unrelated mirror commit");
-assert.deepEqual(await waitN2, [], "unrelated commits do not satisfy the wait; it times out");
+mkdirSync(kanbanDir(rootN), { recursive: true });
+writeFileSync(join(kanbanDir(rootN), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootN), pollMinutes: 0.01 }));
+// both tasks reach done inside one sweep: created in to-merge with nothing to merge
+// (no worktree, no branch), sweepToMerge sets them done directly
+const doneN1 = createTask(rootN, { name: "fix: merged task", summary: "Merged", specs: "n/a" });
+const doneN2 = createTask(rootN, { name: "fix: merged task two", summary: "Merged too", specs: "n/a" });
+setState(rootN, doneN1, "to-merge");
+setState(rootN, doneN2, "to-merge");
+// a finding task from the first task's live test: held unpromoted by its open questions,
+// so the report must list it under the finished task's findings for the PM to unblock
+const findingN = createTask(rootN, { name: "fix: regression found in live test", summary: "Finding", specs: "n/a", issuer: `#${taskNum(doneN1.file)}`, openQuestions: "- [user] Keep the flag?" });
+// a plain schedulable task: promoted this sweep, listed in the Scheduled section
+const schedN = createTask(rootN, { name: "feat: scheduled next", summary: "Promoted", specs: "n/a" });
+rescan(rootN, loadConfig(rootN));
+const reportsN = readdirSync(reportsDir(rootN)).filter((f) => f.endsWith(".md")).sort();
+assert.equal(reportsN.length, 1, "exactly one report for the done sweep");
+const reportN = readFileSync(join(reportsDir(rootN), reportsN[0]), "utf8");
+assert.match(reportN, /^# Board report\n/);
+assert.ok(reportN.includes(doneN1.file) && reportN.includes(doneN2.file), "the Done section covers both finished tasks");
+assert.ok(reportN.includes(`- ${schedN.name} (${schedN.file}): to-do`), "the Scheduled section lists the promoted task with its new state");
+assert.ok(reportN.includes(`## Live-test findings for ${doneN1.name} (#${taskNum(doneN1.file)})`), "findings are grouped under the finished task");
+assert.ok(reportN.includes(findingN.file) && reportN.includes("Keep the flag?"), "the finding task and its open questions are listed");
+assert.match(reportN.slice(reportN.indexOf(`## Live-test findings for ${doneN2.name}`)), /^## Live-test findings for[^\n]*\nnone\n/, "a finished task without findings lists none");
+assert.ok(reportN.includes("## Instructions for the Project manager"), "the report ends with the PM instructions");
+// a second sweep: already-seen done tasks do not re-report
+rescan(rootN, loadConfig(rootN));
+assert.equal(readdirSync(reportsDir(rootN)).filter((f) => f.endsWith(".md")).length, 1, "already-seen done tasks do not re-report");
+// the sweep prunes stale reports and stale claims by mtime, fresh ones survive
+const staleReportN = join(reportsDir(rootN), "2020-01-01T00-00-00-000Z.md");
+writeFileSync(staleReportN, "# Board report\nstale\n");
+const staleClaimN = join(reportsDir(rootN), `${reportsN[0]}.claiming`);
+writeFileSync(staleClaimN, "half-written");
+const oldN = new Date(Date.now() - REPORT_MAX_AGE_MS - 60_000);
+utimesSync(staleReportN, oldN, oldN);
+utimesSync(staleClaimN, oldN, oldN);
+rescan(rootN, loadConfig(rootN));
+assert.ok(!existsSync(staleReportN), "a stale report is pruned");
+assert.ok(!existsSync(staleClaimN), "a stale claim is pruned");
+assert.ok(existsSync(join(reportsDir(rootN), reportsN[0])), "the fresh report survives the prune");
 
-console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard + conflict skip + merge cooldown + mirror board + bootstrap + fresh-clone bootstrap + worktree-cwd board-feed wait passed");
+console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard + conflict skip + merge cooldown + mirror board + bootstrap + fresh-clone bootstrap + PM report queue passed");
 
 // --- part O: a settled done task without a worktree must not swallow create events ---
 // the old code issued a "kanban: done" commit every sweep for such a task; commitKanban
