@@ -1,8 +1,8 @@
 ---
 name: "fix: clear the webui live-line pulse when the run dies"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/193-webui-pulse-clear-on-death"
 issuer: "#191"
 complexity: "simple"
 shortName: "webui-pulse-clear-on-death"
