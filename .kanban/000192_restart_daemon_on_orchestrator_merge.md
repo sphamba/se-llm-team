@@ -1,7 +1,7 @@
 ---
 name: "fix: restart the daemon after a merge that changes the orchestrator"
 priority: "high"
-state: "doing"
+state: "live-testing"
 worktree: "fix/192-restart-daemon-on-orchestrator-merge"
 issuer: "#187"
 complexity: "simple"
@@ -37,8 +37,10 @@ The daemon self-restarts when its own code changes: it runs under node --watch (
 - Note: the `Orchestrator starting (pid N)` message now names the `node --watch` supervisor; the daemon's real pid lands in `.kanban/.orchestrator.lock` and `orchestrator_status` reports it.
 - Live observation: the production daemon already runs under `--watch` (relaunched 12:37, hygiene) and its child self-restarted at 12:46:11 after a src/ merge on main, with the webui re-elected on 0.0.0.0:4242 and the in-flight state kept.
 
+## Review notes (2026-10-13)
+- Verified the diff against the Specs. index.ts spawns the daemon under `node --watch`, and orchestrator_stop signals the daemon's process group when that group is not the caller's own group; src/pid.ts exports procPgrp. The hot reload is fully deleted in src/hub.ts. No file references `webuiPath`, `webuiLoader` or `.webui-hot` any more. No README, SKILL.md or .kanban change (empty diff stat).
+- Verified the test coverage against the Acceptance. index.test.ts covers both stop paths: a plain victim shares the caller's group and gets the bare pid kill, and a detached supervisor plus child dies together on the group kill. Orchestrator part AV covers the end-to-end restart: an mtime-only touch of a watched src file changes the lock pid, the webui answers again after the re-election, and the daemon releases the lock on stop. killAll kills the lock pid too, so a --watch daemon child cannot leak between suite parts.
+- Verified the three assumptions that were listed under Open questions against the code, and removed them: the diff touches no file under src/orchestrator/; the daemon's module graph (src/orchestrator.ts and its imports) excludes index.ts, which only the extension process loads; procPgrp reads null when /proc is unavailable, so stop falls back to the bare pid kill there.
+- Review fixes (1e12884): the src/webui.ts shim comment still said the hub loads a "reloadable module path", which this change deletes, so the comment now names the static import. webui.test.ts now asserts that a page load leaves no `.webui-hot-*` dir under src/ (Acceptance: a page load no longer writes temp copies). All five suites pass after the fixes.
+
 # Open questions
-## Assumptions
-- [assumption] "No orchestrator code change" means no change under src/orchestrator/ (daemon entry, pipeline); index.ts and the shared pid.ts helper are launch-side and take effect without a daemon restart.
-- [assumption] node --watch restarts on changes to the resolved module graph (src/*.ts of the checkout the extension symlink resolves to); index.ts is loaded by the extension process, not the daemon, so an index.ts-only merge does not restart the daemon.
-- [assumption] The stop group kill is Linux-only (/proc); elsewhere stop keeps today's bare-pid SIGTERM.

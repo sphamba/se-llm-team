@@ -1,7 +1,7 @@
 ---
 name: "fix: clear the webui live-line pulse when the run dies"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/193-webui-pulse-clear-on-death"
 issuer: "#191"
 complexity: "simple"
@@ -51,3 +51,20 @@ Observed: the run card reads `agent-past` with no `.spin`, yet `#m-log-text > *:
 - Sanity: while a run is genuinely alive the pulse still engages on the first line, and with `prefers-reduced-motion` the shimmer does not run.
 
 # Notes
+
+- Fix committed as c0d545f on fix/193-webui-pulse-clear-on-death: two one-line sweeps in the client source of src/webui/page.ts, both calling the existing markLiveLine().
+  - updateOpenTask() calls it after renderAgent(t, true) and setBody(t): the board refresh that rebuilds the run cards and drops the dead run's .spin now sweeps the pulse in the same cycle, which satisfies "no later than the next board refresh".
+  - pollLog()'s idle early-return calls it right after clearInterval: the exact repro (run dies while logState.idle is set) sweeps within one 1 s log tick of the board payload flipping to dead, even before that refresh lands.
+- markLiveLine() itself is unchanged: it reads aliveness from the same activeBoard() payload renderAgent reads, keeps the pulse on the first line only (engage/demote from 54ccdd9 / e472661 intact), and prefers-reduced-motion still disables the shimmer. Both calls are idempotent, so a still-alive run re-engages the pulse with no visual change.
+- Regression check in tests/webui.test.ts: asserts the updateOpenTask source and pollLog's idle-early-return block both include markLiveLine(); the "pullLog and closeLog drive the pulse" message was extended to name the new drivers, no assertion weakened.
+- node tests/webui.test.ts passes; full npm test passes (kanban, orchestrator, webui, extension, index).
+- The browser repro from the Specs (SIGKILL the pid, watch the first log line) was not run here: markLiveLine's engage/demote logic is unchanged and already covered, and the browser check is left for the live-testing stage.
+
+# Open questions
+
+None.
+
+Assumptions:
+- Sweep placement in both death-observing paths (updateOpenTask and pollLog's idle early-return) is per the Specs' "and/or" latitude; either alone covers the repro, both make the refresh itself a guarantee.
+- updateOpenTask's sweep also engages the pulse when a new live run surfaces on an open card, matching "the pulse still appears while the run is alive".
+- The browser repro is verified at the live-testing stage; the developer check is the suite, per the Specs' Tests section.
