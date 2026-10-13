@@ -5,6 +5,7 @@ export {
 	agentRowSig,
 	agentStatsText,
 	buildShell,
+	cardBaseHtml,
 	cardHtml,
 	curve,
 	flipDiff,
@@ -17,6 +18,8 @@ export {
 	spinnerHtml,
 	syncAgentStats,
 	syncBoard,
+	syncCardStats,
+	taskStats,
 	taskStatsText,
 } from "./board.ts";
 export { agentLogPayload, taskPayload } from "./payload.ts";
