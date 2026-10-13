@@ -14,6 +14,7 @@
 
 ## Probing the liveness poll and the exit-file mechanism
 - `poll(root, stallMinutes, now)` is directly callable with an injectable stall window, so races are testable without real daemons: hand-write a pid file (a bare dead pid, e.g. "999999999", reads dead; killTree stays safe on it) and an exit file `.pids/<name>.exit`, then call poll and assert the state.
+- A merging task the poll matches against `.pids/merger.slug` (written at merger spawn): a task the slug file does not name requeues to to-merge with no death record. A hand-written poll fixture that puts a task in merging must also write that slug file naming the recorded task (or the task requeues) - see part AU of orchestrator.test.ts.
 - WORKING_STATES keys are only doing, reviewing, live-testing, merging. Queue states (to-do, to-review, to-merge, to-live-test) are NOT working states: the poll's !working path clears a stale pid + exit file and the dead streak there and never moves the task. Every working state is entered through spawnAgent, which clears the exit file before the spawn, so a working state never starts with a foreign exit code.
 - The reviewer exception is sticky by design: exit 0 in reviewing keeps the exit file so the next pass re-logs "left for the PM" instead of crash-bouncing. Only a fresh spawn or a poll-observed transition clears it.
 

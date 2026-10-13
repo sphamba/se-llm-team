@@ -1,7 +1,7 @@
 ---
 name: "feat: worktree SPECS.md and AGENTS.md symlinks simplify agent prompts"
 priority: "medium"
-state: "doing"
+state: "to-merge"
 worktree: "feat/188-worktree-symlink-context"
 issuer: "user"
 complexity: "moderate"
@@ -55,3 +55,20 @@ Following #187, symlink the task file as SPECS.md and the role notes as AGENTS.m
 - Two test fixes came out of the full-suite run: (1) the shared fixture() in tests/orchestrator.test.ts now commits a .gitignore containing AGENTS.md and SPECS.md. Without it, the stubs' blanket git add -A committed the context symlinks into each branch, and merges then conflicted on the differing symlink targets, which parked lane one behind the merger retry idle cooldown and hung part R ("lane one completed"). (2) Part X's merger xFlags call now attributes the spawn by task name (taskX2.name) like the wait above it, because the stub reads the task from the cwd SPECS.md and the prompt carries no file path.
 - npm test green (exit 0: kanban, orchestrator, webui, extension, index suites). Ad hoc strict tsc on the changed src files: no new errors vs HEAD.
 - SKILL.md docs item skipped: SKILL.md has no per-role notes description mentioning --append-system-prompt or AGENTS.md, so there is no existing text to move.
+- Second pass (verification and completion): reviewed the whole uncommitted diff against the Specs, all items were in place. Added the missing reviewer prompt assert (renderPrompt(rootAL, "reviewer"): step 2 carries git -C <root> branch --show-current, no hardcoded git diff main, no absolute task-file or worktree path, no placeholder), which also uses the previously unused renderPrompt import.
+- Full-suite run exposed a pre-existing part Q flake ("in-flight write mirrored after the reconcile", also fails at HEAD, confirmed by stash-and-run): the in-flight task is a worktree-less backlog task with no openQuestions, so promoteBacklog rewrote it (state -> to-do) between the PM write and its create commit, and the byte-for-byte assert raced the promotion. Fix: the in-flight write now carries an open question, which holds it in backlog and matches the test's intent. Two consecutive orchestrator runs green after the fix.
+- Committed as 86ac682 on feat/188-worktree-symlink-context. npm test green (exit 0: kanban, orchestrator, webui, extension, index suites).
+- Review pass (to-merge): every spec item checked against the code and no fixes needed. Symlinks: ensureContextSymlinks re-points in the worktree root at every spawn; clearContextSymlinks is hooked at bounceDead and at the poll dead-pid path; the done worktree removal covers doneCleanup. Tools: resolveTaskFromCwd + optional file on kanban_get, kanban_update and kanban_set_state with the exact NO_TASK message; kanban_delete and kanban_set_worktree keep the required file. Prompts: no --append-system-prompt, no placeholders anywhere, the reviewer keeps the one {{ROOT}} for git -C {{ROOT}} branch --show-current, the merger resolves its branch in its cwd. .gitignore, README, tests all match the Specs. All five suites green in a reviewer run (exit 0 each).
+- Verified the live-agent clobber concern from the Notes assumptions: spawnAgent plus the state move run in the same synchronous sweep block, and the poll checks only the pid of the state's own role (the project-wide merger pid for merging, the task slug otherwise), so a symlink clear can never land between a spawn re-point and the next session's cwd read. The re-point-while-winding-down assumption holds.
+- Two deliberate behaviors worth knowing, both consistent with the Specs: repointContextSymlink silently replaces a real (non-symlink) file at SPECS.md or AGENTS.md in the worktree root (only directories are refused); clearContextSymlinks computes the cwd as join(.worktrees, task.worktree), which matches ensureWorktree for every worktree the orchestrator creates.
+- No developer/live-tester prompt assert for absolute paths: renderPrompt does no substitution for those roles, so the prompt cannot carry one by construction; the part AL asserts cover the two roles where substitution happens (merger, reviewer). Accepted as adequate.
+- Merge of main (#189, bbd7510) resolved in src/orchestrator/liveness.ts only: main renamed getMergerLogSlug to readMergerSlug (spawn.ts) and our branch added clearContextSymlinks to the same import line. Resolved to one import with all four names (clearContextSymlinks, clearExitFile, readExitCode, readMergerSlug); the old getMergerLogSlug no longer exists. Git auto-merged the rest (main's readMergerSlug requeue block in poll, our two clearContextSymlinks calls). Committed as 98f601f; no conflict markers left, node --check passes on the resolved file.
+
+# Open questions
+
+None.
+
+Assumptions:
+- Worktree-less tasks always get a worktree ensured before the developer spawn (startTodo), so the context symlinks are never created in the main checkout; the clear-side worktree "" skip is defensive only.
+- The symlinks are safe to re-point while a previous agent session is winding down (re-point happens at spawn, before the new session reads its cwd).
+- Agents never commit the symlinks because the worktrees share the checked-out .gitignore, and the orchestrator test fixtures mirror that .gitignore.
