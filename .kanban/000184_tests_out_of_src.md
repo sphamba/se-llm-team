@@ -1,12 +1,12 @@
 ---
 name: "chore: move tests from src into tests"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "chore/184-tests-out-of-src"
 issuer: "user"
 complexity: "simple"
 shortName: "tests-out-of-src"
-blockedBy: "#183"
+blockedBy: ""
 ---
 
 # Summary
