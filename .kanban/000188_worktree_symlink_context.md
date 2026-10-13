@@ -1,12 +1,12 @@
 ---
 name: "feat: worktree SPECS.md and AGENTS.md symlinks simplify agent prompts"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/188-worktree-symlink-context"
 issuer: "user"
 complexity: "moderate"
 shortName: "worktree-symlink-context"
-blockedBy: "#187"
+blockedBy: ""
 ---
 
 # Summary
