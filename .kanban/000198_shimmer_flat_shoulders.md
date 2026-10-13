@@ -1,8 +1,8 @@
 ---
 name: "fix: seamless shimmer loop; flat gradient shoulders"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/198-shimmer-flat-shoulders"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "shimmer-flat-shoulders"
@@ -45,6 +45,13 @@ Acceptance:
 - node tests/webui.test.ts passes; full npm test passes.
 - The acceptance browser check (task detail card and a live log pane with a pulsed block, one full 2s loop, no jump at the wrap, both themes) is left for the live-test stage on the merged commit.
 - Review pass: shoulders byte-exact as decided, keyframes verified byte-identical to base by diff, test :575 updated in the same commit, webui.test.ts passes, endpoint math checked (~1.8% max bright sliver at the window edge, flat in practice). No fixes needed.
+- Live test on the merged commit (76c7478) in the task worktree, 2026-10-13: 25/25 checks pass. Method: an isolated hub (port 4417, scratch HOME) serves a fixture board with one `doing` task that has a live pid and a real-shape developer log whose last block is an open thinking block. Playwright Chromium opens the task card, clicks the developer run and expands the pulsed thinking block. The shimmer animation is paused through the Web Animations API and set to exact times, and element screenshots are compared pixel by pixel. The flat-base reference is a solid base gradient through the same `background-clip: text` pipeline, so the glyph rasterization cancels. A difference above 4/255 counts as visible.
+- Endpoint result, in both themes: the from position, the last frame before the wrap and the first frame after the wrap differ from the flat base by at most 1/255, so no bright tail and no jump at the wrap. The band still sweeps: the peak sits at the left edge at the quarter phase (36/255 light, 72/255 dark), at the center at mid-loop (37/255 light, 75/255 dark) and at the right edge at the three-quarter phase (36/255 light, 72/255 dark). The text stays visible at every sampled phase.
+- Real loop: 139 `requestAnimationFrame` samples over 2313 ms cover one full wrap (position 100% to 0% and back). Captures just before and just after the wrap differ by at most 1/255.
+- Sensitivity control: the pre-fix continuous gradient, injected on the same page, fails the same checks. The from position shows the partial-bright tail at the left edge and the wrap teleports it (24/255). Thus the measurements detect the reported bug.
+- Assumptions: (1) the tested pulsed element is an open thinking block, the only realistic live pulse at HEAD. `markLiveLine` assigns `.pulse` only to an open `details.lg-think` or to a result-less `details.lg-tool`, and all three selectors share the one shine rule. (2) "No visible discontinuity" is the pixel comparison at the element edges with tolerance 4/255. The residual ~2% shoulder sliver at the window edge measures 0-1/255 here. (3) The keyframes check reads the served CSSOM (0% -> `100% 0px`, 100% -> `0px 0px`), which matches the byte-identical source string that the suite pins.
+- Technical difficulty, no effect on the result: the first two browser starts crashed under machine memory pressure ("Target crashed", then "Page crashed" at navigation). The host had about 900 MB available because 74 orphaned `/tmp/orch-smoke-*/fake-agent.cjs` processes (PPID 1, from interrupted `tests/orchestrator.test.ts` part AQ runs) were alive. A third start with a fresh browser passed all checks.
+- No fixes needed. No open questions for the user or client.
 
 # Open questions
 

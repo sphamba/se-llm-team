@@ -1,8 +1,8 @@
 ---
 name: "feat: rebase merge flow; fast-forward merges only, linear main"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/199-rebase-merge-flow"
 issuer: "user"
 complexity: "complex"
 shortName: "rebase-merge-flow"

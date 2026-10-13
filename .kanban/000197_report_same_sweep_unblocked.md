@@ -1,7 +1,7 @@
 ---
 name: "fix: report tasks unblocked by the same done sweep"
 priority: "low"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/197-report-same-sweep-unblocked"
 issuer: "#190"
 complexity: "simple"
@@ -32,6 +32,9 @@ Acceptance: an orchestrator-flow fix, checked against the real daemon path (fixt
 - Verified against the real daemon path, fixture from the repro (temp root, stub agent, `--rescan-seconds 1 --no-webui`): one sweep logs `000006_epsilon.md: nothing to merge, set done`, then `000009_schedblocked.md: dropped satisfied blocker ref(s) #6`, then `promoting 000009_schedblocked.md to to-do (blockers done)`, then queues the report. That report's Scheduled section lists 000008 and 000009. No one-sweep delay, no silent promotion.
 - Left a deterministic check behind: `orchestrator.test.ts` part AW drives `rescan` with the fixture and asserts the same-sweep promotion, the same-sweep ref drop, and the report naming 000009 under Scheduled. Full suite green (`npm test`, exit 0).
 - Residual ceiling, accepted: a done write landing in the sub-second window between the post-loop re-read and the promote pass still promotes one sweep later (no report). Narrower than the old whole-sweep window; closing it fully would need the report to cover promotions without a done transition (out of scope here).
+- Review: no fixes. Traced the fixed flow end to end: `reportDone` reads `doneNow` from a fresh `listAll` and seeds its seen-set from the pre-loop snapshot, so the sweep's own done move stays this sweep's transition and the report names the blocker (Done) plus the dependent (Scheduled). `promoteBacklog`'s fresh gates run after `dropDoneBlockers` wrote, so they see the dropped ref; even if the ref write failed, `blockedByUndone` judges by blocker state (done satisfies), so promotion is not held.
+- Review: checked the poll path (`liveness.ts:221`) for the same staleness. No gap there: the poll's only done move is live-tester -> done, and `live-testing` is already in `BLOCKER_SATISFIED`, so a dependent of a live-testing blocker was promoted earlier. Rescan's to-merge -> done (nothing to merge) was the only gap; the fix's scope is right.
+- Review: re-ran `node tests/orchestrator.test.ts` (part AW log matches the repro sequence: done, ref drop, promotion, one report) and `node index.test.ts`; both green.
 
 # Open questions
 
