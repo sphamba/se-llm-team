@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
-import { createTask, getTask, listAll, listTasks, parseTask, setState, setWorktree, slugFile, slugWorktree, splitWorktreeRoot, taskFiles, taskNum, updateTask } from "./kanban.ts";
+import { createTask, getTask, listAll, listTasks, parseTask, setState, setWorktree, slugFile, slugWorktree, splitWorktreeRoot, taskFiles, taskNum, updateTask } from "../src/kanban.ts";
 
 const root = mkdtempSync(join(tmpdir(), "kanban-test-"));
 const fail = (msg: string) => {
@@ -174,7 +174,7 @@ fs.writeFileSync = function (p, ...args) {
 	return orig.call(fs, p, ...args);
 };`,
 );
-const racerMod = JSON.stringify(pathToFileURL(join(import.meta.dirname, "kanban.ts")).href);
+const racerMod = JSON.stringify(pathToFileURL(join(import.meta.dirname, "..", "src", "kanban.ts")).href);
 const racerOut = await new Promise((resolve, reject) => {
 	let stdout = "";
 	let err = "";
@@ -209,7 +209,7 @@ rmSync(raceRoot, { recursive: true, force: true });
 // block proves unique numbers under contention, while the net itself is exercised only
 // by the race block above
 const concRoot = mkdtempSync(join(tmpdir(), "kanban-conc-"));
-const mod = JSON.stringify(pathToFileURL(join(import.meta.dirname, "kanban.ts")).href);
+const mod = JSON.stringify(pathToFileURL(join(import.meta.dirname, "..", "src", "kanban.ts")).href);
 const creator = `import(${mod}).then(({ createTask }) => { for (let i = 0; i < 20; i++) createTask(${JSON.stringify(concRoot)}, { name: "feat: concurrent " + process.pid + " " + i, summary: "s" }); })`;
 await Promise.all(
 	Array.from({ length: 4 }, () =>

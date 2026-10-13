@@ -4,12 +4,13 @@ import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, real
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createTask, getTask, PRIORITY_RANK, setState } from "./kanban.ts";
-import { startHub } from "./hub.ts";
-import { agentLabel, agentRowSig, agentStatsText, boardOf, buildShell, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, tabNames, tabsHtml } from "./webui.ts";
+import { createTask, getTask, PRIORITY_RANK, setState } from "../src/kanban.ts";
+import { startHub } from "../src/hub.ts";
+import { agentLabel, agentRowSig, agentStatsText, boardOf, buildShell, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, tabNames, tabsHtml } from "../src/webui.ts";
 import { gzipSync } from "node:zlib";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const SRC = join(HERE, "..", "src");
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-merge", "merging", "to-live-test", "live-testing", "done"];
 
 const root = mkdtempSync(join(tmpdir(), "webui-test-"));
@@ -21,7 +22,7 @@ const cleanup = () => {
 	rmSync(home, { recursive: true, force: true });
 	// leftover webui copy dirs from a crashed run must not pollute the repo's src dir
 	try {
-		for (const d of readdirSync(HERE)) if (d.startsWith(".webui-hot-")) rmSync(join(HERE, d), { recursive: true, force: true });
+		for (const d of readdirSync(SRC)) if (d.startsWith(".webui-hot-")) rmSync(join(SRC, d), { recursive: true, force: true });
 	} catch {
 		/* src dir unreadable */
 	}
@@ -405,7 +406,7 @@ rmSync(graphHome, { recursive: true, force: true });
 
 // the real hub keeps serving after a webui reload too: an mtime bump (a branch switch bumps it)
 // makes the loader re-import the real module graph with a fresh query, page and api stay up
-const realWebui = fileURLToPath(new URL("./webui.ts", import.meta.url));
+const realWebui = fileURLToPath(new URL("../src/webui.ts", import.meta.url));
 const was = statSync(realWebui).mtime;
 utimesSync(realWebui, new Date(was.getTime() + 1000), new Date(was.getTime() + 1000));
 assert.equal((await fetch(`${base}/`)).status, 200, "the hub keeps serving the real page after a webui reload");
@@ -1467,7 +1468,7 @@ process.env.HOME = realHome;
 // daemon wiring: HOME at a config with webUi enabled and port 0 -> OS picks, URL logged
 mkdirSync(join(home, ".pi", "agent"), { recursive: true });
 writeFileSync(join(home, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, port: 0 } }));
-daemon = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", root], {
+daemon = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", root], {
 	stdio: ["ignore", "pipe", "pipe"],
 	env: { ...process.env, HOME: home },
 });

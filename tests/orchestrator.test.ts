@@ -6,11 +6,11 @@ import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSyn
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isLinkedWorktree, readHubRegistry, startHub } from "./hub.ts";
-import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, updateTask, ROLE_NOTES_RE } from "./kanban.ts";
-import { compactFinishedLogs, compactLogLine, dropDoneBlockers, loadConfig, nextRunIndex, poll, promoteBacklog, removeTask, waitForBoardCommits } from "./orchestrator.ts";
+import { isLinkedWorktree, readHubRegistry, startHub } from "../src/hub.ts";
+import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, updateTask, ROLE_NOTES_RE } from "../src/kanban.ts";
+import { compactFinishedLogs, compactLogLine, dropDoneBlockers, loadConfig, nextRunIndex, poll, promoteBacklog, removeTask, waitForBoardCommits } from "../src/orchestrator.ts";
 import { gunzipSync } from "node:zlib";
-import { pidAlive } from "./pid.ts";
+import { pidAlive } from "../src/pid.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -150,7 +150,7 @@ const deadStub = (root: string) => {
 	return stub;
 };
 
-async function runDaemon(root: string, script = join(HERE, "orchestrator.ts"), home?: string) {
+async function runDaemon(root: string, script = join(HERE, "../src/orchestrator.ts"), home?: string) {
 	const daemon = spawn(
 		process.execPath,
 		[script, "--root", root, "--rescan-seconds", "1", "--poll-minutes", "0.01"],
@@ -388,7 +388,7 @@ await waitFor(() => lockC() !== "", 10000, "lock acquired", c.output);
 assert.equal(lockC(), String(c.daemon.pid), "lock holds the daemon pid");
 
 // a second start attempt exits instead of becoming a daemon; the first keeps the lock
-const second = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootC], { stdio: "ignore", env: { ...process.env, SE_LLM_TEAM_NO_WEBUI: "1" } });
+const second = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", rootC], { stdio: "ignore", env: { ...process.env, SE_LLM_TEAM_NO_WEBUI: "1" } });
 const secondExit = await Promise.race([
 	new Promise<string>((r) => second.on("exit", (code) => r(String(code)))),
 	new Promise<string>((r) => setTimeout(() => r("timeout"), 10000)),
@@ -613,7 +613,7 @@ const rootH = fixture();
 cleaned.push(rootH);
 const symDir = mkdtempSync(join(tmpdir(), "orch-sym-"));
 const symScript = join(symDir, "orchestrator.ts");
-symlinkSync(join(HERE, "orchestrator.ts"), symScript);
+symlinkSync(join(HERE, "../src/orchestrator.ts"), symScript);
 const h = await runDaemon(rootH, symScript);
 await waitFor(() => h.output().includes("orchestrator started"), 10000, "daemon start through symlinked script", h.output);
 assert.ok(existsSync(join(kanbanDir(rootH), ".orchestrator.lock")), "lock created when spawned through a symlink");
@@ -1038,7 +1038,7 @@ cleaned.push(homeS);
 mkdirSync(join(homeS, ".pi", "agent"), { recursive: true });
 writeFileSync(join(homeS, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: 4277 } }));
 
-const sEnv = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootS, "--rescan-seconds", "1"], {
+const sEnv = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", rootS, "--rescan-seconds", "1"], {
 	stdio: ["ignore", "pipe", "pipe"],
 	env: { ...process.env, HOME: homeS, SE_LLM_TEAM_NO_WEBUI: "1" },
 });
@@ -1052,7 +1052,7 @@ sEnv.kill("SIGTERM");
 // full exit before the next spawn: the lock must be released, or the second daemon exits early
 await Promise.race([new Promise((r) => sEnv.on("exit", r)), new Promise((r) => setTimeout(r, 5000))]);
 
-const sFlag = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootS, "--rescan-seconds", "1", "--no-webui"], {
+const sFlag = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", rootS, "--rescan-seconds", "1", "--no-webui"], {
 	stdio: ["ignore", "pipe", "pipe"],
 	env: { ...process.env, HOME: homeS },
 });
@@ -1206,8 +1206,8 @@ mkdirSync(join(homeV, ".pi", "agent"), { recursive: true });
 writeFileSync(join(homeV, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portV } }));
 const hubEnv = { ...process.env, HOME: homeV, SE_LLM_TEAM_HUB_HEALTH_MS: "500" };
 delete hubEnv.SE_LLM_TEAM_NO_WEBUI; // the election needs the webui enabled; the temp HOME config picks a free port
-const dV1 = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootV1, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnv });
-const dV2 = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootV2, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnv });
+const dV1 = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", rootV1, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnv });
+const dV2 = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", rootV2, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnv });
 daemons.push({ daemon: dV1, root: rootV1 }, { daemon: dV2, root: rootV2 });
 let outV1 = "", outV2 = "";
 dV1.stdout.on("data", (d) => (outV1 += d));
@@ -1250,8 +1250,8 @@ mkdirSync(join(homeW, ".pi", "agent"), { recursive: true });
 writeFileSync(join(homeW, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portW } }));
 const hubEnvW = { ...process.env, HOME: homeW, SE_LLM_TEAM_HUB_HEALTH_MS: "500", SE_LLM_TEAM_HUB_STALE_MS: "1500" };
 delete hubEnvW.SE_LLM_TEAM_NO_WEBUI;
-const dW1 = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootW1, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnvW });
-const dW2 = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", rootW2, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnvW });
+const dW1 = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", rootW1, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnvW });
+const dW2 = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", rootW2, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnvW });
 daemons.push({ daemon: dW1, root: rootW1 }, { daemon: dW2, root: rootW2 });
 let outW1 = "", outW2 = "";
 dW1.stdout.on("data", (d) => (outW1 += d));
@@ -1303,7 +1303,7 @@ const wtPath = join(rootWt, ".worktrees", "fix", "1-wt");
 const envWt = { ...process.env, HOME: homeWt, SE_LLM_TEAM_HUB_HEALTH_MS: "500" };
 delete envWt.SE_LLM_TEAM_NO_WEBUI;
 // the hub comes up AFTER the worktree daemon: its startup election stands down instead of racing
-const dWt = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", wtPath, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: envWt });
+const dWt = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", wtPath, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: envWt });
 daemons.push({ daemon: dWt, root: wtPath });
 let outWt = "";
 dWt.stdout.on("data", (d) => (outWt += d));
@@ -1331,7 +1331,7 @@ assert.equal(await Promise.race([exitWt, new Promise<string>((r) => setTimeout((
 // the task gone: a fresh daemon reaps at startup, before anything recreates the removed worktree's dirs
 rmSync(join(rootWt, ".kanban", taskWt.file));
 rmSync(join(rootWt, ".worktrees"), { recursive: true, force: true });
-const dWt2 = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", wtPath, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: envWt });
+const dWt2 = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", wtPath, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: envWt });
 daemons.push({ daemon: dWt2, root: wtPath });
 let outWt2 = "";
 dWt2.stdout.on("data", (d) => (outWt2 += d));
@@ -1366,7 +1366,7 @@ mkdirSync(join(homeT, ".pi", "agent"), { recursive: true });
 writeFileSync(join(homeT, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portT } }));
 const envT = { ...process.env, HOME: homeT, SE_LLM_TEAM_HUB_HEALTH_MS: "300" };
 delete envT.SE_LLM_TEAM_NO_WEBUI;
-const dT = spawn(process.execPath, [join(HERE, "orchestrator.ts"), "--root", wtT, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: envT });
+const dT = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", wtT, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: envT });
 daemons.push({ daemon: dT, root: wtT });
 let outT = "";
 dT.stdout.on("data", (d) => (outT += d));
@@ -1453,7 +1453,7 @@ setState(rootX, taskX, "to-do");
 const taskX3 = createTask(rootX, { name: "feat: llm flags complex", summary: "LLM config smoke", specs: "n/a", complexity: "complex" });
 setState(rootX, taskX3, "to-do");
 
-const x = await runDaemon(rootX, join(HERE, "orchestrator.ts"), homeX);
+const x = await runDaemon(rootX, join(HERE, "../src/orchestrator.ts"), homeX);
 await waitFor(
 	() =>
 		[taskX, taskX3].every((t) => parseTask(rootX, t.file).state === "done" && parseTask(rootX, t.file).worktree === ""),
@@ -1499,7 +1499,7 @@ writeFileSync(
 );
 const taskY = createTask(rootY, { name: "fix: bad llm config", summary: "Bad llm config smoke", specs: "n/a" });
 setState(rootY, taskY, "to-do");
-const y = await runDaemon(rootY, join(HERE, "orchestrator.ts"), homeY);
+const y = await runDaemon(rootY, join(HERE, "../src/orchestrator.ts"), homeY);
 // wait for the stub's own record, not just the spawn log: the child may not have written argv.log yet
 await waitFor(() => {
 	try {
@@ -2349,7 +2349,7 @@ writeFileSync(join(kanbanDir(rootAS), "se-llm-team.json"), JSON.stringify({ agen
 writeFileSync(join(kanbanDir(rootAS), "AGENTS.md"), "# notes\n");
 const taskAS = createTask(rootAS, { name: "feat: role notes", summary: "Role notes smoke", specs: "n/a" });
 setState(rootAS, taskAS, "to-do");
-const as = await runDaemon(rootAS, join(HERE, "orchestrator.ts"), homeAS);
+const as = await runDaemon(rootAS, join(HERE, "../src/orchestrator.ts"), homeAS);
 await waitFor(
 	() => parseTask(rootAS, taskAS.file).state === "done" && parseTask(rootAS, taskAS.file).worktree === "",
 	60000,

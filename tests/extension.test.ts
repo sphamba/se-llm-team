@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createTask, getTask, taskNum } from "./kanban.ts";
+import { createTask, getTask, taskNum } from "../src/kanban.ts";
 
 // pi loads the extension with jiti aliases into its own install (loader.js);
 // mirror that resolution so plain node can import the real index.ts

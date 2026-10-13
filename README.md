@@ -114,10 +114,10 @@ npm run test:changed
 `npm test` runs all five suites:
 
 ```sh
-node src/kanban.test.ts
-node src/orchestrator.test.ts
-node src/webui.test.ts
-node src/extension.test.ts
+node tests/kanban.test.ts
+node tests/orchestrator.test.ts
+node tests/webui.test.ts
+node tests/extension.test.ts
 node index.test.ts
 ```
 

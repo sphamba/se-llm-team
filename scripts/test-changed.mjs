@@ -4,16 +4,16 @@ import { execSync, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-const ALL = ["src/kanban.test.ts", "src/orchestrator.test.ts", "src/webui.test.ts", "src/extension.test.ts", "index.test.ts"];
+const ALL = ["tests/kanban.test.ts", "tests/orchestrator.test.ts", "tests/webui.test.ts", "tests/extension.test.ts", "index.test.ts"];
 
 const RULES = [
-	[/^src\/orchestrator\.ts$/, ["src/orchestrator.test.ts"]],
-	[/^src\/pid\.ts$/, ["src/orchestrator.test.ts"]],
-	[/^agents\/.*\.md$/, ["src/orchestrator.test.ts"]],
-	[/^src\/webui\.ts$/, ["src/webui.test.ts"]],
-	[/^src\/kanban\.ts$/, ["src/kanban.test.ts", "src/orchestrator.test.ts", "src/webui.test.ts"]],
-	[/^src\/hub\.ts$/, ["src/orchestrator.test.ts", "src/webui.test.ts"]],
-	[/^index\.ts$/, ["index.test.ts", "src/extension.test.ts"]],
+	[/^src\/orchestrator\.ts$/, ["tests/orchestrator.test.ts"]],
+	[/^src\/pid\.ts$/, ["tests/orchestrator.test.ts"]],
+	[/^agents\/.*\.md$/, ["tests/orchestrator.test.ts"]],
+	[/^src\/webui\.ts$/, ["tests/webui.test.ts"]],
+	[/^src\/kanban\.ts$/, ["tests/kanban.test.ts", "tests/orchestrator.test.ts", "tests/webui.test.ts"]],
+	[/^src\/hub\.ts$/, ["tests/orchestrator.test.ts", "tests/webui.test.ts"]],
+	[/^index\.ts$/, ["index.test.ts", "tests/extension.test.ts"]],
 	[/^package\.json$/, ALL],
 ];
 
