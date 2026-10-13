@@ -115,6 +115,8 @@ The agent log (`.kanban/.logs/`) carries the full JSONL event stream; the web ui
 
 The PM session gets: kanban_list, kanban_get, kanban_create, kanban_update, kanban_set_state, kanban_set_worktree, kanban_delete, orchestrator_start, orchestrator_status, orchestrator_stop, orchestrator_poke. kanban_get, kanban_update and kanban_set_state take an optional file parameter: when omitted, the task resolves from the session cwd through the SPECS.md symlink, so an agent session in a worktree never passes the file name. With no SPECS.md in the cwd the tool reports `no task; pass the file name or run from a worktree with SPECS.md`. kanban_delete removes a mistaken task: it deletes the task file and commits a whole-board mirror snapshot in one operation, so the daemon cannot restore the task. Never delete a board file by hand. The daemon restores hand-deleted files from the mirror. The extension also notifies the session when a task reaches done, and delivers the queued PM reports as `board-report` messages (see the Orchestrator section).
 
+All tools load on demand: they are registered deferred, so they stay out of the model's startup tool list, and the model declares one when the built-in `tool_search` tool finds it. The extension activates `tool_search` automatically at session start (a `before_agent_start` handler), so installing the plugin is enough. When the extension is not loaded, enable the tool manually with `"defaultTools": ["+tool_search"]` in `~/.pi/agent/settings.json`.
+
 ## Checks
 
 ```sh

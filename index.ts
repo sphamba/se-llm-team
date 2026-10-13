@@ -26,6 +26,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "kanban_list",
+		exposure: "deferred",
 		label: "Kanban list",
 		description:
 			"List kanban tasks of this project. scope=backlog: tasks to prioritize. scope=in-progress: tasks being worked on. scope=done: completed tasks. Optional priority filter (low/medium/high/critical). Returns file, num (#NN), name, priority, state, issuer, summary, openQuestions (the task body's # Open questions section, empty when none), complexity and blockedBy (comma-joined blocker task refs like \"#42, #43\", empty when none) per task.",
@@ -45,6 +46,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "kanban_get",
+		exposure: "deferred",
 		label: "Kanban get",
 		description: "Read one kanban task in full detail (state, worktree, issuer, complexity, blockedBy, summary, specs, notes, openQuestions). openQuestions is the task body's # Open questions section, empty when none. file is optional; resolved from the cwd SPECS.md symlink when omitted.",
 		parameters: Type.Object({ file: Type.Optional(Type.String({ description: "Task file name, e.g. 000001_nice_thing.md. Optional: resolved from the cwd SPECS.md symlink when omitted" })) }),
@@ -60,6 +62,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "kanban_create",
+		exposure: "deferred",
 		label: "Kanban create",
 		description:
 			"Create a kanban task in state backlog. Name tasks with a type prefix like 'feat: ', 'fix: ', 'perf: '. Write the specs with the user. Set issuer to '#<num>' when the task was created after live-testing of task #<num>; the default 'user' means the user requested it. The issuer is set at creation only and never changed afterwards. Set complexity to trivial, simple, moderate (default) or complex; it drives which per-complexity LLM config entry and reviewer-pass cap apply (trivial gets no reviewer pass). Complexity stays updatable later via kanban_update.",
@@ -88,6 +91,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "kanban_update",
+		exposure: "deferred",
 		label: "Kanban update",
 		description:
 			"Update an existing task. Use this instead of creating a duplicate when a not-done task already covers the same need. Omitted fields stay unchanged. file is optional; resolved from the cwd SPECS.md symlink when omitted.",
@@ -116,6 +120,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "kanban_set_state",
+		exposure: "deferred",
 		label: "Kanban set state",
 		description: `Move a task to a new state. States: ${STATES.join(", ")}. file is optional; resolved from the cwd SPECS.md symlink when omitted.`,
 		// additionalProperties: false so pi rejects an unrecognized field (e.g. notes)
@@ -135,6 +140,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "kanban_set_worktree",
+		exposure: "deferred",
 		label: "Kanban set worktree",
 		description: "Set or clear (empty string) the worktree attribute of a task.",
 		// additionalProperties: false so pi rejects an unrecognized field (e.g. notes)
@@ -154,6 +160,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "kanban_delete",
+		exposure: "deferred",
 		label: "Kanban delete",
 		description:
 			"Remove a task from the board. Deletes the task file and commits a whole-board mirror snapshot in one operation, so the daemon cannot restore the task. Use for a mistaken or duplicate task. The worktree and branch of a started task are not removed.",
@@ -168,6 +175,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "orchestrator_start",
+		exposure: "deferred",
 		label: "Orchestrator start",
 		description:
 			"Start the se-llm-team orchestrator daemon for this project. It watches .kanban/, spawns Developer agents for to-do tasks, Reviewer agents for to-review tasks, one Merger agent for to-merge tasks, and Live-tester agents for to-live-test tasks on the merged commit, and polls agent liveness. Pipeline order: review -> merge -> live-test. When webUi.enabled is set in ~/.pi/agent/se-llm-team.json it also starts an in-process web dashboard for the board. Exits early if it already runs for this project.",
@@ -206,6 +214,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "orchestrator_status",
+		exposure: "deferred",
 		label: "Orchestrator status",
 		description: "Report whether the orchestrator daemon runs for this project and give kanban state counts.",
 		parameters: Type.Object({}),
@@ -221,6 +230,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "orchestrator_poke",
+		exposure: "deferred",
 		label: "Orchestrator poke",
 		description: "Poke the se-llm-team orchestrator daemon to trigger an immediate scan and agent scheduling.",
 		parameters: Type.Object({}),
@@ -243,6 +253,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "orchestrator_stop",
+		exposure: "deferred",
 		label: "Orchestrator stop",
 		description: "Stop the orchestrator daemon for this project.",
 		parameters: Type.Object({}),
@@ -351,6 +362,14 @@ export default function (pi: ExtensionAPI) {
 			/* no report watching in this session */
 		}
 	};
+	// the 11 tools are deferred, so every session needs the built-in tool_search to declare them
+	// on demand. setActiveTools throws during factory loading ("Extension runtime not initialized"),
+	// so activation happens in this handler, which fires after the runtime binds. Additive and
+	// idempotent: setActiveTools replaces the active set, so spread and check before adding.
+	pi.on("before_agent_start", () => {
+		const active = pi.getActiveTools();
+		if (!active.includes("tool_search")) pi.setActiveTools([...active, "tool_search"]);
+	});
 	pi.on("session_start", (_event, ctx) => {
 		ensureBoardWatcher(ctx);
 		ensureReportsWatcher(ctx);
