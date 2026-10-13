@@ -1,7 +1,7 @@
 ---
 name: "feat: orchestrator PM reports queued to the chat"
 priority: "high"
-state: "doing"
+state: "reviewing"
 worktree: "feat/190-pm-report-queue"
 issuer: "user"
 complexity: "moderate"
@@ -50,3 +50,17 @@ When one or several tasks move to done, the orchestrator schedules unblocked tas
 
 # Notes
 - The 1 h delivery cutoff is a deliberate choice for "the latest reports"; adjust it in one constant.
+- Implemented: isLinkedWorktree moved from src/hub.ts to src/kanban.ts and shared by the hub candidacy rule and the new report-consumption gate (the spec's --git-common-dir vs --show-toplevel wording would not discriminate a main checkout from a worktree).
+- New src/orchestrator/report.ts: composeReport, writeReport (atomic tmp+rename, sortable timestamp filename), pruneReports (mtime cutoff) and reportDone, the rescan hook. rescan calls reportDone(root, tasks, promoted) after promoteBacklog; the poll never composes reports, so a done transition the poll performs (a live-tester exiting 0) is reported by the next sweep. The per-root done-set is seeded from the sweep's own pre-state snapshot, so the first sweep reports its own done transitions and a daemon restart does not re-report already-done tasks.
+- promoteBacklog returns the promoted tasks; they feed the report's Scheduled section.
+- Extension: every session watches .kanban/.reports/ from session_start (same lifecycle as the board watcher); only a session with a UI whose cwd is not a linked worktree consumes. Consumption claims the oldest report by rename to <name>.claiming, sends it with pi.sendMessage({customType: "board-report", display: true}) as triggerTurn when idle, deliverAs "followUp" when busy, and deletes the claim in a finally block. session_start at the repo root drains the queue oldest first and discards reports older than the cutoff.
+- Old ritual removed: orchestrator_wait tool, waitForBoardCommits and .pi/agents/watcher.md are gone; README.md and skills/se-llm-team/SKILL.md document the report flow.
+- Tests: orchestrator part N replaced with the PM report part (one report per done sweep, done and scheduled and findings and PM instructions, no re-report on the second sweep, stale report and stale claim pruned, fresh one kept); extension tests gained the report-delivery checks (oldest-first drain, worktree never consumes, stale discarded at startup, busy session gets followUp). npm test green.
+
+# Open questions
+
+## Assumptions
+- The PM session is any UI session whose cwd is the repo root; worktree role-agent sessions and JSON/print-mode sessions never consume reports.
+- Reports correspond to sweeps: a done transition the liveness poll performs is reported by the following sweep, so delivery lags the poll by at most one pollMinutes plus one rescan beat.
+- Tasks already done when the daemon starts are never re-reported; only a sweep's own done transitions are.
+- One report per sweep that moves tasks to done, even when several tasks finish in the same sweep.
