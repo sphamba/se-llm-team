@@ -1,12 +1,12 @@
 ---
 name: "feat: orchestrator PM reports queued to the chat"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/190-pm-report-queue"
 issuer: "user"
 complexity: "moderate"
 shortName: "pm-report-queue"
-blockedBy: "#188"
+blockedBy: ""
 ---
 
 # Summary

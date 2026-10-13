@@ -1,8 +1,8 @@
 ---
 name: "feat: worktree SPECS.md and AGENTS.md symlinks simplify agent prompts"
 priority: "medium"
-state: "to-merge"
-worktree: "feat/188-worktree-symlink-context"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "worktree-symlink-context"
@@ -63,6 +63,31 @@ Following #187, symlink the task file as SPECS.md and the role notes as AGENTS.m
 - Two deliberate behaviors worth knowing, both consistent with the Specs: repointContextSymlink silently replaces a real (non-symlink) file at SPECS.md or AGENTS.md in the worktree root (only directories are refused); clearContextSymlinks computes the cwd as join(.worktrees, task.worktree), which matches ensureWorktree for every worktree the orchestrator creates.
 - No developer/live-tester prompt assert for absolute paths: renderPrompt does no substitution for those roles, so the prompt cannot carry one by construction; the part AL asserts cover the two roles where substitution happens (merger, reviewer). Accepted as adequate.
 - Merge of main (#189, bbd7510) resolved in src/orchestrator/liveness.ts only: main renamed getMergerLogSlug to readMergerSlug (spawn.ts) and our branch added clearContextSymlinks to the same import line. Resolved to one import with all four names (clearContextSymlinks, clearExitFile, readExitCode, readMergerSlug); the old getMergerLogSlug no longer exists. Git auto-merged the rest (main's readMergerSlug requeue block in poll, our two clearContextSymlinks calls). Committed as 98f601f; no conflict markers left, node --check passes on the resolved file.
+
+## Live test report (2026-10-13, merged commit 98f601f)
+
+Live-tested the real flows in an isolated fixture: scratch origin, isolated HOME, a role-aware fake-pi agent that records argv, cwd and symlink state, and a daemon run against the fixture root with --no-webui. No unit suite was run, per the live-test rule. Result: every user-facing Specs item works. One technical difficulty was hit; it is the #192 root cause and needs no new task.
+
+Verified:
+- Symlink lifecycle across all four roles. Developer and reviewer ran in .worktrees/probe/1-dev-probe with SPECS.md -> .kanban/000001_dev_probe.md and AGENTS.md re-pointed from AGENTS.developer.md to AGENTS.reviewer.md between the two spawns; the merger ran with AGENTS.md -> AGENTS.merger.md and the live-tester with AGENTS.md -> AGENTS.live-tester.md. No spawn argv carried --append-system-prompt. After developer and reviewer terminated, both links were gone from the worktree; after done the live-tester worktree was removed. The daemon log had no symlink or refusing line.
+- Prompt payloads: for every role the -p payload matched the shipped agents/<role>.md line for line (reviewer with {{ROOT}} replaced by the fixture root), no {{PLACEHOLDER}} token left, no absolute task or worktree path in the path-free roles, no append flag.
+- .gitignore protection: a developer run that did git add -A and committed left SPECS.md and AGENTS.md untracked (git check-ignore -v: .gitignore:3:SPECS.md, .gitignore:2:AGENTS.md), and git status --porcelain stayed clean with both links present.
+- Cwd task resolution: a real pi session with cwd in a worktree whose SPECS.md -> .kanban/000001_tool_probe.md called kanban_get {} and got that task, kanban_set_state {state: to-do} moved it, and kanban_update {priority: low} changed it. With cwd in the main checkout (no SPECS.md), kanban_get {} returned exactly "no task; pass the file name or run from a worktree with SPECS.md", and kanban_delete {} failed validation (file: must have required properties file), so delete keeps the required file.
+- AGENTS.md auto-load: a pi run with no tools and no append flag in a worktree whose AGENTS.md carried a marker reported the marker from the system message's project_context section tagged with the cwd AGENTS.md path, so the role notes reach the session from the symlink alone.
+- Pipeline end to end in the fixture: developer doing -> to-review, the moderate reviewer cap (2) forced the advance to to-merge, the orchestrator self-merged to to-live-test, and the live-tester exit 0 reached done.
+
+Technical difficulty hit while testing (covered by #192, no new task):
+- The daemon that spawned this live-tester (pid 502237, started 11:11:33) predated the #188 commit (11:49:27) and the merge (12:04:10), so it ran pre-change orchestrator code: this worktree never got SPECS.md or AGENTS.md (reading SPECS.md in the cwd failed with ENOENT) and the spawn still passed --append-system-prompt, while the prompt text already used the new wording because renderPrompt reads agents/*.md from disk at each spawn. That is exactly the #192 root cause (a merged src/orchestrator change is inert until the daemon restarts). Reported to a PM subagent, which read #192 (in doing) and confirmed it covers the finding, so no duplicate task was created. This live test therefore read the task file from the main checkout instead of through the cwd symlink.
+- The daemon was restarted to the merged code at 12:24 while this live-tester ran. This spawn has the exit-file wrapper, so the restarted daemon sees the clean exit and uses the normal live-testing -> done path.
+
+Usage-test assumptions:
+- The fixture agent is a script, not a real LLM, so prompt compliance was verified by exact payload comparison against the shipped prompt files, not by model behavior.
+- The fixture drives the shipped pipeline states rather than hand-started real agents; the symlink code runs at the real spawn sites in src/orchestrator.
+- The kanban-tool fixture worktree needs its own .kanban symlink (as the real worktrees have), because the tools resolve the board at ctx.cwd/.kanban.
+- A plain pi session stands in for a spawned agent in the auto-load check; the request carries the same cwd context.
+- The fixture pipeline, not the production board, is the observable system; this test did not assess the production daemon's own state.
+
+Contradiction with a stated assumption: the live-test prompt says the daemon merged the change and synced the worktree "so run the project from your cwd (the merged commit)", but the running daemon had pre-change code (see the difficulty above). The cwd itself was at 98f601f, so the fixture tests did run the merged implementation.
 
 # Open questions
 

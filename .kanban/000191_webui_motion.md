@@ -1,7 +1,7 @@
 ---
 name: "feat: subtle animations and transitions across the webui"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "feat/191-webui-motion"
 issuer: "user"
 complexity: "moderate"
@@ -51,6 +51,12 @@ Every state change in the webui gets a subtle animation or transition: new task 
 - Sub cards: the fetchSubs rebuild is gated behind box.__html !== html so the 1 s keep-poll never replays entrances; only a genuinely new sub/run card gains .enter.
 - Reduced motion: the original exact rule (spinner + relation paths) is untouched; a second rule disables the new animations (entrances, chunk fade, pulse loop). The existing exact-string regex assert on the first rule stays green.
 - Known limits: bare text lines ([prompt] ... and legacy text-only logs) cannot animate, so they get neither the chunk fade nor the pulse (text nodes carry no class; wrapping chunks would break logFixups' cross-chunk join); #m-log-meta is not animated (it toggles visibility on polls).
+- Verification run (re-spawn): prior work re-checked against the specs (diff reviewed, full suite green), then the spec's live check ran for real: a throwaway hub from the worktree on a spare port (47119) with an isolated HOME (temp registry, production registry untouched), a seeded temp root (a doing task, a live slug.pid pid file, a log streaming one line per second) and Playwright against it; the production webui on 4242 stayed untouched.
+- Live check result: board entrance cardIn, modal fadeIn/boxIn and log pane logIn all fire at open and settle to the static frame; no replay-on-poll flicker over a full refresh cycle (0 post-load cardIn events); the pulse and chunkIn machinery verified via a synthetic DOM probe (chunkIn 150 ms iter 1, shimmer 1.8 s infinite, 90deg gradient, bg-size 300%). The seeded plain-text log renders text nodes, so the chunk fade and pulse had no live target, the documented known limit above (real --mode json logs render element children).
+- Live check caught a real bug, fixed (commit e8e97d0): the second reduced-motion rule sat before the base animation rules it must disable; equal specificity, later rule wins, so #modal/#m-box/#m-log/#m-log-text entrances stayed animated under reduced-motion emulation. The rule now sits after @keyframes boxIn (the last base animation declaration), and a test assert pins the cascade order (page.indexOf boxIn < the media rule). Re-verified in the browser: with reducedMotion emulation every animation-name reads none (card, modal, box, log, spin), without it fadeIn/boxIn still fire.
+- Cleanup: throwaway hub, streaming loop and sleeper torn down, port 47119 free, temp dirs removed; production hub still healthy.
+- Review pass (fix commit e472661): two replay paths the live check missed. (1) fetchSubs gave sub cards .enter with no animationend drop, but renderAgent's row rebuild re-attaches the carried-over sub boxes (replaceWith). Re-attaching a node restarts its CSS animations, so any run-set change after a sub appeared (a new run, or live -> dead) replayed every carried-over sub card's entrance. Fixed with the makeCard one-shot drop (class removed on animationend). (2) markLiveLine toggled the pulse on the current first child only. A history back-fill (scroll to top on a live log) inserts older lines above it, so the demoted line kept .pulse and shimmered on. markLiveLine now walks #m-log-text > .pulse and keeps the pulse only on the first line. Both page-source asserts updated. Suite green.
+- Review observation, no change: a run card and the initial sub list get no entrance on first modal open, only poll-driven new runs and subs animate. The modal's own fadeIn/boxIn covers the open, and this matches the calm goal. Run cards need no drop handler: a row rebuild discards their old nodes, they are never re-attached.
 
 # Open questions
 - Assumption: "the first line" of a running log means the pane's topmost element line (a stable alive beacon, not the streaming tail); when the log starts with a collapsed details block, the pulsed line is that summary. If the streaming tail was meant, the CSS target changes to the last child.
