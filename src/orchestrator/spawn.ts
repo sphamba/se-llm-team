@@ -94,16 +94,30 @@ export function spawnAgent(root: string, cfg: Config, role: string, task: Task, 
 		log(root, `spawned ${role} pid=${child.pid} for ${task.file} (cwd=${cwd})`);
 	}
 }
-// the slug the live merger was spawned for: the merger pid file is project-wide, so a merging
-// task can outlive its own merger run while another task's merger works; only the task the
-// current merger serves may stall-bounce it, or an old merger log would get the wrong
-// process killed
-let mergerLogSlug: string | null = null;
+// the slug the current merger was spawned for, next to its pid/exit files: the merger pid
+// files are project-wide, so a merging task can outlive its own merger run while another
+// task's merger works (or after a daemon restart). The poll matches a merging task against
+// this file, so only the task the current merger serves may stall-bounce it or consume its
+// exit code; on disk, so the match survives a daemon restart (an in-memory slug would not)
+export const mergerSlugPath = (root: string) => join(kanbanDir(root), ".pids", "merger.slug");
 
-export function setMergerLogSlug(slug: string): void {
-	mergerLogSlug = slug;
+export function writeMergerSlug(root: string, slug: string): void {
+	mkdirSync(join(kanbanDir(root), ".pids"), { recursive: true });
+	writeFileSync(mergerSlugPath(root), `${slug}\n`);
 }
 
-export function getMergerLogSlug(): string | null {
-	return mergerLogSlug;
+export function readMergerSlug(root: string): string | null {
+	try {
+		return readFileSync(mergerSlugPath(root), "utf8").trim() || null;
+	} catch {
+		return null;
+	}
+}
+
+export function clearMergerSlug(root: string): void {
+	try {
+		rmSync(mergerSlugPath(root));
+	} catch {
+		/* already gone */
+	}
 }

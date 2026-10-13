@@ -9,9 +9,10 @@ import { fileURLToPath } from "node:url";
 import { isLinkedWorktree, readHubRegistry, startHub } from "../src/hub.ts";
 import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskSlug, updateTask, ROLE_NOTES_RE } from "../src/kanban.ts";
 import { compactFinishedLogs, compactLogLine, dropDoneBlockers, loadConfig, nextRunIndex, poll, promoteBacklog, removeTask, waitForBoardCommits } from "../src/orchestrator.ts";
+import { rescan } from "../src/orchestrator/pipeline.ts";
 import { gunzipSync } from "node:zlib";
-import { agentPid, killTree, pidAlive, pidPath } from "../src/pid.ts";
-import { exitFilePath, renderPrompt, readExitCode, spawnAgent } from "../src/orchestrator/spawn.ts";
+import { agentAlive, agentPid, killTree, pidAlive, pidPath } from "../src/pid.ts";
+import { exitFilePath, readMergerSlug, renderPrompt, readExitCode, spawnAgent } from "../src/orchestrator/spawn.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -2274,14 +2275,23 @@ sleepersAN.push(sleeperAN4);
 stallPidFile(slugAN4, sleeperAN4.pid!);
 writeFileSync(join(kanbanDir(rootAN), ".logs", `${slugAN4}.dead.count`), "6");
 writeFileSync(join(kanbanDir(rootAN), ".logs", `${slugAN4}.reviewer.0.log`), "silent\n");
-// task 5: merging with a live merger pid, but its old merger log is not the current merger's
-// run (mergerLogSlug is null in this process): never sampled, never a false kill
+// task 5: merging with a live merger pid, but no merger slug recorded for it (another task's
+// merger owns the global pid/exit pair): requeued to to-merge, never sampled, never a false kill
 const taskAN5 = stallTask("fix: stale merger task", "merging");
 const slugAN5 = taskAN5.file.replace(/\.md$/, "");
 const sleeperAN5 = sleeperAN(60000);
 sleepersAN.push(sleeperAN5);
 writeFileSync(join(kanbanDir(rootAN), ".pids", "merger.pid"), String(sleeperAN5.pid!));
 writeFileSync(join(kanbanDir(rootAN), ".logs", `${slugAN5}.merger.0.log`), "old run\n");
+// task 6: merging and the recorded merger slug names it: the stall check samples its own
+// merger log and bounces the merger at the window edge like any other working agent
+const taskAN6 = stallTask("fix: recorded merger task", "merging");
+const slugAN6 = taskAN6.file.replace(/\.md$/, "");
+const sleeperAN6 = sleeperAN(60000);
+sleepersAN.push(sleeperAN6);
+writeFileSync(join(kanbanDir(rootAN), ".pids", "merger.pid"), String(sleeperAN6.pid!));
+writeFileSync(join(kanbanDir(rootAN), ".pids", "merger.slug"), `${slugAN6}\n`);
+writeFileSync(join(kanbanDir(rootAN), ".logs", `${slugAN6}.merger.0.log`), "silent\n");
 
 const t0AN = Date.now();
 poll(rootAN, 5, t0AN); // first samples
@@ -2312,9 +2322,16 @@ assert.ok(pidAlive(sleeperAN2.pid!), "a growing log never gets the agent killed"
 // no per-run log file: no sample, no check, no bounce
 assert.equal(parseTask(rootAN, taskAN3.file).state, "doing", "no log file: the stall check is skipped");
 assert.ok(pidAlive(sleeperAN3.pid!), "no log file: the agent is not killed");
-// the merging guard: the old merger log is never sampled while the live merger serves another task
-assert.equal(parseTask(rootAN, taskAN5.file).state, "merging", "stale merging task never sampled");
+// a merging task the slug file does not name requeues without a death record: never sampled,
+// never a false kill
+assert.equal(parseTask(rootAN, taskAN5.file).state, "to-merge", "a superseded merging task requeues to to-merge");
 assert.ok(pidAlive(sleeperAN5.pid!), "the merger working another task is not killed");
+assert.ok(!existsSync(join(kanbanDir(rootAN), ".logs", `${slugAN5}.merger.0.dead`)), "no death marker for the requeued merging task");
+assert.ok(!existsSync(join(kanbanDir(rootAN), ".logs", `${slugAN5}.dead.count`)), "no dead counter bump for the requeued merging task");
+// the recorded merging task's stall check samples its own merger log: bounced at the edge
+assert.equal(parseTask(rootAN, taskAN6.file).state, "to-merge", "the recorded merger's stall bounce moves merging -> to-merge");
+assert.equal(readFileSync(join(kanbanDir(rootAN), ".logs", `${slugAN6}.dead.count`), "utf8").trim(), "1", "dead counter bumped on the merger stall bounce");
+assert.ok(readFileSync(join(kanbanDir(rootAN), ".logs", `${slugAN6}.merger.0.dead`), "utf8").trim() === String(sleeperAN6.pid!), "the merger stall bounce names the dying run in the per-run death marker");
 for (const s of sleepersAN) {
 	try {
 		s.kill("SIGKILL");
@@ -2628,3 +2645,83 @@ poll(rootAT, 5);
 assert.equal(parseTask(rootAT, taskAT.file).state, "reviewing", "the exception is sticky: no crash bounce on the next pass");
 assert.ok(!orchLogAT().includes("agent pid=0 dead without state update"), "no spurious dead-pid bounce for the pid-less reviewing task");
 console.log("orchestrator.test.ts: ... + exit-code file smoke passed");
+
+// --- part AU: 000189 two conflicted to-merge tasks, one merger at a time. The second
+// merger's spawn supersedes the first task's unconsumed merger exit (it clears the shared
+// exit file), so the poll must requeue the superseded task instead of false-bouncing it: no
+// dead marker, no dead-count bump, and the recorded task consumes its own exit 0 ---
+const rootAU = fixture();
+cleaned.push(rootAU);
+const homeAU = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAU);
+mkdirSync(kanbanDir(rootAU), { recursive: true });
+const savedHomeAU = process.env.HOME;
+process.env.HOME = homeAU;
+let cfgAU: ReturnType<typeof loadConfig>;
+try {
+	cfgAU = loadConfig(rootAU);
+} finally {
+	process.env.HOME = savedHomeAU;
+}
+// merger stub: no command file in its cwd -> sleeps 1s, exits 0 without resolving, so each
+// merger stays alive while the same sweep defers the other task (one merger at a time)
+writeFileSync(
+	join(rootAU, "au-merger.cjs"),
+	`#!/usr/bin/env node
+const { readFileSync } = require("node:fs");
+const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
+const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
+if (!file || !readFileSync(file, "utf8").match(/^state: /m) || !prompt.includes("Merger agent")) process.exit(0);
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+`,
+	{ mode: 0o755 },
+);
+cfgAU.agent = join(rootAU, "au-merger.cjs");
+// two branches that each conflict with main (both edit README.md), main advanced after both
+execSync("git checkout -qb feat/au-one", { cwd: rootAU, shell: "/bin/bash" });
+writeFileSync(join(rootAU, "README.md"), "one\n");
+execSync("git commit -qam one", { cwd: rootAU, shell: "/bin/bash" });
+execSync("git checkout -q main", { cwd: rootAU, shell: "/bin/bash" });
+execSync("git checkout -qb feat/au-two", { cwd: rootAU, shell: "/bin/bash" });
+writeFileSync(join(rootAU, "README.md"), "two\n");
+execSync("git commit -qam two", { cwd: rootAU, shell: "/bin/bash" });
+execSync("git checkout -q main", { cwd: rootAU, shell: "/bin/bash" });
+writeFileSync(join(rootAU, "README.md"), "main\n");
+execSync("git commit -qam main", { cwd: rootAU, shell: "/bin/bash" });
+const taskAUa = createTask(rootAU, { name: "fix: merger one", summary: "Misattribution smoke", specs: "n/a" });
+const taskAUb = createTask(rootAU, { name: "fix: merger two", summary: "Misattribution smoke", specs: "n/a" });
+setWorktree(rootAU, taskAUa, "feat/au-one");
+setWorktree(rootAU, taskAUb, "feat/au-two");
+setState(rootAU, taskAUa, "to-merge");
+setState(rootAU, taskAUb, "to-merge");
+const slugAUa = taskSlug(taskAUa.file);
+const slugAUb = taskSlug(taskAUb.file);
+const orchLogAU = () => readFileSync(join(kanbanDir(rootAU), ".logs", "orchestrator.log"), "utf8");
+// sweep 1: the first task's merger takes the global pid/exit pair; the second task defers
+rescan(rootAU, cfgAU);
+assert.equal(parseTask(rootAU, taskAUa.file).state, "merging", "the first task sits in merging");
+await waitFor(() => readExitCode(rootAU, "merger") === 0 && !agentAlive(rootAU, "merger"), 15000, "the first merger exited 0", () => "");
+// sweep 2, before any poll consumed the first exit: the second task's merger spawns and
+// clobbers the shared pair (clearExitFile + writePid), superseding the first task
+rescan(rootAU, cfgAU);
+assert.equal(readMergerSlug(rootAU), slugAUb, "the second merger's spawn recorded its own slug");
+await waitFor(() => readExitCode(rootAU, "merger") === 0 && !agentAlive(rootAU, "merger"), 15000, "the second merger exited 0", () => "");
+assert.equal(parseTask(rootAU, taskAUa.file).state, "merging", "the first task still sits in merging, superseded");
+// one poll pass: the superseded task requeues (no death record), the recorded task reads its own exit 0
+poll(rootAU, 5);
+assert.equal(parseTask(rootAU, taskAUa.file).state, "to-merge", "the superseded task requeued merging -> to-merge");
+assert.equal(parseTask(rootAU, taskAUb.file).state, "to-merge", "the recorded task requeued on its own exit 0");
+assert.ok(
+	!existsSync(join(kanbanDir(rootAU), ".logs", `${slugAUa}.merger.0.dead`)) && !existsSync(join(kanbanDir(rootAU), ".logs", `${slugAUb}.merger.0.dead`)),
+	"no per-run death marker for either task",
+);
+assert.ok(
+	!existsSync(join(kanbanDir(rootAU), ".logs", `${slugAUa}.dead.count`)) && !existsSync(join(kanbanDir(rootAU), ".logs", `${slugAUb}.dead.count`)),
+	"no dead-count bump for either task",
+);
+assert.ok(!orchLogAU().includes("dead without state update"), "no false dead line in the poll log");
+assert.ok(orchLogAU().includes(`${slugAUb}: agent exited 0, merging -> to-merge`), "the recorded task consumed its own exit 0");
+assert.ok(orchLogAU().includes(`${slugAUa}: its merger run is over (superseded or unrecorded), merging -> to-merge`), "the superseded task's requeue is logged");
+assert.ok(!existsSync(pidPath(rootAU, "merger")) && !existsSync(exitFilePath(rootAU, "merger")), "the recorded task consumed the shared pid/exit pair");
+cleanupAll(rootAU, homeAU);
+console.log("orchestrator.test.ts: ... + superseded merger requeue smoke passed");

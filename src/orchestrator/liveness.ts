@@ -4,7 +4,7 @@ import { getTask, kanbanDir, listAll, setState, taskSlug, type Task, type TaskSt
 import { clearPid, killTree, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP } from "./config.ts";
 import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, logPath, nextRunIndex, readCounter } from "./log.ts";
-import { clearExitFile, getMergerLogSlug, readExitCode } from "./spawn.ts";
+import { clearExitFile, readExitCode, readMergerSlug } from "./spawn.ts";
 import { dropDoneBlockers, promoteBacklog } from "./pipeline.ts";
 
 // the working states with an agent out: next is the one-state-back bounce target when the
@@ -112,6 +112,21 @@ export function poll(root: string, stallMinutes: number, now = Date.now()): void
 			if (task.conflicted) continue;
 			const working = WORKING_STATES[task.state];
 			const slug = taskSlug(task.file);
+			// a merging task the merger slug file does not name: the shared pid/exit pair belongs to
+			// another task's merger (or no merger was ever recorded). Its own merger run is over
+			// either way (a new spawn requires the old merger dead), so requeue it without a death
+			// record and leave the shared pair for the task the slug file names
+			if (task.state === "merging" && readMergerSlug(root) !== slug) {
+				dropLogSamples(slug);
+				// re-read + state-match: a task that moved on underneath (PM or user) wins
+				const fresh = getTask(root, task.file);
+				if (fresh && fresh.state === task.state) {
+					ended = true;
+					setState(root, fresh, "to-merge");
+					log(root, `${slug}: its merger run is over (superseded or unrecorded), merging -> to-merge`);
+				}
+				continue;
+			}
 			// a merging task's agent is the project-wide merger (the global pid file); every other
 			// state maps to the task's own agent pid. Clear before the transition check: a pidfile
 			// for a state with no transition (to-merge, done) would otherwise linger forever
@@ -119,10 +134,10 @@ export function poll(root: string, stallMinutes: number, now = Date.now()): void
 			const { pid, disc } = pidEntry(root, pidName);
 			if (pidAlive(pid, disc)) {
 				// a live pid is stalled when its per-run log size is unchanged for the whole window:
-				// bounced and killed like a dead agent. A merging task only samples while the live
-				// merger is its own (see mergerLogSlug); outside the working states there is no
-				// check, and stale samples are dropped
-				if (working && (task.state !== "merging" || getMergerLogSlug() === slug) && logStalled(root, slug, working.role, stallMinutes, now)) {
+				// bounced and killed like a dead agent. A merging task reaching here is the recorded
+				// merger's own (mismatches requeue above), so the sampled per-run log is its merger
+				// run; outside the working states there is no check, and stale samples are dropped
+				if (working && logStalled(root, slug, working.role, stallMinutes, now)) {
 					log(root, `${task.file}: agent log unchanged for ${stallMinutes}+ min, assuming dead (state ${task.state})`);
 					ended = true;
 					bounceDead(root, task, working.next, pidName, pid, true);
