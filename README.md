@@ -18,7 +18,13 @@ Local development alternative: symlink the repo to `~/.pi/agent/extensions/se-ll
 ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
 ```
 
-3. Optional config in `~/.pi/agent/se-llm-team.json` (a `.kanban/se-llm-team.json` in the project overrides it):
+## Using it
+
+Start pi in a project and run the `se-llm-team` skill: the skill makes the session the Project manager, the kanban tools drive the board, and `orchestrator_start` runs the daemon. The orchestrator sends board reports to the chat. The mechanics are in [Documentation](#documentation) below.
+
+## Configuration
+
+Optional config in `~/.pi/agent/se-llm-team.json` (a `.kanban/se-llm-team.json` in the project overrides it):
 
 ```json
 {
@@ -48,92 +54,10 @@ ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
 | `webUi.host` | `localhost` | Dashboard bind host. |
 | `webUi.port` | `4242` | Dashboard port. |
 
-## Package manager
+## Documentation
 
-pnpm is the package manager, pinned in `package.json` through the `packageManager` field. Corepack resolves and runs exactly that version:
-
-```sh
-corepack enable
-corepack prepare pnpm@12.11.2 --activate
-```
-
-There are no dependencies and no committed lockfile (pnpm writes an env lockfile that is gitignored). The checks still run with `node` directly, see [Checks](#checks).
-
-## Kanban board
-
-`.kanban/` in the project repo holds one markdown file per task, named `000001_nice_thing.md` (zero-padded number, slug capped at 4 words with the type word dropped). Flat YAML frontmatter (name, priority, state, worktree, issuer, complexity) plus # Summary, # Specs, # Notes sections. The complexity attribute (`simple`, `moderate`, `complex` or `trivial`) defaults to `moderate` and drives which per-complexity LLM config entry and reviewer-pass cap apply. The library writes files only; the orchestrator daemon is the sole git committer for `.kanban/` paths, at two points only: creation in backlog, and done. Edits in between stay uncommitted and land in the one done commit.
-
-States: backlog, to-do, doing, to-review, reviewing, to-merge, merging, to-live-test, live-testing, done.
-
-## Orchestrator
-
-`src/orchestrator.ts` is a non-LLM daemon. Start it with the `orchestrator_start` tool (or `node src/orchestrator.ts --root <project>`). One daemon per project: the lockfile is `.kanban/.orchestrator.lock`.
-
-- Watches `.kanban/` (fs.watch) and rescans every 10 s. The `orchestrator_poke` tool touches `.kanban/.poke` for an immediate scan and agent scheduling.
-- backlog: promoted automatically, on every scan and poll: every backlog task whose blockedBy refs all point at satisfied blockers (done tasks, or tasks in the live test: to-live-test or live-testing), whose openQuestions section is empty and whose file has no conflict markers moves to to-do, all schedulable tasks at once (unchained tasks run as parallel lanes). When a blocker reaches done or enters the live test (to-live-test/live-testing), the daemon drops its ref from every task that listed it in the same scan or poll, so blockedBy always lists unsatisfied (to-merge/merging) blockers only.
-- to-do: creates `.worktrees/<type>/<num>-<short-slug>` (e.g. feat/1-nice-thing) from the task, sets the worktree attribute, spawns a Developer, moves to doing. Unlimited lanes; the blockedBy chain serializes what must serialize.
-- to-review: spawns a Reviewer in the worktree, moves to reviewing. After `reviewerCap.<complexity>` successful reviewer runs (0 for trivial, 1 for simple, 2 for moderate, 3 for complex by default) the task force-advances to to-merge. A trivial task (cap 0) advances on the first sweep without spawning a reviewer. The Reviewer keeps its own state decision: approval sets to-merge, fixes go back to to-review.
-- to-merge: the orchestrator's merge queue. The merge waits while the task's own agent is still alive, and at most one merger runs project-wide. A failed merge writes an attempt marker and retries after the task sat idle in to-merge for `autoScheduleMinutes`.
-- merging: a merger is resolving a conflicted rebase. The orchestrator runs the merges itself: it rebases the task branch onto the base branch (the root checkout's current branch, resolved live per operation) in the worktree, and on a conflict spawns the merger there to resolve and conclude the replayed commit (`git rebase --continue`; the merger runs no tests and makes no state moves); then it fast-forwards the base to the branch from the project root (`--ff-only`, so no merge commit is created and main history stays linear). The merger's successful finish moves the task back to to-merge and the next sweep retries. A failed fast-forward (the base moved, a dirty root checkout) requeues the task in to-merge; the retry re-runs a fresh rebase onto the moved base followed by the fast-forward.
-- to-live-test: reached after the orchestrator fast-forwarded the base to the branch; the worktree branch head already is the merged commit. The daemon routes a task whose branch is not merged into the base, or that has no worktree, back to to-merge first. Otherwise it spawns a Live-tester in the task worktree and moves to live-testing.
-- Liveness poll: each agent's exit code is recorded, and a successful finish (exit 0) moves the task forward: the orchestrator owns the move (doing to to-review, merging to to-merge, live-testing to done); only the Reviewer keeps its state decision, and an exit 0 with the task still in reviewing is left for the PM. A crash (non-zero or missing exit code) moves the task back one step (a dead Developer goes back to to-do for a fresh run, reviewing to to-review, live-testing to to-live-test, merging to to-merge). Capped at 5 respawns per task.
-- done with a worktree: the orchestrator fast-forwarded the base to the branch before the live test set done. The worktree lives until done: the orchestrator removes the worktree (the only worktree deletion point), deletes the merged branch and commits the task file (the done commit). done without a worktree: the orchestrator commits the task file at the next rescan. The done commit is skipped when the file has nothing uncommitted.
-- On the sweep that moves one or more tasks to done, the daemon queues ONE report for the PM session in `.kanban/.reports/<sortable-timestamp>.md` (atomic tmp+rename write): the done tasks (name and shortName), the tasks the sweep scheduled (the backlog promotions, with their new state), per finished task its live-test findings (the tasks whose issuer attribute is that task's number, each with its name and its # Open questions section), and instructions for the PM. Files older than the 1 h delivery cutoff are pruned on every sweep.
-- Report delivery: the extension consumes the queue in the PM session. Every session watches `.kanban/.reports/` from session_start (same lifecycle as the done toasts), but only the session whose cwd is the repo root consumes reports (the git-topology gate of the hub-candidacy rule; a worktree session shares the board through the `.kanban` symlink and stays silent). Consumption claims the oldest report by rename to `<name>.claiming`, sends it to the chat as a `board-report` message (`triggerTurn` when the session is idle, `deliverAs: "followUp"` when busy) and deletes the claimed file; a second root session loses the rename and never double-sends. On session start at the repo root the queue is drained: reports younger than the cutoff are delivered oldest first, older ones are deleted. A process death between claim and send is cleaned by the orchestrator prune.
-- A task file with unresolved merge conflict markers is left untouched: the daemon spawns no agents, rewrites no attribute, and commits nothing for it until the merger or the user resolves the conflict.
-
-### Board mirror to origin
-
-Every mirror commit is best-effort pushed to `origin` as `refs/heads/meta/kanban` (only that ref; failures are logged, never fatal). The push needs SSH access to origin for the daemon user (a known_hosts entry and a deploy key); without it the mirror stays local and a fresh-clone bootstrap on another machine cannot work. After 3 consecutive failed pushes the daemon logs one warning (repeated only after a push succeeds again), visible in `.kanban/.logs/orchestrator.log`.
-
-## Extension load path
-
-Role agents run in the task worktree, but pi loads the extension from the global symlink `~/.pi/agent/extensions/se-llm-team/`, which resolves to the main checkout. Tools added on an unmerged branch are invisible to role agents until the branch merges. Until then, a Live-tester of a new tool verifies it with fixtures and code inspection instead of invoking the tool.
-
-## Web dashboard
-
-With `webUi.enabled: true` in `~/.pi/agent/se-llm-team.json`, the orchestrator daemon serves a read-only dashboard at `http://<host>:<port>` (default `http://localhost:4242`): one column per task state, cards with a priority chip, and a popup with the full task (attributes and rendered body). The board is re-read on every request and the page refreshes itself every 5 s. A failed start (port taken) is logged and the pipeline continues. The page footer shows the serving hub's identity (`pid`, code checkout, `commit`), so a stale-code hub or a failover is visible at a glance; the same payload is at `GET /api/hub`.
-
-Only daemons rooted at a main checkout can win the hub election and bind the port: a linked git worktree checkout can hold old code, so its daemon registers with the hub and never serves the ui. Candidacy is git topology (the per-worktree git dir differs from the common dir), not a path rule, so a worktree created anywhere (not just under `.worktrees/`) stands down. During a production restart the dashboard is briefly down instead of being served by old code. A daemon rooted in a task worktree exits itself when its task reaches `done` or is gone (checked at startup and on every sweep), so no stale worktree daemon lingers to hold the lock or contest the port.
-
-Both checks run inside each daemon's own code. A daemon started from a worktree checkout before this change does not run them, so it can still win the election and hold the port. After you upgrade, kill the old worktree daemons one time: run `pgrep -af orchestrator.ts` and kill each process whose `--root` contains `.worktrees` (for example: `pkill -f 'orchestrator.ts.*--root .*/\.worktrees'`; the pattern does not match a daemon at the project root). New worktree daemons run the current code and exclude themselves, so this residue does not come back.
-
-## Agents
-
-Agent prompts live in `agents/`. The orchestrator runs each agent as a headless `<executable> --approve --mode json [<llm flags>] -p <prompt>` process, with the optional provider/model/thinking flags from the config. The prompt carries no task path. Before each spawn the orchestrator puts two symlinks in the agent cwd: `SPECS.md` points at the task file through the linked board, and `AGENTS.md` points at the role's notes file (`.kanban/AGENTS.<role>.md`), which replaces the former `--append-system-prompt` flag. The agent reads the task and the role guidance from its cwd at startup. The orchestrator re-points both symlinks at every spawn and removes them when the agent terminates. All four roles run with the task worktree as cwd:
-
-| Role | cwd |
+| Doc | Description |
 | --- | --- |
-| Developer | the task worktree |
-| Reviewer | the task worktree |
-| Merger | the task worktree (resolves conflicts only) |
-| Live-tester | the task worktree (tests the merged commit) |
-
-The agent log (`.kanban/.logs/`) carries the full JSONL event stream; the web ui renders it readably. The orchestrator reads the role prompt from `agents/` in its own checkout at each spawn. A prompt fix on a task worktree branch applies only after that branch merges, so do not rely on a prompt change before the merge. Agents append notes to their task file directly; only the Reviewer also writes the state attribute (its approve/reject decision), and the orchestrator moves the task itself on a successful finish. The Live-tester reports issues to a Project manager subagent that creates new tasks.
-
-## Tools
-
-The PM session gets: kanban_list, kanban_get, kanban_create, kanban_update, kanban_set_state, kanban_set_worktree, kanban_delete, orchestrator_start, orchestrator_status, orchestrator_stop, orchestrator_poke. kanban_get, kanban_update and kanban_set_state take an optional file parameter: when omitted, the task resolves from the session cwd through the SPECS.md symlink, so an agent session in a worktree never passes the file name. With no SPECS.md in the cwd the tool reports `no task; pass the file name or run from a worktree with SPECS.md`. kanban_delete removes a mistaken task: it deletes the task file and commits a whole-board mirror snapshot in one operation, so the daemon cannot restore the task. Never delete a board file by hand. The daemon restores hand-deleted files from the mirror. The extension also notifies the session when a task reaches done, and delivers the queued PM reports as `board-report` messages (see the Orchestrator section).
-
-All tools load on demand: they are registered deferred, so they stay out of the model's startup tool list, and the model declares one when the built-in `tool_search` tool finds it. The extension activates `tool_search` automatically at session start (a `before_agent_start` handler), so installing the plugin is enough. When the extension is not loaded, enable the tool manually with `"defaultTools": ["+tool_search"]` in `~/.pi/agent/settings.json`.
-
-## Checks
-
-```sh
-npm test
-npm run test:changed
-```
-
-`npm test` runs all five suites:
-
-```sh
-node tests/kanban.test.ts
-node tests/orchestrator.test.ts
-node tests/webui.test.ts
-node tests/extension.test.ts
-node index.test.ts
-```
-
-`npm run test:changed` runs only the suites that the current modifications affect. It maps the working tree changes and the branch commits against main to the test files, and runs everything when a changed path is not in the mapping. The orchestrator suite runs its daemons with a fast delay profile (600 ms poll, 1 s rescan, faked cooldowns and hub timers), so the full check stays quick.
-
-Sidecar files (`.kanban/.logs/`, `.kanban/.pids/`, `.kanban/.orchestrator.lock`) are gitignored.
+| [docs/architecture.md](docs/architecture.md) | The kanban board, the orchestrator daemon, the board mirror to origin and the web dashboard. |
+| [docs/agents-and-tools.md](docs/agents-and-tools.md) | The agent roles and how they run, and the PM session tools. |
+| [docs/development.md](docs/development.md) | The package manager, the extension load path and the checks. |
