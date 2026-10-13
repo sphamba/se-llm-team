@@ -1,7 +1,7 @@
 ---
 name: "fix: clear the webui live-line pulse when the run dies"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/193-webui-pulse-clear-on-death"
 issuer: "#191"
 complexity: "simple"
@@ -59,6 +59,13 @@ Observed: the run card reads `agent-past` with no `.spin`, yet `#m-log-text > *:
 - Regression check in tests/webui.test.ts: asserts the updateOpenTask source and pollLog's idle-early-return block both include markLiveLine(); the "pullLog and closeLog drive the pulse" message was extended to name the new drivers, no assertion weakened.
 - node tests/webui.test.ts passes; full npm test passes (kanban, orchestrator, webui, extension, index).
 - The browser repro from the Specs (SIGKILL the pid, watch the first log line) was not run here: markLiveLine's engage/demote logic is unchanged and already covered, and the browser check is left for the live-testing stage.
+- Review (fix/193-webui-pulse-clear-on-death, HEAD before merge c0d545f): both death-observing paths sweep via the unchanged markLiveLine(), which reads the same activeBoard() payload renderAgent reads. updateOpenTask's sweep runs inside the refresh cycle that flips the payload (mergeBoards precedes updateOpenTask), satisfying "no later than the next board refresh"; pollLog's sweep is a belt-and-braces earlier trigger within one 1 s tick. Both idempotent, engage/demote from 54ccdd9 / e472661 intact, no existing assertion weakened; node tests/webui.test.ts passed on the pre-merge HEAD.
+- Review merged main into the branch per the convention (main had moved 4 commits past da35d5b: #192 node --watch daemon, webui hot reload deletion): merge commit 077c67c, auto-merged with no conflicts. main touched tests/webui.test.ts (removed the hot reload section) and src/webui.ts, not src/webui/page.ts, so the fix is untouched. Full npm test (kanban, orchestrator, webui, extension, index) passes on the merged HEAD, run twice.
+- Live test (merged 077c67c, no code edited, no unit suite run): the merged webui was served by a throwaway hub from the task worktree (startHub in src/hub.ts) on port 4388 with an isolated HOME, so the temp hub registry and lock stayed in /tmp and the production registry and port 4242 were untouched. Fixture root: two doing tasks, each with a live sleep pid in .kanban/.pids/<slug>.pid and a real-shape developer log (a session record, a turn_end usage record, then 8 text_start/text_delta pairs that render 8 element lines). Playwright headless chromium drove the real ui.
+- Live test result: 15/15 checks pass. Engage: while the run is alive the first log line carries .pulse with shimmer:running, exactly one line is pulsed, and the run card shows .spin. Idle: after 3 s of empty 1 s log polls the rendered line count is unchanged and the pulse is still on. Death sweep: SIGKILL on the pid in .pids/000001_alive.pid, the board refresh drops .spin at 1188 ms, and in that same DOM state the first line has no .pulse, getAnimations() reports no shimmer, the pane holds no .pulse at all, and the run card reads agent-past. The sweep had already fired before the board refresh (pollLog's idle early-return on its 1 s tick), and markLiveLine is idempotent, so the two paths agree. The exact 6 s repro window after the kill still shows no pulse and no shimmer, so the reported loop is gone. Reduced motion (emulated): the live first line still carries .pulse but getAnimations() is empty, so no shimmer runs. No page errors.
+- Differential control: the same scenario against the pre-fix client (merged tree with src/webui/page.ts taken from c0d545f~1) reproduces the reported bug. After .spin is gone the first line still has .pulse and shimmer:running, the pulse count is 1, and it is still that way 6 s later (5 death checks fail). The merged code passes all of them, so the test is sensitive to exactly this fix.
+- Live test assumptions: "first line" means the pane's topmost element child, and the fixture uses real JSON records that render element lines. Aliveness ends with SIGKILL on the pid named in the .pids file, the same source pidAlive reads. The pollLog sweep can beat the board refresh by up to one 1 s log tick, which the Specs' "and/or" and "no later than the next board refresh" wording allows. The hub-only fixture serves the client without a daemon, matching the Specs' own repro recipe.
+- Contradictions: none. The merged commit 077c67c serves the fix unchanged (page.ts is at c0d545f, main had moved only tests/webui.test.ts and src/webui.ts, no conflict there).
 
 # Open questions
 

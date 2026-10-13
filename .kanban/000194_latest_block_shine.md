@@ -1,12 +1,12 @@
 ---
 name: "fix: animated closes and letter-only shine on the latest block"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/194-latest-block-shine"
 issuer: "user"
 complexity: "moderate"
 shortName: "latest-block-shine"
-blockedBy: "#193"
+blockedBy: ""
 ---
 
 # Summary

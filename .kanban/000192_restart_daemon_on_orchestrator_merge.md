@@ -43,4 +43,26 @@ The daemon self-restarts when its own code changes: it runs under node --watch (
 - Verified the three assumptions that were listed under Open questions against the code, and removed them: the diff touches no file under src/orchestrator/; the daemon's module graph (src/orchestrator.ts and its imports) excludes index.ts, which only the extension process loads; procPgrp reads null when /proc is unavailable, so stop falls back to the bare pid kill there.
 - Review fixes (1e12884): the src/webui.ts shim comment still said the hub loads a "reloadable module path", which this change deletes, so the comment now names the static import. webui.test.ts now asserts that a page load leaves no `.webui-hot-*` dir under src/ (Acceptance: a page load no longer writes temp copies). All five suites pass after the fixes.
 
+## Live-test notes (2026-10-13)
+Scope: the acceptance flows only, through their real interfaces. No unit suite ran. The fixture tests ran from a scratch clone of the merged commit 6fee955 in /tmp/live192/code, against a throwaway git root, an isolated HOME and a non-production port. The real checkout stayed untouched by those tests.
+
+Assumptions:
+- A merge that changes src/ is equivalent to a `touch` or an edit of a watched src file. Both trigger the fs.watch event that node --watch reacts to.
+- "A page load no longer restarts the daemon" means that a page load writes nothing under src/ and does not change the lock pid.
+- The "one-time hygiene" sentence in Summary/Specs is part of the deliverable. It was verified, not trusted.
+
+Passed:
+1. Watch restart (fixture): `touch src/kanban.ts` changed the lock pid 857511 -> 857570. The webui answered 200 after the re-election. A content edit of src/orchestrator/main.ts loaded the new code ([GEN2] marker, 3 starts in total).
+2. Page loads (fixture): 3 HTTP GET /, then 5 GET /, then a real Playwright load (title "Software Engineering LLM Team", #board present, no page errors). No restart occurred. No src/.webui-hot-* dir existed. The src/ tree did not change.
+3. Extension interface (fixture repo): orchestrator_start reported "Orchestrator starting (pid 861495)". The supervisor 861495 ran `node --watch <ext>/src/orchestrator.ts --root <root>`. The lock held its child 861508. orchestrator_status reported the child pid. orchestrator_stop reported "Sent SIGTERM to orchestrator pid 861508" and killed supervisor and child. The lock became empty. The log recorded "orchestrator stopped".
+4. Production acceptance after the re-hygiene below: `touch src/kanban.ts` in the real checkout changed the lock pid 868296 -> 868359 under the same supervisor 868290. The webui answered 200 on 4242 and /api/hub carried the new pid. The file sha256 and `git status` did not change. The restart kept 3 in-flight tasks and left all 4 running agent pids alive.
+
+Contradiction found, then repaired:
+- The Summary/Specs sentence "One-time hygiene done: the production daemon already runs under node --watch" was false at test start. Lock pid 758169 had PPID 1 and no supervisor process. Main moved from 6fee955 to 077c67c (#193 merge, 13:24) and to 0bf8fed (#190 merge, 13:30) with no restart in .kanban/.logs/orchestrator.log. So the fix was inert on the real board across two merges.
+- Cause: the old daemon started at 12:46, before the 13:14 merge, from a pi session with pre-#192 extension code. The pi docs (docs/extensions.md) load extensions at session start and apply a change only after /reload. The long-lived pi sessions on this machine started days ago. Therefore a future orchestrator_stop + orchestrator_start from one of them spawns an unwatched daemon again and silently regresses the hygiene. The dev observation was true when it was made (child self-restart at 12:46:11) and became false at 12:46:48 when the old session restarted the daemon without --watch.
+- Repair during the live test (the documented recovery, from a fresh pi session with the merged extension): orchestrator_stop reported "Sent SIGTERM to orchestrator pid 758169" and freed port 4242. orchestrator_start reported "Orchestrator starting (pid 868290)". The supervisor 868290 ran the daemon child 868296 under --watch. The webui answered 200 on 4242. /api/hub reported pid 868296. Then check 4 passed. The real daemon now runs under --watch.
+- Related trap for tests: `/api/hub.commit` is `currentCommit(CODE_ROOT)`, a live `git rev-parse` of the checkout (src/hub.ts line 204). It reports the on-disk HEAD, not the code the daemon loaded. Use the lock pid, its PPID and the supervisor argv to identify the running daemon.
+
+No open questions. Evidence: /tmp/live192/{run1.sh,run3.sh,daemon.log,start-real.jsonl,stop-real.jsonl}.
+
 # Open questions

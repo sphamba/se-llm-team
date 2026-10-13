@@ -1,7 +1,7 @@
 ---
 name: "feat: orchestrator PM reports queued to the chat"
 priority: "high"
-state: "reviewing"
+state: "live-testing"
 worktree: "feat/190-pm-report-queue"
 issuer: "user"
 complexity: "moderate"
@@ -57,6 +57,12 @@ When one or several tasks move to done, the orchestrator schedules unblocked tas
 - Old ritual removed: orchestrator_wait tool, waitForBoardCommits and .pi/agents/watcher.md are gone; README.md and skills/se-llm-team/SKILL.md document the report flow.
 - Tests: orchestrator part N replaced with the PM report part (one report per done sweep, done and scheduled and findings and PM instructions, no re-report on the second sweep, stale report and stale claim pruned, fresh one kept); extension tests gained the report-delivery checks (oldest-first drain, worktree never consumes, stale discarded at startup, busy session gets followUp). npm test green.
 - Review fixes (badf764): ensureReportsWatcher returned early when .kanban/.reports did not exist at session_start, but the dir is created lazily by the orchestrator's first report, so a PM session started before the first report (the normal case) never installed the watcher and live delivery silently failed for it; it now guards on the board dir existing and creates .reports itself. The watcher is installed before the drain, so a report landing between drain end and watch start can no longer be missed. deliverReport contained a readFileSync failure after a successful claim (would have propagated out of the fs.watch callback as an uncaught exception). The isLinkedWorktree comment's "worktree self-reap" usage claim dropped (no such usage). Extension test pins the dir creation. Merged main (a09c32e; main had moved past the merge-base with disjoint src/webui changes); npm test green after the merge.
+- Second review pass: all spec items verified in the diff (rescan order promoteBacklog then reportDone, atomic tmp+rename write, oldest-first claim by rename, shared isLinkedWorktree gate reused by the hub candidacy rule, session-start drain, orchestrator_wait tool, waitForBoardCommits and .pi/agents/watcher.md gone with their tests, README and SKILL.md on the report flow). All four suites re-run green in this pass (extension, kanban, orchestrator, webui). pi.sendMessage calls checked against the pi-coding-agent types ({customType, content, display} plus {triggerTurn} / {deliverAs: "followUp"}); they match.
+- Second review pass, mirror safety checked: commitKanban builds the meta/kanban tree from the explicit task files only, so report files never enter the mirror; .kanban/ is gitignored, so reports never show as untracked in the working tree.
+- Second review fix (8df2a0b): the extension test's teardown comment claimed rmSync(reportsPath) stopped a live reports watcher from interfering, but the module-level reportsWatcher is claimed by the first session_start and watches the main fixture's .reports, never this dir; the later scenarios exercise the queue through the explicit session_start drains only. Comment-only, no behavior change; extension suite re-run green.
+- Accepted interpretation: SKILL.md's Board reports bullet keeps the negating mention "No watcher subagent and no orchestrator_wait tool". The spec's "no orchestrator_wait references remain" is read as the ritual being dead; the negation tells a PM agent returning from an older session not to re-spawn the watcher, which serves that intent. README has no references left.
+- Noted, no fix: a claim file inherits the report's mtime through the rename, so a claim orphaned by a death between claim and send is pruned relative to the report's age, not the claim's. Still bounded and cleaned by the orchestrator prune, which is what the spec asks for.
+- Merged main (674abcc): main's #192 webui hot-reload deletion removed the hub.ts module-graph walk (the relative/sep/pathToFileURL/splitWorktreeRoot usages), so the hub.ts conflict resolved to main's import block plus the branch's isLinkedWorktree-only kanban.ts import; the splitWorktreeRoot import dropped as unused in hub.ts (kanban.ts keeps the export, src/orchestrator/main.ts still uses it). The index.ts conflict resolved to the branch's import block (no waitForBoardCommits, isLinkedWorktree plus report imports kept) plus main's new procPgrp, which the orchestrator_stop group-kill uses.
 
 # Open questions
 
