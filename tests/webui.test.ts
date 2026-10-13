@@ -576,8 +576,11 @@ assert.match(page, /#m-log-text > \.pulse, #m-log-text > details\.lg-think\.puls
 assert.ok(page.includes("#m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { --shine-base: var(--muted); }"), "the muted blocks' band goes muted, whiter, muted");
 assert.match(page, /--enter: 200ms; --exit: 180ms; --fade: 150ms; --pulse: 2s; --shine: 45%;/, "the motion durations and the band strength retune in one place");
 assert.match(page, /@media \(prefers-reduced-motion: reduce\) \{ \.card\.enter, [^}]*\{ animation: none; \} \}/, "reduced motion stops the new animations too");
+// 000194 review: the details.pulse variants (1,2,1) outrank #m-log-text > * and .pulse, so they
+// join the first media rule or the clip animation would keep running under reduce
+assert.ok(page.includes("#m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { animation: none; } }"), "reduced motion stops the details blocks' pulse animation too, their variant outranks #m-log-text > *");
 // 000194: the restore: color: transparent with the animation stopped would make the text vanish
-assert.match(page, /@media \(prefers-reduced-motion: reduce\) \{ #m-log-text > \.pulse \{ background-image: none; color: var\(--fg\); \} #m-log-text > details\.lg-think\.pulse, #m-log-text > details\.lg-tool\.pulse \{ color: var\(--muted\); \} \}/, "reduced motion drops the gradient and restores the solid color per block type");
+assert.match(page, /@media \(prefers-reduced-motion: reduce\) \{ #m-log-text > \.pulse \{ background-image: none; color: var\(--fg\); \} #m-log-text > details\.lg-think\.pulse, #m-log-text > details\.lg-tool\.pulse \{ background-image: none; color: var\(--muted\); \} \}/, "reduced motion drops the gradient and restores the solid color per block type");
 // the rule must come after the last base animation rule: equal specificity, so a media rule
 // placed earlier is overridden and reduced motion stays animated (caught in live testing)
 assert.ok(page.indexOf("@keyframes boxIn") < page.indexOf('@media (prefers-reduced-motion: reduce) { .card.enter'), "the reduced-motion rule sits after every base animation rule");
@@ -958,7 +961,12 @@ class CloseEl {
 	addEventListener(_type: string, fn: (e?: unknown) => void) { this.listeners.push(fn); }
 	removeEventListener(_type: string, fn: (e?: unknown) => void) { this.listeners = this.listeners.filter((l) => l !== fn); }
 }
-const closeOf = (reduce: boolean) => new Function("matchMedia", page.match(/function closeAnimated\(el\) \{[\s\S]*?\n\}/)![0] + "; return closeAnimated;")(() => ({ matches: reduce }));
+const closeTimers: Array<(() => void) | null> = [];
+const closeOf = (reduce: boolean) => new Function("matchMedia", "setTimeout", "clearTimeout", page.match(/function closeAnimated\(el\) \{[\s\S]*?\n\}/)![0] + "; return closeAnimated;")(
+	() => ({ matches: reduce }),
+	(fn: () => void) => { closeTimers.push(fn); return closeTimers.length - 1; },
+	(id?: number) => { if (id != null) closeTimers[id] = null; },
+);
 const closing = new CloseEl();
 closeOf(false)(closing);
 assert.ok(closing.classList.contains("closing") && !closing.classList.contains("hidden"), "the close starts the exit animation");
@@ -972,6 +980,17 @@ assert.ok(!bubbling.classList.contains("hidden") && bubbling.classList.contains(
 bubbling.listeners[0]({ target: bubbling }); // the element's own exit ends the hide and drops the listener
 assert.ok(bubbling.classList.contains("hidden") && !bubbling.classList.contains("closing"), "the element's own animationend hides it");
 assert.ok(bubbling.listeners.length === 0, "the hide listener drops after the element's own animationend");
+// 000194 review: a reopen drops .closing (the late animationend no-ops above) but the cancelled
+// close's fallback timer stays armed; the next close must clear it or it cuts the new exit
+const again = new CloseEl();
+const timerBase = closeTimers.length;
+closeOf(false)(again);
+again.classList.remove("closing"); // the reopen inside the fallback window
+closeOf(false)(again);
+assert.ok(again.classList.contains("closing") && !again.classList.contains("hidden"), "the second close restarts the exit");
+assert.ok(closeTimers[timerBase] === null, "the second close clears the cancelled close's stale fallback timer");
+closeTimers[timerBase + 1]?.(); // the second close's own fallback fires
+assert.ok(again.classList.contains("hidden") && !again.classList.contains("closing"), "the live fallback still hides");
 const reopened = new CloseEl();
 closeOf(false)(reopened);
 reopened.classList.remove("closing"); // openTask/openLog reopen during the close

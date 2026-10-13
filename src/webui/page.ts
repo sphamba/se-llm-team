@@ -230,11 +230,12 @@ fixed-timeout fallback */
 @keyframes fadeOut { to { opacity: 0; } }
 @keyframes boxOut { to { opacity: 0; transform: translateY(6px) scale(.985); } }
 /* 000191: reduced motion stops the entrance, chunk and pulse animations too; the rule sits
-after every base animation rule so the later equal-specificity selectors cannot override it */
-@media (prefers-reduced-motion: reduce) { .card.enter, .agent-card.enter, #modal:not(.hidden), #modal:not(.hidden) #m-box, #m-log:not(.hidden), #m-log-text > *, #m-log-text > .pulse { animation: none; } }
-/* 000194: under reduced motion the clip animation stops and color: transparent would make the
-text vanish: the gradient drops and the solid color restores per block type */
-@media (prefers-reduced-motion: reduce) { #m-log-text > .pulse { background-image: none; color: var(--fg); } #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { color: var(--muted); } }
+after every base animation rule so the later equal-specificity selectors cannot override it;
+000194: the details.pulse variants join it, only they outrank #m-log-text > * and .pulse */
+@media (prefers-reduced-motion: reduce) { .card.enter, .agent-card.enter, #modal:not(.hidden), #modal:not(.hidden) #m-box, #m-log:not(.hidden), #m-log-text > *, #m-log-text > .pulse, #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { animation: none; } }
+/* 000194: under reduced motion the clip animation stops (above) and color: transparent would
+make the text vanish: the gradient drops and the solid color restores per block type */
+@media (prefers-reduced-motion: reduce) { #m-log-text > .pulse { background-image: none; color: var(--fg); } #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { background-image: none; color: var(--muted); } }
 #m-box { background: var(--panel); border-radius: 10px; padding: 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
 #m-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 #m-head h2 { font-size: 15px; margin: 0; }
@@ -487,6 +488,8 @@ function updateOpenTask(t) {
 function closeAnimated(el) {
 	if (el.classList.contains("closing")) return;
 	if (matchMedia("(prefers-reduced-motion: reduce)").matches) { el.classList.add("hidden"); return; }
+	// 000194: a stale fallback from a cancelled close (the reopen dropped .closing) must not cut the next exit
+	clearTimeout(el.__closeTimer);
 	el.classList.add("closing");
 	const hide = e => {
 		if (e && e.target !== el) return; // descendant chunkIn/boxIn ends bubble up, only the element's own exit ends the hide
@@ -496,7 +499,7 @@ function closeAnimated(el) {
 		el.classList.add("hidden");
 	};
 	el.addEventListener("animationend", hide);
-	setTimeout(hide, 400);
+	el.__closeTimer = setTimeout(hide, 400);
 }
 function closeModal() {
 	const modal = document.getElementById("modal");
