@@ -949,13 +949,14 @@ assert.ok(!otherBlocks[0].classList.contains("pulse"), "a different run's view c
 // motion hides at once. The X button, the overlay click and Esc all keep the shared closeModal.
 class CloseEl {
 	className = "";
-	listeners: Array<() => void> = [];
+	listeners: Array<(e?: unknown) => void> = [];
 	classList = {
 		add: (cls: string) => { if (!this.classList.contains(cls)) this.className += (this.className ? " " : "") + cls; },
 		remove: (cls: string) => { this.className = this.className.split(" ").filter((c) => c !== cls).join(" "); },
 		contains: (cls: string) => this.className.split(" ").includes(cls),
 	};
-	addEventListener(_type: string, fn: () => void) { this.listeners.push(fn); }
+	addEventListener(_type: string, fn: (e?: unknown) => void) { this.listeners.push(fn); }
+	removeEventListener(_type: string, fn: (e?: unknown) => void) { this.listeners = this.listeners.filter((l) => l !== fn); }
 }
 const closeOf = (reduce: boolean) => new Function("matchMedia", page.match(/function closeAnimated\(el\) \{[\s\S]*?\n\}/)![0] + "; return closeAnimated;")(() => ({ matches: reduce }));
 const closing = new CloseEl();
@@ -963,6 +964,14 @@ closeOf(false)(closing);
 assert.ok(closing.classList.contains("closing") && !closing.classList.contains("hidden"), "the close starts the exit animation");
 closing.listeners[0]();
 assert.ok(closing.classList.contains("hidden") && !closing.classList.contains("closing"), "animationend hides the element and drops .closing");
+// 000194 review: descendant chunkIn/boxIn ends bubble up, only the element's own exit hides it
+const bubbling = new CloseEl();
+closeOf(false)(bubbling);
+bubbling.listeners[0]({ target: { tag: "pre" } }); // a descendant chunkIn's animationend reaches the pane first
+assert.ok(!bubbling.classList.contains("hidden") && bubbling.classList.contains("closing"), "a bubbled descendant animationend does not hide early");
+bubbling.listeners[0]({ target: bubbling }); // the element's own exit ends the hide and drops the listener
+assert.ok(bubbling.classList.contains("hidden") && !bubbling.classList.contains("closing"), "the element's own animationend hides it");
+assert.ok(bubbling.listeners.length === 0, "the hide listener drops after the element's own animationend");
 const reopened = new CloseEl();
 closeOf(false)(reopened);
 reopened.classList.remove("closing"); // openTask/openLog reopen during the close

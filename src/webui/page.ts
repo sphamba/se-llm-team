@@ -488,8 +488,14 @@ function closeAnimated(el) {
 	if (el.classList.contains("closing")) return;
 	if (matchMedia("(prefers-reduced-motion: reduce)").matches) { el.classList.add("hidden"); return; }
 	el.classList.add("closing");
-	const hide = () => { if (!el.classList.contains("closing")) return; el.classList.remove("closing"); el.classList.add("hidden"); };
-	el.addEventListener("animationend", hide, { once: true });
+	const hide = e => {
+		if (e && e.target !== el) return; // descendant chunkIn/boxIn ends bubble up, only the element's own exit ends the hide
+		el.removeEventListener("animationend", hide);
+		if (!el.classList.contains("closing")) return;
+		el.classList.remove("closing");
+		el.classList.add("hidden");
+	};
+	el.addEventListener("animationend", hide);
 	setTimeout(hide, 400);
 }
 function closeModal() {
