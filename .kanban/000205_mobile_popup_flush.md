@@ -1,8 +1,8 @@
 ---
 name: "feat: mobile task details popup flush with the screen sides"
 priority: "medium"
-state: "live-testing"
-worktree: "feat/205-mobile-popup-flush"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "trivial"
 shortName: "mobile-popup-flush"
