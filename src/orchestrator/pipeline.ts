@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { kanbanDir, getTask, listAll, setState, setWorktree, taskFiles, taskSlug, updateAttrs, type Task } from "../kanban.ts";
 import { agentAlive, agentPid, clearPid, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP, REVIEWER_RUN_CAP, type Config } from "./config.ts";
@@ -50,11 +50,14 @@ function clearMergerAttempt(root: string, slug: string): void {
 	}
 }
 // the to-merge sweep: a task the reviewer passed sits in to-merge until the orchestrator
-// merges main into the branch worktree, then the branch into main, then syncs the branch with
-// --ff-only and sets to-live-test. No merger agent runs on this clean path. On conflicts the
-// merge stays in progress in the worktree and a Merger (cwd = the worktree, pidName merger)
-// resolves only the conflicts and commits; its successful exit requeues the task to to-merge
-// through the poll, and the retry waits for the idle cooldown
+// rebases the branch onto the base in the worktree, then fast-forwards the base to the
+// branch at the project root and sets to-live-test; main history stays linear with no merge
+// commits. No merger agent runs on this clean path. On a rebase conflict the rebase stays in
+// progress in the worktree and a Merger (cwd = the worktree, pidName merger) resolves only
+// the conflicts and concludes the replayed commit with git rebase --continue; its successful
+// exit requeues the task to to-merge through the poll, and the retry waits for the idle
+// cooldown. A rebase can stop once per replayed commit, so the Merger is spawned per conflict
+// round until the rebase completes
 function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	const slug = taskSlug(task.file);
 	// a reviewer approval is a successful run too: consume the armed marker here, since the
@@ -79,10 +82,12 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 		log(root, `${task.file}: nothing to merge, set done`);
 		return;
 	}
-	// a detached root checkout has no branch to merge into: git merge there would land the
-	// change on a dangling commit that the done cleanup then deletes. The old merger guarded
-	// this; leave the task in to-merge for the PM, retries wait out the idle cooldown
-	if (git(root, ["branch", "--show-current"], true) === "") {
+	// the base branch: the root checkout's current branch, resolved live per merge operation
+	// (#102: never a hardcoded main). A detached root has no branch to rebase onto or into:
+	// git merge there would land the change on a dangling commit that the done cleanup then
+	// deletes. Leave the task in to-merge for the PM, retries wait out the idle cooldown
+	const base = git(root, ["branch", "--show-current"], true);
+	if (base === "") {
 		writeFileSync(mergerAttemptPath(root, slug), "");
 		log(root, `${task.file}: root checkout is detached, left in to-merge (PM resolves manually)`);
 		return;
@@ -93,43 +98,49 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 		log(root, `${task.file}: worktree could not be created, merge not started (state unchanged)`);
 		return;
 	}
-	// step 1: merge main into the branch, in the worktree
-	if (git(ensured.wtDir, ["merge", "--no-edit", "main"]) === null) {
-		// a failed merge that left MERGE_HEAD is a conflict: leave the merge in progress (no
-		// abort) and let the merger resolve only the conflicts; any other failure (dirty
-		// worktree, missing ref) requeues for a later sweep with no merger
+	// step 1: rebase the branch onto the base, in the worktree. The rebase and the fast-forward
+	// below run back-to-back in this serialized lane, so a branch rebased here is merged before
+	// the next merger operation rebases another branch onto a moved base. A rebase already in
+	// progress (a conflict round from an earlier run) makes a fresh rebase fail without
+	// touching state, which lands in the conflict path below and respawns the Merger
+	if (git(ensured.wtDir, ["rebase", base]) === null) {
 		mkdirSync(join(kanbanDir(root), ".pids"), { recursive: true });
 		writeFileSync(mergerAttemptPath(root, slug), "");
-		if (git(ensured.wtDir, ["rev-parse", "--verify", "-q", "MERGE_HEAD"], true) !== null) {
-			log(root, `${task.file}: merge conflicts, merger spawned to resolve them`);
+		// a stopped rebase leaves the rebase-merge directory in the worktree's git dir: that is
+		// a conflict, so leave the rebase in progress (no abort) and let the merger resolve only
+		// the conflicts and continue the replay. REBASE_HEAD is not the check: it lingers after a
+		// completed rebase (git 2.43). Any other failure (dirty worktree, missing ref) requeues
+		// for a later sweep with no merger
+		const rebaseDir = git(ensured.wtDir, ["rev-parse", "--git-path", "rebase-merge"], true);
+		const stopped = typeof rebaseDir === "string"
+			&& existsSync(isAbsolute(rebaseDir) ? rebaseDir : join(ensured.wtDir, rebaseDir));
+		if (stopped) {
+			log(root, `${task.file}: rebase conflicts, merger spawned to resolve them`);
 			writeMergerSlug(root, slug);
 			spawnAgent(root, cfg, "merger", { ...task, worktree: ensured.wt }, ensured.wtDir, "merger");
 			setState(root, task, "merging");
 		} else {
-			log(root, `${task.file}: merge into the worktree failed, left in to-merge for the retry`);
+			log(root, `${task.file}: rebase failed, left in to-merge for the retry`);
 		}
 		return;
 	}
-	// step 2: merge the branch into main, at the project root
-	if (git(root, ["merge", "--no-edit", ensured.wt]) === null) {
-		// rare (main moved between the two steps, or a dirty root checkout): abort and requeue
-		// for the retry after the idle cooldown
-		git(root, ["merge", "--abort"], true);
+	// step 2: fast-forward the base to the branch, at the project root, so no merge commit is
+	// created and main history stays linear. After the rebase the worktree branch head already
+	// is the merged commit, so no worktree sync step follows. Nothing is in progress on a
+	// failure (the rebase completed before this ran): no abort, just requeue for the retry,
+	// which re-runs a fresh rebase onto the moved base followed by the fast-forward
+	if (git(root, ["merge", "--ff-only", ensured.wt]) === null) {
 		writeFileSync(mergerAttemptPath(root, slug), "");
-		log(root, `${task.file}: merge into main failed, left in to-merge for the retry`);
+		log(root, `${task.file}: fast-forward to ${base} failed, left in to-merge for the retry`);
 		return;
 	}
-	// step 3: sync the branch to the merged commit so the live test runs the merged code; a
-	// no-op when the root merge was a fast-forward. The worktree stays: only doneCleanup deletes it
-	if (git(ensured.wtDir, ["merge", "--ff-only", "main"], true) === null) {
-		log(root, `${task.file}: branch sync to main failed; the live test runs the branch tip`);
-	}
 	setState(root, task, "to-live-test");
-	log(root, `${task.file}: merged into main, set to-live-test`);
+	log(root, `${task.file}: fast-forwarded ${base} to ${ensured.wt}, set to-live-test`);
 }
 
-// a done task's worktree and branch: the orchestrator merged the branch into main before
-// setting to-live-test and the live test passed, so cleanup is all that is left here. -d
+// a done task's worktree and branch: the orchestrator fast-forwarded the base to the
+// branch before setting to-live-test and the live test passed, so cleanup is all that is
+// left here. -d
 // refuses an unmerged branch, so a manual done with unfinished work keeps both branch and
 // worktree for a manual merge.
 function doneCleanup(root: string, task: Task): void {
@@ -273,10 +284,11 @@ export function rescan(root: string, cfg: Config): void {
 			} else if (task.state === "to-live-test" && !deadCooldownActive(root, cfg, task)) {
 				const slug = taskSlug(task.file);
 				consumeReviewerRun(root, slug);
-				// the live test runs on the merged commit, which the orchestrator synced into the
-				// branch: an unmerged branch (in-flight task from a daemon still on the old order, or
-				// a manual placement) or a task with no worktree at all goes back to to-merge first,
-				// so main never gets tested without this task's merged change
+				// the live test runs on the merged commit: after the rebase + fast-forward the
+				// worktree branch head IS the base branch, so an unmerged branch (an in-flight task
+				// from a daemon still on the old order, or a manual placement) or a task with no
+				// worktree at all goes back to to-merge first, so main never gets tested without
+				// this task's merged change
 				if (!task.worktree || git(root, ["merge-base", "--is-ancestor", task.worktree, "HEAD"], true) === null) {
 					setState(root, task, "to-merge");
 					log(root, task.worktree ? `${task.file}: branch not merged yet, moving to to-merge for the orchestrator merge` : `${task.file}: no worktree, moving to to-merge for the orchestrator merge`);
