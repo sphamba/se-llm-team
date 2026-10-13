@@ -6,7 +6,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { createTask, getTask, kanbanDir, listAll, listTasks, resolveTaskFromCwd, setState, setWorktree, taskNum, updateTask, STATES, type TaskState } from "./src/kanban.ts";
-import { pidAlive } from "./src/pid.ts";
+import { pidAlive, procPgrp } from "./src/pid.ts";
 import { removeTask, waitForBoardCommits } from "./src/orchestrator.ts";
 
 function text(s: string) {
@@ -183,7 +183,9 @@ export default function (pi: ExtensionAPI) {
 			} catch (err) {
 				return text(`Cannot start the orchestrator: ${(err as Error).message}`);
 			}
-			const child = spawn(process.execPath, [join(extDir, "src", "orchestrator.ts"), "--root", root], {
+			// node --watch restarts the daemon whenever its module graph changes, so a merge
+			// that changes the orchestrator takes effect without a manual stop and start (000192)
+			const child = spawn(process.execPath, ["--watch", join(extDir, "src", "orchestrator.ts"), "--root", root], {
 				detached: true,
 				stdio: ["ignore", log, log],
 			});
@@ -240,7 +242,12 @@ export default function (pi: ExtensionAPI) {
 			const pid = readPid(resolveRoot(ctx.cwd) ?? ctx.cwd);
 			if (!pid || !pidAlive(pid)) return text("Orchestrator not running");
 			try {
-				process.kill(pid, "SIGTERM");
+				// under node --watch the supervisor shares the daemon's process group: a bare pid
+				// kill would leave it to resurrect the daemon on the next watched change, so
+				// signal the group when it is not our own group (a test victim shares it)
+				const pgrp = procPgrp(pid);
+				if (pgrp && pgrp !== procPgrp(process.pid)) process.kill(-Number(pgrp), "SIGTERM");
+				else process.kill(pid, "SIGTERM");
 			} catch {
 				return text("Orchestrator not running");
 			}
