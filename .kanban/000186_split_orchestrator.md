@@ -1,12 +1,12 @@
 ---
 name: "refactor: split orchestrator.ts into src/orchestrator modules"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "refactor/186-split-orchestrator"
 issuer: "user"
 complexity: "complex"
 shortName: "split-orchestrator"
-blockedBy: "#184"
+blockedBy: ""
 ---
 
 # Summary

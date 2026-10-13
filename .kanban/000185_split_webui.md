@@ -1,12 +1,12 @@
 ---
 name: "refactor: split webui.ts into src/webui modules"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "refactor/185-split-webui"
 issuer: "user"
 complexity: "complex"
 shortName: "split-webui"
-blockedBy: "#184"
+blockedBy: ""
 ---
 
 # Summary
