@@ -2903,3 +2903,37 @@ try {
 }
 await waitFor(() => lockPidAV() === 0, 10000, "the restarted daemon exited and released the lock", () => outAV);
 console.log("orchestrator.test.ts: ... + node --watch restart smoke passed");
+
+// --- part AW: 000197 a done move the sweep itself makes unblocks the dependent in the same
+// sweep. The state loop lands the done move (to-merge with nothing to merge): blocker
+// decisions from the pre-loop snapshot would defer the drop and the promotion one sweep, and
+// the promotion would ride no report (a sweep without a done transition queues none) ---
+const rootAW = fixture();
+cleaned.push(rootAW);
+const homeAW = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAW);
+mkdirSync(kanbanDir(rootAW), { recursive: true });
+const savedHomeAW = process.env.HOME;
+process.env.HOME = homeAW;
+let cfgAW: ReturnType<typeof loadConfig>;
+try {
+	cfgAW = loadConfig(rootAW);
+} finally {
+	process.env.HOME = savedHomeAW;
+}
+const blockerAW = createTask(rootAW, { name: "feat: same-sweep blocker", summary: "Same-sweep unblock", specs: "n/a" });
+setState(rootAW, blockerAW, "to-merge"); // no worktree: nothing to merge, the sweep sets done
+const dependentAW = createTask(rootAW, { name: "feat: same-sweep dependent", summary: "Same-sweep unblock", specs: "n/a", blockedBy: `#${taskNum(blockerAW.file)}` });
+const plainAW = createTask(rootAW, { name: "feat: same-sweep plain", summary: "Same-sweep unblock", specs: "n/a" });
+rescan(rootAW, cfgAW);
+assert.equal(parseTask(rootAW, blockerAW.file).state, "done", "nothing to merge: the sweep set the blocker done");
+assert.equal(parseTask(rootAW, dependentAW.file).state, "to-do", "the dependent promoted in the same sweep as the done move");
+assert.equal(parseTask(rootAW, dependentAW.file).blockedBy, "", "the satisfied blocker ref dropped in the same sweep");
+assert.equal(parseTask(rootAW, plainAW.file).state, "to-do", "the already-unblocked task promoted as usual");
+const reportsAW = readdirSync(reportsDir(rootAW)).filter((f) => f.endsWith(".md")).sort();
+assert.equal(reportsAW.length, 1, "the sweep queued one report");
+const reportAW = readFileSync(join(reportsDir(rootAW), reportsAW[0]), "utf8");
+assert.ok(reportAW.includes(blockerAW.name), "the report's Done section names the blocker");
+assert.ok(reportAW.includes(dependentAW.name), "the report's Scheduled section names the same-sweep promotion");
+cleanupAll(rootAW);
+console.log("orchestrator.test.ts: ... + same-sweep unblock smoke passed");

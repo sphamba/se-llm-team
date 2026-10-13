@@ -319,13 +319,19 @@ export function rescan(root: string, cfg: Config): void {
 		if (task.state !== "to-merge" && task.state !== "merging") clearMergerAttempt(root, taskSlug(task.file));
 	}
 	janitorPids(root, tasks);
-	// the sweep promotes: drop satisfied blocker refs first (board hygiene, same snapshot),
-	// then promote every schedulable backlog task; a blocker in done or the live test does not
-	// hold promotion, and promoteBacklog re-checks its gates on a fresh board read before setState
-	dropDoneBlockers(root, tasks);
-	const promoted = promoteBacklog(root, tasks);
+	// the sweep promotes: re-read the board first, because the state loop itself lands done
+	// moves (a to-merge with nothing to merge, a hand-set done fold-in); blocker decisions from
+	// the pre-loop snapshot would defer the drop and the promotion one sweep, and the promotion
+	// would ride no report (a sweep without a done transition queues none). dropDoneBlockers
+	// drops satisfied refs first (board hygiene), then promoteBacklog promotes every schedulable
+	// backlog task; a blocker in done or the live test does not hold promotion, and
+	// promoteBacklog re-checks its gates on a fresh board read before setState
+	const current = listAll(root);
+	dropDoneBlockers(root, current);
+	const promoted = promoteBacklog(root, current);
 	// the PM report: the sweep schedules first, then one report covers the tasks that moved to
-	// done in this sweep (detected against the sweep's own snapshot) plus what it scheduled
+	// done in this sweep (detected against the pre-loop snapshot, so a done move this sweep made
+	// is this sweep's transition) plus what it scheduled
 	reportDone(root, tasks, promoted);
 	// every sweep: finished agents' logs compact into .log.gz (idempotent; live pids are skipped)
 	compactFinishedLogs(root);
@@ -407,8 +413,8 @@ export function promoteBacklog(root: string, tasks: Task[]): Task[] {
 		if (task.openQuestions) continue;
 		// unfinished blockers hold the task
 		if (blockedByUndone(tasks, task)) continue;
-		// the snapshot predates this pass by the whole state loop (tens of seconds on a big or
-		// slow board): an edit that landed mid-sweep (a done rewrite, a blockedBy ref, open
+		// the snapshot predates this pass (dropDoneBlockers and earlier promotions already
+		// wrote): an edit that landed in between (a done rewrite, a blockedBy ref, open
 		// questions) must win, so the three gates re-check on a fresh board read just before
 		// the promotion. A vanished task is gone: skip
 		const board = listAll(root);
