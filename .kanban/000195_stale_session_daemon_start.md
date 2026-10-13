@@ -1,8 +1,8 @@
 ---
 name: "fix: a stale pi session can restart the daemon without --watch and silently undo #192"
 priority: "medium"
-state: "to-do"
-worktree: ""
+state: "doing"
+worktree: "fix/195-stale-session-daemon-start"
 issuer: "#192"
 complexity: "simple"
 shortName: "stale-session-daemon-start"
