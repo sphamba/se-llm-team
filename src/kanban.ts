@@ -82,7 +82,7 @@ export function splitWorktreeRoot(root: string): [string, string] | null {
 // worktree's git dir is a per-worktree dir, not the common dir. A main checkout, a subdir of
 // one, a separate-git-dir checkout and a non-git root all match and stay production, so a
 // worktree created anywhere (not just under .worktrees) is caught. Shared by the hub
-// candidacy rule, the PM report gate and the worktree self-reap
+// candidacy rule and the PM report gate
 export function isLinkedWorktree(root: string): boolean {
 	try {
 		const rev = (arg: string): string =>

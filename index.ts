@@ -284,6 +284,8 @@ export default function (pi: ExtensionAPI) {
 		}
 		try {
 			pi.sendMessage({ customType: "board-report", content: readFileSync(claim, "utf8"), display: true }, ctx.isIdle() ? { triggerTurn: true } : { deliverAs: "followUp" });
+		} catch {
+			/* a vanished claim (prune race) must not crash the session */
 		} finally {
 			rmSync(claim, { force: true });
 		}
@@ -325,8 +327,11 @@ export default function (pi: ExtensionAPI) {
 	};
 	let reportsWatcher: FSWatcher | undefined;
 	const ensureReportsWatcher = (ctx: ExtensionContext) => {
-		if (reportsWatcher || !existsSync(reportsDir(ctx.cwd))) return;
+		if (reportsWatcher || !existsSync(kanbanDir(ctx.cwd))) return;
 		try {
+			// the dir is created lazily by the first report: create it here, so a session that
+			// starts before the first report still watches the queue
+			mkdirSync(reportsDir(ctx.cwd), { recursive: true });
 			reportsWatcher = watch(reportsDir(ctx.cwd), () => consumeReports(ctx));
 		} catch {
 			/* no report watching in this session */
@@ -334,8 +339,8 @@ export default function (pi: ExtensionAPI) {
 	};
 	pi.on("session_start", (_event, ctx) => {
 		ensureBoardWatcher(ctx);
-		drainReports(ctx);
 		ensureReportsWatcher(ctx);
+		drainReports(ctx);
 	});
 	pi.on("session_shutdown", async () => {
 		boardWatcher?.close();

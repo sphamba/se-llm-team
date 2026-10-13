@@ -126,6 +126,12 @@ assert.equal(updated.content[0].text, `Updated ${t1.file} (#${taskNum(t1.file)})
 assert.notEqual(readFileSync(taskFile(t1.file), "utf8"), before);
 assert.equal(getTask(root, t1.file)?.summary, "after");
 
+// session_start creates .kanban/.reports when the board dir exists: the dir was the only
+// guard on the queue watcher, so a session that starts before the first report (the dir
+// not there yet) must still get the watcher and consume reports live
+await events["session_start"]?.({ type: "session_start", reason: "startup" }, ctx);
+assert.ok(existsSync(join(root, ".kanban", ".reports")), "session_start creates the reports dir when the board exists");
+
 // PM report queue: a repo-root session drains .kanban/.reports oldest first and deletes
 // each delivered report, a stale one is discarded at startup, a busy session gets the
 // report as a follow-up, and a linked-worktree session never consumes (git-topology gate)
