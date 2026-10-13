@@ -1,8 +1,8 @@
 ---
 name: "feat: subtle animations and transitions across the webui"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/191-webui-motion"
 issuer: "user"
 complexity: "moderate"
 shortName: "webui-motion"
