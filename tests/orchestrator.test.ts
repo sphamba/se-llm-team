@@ -213,6 +213,14 @@ const killAll = () => {
 				/* agent already gone */
 			}
 		}
+		try {
+			// the daemon may run under node --watch: the lock pid is its child, which the
+			// supervisor kill above does not take down
+			const lock = parseInt(readFileSync(join(kanbanDir(root), ".orchestrator.lock"), "utf8").trim(), 10);
+			if (lock > 0) killTree(lock, "SIGKILL");
+		} catch {
+			/* no lock */
+		}
 	}
 };
 process.on("exit", () => {
@@ -2827,3 +2835,71 @@ assert.ok(orchLogAU().includes(`${slugAUa}: its merger run is over (superseded o
 assert.ok(!existsSync(pidPath(rootAU, "merger")) && !existsSync(exitFilePath(rootAU, "merger")), "the recorded task consumed the shared pid/exit pair");
 cleanupAll(rootAU, homeAU);
 console.log("orchestrator.test.ts: ... + superseded merger requeue smoke passed");
+
+// --- part AV: 000192 the daemon runs under node --watch. The launch mirrors index.ts
+// orchestrator_start; an mtime-only touch of a watched src file restarts the daemon child
+// (the lock pid changes) and the webui answers again after the re-election ---
+const rootAV = fixture();
+cleaned.push(rootAV);
+const homeAV = mkdtempSync(join(tmpdir(), "orch-watch-home-"));
+cleaned.push(homeAV);
+mkdirSync(join(homeAV, ".pi", "agent"), { recursive: true });
+const portAV = await freePort();
+writeFileSync(join(homeAV, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portAV } }));
+const watchEnv = { ...process.env, HOME: homeAV, SE_LLM_TEAM_HUB_HEALTH_MS: "500" };
+delete watchEnv.SE_LLM_TEAM_NO_WEBUI; // the re-election needs the webui enabled; the temp HOME config picks a free port
+const dAV = spawn(
+	process.execPath,
+	["--watch", join(HERE, "../src/orchestrator.ts"), "--root", rootAV, "--rescan-seconds", "1", "--poll-minutes", "0.05"],
+	{ stdio: ["ignore", "pipe", "pipe"], env: watchEnv },
+);
+daemons.push({ daemon: dAV, root: rootAV });
+let outAV = "";
+dAV.stdout.on("data", (d) => (outAV += d));
+dAV.stderr.on("data", (d) => (outAV += d));
+const lockPidAV = () => {
+	try {
+		return parseInt(readFileSync(join(kanbanDir(rootAV), ".orchestrator.lock"), "utf8").trim(), 10);
+	} catch {
+		return 0;
+	}
+};
+await waitFor(() => lockPidAV() > 0 && pidAlive(lockPidAV()), 15000, "the daemon acquired the lock", () => outAV);
+const pidAV1 = lockPidAV();
+const baseAV = `http://127.0.0.1:${portAV}`;
+await waitForAsync(async () => {
+	try {
+		return (await (await fetch(`${baseAV}/api/projects`)).json()).length === 1;
+	} catch {
+		return false;
+	}
+}, 15000, "the daemon serves the webui");
+// mtime-only touch of a watched src file: no content change, the module graph changes
+utimesSync(join(HERE, "../src/orchestrator.ts"), new Date(), new Date());
+await waitFor(
+	() => {
+		const pid = lockPidAV();
+		return pid > 0 && pid !== pidAV1 && pidAlive(pid);
+	},
+	30000,
+	"the lock pid changed after the touch",
+	() => outAV,
+);
+assert.ok(outAV.includes("Restarting"), "node --watch restarted the daemon after the touch");
+await waitForAsync(async () => {
+	try {
+		return (await (await fetch(`${baseAV}/api/projects`)).json()).length === 1;
+	} catch {
+		return false;
+	}
+}, 20000, "the webui answers again after the re-election");
+// the supervisor dies without the child: signal both, then wait for the lock to vanish
+dAV.kill("SIGTERM");
+try {
+	const pid = lockPidAV();
+	if (pid > 0) process.kill(pid, "SIGTERM");
+} catch {
+	/* already gone */
+}
+await waitFor(() => lockPidAV() === 0, 10000, "the restarted daemon exited and released the lock", () => outAV);
+console.log("orchestrator.test.ts: ... + node --watch restart smoke passed");

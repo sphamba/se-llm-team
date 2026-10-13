@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { isLinkedWorktree, splitWorktreeRoot } from "./kanban.ts";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { isLinkedWorktree } from "./kanban.ts";
 import { pidAlive } from "./pid.ts";
+import * as webui from "./webui.ts";
 
 // Hub backend: daemons register on spawn, the hub is elected by a lock race, the registry is
 // one hub-written file, failover re-elects on hub death, and only the hub serves the ui.
@@ -26,11 +27,8 @@ export interface HubOptions {
 	log?: (message: string) => void;
 	healthMs?: number; // heartbeat + failover poll + hub reap cadence
 	staleMs?: number; // registry age-out for silent entries
-	webuiPath?: string; // the reloadable webui module; defaults to the sibling webui.ts
 }
 
-type WebuiModule = typeof import("./webui.ts");
-const DEFAULT_WEBUI_PATH = fileURLToPath(new URL("./webui.ts", import.meta.url));
 // the checkout whose code this process serves: hub.ts is <code root>/src/hub.ts and realpath
 // resolves the install symlink, so a worktree-launched daemon names its own worktree (000165)
 const CODE_ROOT = (() => {
@@ -41,124 +39,6 @@ const CODE_ROOT = (() => {
 		return join(src, "..");
 	}
 })();
-
-// static relative import specifiers of one file, for the graph walk below
-const RELATIVE_IMPORT_RE = /(?:from|import)\s*\(?\s*["'](\.\.?\/[^"']+)["']/g;
-
-// the webui module graph, walked from webui.ts over its static relative imports (today kanban.ts
-// and pid.ts): node: and bare specifiers stay out, they are process-global or resolve against
-// the real node_modules
-const webuiGraph = (entry: string): string[] => {
-	const seen = new Set<string>();
-	const walk = (file: string): void => {
-		if (seen.has(file)) return;
-		seen.add(file);
-		let src: string;
-		try {
-			src = readFileSync(file, "utf8");
-		} catch {
-			return; // vanished mid-walk: the copy below fails and the last good module serves
-		}
-		for (const m of src.matchAll(RELATIVE_IMPORT_RE)) {
-			const target = resolve(dirname(file), m[1]);
-			try {
-				if (statSync(target).isFile()) walk(target);
-			} catch {
-				// unresolvable specifier: the same import fails inside the copy
-			}
-		}
-	};
-	walk(entry);
-	return [...seen];
-};
-
-// the deepest dir every graph file shares: the copy mirrors the graph layout from here, so
-// relative imports inside the copy resolve to sibling copies, not the stale cached modules
-const commonDir = (files: string[]): string => {
-	let prefix = dirname(files[0]).split(sep);
-	for (const f of files) {
-		const parts = dirname(f).split(sep);
-		let n = 0;
-		while (n < prefix.length && n < parts.length && prefix[n] === parts[n]) n++;
-		prefix = prefix.slice(0, n);
-	}
-	return prefix.join(sep) || sep;
-};
-
-// The webui module (page, rendering, payload builders) reloads when any file in its module graph
-// changes: the whole graph is copied into a per-version dir and imported from the copy, so a
-// reloaded webui.ts sees fresh sibling modules too and a kanban.ts-only change (e.g. a STATES
-// reorder) goes live on browser reload without a daemon restart. The version is the newest
-// mtime in the graph. The hub's registry, heartbeats and election stay in this process; only
-// the request handlers swap. A vanished or unparseable file serves the last good module, so an
-// edit mid-write never blanks the ui. The copy dir is removed after the import: node keeps the
-// modules in memory and only a new version needs files on disk (the graph must not dynamic-import
-// at call time; keep the dir if it ever does). hub.ts itself still needs a daemon restart to
-// reload (upgrade path: an out-of-process webui child).
-const webuiLoader = (path: string): (() => Promise<WebuiModule>) => {
-	let mod: WebuiModule | undefined;
-	let version = -1;
-	let failed = -2;
-	let graph = [path];
-	let pending: Promise<void> | undefined;
-	const srcDir = dirname(path);
-	// the newest mtime in the whole graph, so a kanban.ts-only change reloads even though
-	// webui.ts is unchanged; -1 when a graph file vanished
-	const graphMtime = (): number => {
-		let max = -1;
-		for (const f of graph) {
-			try {
-				max = Math.max(max, statSync(f).mtimeMs);
-			} catch {
-				return -1;
-			}
-		}
-		return max;
-	};
-	// stale .webui-hot dirs from a killed process or a failed copy: sweep on every reload
-	const hotSweep = (): void => {
-		try {
-			for (const d of readdirSync(srcDir)) {
-				if (d.startsWith(".webui-hot-")) rmSync(join(srcDir, d), { recursive: true, force: true });
-			}
-		} catch {
-			// srcDir unreadable
-		}
-	};
-	const reload = async (): Promise<void> => {
-		const seen = graphMtime();
-		if (mod !== undefined && (seen === version || seen === failed)) return;
-		let v = seen;
-		try {
-			graph = webuiGraph(path);
-			const base = commonDir(graph);
-			v = graphMtime();
-			const dir = join(srcDir, `.webui-hot-${process.pid}-${v}`);
-			rmSync(dir, { recursive: true, force: true });
-			for (const f of graph) {
-				const dst = join(dir, relative(base, f));
-				mkdirSync(dirname(dst), { recursive: true });
-				copyFileSync(f, dst);
-			}
-			mod = await import(pathToFileURL(join(dir, relative(base, path))).href);
-			version = v;
-		} catch {
-			failed = v; // a broken file at this version: keep the last good module until it changes
-		}
-		hotSweep();
-	};
-	return async () => {
-		if (pending) await pending;
-		else {
-			pending = reload().finally(() => {
-				pending = undefined;
-			});
-			await pending;
-		}
-		if (!mod) throw new Error(`webui module unavailable: ${path}`);
-		return mod;
-	};
-};
 
 const REGISTRY_FILE = "se-llm-team-hub.json";
 const LOCK_FILE = "se-llm-team-hub.lock";
@@ -291,7 +171,6 @@ async function route(
 	opts: HubOptions,
 	entries: Map<string, HubEntry>,
 	flush: () => void,
-	webui: () => Promise<WebuiModule>,
 	req: IncomingMessage,
 	res: ServerResponse,
 ): Promise<void> {
@@ -303,10 +182,9 @@ async function route(
 		res.writeHead(200, { "content-type": "text/plain; charset=utf-8", connection: "close" });
 		res.end("ok");
 	} else if (req.method === "GET" && path === "/") {
-		const { PAGE } = await webui();
 		// no-cache: a browser reload re-fetches the page instead of serving a stale one
 		res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache", connection: "close" });
-		res.end(PAGE);
+		res.end(webui.PAGE);
 	} else if (req.method === "GET" && path === "/api/hub") {
 		// 000165: the serving hub's identity, so a stale-code hub or a failover is visible at a glance
 		json(res, { pid: process.pid, root: CODE_ROOT, commit: currentCommit(CODE_ROOT) });
@@ -317,11 +195,11 @@ async function route(
 		if (!entry) {
 			res.writeHead(404).end(); // unknown projects are rejected
 		} else {
-			json(res, (await webui()).taskPayload(entry.root));
+			json(res, webui.taskPayload(entry.root));
 		}
 	} else if (req.method === "GET" && path === "/api/agent-log") {
 		const entry = resolveEntry(entries, project);
-		const payload = entry ? (await webui()).agentLogPayload(entry.root, url.searchParams) : null;
+		const payload = entry ? webui.agentLogPayload(entry.root, url.searchParams) : null;
 		if (!payload) {
 			res.writeHead(404).end();
 		} else {
@@ -387,13 +265,12 @@ export async function startHub(opts: HubOptions): Promise<{ port: number; close:
 	for (const e of readHubRegistry()) if (e.root && now - e.lastHeartbeat <= staleMs) entries.set(e.root, e);
 	const self: HubEntry = { name: opts.name, root: opts.root, branch: currentBranch(opts.root), start: now, lastHeartbeat: now };
 	entries.set(opts.root, self);
-	const webui = webuiLoader(opts.webuiPath ?? DEFAULT_WEBUI_PATH);
 	const flush = () => writeRegistry([...entries.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)));
 	flush();
 
 	const server = createServer((req, res) => {
 		res.on("error", () => {}); // client aborted mid-response
-		route(opts, entries, flush, webui, req, res).catch(() => {
+		route(opts, entries, flush, req, res).catch(() => {
 			try {
 				res.writeHead(500, { "content-type": "text/plain" });
 				res.end("hub error");

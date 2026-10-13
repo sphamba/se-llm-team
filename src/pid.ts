@@ -19,7 +19,7 @@ function procStartTicks(pid: number): string | null {
 
 // process-group id (field 5): equal to the pid only when the process leads its own group,
 // which every detached agent spawn does (the sh wrapper heads a fresh group)
-function procPgrp(pid: number): string | null {
+export function procPgrp(pid: number): string | null {
 	try {
 		const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
 		return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2] ?? null;
