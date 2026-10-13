@@ -155,7 +155,7 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .chip.issuer { background: var(--code-bg); color: var(--muted); }
 .chip.cx { background: var(--code-bg); color: var(--muted); }
 .issued { color: var(--muted); }
-.card-stats { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.card-stats { display: block; font-size: 12px; color: var(--muted); margin-top: 6px; }
 .p-low { background: var(--low-bg); color: var(--low-fg); }
 .p-medium { background: var(--medium-bg); color: var(--medium-fg); }
 .p-high { background: var(--high-bg); color: var(--high-fg); }
