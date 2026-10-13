@@ -1,8 +1,8 @@
 ---
 name: "fix: task card stats spacing and h m s duration labels"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/200-card-stats-spacing-hours"
 issuer: "user"
 complexity: "simple"
 shortName: "card-stats-spacing-hours"
