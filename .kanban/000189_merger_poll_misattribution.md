@@ -1,8 +1,8 @@
 ---
 name: "fix: poll false-bounces the second task in the merging state"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/189-merger-poll-misattribution"
 issuer: "#187"
 complexity: "simple"
 shortName: "merger-poll-misattribution"
