@@ -467,7 +467,8 @@ assert.ok(cardHtml({ file: "000005_e.md", name: "e", priority: "low", complexity
 assert.ok(cardHtml({ file: "000007_g.md", name: "g", priority: "low", agents: [{ tokens: 420, duration: 1500 }, { tokens: 1580, duration: 2000 }] }, "doing").includes('<span class="card-stats">2k · 4s</span>'), "a card sums its agent entries' tokens and durations into the stats line");
 assert.ok(!cardHtml({ file: "000008_h.md", name: "h", priority: "low" }, "doing").includes("card-stats"), "a card without agent entries renders no stats line");
 assert.ok(!cardHtml({ file: "000009_i.md", name: "i", priority: "low", agents: [{ tokens: null, duration: 1500 }, { duration: 2000 }] }, "doing").includes("card-stats"), "a card whose agent entries carry durations but no usage renders no stats line (000183)");
-assert.ok(page.includes(".card-stats {"), "the card stats line style ships in the page css");
+assert.ok(page.includes(".card-stats { display: block; font-size: 12px; color: var(--muted); margin-top: 6px; }"), "the card stats line sits 6px below the chips row (000200)");
+assert.ok(page.includes(".agent-stats { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }"), "the agent stats line keeps its 2px margin (000200)");
 
 // relation lines: one dashed curve per stored relation between rendered cards, running from the
 // blocked task's card to the blocker's card, so the dashes flow blocked -> blocker. A done
@@ -1416,6 +1417,11 @@ assert.equal(fmtTokens(null), "", "missing tokens render empty");
 assert.equal(fmtDur(3479), "3s", "a duration rounds to integer seconds");
 assert.equal(fmtDur(60000), "1m", "a whole minute drops the zero seconds");
 assert.equal(fmtDur(86592), "1m 27s", "minutes and seconds");
+assert.equal(fmtDur(3599000), "59m 59s", "durations below an hour keep the minutes format");
+assert.equal(fmtDur(3600000), "1h", "an hour drops the zero minutes and seconds");
+assert.equal(fmtDur(3660000), "1h 1m", "an hour and a minute drops the zero seconds");
+assert.equal(fmtDur(3661000), "1h 1m 1s", "hours, minutes and seconds");
+assert.equal(fmtDur(7261000), "2h 1m 1s", "hours above one render the full count");
 assert.equal(fmtDur(null), "", "a missing duration renders empty");
 assert.ok(page.includes(String(fmtTokens)) && page.includes(String(fmtDur)), "the page ships the tested stats formatters");
 

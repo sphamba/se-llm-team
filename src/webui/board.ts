@@ -31,12 +31,14 @@ export function fmtTokens(total) {
 	return Math.round(total / 1000) + "k";
 }
 
-// duration on an agent card: integer seconds, then minutes
+// duration on an agent card: integer seconds, then minutes, then hours from 3600s (000200)
 export function fmtDur(ms) {
 	if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "";
 	const sec = Math.round(ms / 1000);
 	if (sec < 60) return sec + "s";
-	return Math.floor(sec / 60) + "m" + (sec % 60 ? " " + (sec % 60) + "s" : "");
+	if (sec < 3600) return Math.floor(sec / 60) + "m" + (sec % 60 ? " " + (sec % 60) + "s" : "");
+	const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+	return h + "h" + (m ? " " + m + "m" : "") + (s ? " " + s + "s" : "");
 }
 
 // the stats line under an agent card's label (42k · 42s): tokens then duration, empty when both
