@@ -1,8 +1,8 @@
 ---
 name: "feat: mobile font size 15% smaller via rem; block zooming"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/204-mobile-font-rem"
 issuer: "user"
 complexity: "trivial"
 shortName: "mobile-font-rem"
