@@ -100,8 +100,8 @@ export const PAGE = `<!doctype html>
 /* Ayu Light palette (ayu-theme/ayu-colors); 000129: medium moved to a deeper yellow so the priority chips read apart */
 :root { --bg: #fcfcfc; --fg: #5c6166; --panel: #ffffff; --border: rgba(107, 125, 143, .12); --heading: #5c6166; --muted: #adaeb1; --faint: #adaeb1; --soft: #5c6166; --hover: rgba(130, 142, 159, .1); --overlay: rgba(15, 23, 42, .45); --code-bg: #ebeef0; --link: #f29718;
 --low-bg: rgba(134, 179, 0, .15); --low-fg: #86b300; --medium-bg: rgba(201, 151, 0, .15); --medium-fg: #c99700; --high-bg: rgba(250, 133, 50, .15); --high-fg: #fa8532; --critical-bg: rgba(230, 80, 80, .15); --critical-fg: #e65050;
-/* 000191: motion knobs, one place to retune the entrances, the chunk fade and the pulse loop */
---enter: 200ms; --fade: 150ms; --pulse: 1.8s; }
+/* 000191: motion knobs, one place to retune the entrances, the chunk fade and the pulse loop; 000194: --exit runs the closes, --shine is the whiter band mix */
+--enter: 200ms; --exit: 180ms; --fade: 150ms; --pulse: 2s; --shine: 45%; }
 ${DARK_VARS}
 html, body { height: 100%; }
 body { display: flex; flex-direction: column; margin: 0; background: var(--bg); color: var(--fg); font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
@@ -187,9 +187,12 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 /* 000152: the pane grows to 70vh so long logs show more content */
 #m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 70vh; overflow: auto; }
 #m-log.hidden { display: none; }
-/* 000191: the pane fades and rises on open; entrance only */
+/* 000191: the pane fades and rises on open */
 #m-log:not(.hidden) { animation: logIn var(--enter) ease-out; }
 @keyframes logIn { from { opacity: 0; transform: translateY(4px); } }
+/* 000194: the matching close, after the entrance rule so the equal-specificity logOut wins */
+#m-log.closing { animation: logOut var(--exit) ease-in forwards; }
+@keyframes logOut { to { opacity: 0; transform: translateY(4px); } }
 #m-log-meta { padding: 6px 10px 0; font-size: 10px; line-height: 1.45; color: var(--muted); }
 #m-log-meta.hidden { display: none; }
 /* the log text renders in the page's Inter stack; 000152: the size matches the card body text, only the line-height stays tuned for logs; blocks are collapsed <details> the client fills in */
@@ -203,22 +206,35 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 nodes, so untouched siblings never re-animate and only new content moves */
 #m-log-text > * { animation: chunkIn var(--fade) ease-out; }
 @keyframes chunkIn { from { opacity: 0; transform: translateY(2px); } }
-/* 000191: while the viewed run is alive its log's first line shimmers left to right, a paint-only
-background-position sweep through a low-alpha accent tint; the class follows the .spin spinner's
-liveness signal, and the second reduced-motion rule stops the loop */
-#m-log-text > .pulse { background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--link) 14%, transparent) 50%, transparent); background-size: 300% 100%; background-repeat: no-repeat; animation: chunkIn var(--fade) ease-out, shimmer var(--pulse) linear infinite; }
+/* 000194: the pulse brightens only the glyphs: background-clip: text clips the gradient to the
+block's text, the nested pre and summary children included, and color: transparent hides the box,
+so the band passing reads as letters brightening, never a highlight bar; the details.pulse
+selectors outrank the muted color rule (color: transparent must stick there) and --shine-base
+follows the block's own color */
+#m-log-text > .pulse, #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { --shine-base: var(--fg); background-image: linear-gradient(90deg, var(--shine-base) 0%, color-mix(in srgb, #fff var(--shine), var(--shine-base)) 50%, var(--shine-base) 100%); background-size: 300% 100%; background-repeat: no-repeat; -webkit-background-clip: text; background-clip: text; color: transparent; animation: chunkIn var(--fade) ease-out, shimmer var(--pulse) linear infinite; }
+#m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { --shine-base: var(--muted); }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 #modal { position: fixed; inset: 0; z-index: 3; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
 #modal.hidden { display: none; }
-/* 000191: the overlay fades and the panel rises slightly on open; entrance only, and the refresh
-never replays it (the class list is untouched while the card stays open) */
+/* 000191: the overlay fades and the panel rises slightly on open, and the refresh never replays
+it (the class list is untouched while the card stays open) */
 #modal:not(.hidden) { animation: fadeIn var(--enter) ease-out; }
 #modal:not(.hidden) #m-box { animation: boxIn var(--enter) ease-out; }
 @keyframes fadeIn { from { opacity: 0; } }
 @keyframes boxIn { from { opacity: 0; transform: translateY(6px) scale(.985); } }
+/* 000194: the exits run the entrances in reverse; .closing sits after the entrance rules so the
+equal-specificity close animation wins, the JS drops .closing and hides on animationend with a
+fixed-timeout fallback */
+#modal.closing { animation: fadeOut var(--exit) ease-in forwards; }
+#modal.closing #m-box { animation: boxOut var(--exit) ease-in forwards; }
+@keyframes fadeOut { to { opacity: 0; } }
+@keyframes boxOut { to { opacity: 0; transform: translateY(6px) scale(.985); } }
 /* 000191: reduced motion stops the entrance, chunk and pulse animations too; the rule sits
 after every base animation rule so the later equal-specificity selectors cannot override it */
 @media (prefers-reduced-motion: reduce) { .card.enter, .agent-card.enter, #modal:not(.hidden), #modal:not(.hidden) #m-box, #m-log:not(.hidden), #m-log-text > *, #m-log-text > .pulse { animation: none; } }
+/* 000194: under reduced motion the clip animation stops and color: transparent would make the
+text vanish: the gradient drops and the solid color restores per block type */
+@media (prefers-reduced-motion: reduce) { #m-log-text > .pulse { background-image: none; color: var(--fg); } #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { color: var(--muted); } }
 #m-box { background: var(--panel); border-radius: 10px; padding: 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
 #m-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 #m-head h2 { font-size: 15px; margin: 0; }
@@ -450,7 +466,10 @@ function openTask(file) {
 	writeHead(t);
 	renderAgent(t);
 	setBody(t);
-	document.getElementById("modal").classList.remove("hidden");
+	// 000194: a reopen during the close drops .closing first, the pending hide must not re-run
+	const modal = document.getElementById("modal");
+	modal.classList.remove("closing");
+	modal.classList.remove("hidden");
 }
 // the 5 s refresh of the open detail card: every block re-derives from the fresh payload with no
 // close/reopen; renderAgent's keep mode moves only the stats lines on an unchanged run set and
@@ -462,7 +481,23 @@ function updateOpenTask(t) {
 	setBody(t);
 	markLiveLine();
 }
-function closeModal() { closeLog(); document.getElementById("modal").classList.add("hidden"); }
+// 000194: the shared animated close: .closing runs the entrance in reverse, the element hides on
+// animationend with a fixed-timeout fallback (a background tab never fires the event); a reopen
+// (openTask/openLog) drops .closing first, so the late event must not re-hide
+function closeAnimated(el) {
+	if (el.classList.contains("closing")) return;
+	if (matchMedia("(prefers-reduced-motion: reduce)").matches) { el.classList.add("hidden"); return; }
+	el.classList.add("closing");
+	const hide = () => { if (!el.classList.contains("closing")) return; el.classList.remove("closing"); el.classList.add("hidden"); };
+	el.addEventListener("animationend", hide, { once: true });
+	setTimeout(hide, 400);
+}
+function closeModal() {
+	const modal = document.getElementById("modal");
+	if (modal.classList.contains("hidden")) return;
+	closeLog();
+	closeAnimated(modal);
+}
 // the blockedBy row: each stored ref links to its task's card when that task is on the board, and
 // the row is dropped when the attribute is absent or empty
 function blockedRow(t) {
@@ -491,17 +526,22 @@ function markActiveAgent() {
 		b.classList.toggle("agent-card-active", active);
 	}
 }
-// 000191: while the viewed run is alive its log's first line carries the pulse shimmer; the same
-// liveness signal the .spin spinner reads, dropped as soon as the run or the view changes
+// 000194: while the viewed run is alive, the shine sits on the LATEST block and only while the
+// run is inside one: an open thinking block (data-open) or a tool block still awaiting its result
+// pre (tool_execution_start without its end); plain text, closed blocks and idle or dead runs
+// leave nothing shining, the same liveness signal the .spin spinner reads
 function markLiveLine() {
 	const t = activeBoard().tasks.find(x => x.file === modalFile);
 	const run = t && (t.agents || []).find(a => a.alive);
 	const p = logPane();
 	const on = !!run && !!logState && run.handle === logState.handle && !p.classList.contains("hidden");
-	// the pulse stays on the first line only: a history back-fill inserts older lines above it,
-	// and a demoted line must not keep the shimmer
-	const first = document.querySelector("#m-log-text > *");
-	for (const el of document.querySelectorAll("#m-log-text > *")) el.classList.toggle("pulse", on && el === first);
+	const text = document.getElementById("m-log-text");
+	let live = null;
+	if (on) for (const el of text.children) {
+		if (el.classList.contains("lg-think") && el.dataset.open) live = el;
+		else if (el.classList.contains("lg-tool") && !el.querySelector("pre.lg-out")) live = el;
+	}
+	for (const el of text.children) el.classList.toggle("pulse", el === live);
 }
 const atBottom = () => { const p = logPane(); return p.scrollTop + p.clientHeight >= p.scrollHeight - 4; };
 // the live auto-scroll glides to the bottom, an instant auto scroll under reduced motion
@@ -612,6 +652,8 @@ function openLog(handle, sub) {
 	const t = activeBoard().tasks.find(x => x.file === modalFile);
 	const p = logPane();
 	if (!t || !p) return;
+	// 000194: a reopen during the close drops .closing first
+	p.classList.remove("closing");
 	p.classList.remove("hidden");
 	// the previous view's meta line must not flash before the init payload arrives
 	const meta = document.getElementById("m-log-meta");
@@ -626,7 +668,8 @@ function closeLog() {
 	if (logTimer) { clearInterval(logTimer); logTimer = null; }
 	logState = null;
 	const p = logPane();
-	if (p) p.classList.add("hidden");
+	// 000194: poll and state clear at once, only the visual hide waits for the exit animation
+	if (p && !p.classList.contains("hidden")) closeAnimated(p);
 	// 000154: the meta line is a sibling above the pane now, so it must hide itself on close
 	const meta = document.getElementById("m-log-meta");
 	if (meta) { meta.textContent = ""; meta.classList.add("hidden"); }
@@ -694,6 +737,8 @@ function pullLog(qs, mode) {
 	}).catch(() => {}).finally(() => { if (logState === st) st.busy = false; });
 }
 document.getElementById("modal").onclick = e => { if (e.target.id === "modal") closeModal(); };
+// 000194: Esc joins the X button and the overlay click on the same close path
+window.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
 // the log pane is static markup: the scroll handler binds once and reads the live logState
 const pane = logPane();
 pane.onscroll = () => {

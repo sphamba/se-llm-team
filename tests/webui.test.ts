@@ -571,12 +571,22 @@ assert.ok(page.includes("#modal:not(.hidden) #m-box { animation: boxIn var(--ent
 assert.ok(page.includes("#m-log:not(.hidden) { animation: logIn var(--enter) ease-out; }"), "the log pane fades and rises on open");
 assert.ok(page.includes("#m-log-text > * { animation: chunkIn var(--fade) ease-out; }"), "appended log chunks fade and rise in");
 assert.ok(page.includes("@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }"), "the pulse sweeps left to right via background-position");
-assert.match(page, /#m-log-text > \.pulse \{[^}]*animation: chunkIn var\(--fade\) ease-out, shimmer var\(--pulse\) linear infinite/, "the live first line carries the pulse shimmer");
-assert.match(page, /--enter: 200ms; --fade: 150ms; --pulse: 1.8s;/, "the motion durations retune in one place");
+// 000194 letter-only shimmer: the gradient clips to the glyphs, color: transparent hides the box
+assert.match(page, /#m-log-text > \.pulse, #m-log-text > details\.lg-think\.pulse, #m-log-text > details\.lg-tool\.pulse \{[^}]*background-image: linear-gradient\(90deg, var\(--shine-base\) 0%, color-mix\(in srgb, #fff var\(--shine\), var\(--shine-base\)\) 50%, var\(--shine-base\) 100%\); background-size: 300% 100%; background-repeat: no-repeat; -webkit-background-clip: text; background-clip: text; color: transparent; animation: chunkIn var\(--fade\) ease-out, shimmer var\(--pulse\) linear infinite/, "the pulse brightens only the glyphs via background-clip: text");
+assert.ok(page.includes("#m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { --shine-base: var(--muted); }"), "the muted blocks' band goes muted, whiter, muted");
+assert.match(page, /--enter: 200ms; --exit: 180ms; --fade: 150ms; --pulse: 2s; --shine: 45%;/, "the motion durations and the band strength retune in one place");
 assert.match(page, /@media \(prefers-reduced-motion: reduce\) \{ \.card\.enter, [^}]*\{ animation: none; \} \}/, "reduced motion stops the new animations too");
+// 000194: the restore: color: transparent with the animation stopped would make the text vanish
+assert.match(page, /@media \(prefers-reduced-motion: reduce\) \{ #m-log-text > \.pulse \{ background-image: none; color: var\(--fg\); \} #m-log-text > details\.lg-think\.pulse, #m-log-text > details\.lg-tool\.pulse \{ color: var\(--muted\); \} \}/, "reduced motion drops the gradient and restores the solid color per block type");
 // the rule must come after the last base animation rule: equal specificity, so a media rule
 // placed earlier is overridden and reduced motion stays animated (caught in live testing)
 assert.ok(page.indexOf("@keyframes boxIn") < page.indexOf('@media (prefers-reduced-motion: reduce) { .card.enter'), "the reduced-motion rule sits after every base animation rule");
+// 000194 close animations: the exits run the #191 entrances in reverse
+assert.ok(page.includes("#modal.closing { animation: fadeOut var(--exit) ease-in forwards; }"), "the modal overlay fades out on close");
+assert.ok(page.includes("#modal.closing #m-box { animation: boxOut var(--exit) ease-in forwards; }"), "the modal panel sinks out on close");
+assert.ok(page.includes("@keyframes fadeOut { to { opacity: 0; } }") && page.includes("@keyframes boxOut { to { opacity: 0; transform: translateY(6px) scale(.985); } }"), "the panel exit mirrors the entrance's rise");
+assert.ok(page.includes("#m-log.closing { animation: logOut var(--exit) ease-in forwards; }") && page.includes("@keyframes logOut { to { opacity: 0; transform: translateY(4px); } }"), "the log pane fades out on close");
+assert.ok(page.indexOf("#modal:not(.hidden) { animation: fadeIn") < page.indexOf("#modal.closing {") && page.indexOf("#m-log:not(.hidden) { animation: logIn") < page.indexOf("#m-log.closing {"), "the .closing rules sit after the entrance rules, the equal-specificity close wins");
 const pathRule = page.match(/#relations path \{([^}]*)\}/)?.[1] ?? "";
 const baseOpacity = Number(pathRule.match(/stroke-opacity: ([\d.]+)/)?.[1]);
 assert.ok(baseOpacity > 0 && baseOpacity < 1, "the relation lines draw at a reduced opacity, a subtle hint behind the semi-transparent cards");
@@ -867,12 +877,10 @@ const pollSrc = page.match(/function pollLog\(\) \{[\s\S]*?\n\}/)![0];
 assert.ok(pollSrc.includes("const live = !!liveRun && liveRun.handle === logState.handle;"), "a sub view of a still-alive parent stays live: the pane keeps its poll timer after an empty poll");
 assert.ok(!pollSrc.includes("logState.sub == null"), "a sub view is no longer hard-wired non-live, which froze the pane after the first empty poll");
 assert.ok(pollSrc.includes("if (!live && logState.idle) {"), "a past run's log still stops the timer after the first empty poll");
-// 000191: the live first-line pulse follows the viewed run's aliveness, the same signal the poll
-// timer reads, refreshed from pullLog after every payload and dropped on close
-assert.ok(page.includes("function markLiveLine()"), "the page wires the live first-line pulse");
-// the toggle walks every direct child, not the already-pulsed nodes: a list of .pulse elements
-// alone never adds the class, so a fresh log's first line would never engage the shimmer
-assert.ok(page.includes('for (const el of document.querySelectorAll("#m-log-text > *")) el.classList.toggle("pulse", on && el === first)'), "the pulse engages on a fresh first line, walking the direct children");
+// 000194: the live pulse follows the viewed run's aliveness, the same signal the poll timer
+// reads, refreshed from pullLog after every payload and dropped on close
+assert.ok(page.includes("function markLiveLine()"), "the page wires the live block pulse");
+assert.ok(page.includes('for (const el of text.children) el.classList.toggle("pulse", el === live)'), "the pulse walks the direct children, the latest live block only");
 assert.ok(page.includes("markLiveLine();"), "pullLog, closeLog, pollLog's idle stop and the refresh drive the pulse");
 // 000191: the death sweep, the two paths that observe the run's death clear the pulse without a
 // close/reopen: the refresh's open-card update (the same pass that drops the dead run's .spin)
@@ -880,6 +888,99 @@ assert.ok(page.includes("markLiveLine();"), "pullLog, closeLog, pollLog's idle s
 assert.ok(upd.includes("markLiveLine();"), "the refresh's open-card update sweeps the pulse when the run dies");
 const idleStop = pollSrc.match(/if \(!live && logState\.idle\) \{[\s\S]*?\n\t\}/)![0];
 assert.ok(idleStop.includes("markLiveLine();"), "pollLog sweeps the pulse when the idle early-return stops the timer on a dead run");
+// 000194 markLiveLine retarget, run against the served source: the pulse lands on the LATEST open
+// thinking/tool block only. The stub records the toggles through classList.
+class ShineEl {
+	tag: string;
+	className = "";
+	dataset: Record<string, string> = {};
+	children: ShineEl[] = [];
+	constructor(tag: string) { this.tag = tag; }
+	classList = {
+		contains: (cls: string) => this.className.split(" ").includes(cls),
+		toggle: (cls: string, on: boolean) => { this.className = on ? (this.className ? this.className + " " + cls : cls) : this.className.split(" ").filter((c) => c !== cls).join(" "); },
+	};
+	querySelector(sel: string) { return sel === "pre.lg-out" ? this.children.find((c) => c.tag === "pre" && c.classList.contains("lg-out")) ?? null : null; }
+}
+const shThinkBlock = (open: boolean) => { const d = new ShineEl("details"); d.className = "lg-think"; if (open) d.dataset.open = "think"; return d; };
+const shToolBlock = (done: boolean) => {
+	const d = new ShineEl("details");
+	d.className = "lg-tool";
+	if (done) { const out = new ShineEl("pre"); out.className = "lg-out"; d.children.push(out); }
+	return d;
+};
+const markOf = (children: ShineEl[], opts: { alive?: boolean; hidden?: boolean; handle?: string } = {}) => {
+	const container = new ShineEl("div");
+	container.children = children;
+	const pane = new ShineEl("div");
+	if (opts.hidden) pane.className = "hidden";
+	const mark = new Function("activeBoard", "modalFile", "logPane", "logState", "document", page.match(/function markLiveLine\(\) \{[\s\S]*?\n\}/)![0] + "; return markLiveLine;")(
+		() => ({ tasks: [{ file: "t.md", agents: [{ handle: "h", alive: opts.alive !== false }] }] }),
+		"t.md",
+		() => pane,
+		{ handle: opts.handle ?? "h" },
+		{ getElementById: (id: string) => (id === "m-log-text" ? container : null) },
+	);
+	return () => mark();
+};
+// the latest open thinking block shines, an earlier closed one and plain text do not
+const thinkBlocks = [shThinkBlock(false), new ShineEl("p"), shThinkBlock(true)];
+markOf(thinkBlocks)();
+assert.ok(thinkBlocks[2].classList.contains("pulse"), "the pulse lands on the latest open thinking block");
+assert.ok(!thinkBlocks[0].classList.contains("pulse") && !thinkBlocks[1].classList.contains("pulse"), "an earlier closed block and plain text never shine");
+// an executing tool block (its result pre has not arrived) shines, an ended one does not
+const toolBlocks = [shToolBlock(true), shThinkBlock(false), shToolBlock(false)];
+markOf(toolBlocks)();
+assert.ok(toolBlocks[2].classList.contains("pulse"), "the pulse lands on the latest executing tool block");
+assert.ok(!toolBlocks[0].classList.contains("pulse"), "an ended tool block does not shine");
+// a run between blocks or streaming plain text leaves nothing shining
+const idleBlocks = [new ShineEl("p"), shThinkBlock(false), shToolBlock(true), new ShineEl("p")];
+markOf(idleBlocks)();
+assert.ok(idleBlocks.every((b) => !b.classList.contains("pulse")), "no block shines between blocks or on plain text");
+// the shine clears on run death (000193 stays) and when another run's log is open
+const dyingBlocks = [shThinkBlock(true), shToolBlock(false)];
+markOf(dyingBlocks, { alive: false })();
+assert.ok(dyingBlocks.every((b) => !b.classList.contains("pulse")), "a dead run clears the shine");
+const otherBlocks = [shThinkBlock(true)];
+markOf(otherBlocks, { handle: "other" })();
+assert.ok(!otherBlocks[0].classList.contains("pulse"), "a different run's view clears the shine");
+// 000194 close paths: one closeAnimated helper serves the modal and the log pane; the hide waits
+// for animationend with a fixed-timeout fallback, a reopen during the close cancels it, reduced
+// motion hides at once. The X button, the overlay click and Esc all keep the shared closeModal.
+class CloseEl {
+	className = "";
+	listeners: Array<() => void> = [];
+	classList = {
+		add: (cls: string) => { if (!this.classList.contains(cls)) this.className += (this.className ? " " : "") + cls; },
+		remove: (cls: string) => { this.className = this.className.split(" ").filter((c) => c !== cls).join(" "); },
+		contains: (cls: string) => this.className.split(" ").includes(cls),
+	};
+	addEventListener(_type: string, fn: () => void) { this.listeners.push(fn); }
+}
+const closeOf = (reduce: boolean) => new Function("matchMedia", page.match(/function closeAnimated\(el\) \{[\s\S]*?\n\}/)![0] + "; return closeAnimated;")(() => ({ matches: reduce }));
+const closing = new CloseEl();
+closeOf(false)(closing);
+assert.ok(closing.classList.contains("closing") && !closing.classList.contains("hidden"), "the close starts the exit animation");
+closing.listeners[0]();
+assert.ok(closing.classList.contains("hidden") && !closing.classList.contains("closing"), "animationend hides the element and drops .closing");
+const reopened = new CloseEl();
+closeOf(false)(reopened);
+reopened.classList.remove("closing"); // openTask/openLog reopen during the close
+reopened.listeners[0](); // the late animationend must not re-hide
+assert.ok(!reopened.classList.contains("hidden"), "a reopen during the close cancels the pending hide");
+const still = new CloseEl();
+closeOf(true)(still);
+assert.ok(still.classList.contains("hidden") && !still.classList.contains("closing"), "reduced motion hides at once with no exit");
+const closeFn = page.match(/function closeModal\(\) \{[\s\S]*?\n\}/)![0];
+assert.ok(closeFn.includes("closeLog()") && closeFn.includes("closeAnimated(modal)"), "the modal close clears the log state and runs the shared exit");
+assert.ok(page.includes('onclick="closeModal()"'), "the X button uses the shared close path");
+assert.ok(page.includes('if (e.target.id === "modal") closeModal();'), "the overlay click uses the shared close path");
+assert.ok(page.includes('if (e.key === "Escape") closeModal();'), "Esc uses the shared close path");
+const closeLogFn = page.match(/function closeLog\(\) \{[\s\S]*?\n\}/)![0];
+assert.ok(closeLogFn.indexOf("clearInterval") < closeLogFn.indexOf("closeAnimated") && closeLogFn.includes("logState = null;"), "closeLog clears the poll and the state before the visual hide");
+assert.ok(closeLogFn.includes("markActiveAgent();") && closeLogFn.includes("markLiveLine();"), "the active-agent highlight and the shine clear at once too");
+assert.ok(page.includes('modal.classList.remove("closing");'), "openTask drops a pending close before reopening");
+assert.match(page, /function openLog\(handle, sub\) \{[\s\S]*?p\.classList\.remove\("closing"\);/, "openLog drops a pending close before reopening");
 
 // 000142 the poll refresh updates the agent row in place: an unchanged run set moves only the
 // cards' .agent-stats text, so the live run's .spin node keeps its animation across the poll; a
