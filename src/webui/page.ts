@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PRIORITY_RANK } from "../kanban.ts";
 import { esc, inline, logFixups, md } from "./logpane.ts";
-import { agentLabel, agentRowSig, agentStatsText, buildShell, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, numLinkHtml, relationPaths, spinnerHtml, syncAgentStats, syncBoard, taskStatsText } from "./board.ts";
+import { agentLabel, agentRowSig, agentStatsText, buildShell, cardBaseHtml, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, numLinkHtml, relationPaths, spinnerHtml, syncAgentStats, syncBoard, syncCardStats, taskStats, taskStatsText } from "./board.ts";
 
 // the served page: PAGE interpolates the tested renderers and helpers as client source; the
 // webui config loader and the per-tab client state helpers live here too
@@ -99,7 +99,9 @@ export const PAGE = `<!doctype html>
 * { box-sizing: border-box; }
 /* Ayu Light palette (ayu-theme/ayu-colors); 000129: medium moved to a deeper yellow so the priority chips read apart */
 :root { --bg: #fcfcfc; --fg: #5c6166; --panel: #ffffff; --border: rgba(107, 125, 143, .12); --heading: #5c6166; --muted: #adaeb1; --faint: #adaeb1; --soft: #5c6166; --hover: rgba(130, 142, 159, .1); --overlay: rgba(15, 23, 42, .45); --code-bg: #ebeef0; --link: #f29718;
---low-bg: rgba(134, 179, 0, .15); --low-fg: #86b300; --medium-bg: rgba(201, 151, 0, .15); --medium-fg: #c99700; --high-bg: rgba(250, 133, 50, .15); --high-fg: #fa8532; --critical-bg: rgba(230, 80, 80, .15); --critical-fg: #e65050; }
+--low-bg: rgba(134, 179, 0, .15); --low-fg: #86b300; --medium-bg: rgba(201, 151, 0, .15); --medium-fg: #c99700; --high-bg: rgba(250, 133, 50, .15); --high-fg: #fa8532; --critical-bg: rgba(230, 80, 80, .15); --critical-fg: #e65050;
+/* 000191: motion knobs, one place to retune the entrances, the chunk fade and the pulse loop */
+--enter: 200ms; --fade: 150ms; --pulse: 1.8s; }
 ${DARK_VARS}
 html, body { height: 100%; }
 body { display: flex; flex-direction: column; margin: 0; background: var(--bg); color: var(--fg); font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
@@ -138,6 +140,10 @@ none so the card clicks pass through */
 /* 000124: positioned above the z-index-1 relation lines; the semi-transparent background lets a line passing under the card show through faintly (no --card var, --panel is the card's base color in both themes) */
 .card { position: relative; z-index: 2; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--border); border-left: 3px solid var(--ac); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
 .card:hover { background: color-mix(in srgb, var(--hover) 85%, transparent); }
+/* 000191: genuinely new cards fade and rise in once at insertion; syncBoard adds .enter only at
+creation and the page drops it on animationend, so a poll or a reorder never replays it */
+.card.enter { animation: cardIn var(--enter) ease-out; }
+@keyframes cardIn { from { opacity: 0; transform: translateY(3px); } }
 .name { font-size: 13px; line-height: 1.35; margin-bottom: 6px; }
 .num { color: var(--faint); margin-right: 4px; }
 .num-link { color: var(--link); cursor: pointer; }
@@ -145,6 +151,8 @@ none so the card clicks pass through */
 .spin { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border: 2px solid var(--border); border-top-color: var(--fg); border-radius: 50%; vertical-align: -1px; animation: spin .9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } #relations path { animation: none; } }
+/* 000191: reduced motion stops the entrance, chunk and pulse animations too */
+@media (prefers-reduced-motion: reduce) { .card.enter, .agent-card.enter, #modal:not(.hidden), #modal:not(.hidden) #m-box, #m-log:not(.hidden), #m-log-text > *, #m-log-text > .pulse { animation: none; } }
 .chip { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: var(--border); color: var(--soft); }
 .chip.issuer { background: var(--code-bg); color: var(--muted); }
 .chip.cx { background: var(--code-bg); color: var(--muted); }
@@ -166,6 +174,8 @@ none so the card clicks pass through */
 /* 000120: each run as a card, its subagent cards stacked below it in the same column */
 .agent-card { display: block; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 12px; text-align: left; }
 .agent-card:hover { background: var(--hover); }
+/* 000191: a genuinely new run card rises in with the board cards' entrance */
+.agent-card.enter { animation: cardIn var(--enter) ease-out; }
 .agent-card-active { border-color: var(--link); background: var(--medium-bg); }
 .agent-dead { color: var(--critical-fg); }
 .agent-stats { display: block; font-size: 10px; color: var(--muted); margin-top: 2px; }
@@ -179,6 +189,9 @@ none so the card clicks pass through */
 /* 000152: the pane grows to 70vh so long logs show more content */
 #m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 70vh; overflow: auto; }
 #m-log.hidden { display: none; }
+/* 000191: the pane fades and rises on open; entrance only */
+#m-log:not(.hidden) { animation: logIn var(--enter) ease-out; }
+@keyframes logIn { from { opacity: 0; transform: translateY(4px); } }
 #m-log-meta { padding: 6px 10px 0; font-size: 10px; line-height: 1.45; color: var(--muted); }
 #m-log-meta.hidden { display: none; }
 /* the log text renders in the page's Inter stack; 000152: the size matches the card body text, only the line-height stays tuned for logs; blocks are collapsed <details> the client fills in */
@@ -188,8 +201,23 @@ none so the card clicks pass through */
 #m-log-text summary { cursor: pointer; }
 #m-log-text details.lg-think, #m-log-text details.lg-tool { color: var(--muted); }
 #m-log-text details > pre { padding-left: 12px; }
+/* 000191: appended chunks fade and rise in; a CSS animation replays only on newly inserted
+nodes, so untouched siblings never re-animate and only new content moves */
+#m-log-text > * { animation: chunkIn var(--fade) ease-out; }
+@keyframes chunkIn { from { opacity: 0; transform: translateY(2px); } }
+/* 000191: while the viewed run is alive its log's first line shimmers left to right, a paint-only
+background-position sweep through a low-alpha accent tint; the class follows the .spin spinner's
+liveness signal, and the second reduced-motion rule stops the loop */
+#m-log-text > .pulse { background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--link) 14%, transparent) 50%, transparent); background-size: 300% 100%; background-repeat: no-repeat; animation: chunkIn var(--fade) ease-out, shimmer var(--pulse) linear infinite; }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 #modal { position: fixed; inset: 0; z-index: 3; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
 #modal.hidden { display: none; }
+/* 000191: the overlay fades and the panel rises slightly on open; entrance only, and the refresh
+never replays it (the class list is untouched while the card stays open) */
+#modal:not(.hidden) { animation: fadeIn var(--enter) ease-out; }
+#modal:not(.hidden) #m-box { animation: boxIn var(--enter) ease-out; }
+@keyframes fadeIn { from { opacity: 0; } }
+@keyframes boxIn { from { opacity: 0; transform: translateY(6px) scale(.985); } }
 #m-box { background: var(--panel); border-radius: 10px; padding: 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
 #m-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 #m-head h2 { font-size: 15px; margin: 0; }
@@ -263,6 +291,7 @@ const LAYOUT = ${JSON.stringify(LAYOUT)};
 const PRIORITY_RANK = ${JSON.stringify(PRIORITY_RANK)};
 ${spinnerHtml}
 ${numLinkHtml}
+${cardBaseHtml}
 ${cardHtml}
 ${buildShell}
 ${syncBoard}
@@ -275,9 +304,11 @@ ${agentLabel}
 ${fmtTokens}
 ${fmtDur}
 ${agentStatsText}
+${taskStats}
 ${taskStatsText}
 ${agentRowSig}
 ${syncAgentStats}
+${syncCardStats}
 ${refreshMs}
 // tabs: one per registered project, the active one renders that project's board
 function renderTabs() {
@@ -306,6 +337,9 @@ function makeCard(file) {
 	el.onclick = () => openTask(file);
 	el.onmouseenter = () => hotRelations(file, true);
 	el.onmouseleave = () => hotRelations(file, false);
+	// 000191: the entrance class is one-shot, dropped on animationend so a later poll or reorder
+	// never replays it
+	el.onanimationend = () => { el.classList.remove("enter"); el.onanimationend = null; };
 	return el;
 }
 // board-content relative: page scroll cancels, board scroll is added back, so a refresh after
@@ -365,7 +399,7 @@ function render(skipFlip) {
 		el.style.transform = "";
 		old[el.dataset.file] = cardBox(el);
 	}
-	syncBoard(cols, tab.tasks, tab.expanded, cardEls, makeCard, VISIBLE);
+	syncBoard(cols, tab.tasks, tab.expanded, cardEls, makeCard, VISIBLE, document);
 	const now = {};
 	for (const el of cardEls.values()) now[el.dataset.file] = cardBox(el);
 	const diff = flipDiff(old, now);
@@ -454,6 +488,16 @@ function markActiveAgent() {
 		b.classList.toggle("agent-card-active", active);
 	}
 }
+// 000191: while the viewed run is alive its log's first line carries the pulse shimmer; the same
+// liveness signal the .spin spinner reads, dropped as soon as the run or the view changes
+function markLiveLine() {
+	const t = activeBoard().tasks.find(x => x.file === modalFile);
+	const run = t && (t.agents || []).find(a => a.alive);
+	const p = logPane();
+	const on = !!run && !!logState && run.handle === logState.handle && !p.classList.contains("hidden");
+	const first = document.querySelector("#m-log-text > *");
+	if (first) first.classList.toggle("pulse", on);
+}
 const atBottom = () => { const p = logPane(); return p.scrollTop + p.clientHeight >= p.scrollHeight - 4; };
 // the live auto-scroll glides to the bottom, an instant auto scroll under reduced motion
 function glide(p) {
@@ -502,8 +546,12 @@ function renderAgent(t, keep) {
 		agentCardHtml(a.alive ? "agent-live" : a.status === "dead" ? "agent-dead" : "agent-past", 'data-handle="' + esc(a.handle) + '"', agentLabel(a, count), a.tokens, a.duration, a.alive ? '<span class="spin"></span>' : a.status === "dead" ? '<span class="cross">✗</span>' : '<span class="check">✓</span>') +
 		'<div class="agent-subs"></div></div>').join("");
 	// bind by dataset: a hand-written task file name can hold quotes or backslashes, which no
-	// amount of HTML escaping makes safe inside inline JS
-	for (const b of el.querySelectorAll(".agent-col > .agent-card")) b.onclick = () => openAgentLog(b.dataset.handle);
+	// amount of HTML escaping makes safe inside inline JS; 000191: only a genuinely new run's
+	// card animates in, the rebuilt old cards stay still
+	for (const b of el.querySelectorAll(".agent-col > .agent-card")) {
+		b.onclick = () => openAgentLog(b.dataset.handle);
+		if (oldSubs && !oldSubs.has(b.dataset.handle)) b.classList.add("enter");
+	}
 	if (oldSubs) for (const c of el.querySelectorAll(".agent-col")) {
 		const box = oldSubs.get(c.querySelector(".agent-col > .agent-card").dataset.handle);
 		if (box) c.querySelector(".agent-subs").replaceWith(box);
@@ -527,9 +575,18 @@ function fetchSubs(gen, a, box) {
 	fetch("/api/agent-log?file=" + encodeURIComponent(a.handle) + "&sub=list" + projectParam()).then(r => r.ok ? r.json() : []).then(list => {
 		// a superseded open must not write into the new view
 		if (gen !== agentGen || !box) return;
-		box.innerHTML = (Array.isArray(list) ? list : []).map(s =>
+		const html = (Array.isArray(list) ? list : []).map(s =>
 			agentCardHtml("agent-sub", 'data-handle="' + esc(a.handle) + '" data-sub="' + s.index + '"', "Sub-" + a.role, s.tokens, s.duration, "")).join("");
-		for (const b of box.querySelectorAll(".agent-card")) b.onclick = () => openSubLog(b.dataset.handle, Number(b.dataset.sub));
+		// html-gated: the keep pass re-fetches the live run's list every second, so an unchanged
+		// list never rebuilds and the sub cards' entrance never replays; only a new sub animates
+		if (box.__html === html) return;
+		const prev = box.__html === undefined ? null : new Set([...box.querySelectorAll(".agent-card")].map((c) => c.dataset.sub));
+		box.innerHTML = html;
+		box.__html = html;
+		for (const b of box.querySelectorAll(".agent-card")) {
+			b.onclick = () => openSubLog(b.dataset.handle, Number(b.dataset.sub));
+			if (prev && !prev.has(b.dataset.sub)) b.classList.add("enter");
+		}
 		markActiveAgent();
 	}).catch(() => {});
 }
@@ -564,6 +621,7 @@ function closeLog() {
 	const meta = document.getElementById("m-log-meta");
 	if (meta) { meta.textContent = ""; meta.classList.add("hidden"); }
 	markActiveAgent();
+	markLiveLine();
 }
 function pollLog() {
 	if (!logState || logState.busy) return;
@@ -621,6 +679,7 @@ function pullLog(qs, mode) {
 				if (stick) glide(p);
 			}
 		}
+		markLiveLine();
 	}).catch(() => {}).finally(() => { if (logState === st) st.busy = false; });
 }
 document.getElementById("modal").onclick = e => { if (e.target.id === "modal") closeModal(); };

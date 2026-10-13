@@ -45,17 +45,24 @@ export function agentStatsText(tokens, duration) {
 	return [fmtTokens(tokens), fmtDur(duration)].filter(Boolean).join(" · ");
 }
 
-// the summary card's stats line under the chips: totals across all agent entries, input + output
+// the summary card's bare totals text (42k · 4s): totals across all agent entries, input + output
 // tokens and durations summed per entry (#178), the same agentStatsText format the agent cards'
-// stats lines use; hidden when no entry carries a usage record (#183, usage-less logs and live
+// stats lines use; empty when no entry carries a usage record (#183, usage-less logs and live
 // runs before their first usage record), or the task has no entries, or both totals are 0/null
-export function taskStatsText(t) {
+export function taskStats(t) {
 	const agents = t.agents || [];
 	if (!agents.some((a) => typeof a.tokens === "number" && Number.isFinite(a.tokens))) return "";
 	const toks = agents.reduce((s, a) => s + (typeof a.tokens === "number" ? a.tokens : 0), 0);
 	const dur = agents.reduce((s, a) => s + (typeof a.duration === "number" ? a.duration : 0), 0);
 	if (!toks && !dur) return "";
-	return '<span class="card-stats">' + agentStatsText(toks, dur) + "</span>";
+	return agentStatsText(toks, dur);
+}
+
+// the summary card's stats line under the chips: taskStats wrapped in the span, empty when the
+// stats are hidden; syncBoard's in-place pass assigns taskStats to the span's textContent
+export function taskStatsText(t) {
+	const stats = taskStats(t);
+	return stats ? '<span class="card-stats">' + stats + "</span>" : "";
 }
 
 // the open detail card's poll cadence (000142): a live agent's tokens and duration advance with
@@ -124,11 +131,12 @@ export function spinnerHtml(st: string) {
 	return st === "doing" || st === "reviewing" || st === "live-testing" || st === "merging" ? '<span class="spin"></span>' : "";
 }
 
-// one card's markup; this string is the card's identity across a refresh, see syncBoard.
-// user-issued cards stay full contrast, task-issued ones (issuer "#<num>") dim the name and
-// carry a small #<num> badge instead of the plain user chip; the complexity chip renders quiet
-// next to the priority chip
-export function cardHtml(t: Task, st: string) {
+// one card's markup without the trailing stats line: the card's structural identity across a
+// refresh (syncBoard compares it), so a stats-only change can update the span in place and the
+// run's spinner and entrance animations survive the poll. user-issued cards stay full contrast,
+// task-issued ones (issuer "#<num>") dim the name and carry a small #<num> badge instead of the
+// plain user chip; the complexity chip renders quiet next to the priority chip
+export function cardBaseHtml(t: Task, st: string) {
 	const issued = !!t.issuer && t.issuer !== "user";
 	return (
 		'<div class="name' +
@@ -149,9 +157,13 @@ export function cardHtml(t: Task, st: string) {
 		(issued ? " issuer" : "") +
 		'">' +
 		(issued ? esc(t.issuer) : "user") +
-		"</span>" +
-		taskStatsText(t)
+		"</span>"
 	);
+}
+
+// one card's markup; this string is the card's identity across a refresh, see syncBoard
+export function cardHtml(t: Task, st: string) {
+	return cardBaseHtml(t, st) + taskStatsText(t);
 }
 
 // a task id as a link: clicking opens that task's card in place of the shown one; data-task carries
@@ -263,12 +275,32 @@ export function buildShell(parent, doc) {
 	return cols;
 }
 
+// 000191: a stats-only change updates the summary card's .card-stats span in place, so the live
+// run's spinner and entrance animations survive the poll (supersedes the accepted #178 restart);
+// the span joins when stats arrive and drops when they vanish, matching taskStatsText's markup.
+// doc is injected so tests run this without a DOM
+export function syncCardStats(el, t, doc) {
+	const stats = taskStats(t);
+	const span = [...el.children].find((c) => c.className === "card-stats");
+	if (span) {
+		if (stats) span.textContent = stats;
+		else span.remove();
+	} else if (stats) {
+		const s = doc.createElement("span");
+		s.className = "card-stats";
+		s.textContent = stats;
+		el.appendChild(s);
+	}
+}
+
 // one refresh pass: place every task's card in its column and update counts and the fold toggle. A
 // card is rewritten only when its markup changed, so an unchanged card keeps its DOM node and with
-// it its running spinner animation and in-flight FLIP transform; orders are fixed by moving nodes,
-// so a card entering a column never rebuilds the cards already in it. The caller measures card
-// positions before and after this pass to animate the moves
-export function syncBoard(cols, tasks, expanded, els, make, visible) {
+// it its running spinner animation and in-flight FLIP transform; a stats-only change updates the
+// .card-stats span in place (syncCardStats), and orders are fixed by moving nodes, so a card
+// entering a column never rebuilds the cards already in it. A genuinely new card gains the
+// "enter" class for the page's one-shot entrance animation. The caller measures card positions
+// before and after this pass to animate the moves
+export function syncBoard(cols, tasks, expanded, els, make, visible, doc) {
 	// backlog is priority-first (critical above high above medium above low), every other column is
 	// newest-first only; the sort is stable and the payload arrives in task-number order, so equal
 	// keys keep that order
@@ -289,12 +321,20 @@ export function syncBoard(cols, tasks, expanded, els, make, visible) {
 			let el = els.get(t.file);
 			if (!el) {
 				el = make(t.file);
+				// 000191: one-shot entrance on a genuinely new card; the page drops the class on
+				// animationend, so a later poll or reorder never replays it
+				el.className += " enter";
 				els.set(t.file, el);
 			}
 			const html = cardHtml(t, st);
 			if (el.__html !== html) {
-				el.innerHTML = html;
+				const base = cardBaseHtml(t, st);
+				// 000191: matching base markup means only the stats line changed, so the span updates
+				// in place and the spinner node keeps its animation; a brand-new card has no base yet
+				if (el.__base === base) syncCardStats(el, t, doc);
+				else el.innerHTML = html;
 				el.__html = html;
+				el.__base = base;
 			}
 			const next = prev ? prev.nextSibling : part.cards.firstChild;
 			if (next !== el) part.cards.insertBefore(el, next);

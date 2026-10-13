@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, PRIORITY_RANK, setState } from "../src/kanban.ts";
 import { startHub } from "../src/hub.ts";
-import { agentLabel, agentRowSig, agentStatsText, boardOf, buildShell, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, tabNames, tabsHtml } from "../src/webui.ts";
+import { agentLabel, agentRowSig, agentStatsText, boardOf, buildShell, cardBaseHtml, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats } from "../src/webui.ts";
 import { gzipSync } from "node:zlib";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -491,6 +491,7 @@ assert.deepEqual(pairLayout(STATE_NAMES), LAYOUT, "the pairs derive from the sta
 assert.ok(LAYOUT.every((part) => (typeof part === "string" ? cols[part] : part.every((st) => cols[st]))), "every layout state gets a column");
 assert.ok(page.includes(JSON.stringify(LAYOUT)), "the page ships the tested layout");
 assert.ok(page.includes(String(buildShell)) && page.includes(String(syncBoard)), "the page runs the tested shell and card pass");
+assert.ok(page.includes(String(cardBaseHtml)) && page.includes(String(syncCardStats)) && page.includes(String(taskStats)), "the page runs the tested base-card and in-place stats source");
 // syncBoard is interpolated as source, so every identifier it references must exist in the
 // client scope: the page ships the rank map as a value, or the backlog sort throws on refresh
 assert.ok(page.includes(`const PRIORITY_RANK = ${JSON.stringify(PRIORITY_RANK)}`), "the client defines the rank map syncBoard references");
@@ -628,6 +629,19 @@ assert.ok(page.includes('setAttribute("pointer-events", "none")'), "the overlay 
 assert.ok(page.includes("stroke-dasharray: 6 4"), "the relation paths render dashed");
 assert.ok(page.includes("@keyframes dashflow { to { stroke-dashoffset: -10; } }"), "dashes flow along the path, from the blocked task towards the blocker");
 assert.match(page, /@media \(prefers-reduced-motion: reduce\) \{ \.spin \{ animation: none; \} #relations path \{ animation: none; \} \}/, "reduced motion renders the relation paths static");
+// 000191 motion: the new keyframes and rules ship in the page css, and the second reduced-motion
+// rule stops the new animations without touching the spinner rule above
+assert.ok(page.includes(".card.enter { animation: cardIn var(--enter) ease-out; }"), "new board cards fade and rise in");
+assert.ok(page.includes(".agent-card.enter { animation: cardIn var(--enter) ease-out; }"), "new agent run cards reuse the card entrance");
+assert.ok(page.includes("@keyframes cardIn { from { opacity: 0; transform: translateY(3px); } }"), "the card entrance is a small fade and rise, transform and opacity only");
+assert.ok(page.includes("#modal:not(.hidden) { animation: fadeIn var(--enter) ease-out; }"), "the modal overlay fades in on open");
+assert.ok(page.includes("#modal:not(.hidden) #m-box { animation: boxIn var(--enter) ease-out; }"), "the modal panel rises in on open");
+assert.ok(page.includes("#m-log:not(.hidden) { animation: logIn var(--enter) ease-out; }"), "the log pane fades and rises on open");
+assert.ok(page.includes("#m-log-text > * { animation: chunkIn var(--fade) ease-out; }"), "appended log chunks fade and rise in");
+assert.ok(page.includes("@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }"), "the pulse sweeps left to right via background-position");
+assert.match(page, /#m-log-text > \.pulse \{[^}]*animation: chunkIn var\(--fade\) ease-out, shimmer var\(--pulse\) linear infinite/, "the live first line carries the pulse shimmer");
+assert.match(page, /--enter: 200ms; --fade: 150ms; --pulse: 1.8s;/, "the motion durations retune in one place");
+assert.match(page, /@media \(prefers-reduced-motion: reduce\) \{ \.card\.enter, [^}]*\{ animation: none; \} \}/, "reduced motion stops the new animations too");
 const pathRule = page.match(/#relations path \{([^}]*)\}/)?.[1] ?? "";
 const baseOpacity = Number(pathRule.match(/stroke-opacity: ([\d.]+)/)?.[1]);
 assert.ok(baseOpacity > 0 && baseOpacity < 1, "the relation lines draw at a reduced opacity, a subtle hint behind the semi-transparent cards");
@@ -649,8 +663,8 @@ assert.ok(page.includes("#m-attrs span:not(.chip):not(.num-link)"), "the attrs s
 // spinner element keeps spinning; a state change rewrites that card's markup and nothing else
 const els = new Map<string, El>();
 const make = (file: string) => { const c = new El("div"); c.className = "card"; c.dataset.file = file; return c; };
-const sync = (list: any[], open: Set<string> = new Set()) => syncBoard(cols, list, open, els, make, 5);
-const shown = (st: string) => cols[st].cards.children.filter((c: El) => c.className === "card").map((c: El) => c.dataset.file);
+const sync = (list: any[], open: Set<string> = new Set()) => syncBoard(cols, list, open, els, make, 5, { createElement: (tag: string) => new El(tag) });
+const shown = (st: string) => cols[st].cards.children.filter((c: El) => c.className.split(" ")[0] === "card").map((c: El) => c.dataset.file);
 const tasksA = [
 	{ file: "000001_a.md", name: "feat: a", priority: "high", state: "doing", updated: 2 },
 	{ file: "000002_b.md", name: "feat: b", priority: "low", state: "backlog", updated: 1 },
@@ -669,6 +683,33 @@ assert.equal(cardA.writes, 2, "a state change rewrites the markup once");
 assert.ok(!cardA.innerHTML.includes("spin"), "leaving a working column stops the spinner");
 sync(tasksA);
 assert.ok(cardA.innerHTML.includes('<span class="spin">'), "entering a working column starts the spinner");
+
+// 000191 motion: a genuinely new card gains the one-shot entrance class at insertion, and neither
+// an unchanged poll nor a markup rewrite ever re-adds it; only new cards are inserted (nodes kept)
+assert.ok(cardA.className.includes("enter"), "a card created this pass carries the entrance class");
+const later = { file: "000003_c.md", name: "feat: c", priority: "low", state: "backlog", updated: 4 };
+sync([...tasksA, later]);
+const cardC = els.get("000003_c.md")!;
+assert.ok(cardC.className.includes("enter"), "a later insertion gains the entrance class too");
+assert.equal(cardA.className, "card enter", "an unchanged card keeps the class exactly once, never re-added");
+sync([{ ...tasksA[0], state: "to-do", updated: 5 }, later]);
+assert.equal(cardA.className, "card enter", "a state rewrite does not re-add the entrance class");
+
+// 000191 in-place stats (supersedes the accepted #178 spinner restart): a stats-only change
+// updates the .card-stats span without rewriting the card markup, so the .spin node keeps its
+// animation; the span joins when stats arrive and drops when they vanish
+const liveTask = { file: "000004_d.md", name: "feat: d", priority: "high", state: "doing", updated: 6, agents: [{ tokens: 420, duration: 1500 }] };
+sync([liveTask]);
+const cardD = els.get("000004_d.md")!;
+assert.ok(cardD.innerHTML.includes('<span class="card-stats">420 · 2s</span>'), "the card markup carries the stats span");
+assert.equal(cardD.writes, 1, "the first pass writes the card markup once");
+sync([{ ...liveTask, agents: [{ tokens: 900, duration: 2500 }] }]);
+assert.equal(cardD.writes, 1, "a stats-only change does not rewrite the card markup, the spinner animation survives");
+assert.equal(cardD.children[0].className, "card-stats", "the stats span updates in place");
+assert.equal(cardD.children[0].textContent, "900 · 3s");
+sync([{ ...liveTask, agents: [] }]);
+assert.equal(cardD.writes, 1, "removing the stats span is in-place too");
+assert.equal(cardD.children.length, 0, "the span drops when the stats vanish");
 
 // the per-column cap and unfold (000030) and the empty marker still hold, and a card whose task
 // left the board loses its node
@@ -860,6 +901,13 @@ assert.ok(!page.includes('id="m-sub-btns"'), "the single sub row is gone; subs s
 assert.match(page, /\.agent-col \{ display: flex; flex-direction: column/, "each column stacks its run card over its sub cards");
 assert.match(page, /\.agent-subs \{ display: flex; flex-direction: column/, "sub cards stack vertically below their caller");
 assert.ok(page.includes('if (gen !== agentGen || !box) return;'), "a superseded open's sub fetches never write into the new view");
+// 000191: the sub list rebuild is html-gated (the keep pass re-fetches every second), and only a
+// newly spawned sub card animates; a genuinely new run card carries the entrance too
+assert.ok(page.includes("if (box.__html === html) return;"), "the sub list rebuild is html-gated, so unchanged subs never replay");
+assert.ok(page.includes('if (prev && !prev.has(b.dataset.sub)) b.classList.add("enter")'), "only a newly spawned sub card animates");
+assert.ok(page.includes('if (oldSubs && !oldSubs.has(b.dataset.handle)) b.classList.add("enter")'), "only a genuinely new run card animates");
+assert.ok(page.includes('el.onanimationend = () => { el.classList.remove("enter"); el.onanimationend = null; };'), "the page drops the entrance class when the animation ends");
+assert.ok(page.includes("syncBoard(cols, tab.tasks, tab.expanded, cardEls, makeCard, VISIBLE, document)"), "the card pass gets the document for the in-place stats span");
 // 000121: the 5 s refresh re-derives the open detail card in place: title and attrs freely, the
 // body html-gated, the run cards re-rendered without touching the log pane or its state
 const upd = page.match(/function updateOpenTask\(t\) \{[\s\S]*?\n\}/)![0];
@@ -883,6 +931,11 @@ const pollSrc = page.match(/function pollLog\(\) \{[\s\S]*?\n\}/)![0];
 assert.ok(pollSrc.includes("const live = !!liveRun && liveRun.handle === logState.handle;"), "a sub view of a still-alive parent stays live: the pane keeps its poll timer after an empty poll");
 assert.ok(!pollSrc.includes("logState.sub == null"), "a sub view is no longer hard-wired non-live, which froze the pane after the first empty poll");
 assert.ok(pollSrc.includes("if (!live && logState.idle) {"), "a past run's log still stops the timer after the first empty poll");
+// 000191: the live first-line pulse follows the viewed run's aliveness, the same signal the poll
+// timer reads, refreshed from pullLog after every payload and dropped on close
+assert.ok(page.includes("function markLiveLine()"), "the page wires the live first-line pulse");
+assert.ok(page.includes('first.classList.toggle("pulse", on)'), "the pulse class follows the viewed run's aliveness");
+assert.ok(page.includes("markLiveLine();"), "pullLog and closeLog drive the pulse");
 
 // 000142 the poll refresh updates the agent row in place: an unchanged run set moves only the
 // cards' .agent-stats text, so the live run's .spin node keeps its animation across the poll; a
