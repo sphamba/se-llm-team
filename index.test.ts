@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask } from "./src/kanban.ts";
+import { pidAlive } from "./src/pid.ts";
 
 // pi loads index.ts with jiti, which resolves @earendil-works/* and typebox from pi's own
 // install; plain node cannot. Stub those runtime imports, and stub spawn so that
@@ -51,7 +52,8 @@ assert.deepEqual(resolveRoot(plain), null);
 // orchestrator_start on a fresh git repo resolves the root and spawns the daemon there
 const started = await tools.get("orchestrator_start").execute("id", {}, undefined, undefined, ctx(sub));
 assert.equal(calls().length, 1);
-assert.ok(calls()[0].args[0].endsWith(join("src", "orchestrator.ts")));
+assert.ok(calls()[0].args[0] === "--watch", "the daemon runs under node --watch");
+assert.ok(calls()[0].args[1].endsWith(join("src", "orchestrator.ts")));
 assert.deepEqual(calls()[0].args.slice(-2), ["--root", repo]);
 assert.match(started.content[0].text, /^Orchestrator starting \(pid 4242\)/);
 
@@ -85,6 +87,41 @@ try {
 	await new Promise<void>((resolve) => victim.on("exit", () => resolve()));
 } finally {
 	victim.kill();
+}
+
+// a node --watch-style victim: a detached supervisor leading its own group, a child in it.
+// The stop signals the group, so both die; a bare pid kill would orphan the child to
+// resurrect the daemon on the next watched change
+const childPidPath = join(repo, ".kanban", "watch-child.pid");
+const victimGroup = spawn(
+	process.execPath,
+	[
+		"-e",
+		`const { spawn } = require("node:child_process");
+const { writeFileSync } = require("node:fs");
+const c = spawn(process.execPath, ["-e", "setInterval(() => {}, 60000)"], { stdio: "ignore" });
+writeFileSync(${JSON.stringify(childPidPath)}, String(c.pid));
+setInterval(() => {}, 60000);`,
+	],
+	{ detached: true, stdio: "ignore" },
+);
+victimGroup.unref();
+try {
+	await new Promise((r) => setTimeout(r, 300));
+	writeFileSync(join(repo, ".kanban", ".orchestrator.lock"), `${victimGroup.pid}\n`);
+	const stoppedGroup = await tools.get("orchestrator_stop").execute("id", {}, undefined, undefined, ctx(sub));
+	assert.match(stoppedGroup.content[0].text, new RegExp(`^Sent SIGTERM to orchestrator pid ${victimGroup.pid}$`));
+	await new Promise((r) => setTimeout(r, 500));
+	assert.ok(!pidAlive(victimGroup.pid), "the supervisor died");
+	assert.ok(!pidAlive(parseInt(readFileSync(childPidPath, "utf8").trim(), 10)), "the child died with the group");
+
+	rmSync(childPidPath, { force: true });
+} finally {
+	try {
+		process.kill(-victimGroup.pid, "SIGKILL");
+	} catch {
+		/* already gone */
+	}
 }
 
 rmSync(repo, { recursive: true, force: true });
