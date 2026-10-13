@@ -1,8 +1,8 @@
 ---
 name: "fix: task card stats spacing and h m s duration labels"
 priority: "medium"
-state: "doing"
-worktree: "fix/200-card-stats-spacing-hours"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "card-stats-spacing-hours"
@@ -34,3 +34,9 @@ Acceptance:
 - Browser check: a task card's stats line sits clearly below the chips row; a task whose duration exceeds an hour shows "Xh Ym Zs" on both the task card and its agent cards.
 
 # Notes
+
+- 2026-10-13, reviewer: Approved. Verified the diff against the Specs: .card-stats margin-top 2px -> 6px with .agent-stats untouched (page.ts:158, :179); fmtDur hours tier at 3600s+ with trailing zero units dropped (board.ts:38-41), all Spec examples (3599000/3600000/3660000/3661000/7261000 ms) render exactly as specified, below an hour keeps "59m 59s". The css lives only in page.ts, so the served PAGE interpolates the change; syncCardStats updates the span in place on live cards. node tests/webui.test.ts passes. No other duration formatter exists in src/, the both-places rule holds. The unsigned commit matches the developer's recorded sandbox note. No open questions.
+
+- 2026-10-13, developer: Done. .card-stats margin-top 2px -> 6px (src/webui/page.ts:158); .agent-stats untouched. fmtDur gained the hours tier: below 3600s keeps the minutes format, 3600s and up renders h/m/s with zero units dropped (src/webui/board.ts, shared by task and agent cards via agentStatsText/taskStatsText). Tests: 8 new fmtDur hour-boundary asserts (3599000 -> "59m 59s", 3600000 -> "1h", 3660000 -> "1h 1m", 3661000 -> "1h 1m 1s", 7261000 -> "2h 1m 1s") and the .card-stats css pin now expects margin-top: 6px plus an .agent-stats 2px pin. node tests/webui.test.ts and npm test pass. Committed 7553736 in the worktree (unsigned: gpg-agent cannot run in the sandbox, read-only HOME; previous worktree commits were signed). No open questions.
+
+- 2026-10-13, live-tester: Passed. 29/29 checks. Hub-only fixture on two ports: the merged commit (4631) against the pre-change page from c098a2f (4632, `git archive` into a second dir plus a second isolated HOME). Task-card chip-to-stats gap: 6px on merged and 2px on old, and the measured gap follows a css margin change by exactly 4px. `.agent-stats` stays 2px in both. Durations on the task card and on the agent card in the modal are identical: 3661000 ms -> "1h 1m 1s", 3600000 -> "1h", 7200000 -> "2h", 7261000 -> "2h 1m 1s", 3599000 -> "59m 59s", 60000 -> "1m" (the old page renders "61m 1s", "60m", "120m", "121m 1s", "59m 59s", "1m"). A live doing card with a run above one hour shows "1h 2m 31s" and the in-place stats update ticks it to "1h 2m 36s" on the next board poll. No console or page errors on either page. No issues found. Assumption: the fixture sets run durations through the first and last log record timestamps, so no wall-clock timing is involved.
