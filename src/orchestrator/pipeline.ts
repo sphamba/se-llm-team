@@ -78,6 +78,14 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 		log(root, `${task.file}: nothing to merge, set done`);
 		return;
 	}
+	// a detached root checkout has no branch to merge into: git merge there would land the
+	// change on a dangling commit that the done cleanup then deletes. The old merger guarded
+	// this; leave the task in to-merge for the PM, retries wait out the idle cooldown
+	if (git(root, ["branch", "--show-current"], true) === "") {
+		writeFileSync(mergerAttemptPath(root, slug), "");
+		log(root, `${task.file}: root checkout is detached, left in to-merge (PM resolves manually)`);
+		return;
+	}
 	const ensured = ensureWorktree(root, task);
 	// a failed worktree creation would strand the task; leave the state for the next rescan to retry
 	if (!ensured) {

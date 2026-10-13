@@ -105,7 +105,9 @@ Agent prompts live in `agents/`. The orchestrator runs each agent as a headless 
 | Developer | the task worktree |
 | Reviewer | the task worktree |
 | Merger | the task worktree (resolves conflicts only) |
-| Live-tester | the task worktree (tests the merged commit) | The agent log (`.kanban/.logs/`) carries the full JSONL event stream; the web ui renders it readably. The orchestrator reads the role prompt from `agents/` in its own checkout at each spawn. A prompt fix on a task worktree branch applies only after that branch merges, so do not rely on a prompt change before the merge. Agents append notes to their task file directly; only the Reviewer also writes the state attribute (its approve/reject decision), and the orchestrator moves the task itself on a successful finish. The Live-tester reports issues to a Project manager subagent that creates new tasks.
+| Live-tester | the task worktree (tests the merged commit) |
+
+The agent log (`.kanban/.logs/`) carries the full JSONL event stream; the web ui renders it readably. The orchestrator reads the role prompt from `agents/` in its own checkout at each spawn. A prompt fix on a task worktree branch applies only after that branch merges, so do not rely on a prompt change before the merge. Agents append notes to their task file directly; only the Reviewer also writes the state attribute (its approve/reject decision), and the orchestrator moves the task itself on a successful finish. The Live-tester reports issues to a Project manager subagent that creates new tasks.
 
 ## Tools
 

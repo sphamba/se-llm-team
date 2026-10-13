@@ -910,6 +910,30 @@ assert.ok(!existsSync(join(rootK4, ".git", "MERGE_HEAD")), "no MERGE_HEAD left a
 assert.ok(!k4.output().includes("spawned merger"), "no merger agent for a refused merge");
 k4.daemon.kill("SIGTERM");
 
+// --- part K5: a detached root checkout has no branch to merge into: the merge is refused
+// before it starts, the task waits in to-merge for the PM, and the worktree is untouched ---
+const rootK5 = fixture();
+cleaned.push(rootK5);
+mkdirSync(kanbanDir(rootK5), { recursive: true });
+execSync("git checkout -qb fix/detached-root", { cwd: rootK5, shell: "/bin/bash" });
+writeFileSync(join(rootK5, "README.md"), "branch\n");
+execSync("git commit -qam branch", { cwd: rootK5, shell: "/bin/bash" });
+execSync("git checkout -q main", { cwd: rootK5, shell: "/bin/bash" });
+execSync("git checkout -q --detach", { cwd: rootK5, shell: "/bin/bash" });
+writeFileSync(join(rootK5, "noop.cjs"), `#!/usr/bin/env node\n`);
+chmodSync(join(rootK5, "noop.cjs"), 0o755);
+writeFileSync(join(kanbanDir(rootK5), "se-llm-team.json"), JSON.stringify({ agent: join(rootK5, "noop.cjs"), pollMinutes: 0.01 }));
+const taskK5 = createTask(rootK5, { name: "fix: detached root", summary: "Detached root smoke", specs: "n/a" });
+setWorktree(rootK5, taskK5, "fix/detached-root");
+setState(rootK5, taskK5, "to-merge");
+
+const k5 = await runDaemon(rootK5);
+await waitFor(() => k5.output().includes("root checkout is detached, left in to-merge"), 30000, "the detached root refused the merge", k5.output);
+assert.equal(parseTask(rootK5, taskK5.file).state, "to-merge", "the task waits in to-merge for the PM");
+assert.ok(!k5.output().includes("merged into main"), "nothing was merged");
+assert.ok(!k5.output().includes("spawned merger"), "no merger agent for a detached root");
+k5.daemon.kill("SIGTERM");
+
 // --- part L: bootstrap materializes board files missing from .kanban/ from the mirror branch ---
 const rootL = fixture();
 cleaned.push(rootL);
@@ -2591,13 +2615,16 @@ assert.equal(parseTask(rootAT, taskAT.file).state, "to-review");
 assert.ok(!existsSync(pidPath(rootAT, slugAT)) && !existsSync(exitFilePath(rootAT, slugAT)), "the success clears the pid and exit files");
 assert.equal(deadCountAT(), "0", "a completed run clears the dead-agent counter");
 
-// the reviewer exception: exit 0 with the task still in reviewing stays for the PM. No
-// further poll after this: the task is pid-less in a working state, so the next pass would
-// crash-bounce it spuriously (the daemon avoids that by re-arming the pid file first)
+// the reviewer exception: exit 0 with the task still in reviewing stays for the PM. The
+// exit file stays too, so every later pass re-takes the exception path instead of
+// crash-bouncing the now pid-less task; a fresh spawn clears it
 setState(rootAT, taskAT, "reviewing");
 writeFileSync(exitFilePath(rootAT, slugAT), "0");
 poll(rootAT, 5);
 assert.ok(orchLogAT().includes(`${slugAT}: reviewer exited 0 with the task still in reviewing; left for the PM`), "the reviewer's exit 0 with the task still reviewing is logged");
 assert.equal(parseTask(rootAT, taskAT.file).state, "reviewing");
-assert.ok(!existsSync(exitFilePath(rootAT, slugAT)), "the poll clears the exit file");
+assert.ok(existsSync(exitFilePath(rootAT, slugAT)), "the exception pass keeps the exit file");
+poll(rootAT, 5);
+assert.equal(parseTask(rootAT, taskAT.file).state, "reviewing", "the exception is sticky: no crash bounce on the next pass");
+assert.ok(!orchLogAT().includes("agent pid=0 dead without state update"), "no spurious dead-pid bounce for the pid-less reviewing task");
 console.log("orchestrator.test.ts: ... + exit-code file smoke passed");

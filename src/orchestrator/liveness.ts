@@ -147,7 +147,9 @@ export function poll(root: string, stallMinutes: number, now = Date.now()): void
 			} catch {
 				/* no armed marker for this task */
 			}
-			clearExitFile(root, pidName);
+			// the reviewer exception (exit 0, no success move) keeps the exit file: the next
+			// pass re-takes the exception path instead of crash-bouncing the now pid-less task
+			if (!(code === 0 && working && !working.success)) clearExitFile(root, pidName);
 			clearPid(root, pidName);
 			if (!working) {
 				// a completed run leaves its stale pidfile behind, a bounce clears it first, so a
@@ -175,7 +177,9 @@ export function poll(root: string, stallMinutes: number, now = Date.now()): void
 					}
 				} else {
 					// the reviewer sets the state itself; exit 0 with the task still in reviewing
-					// means its state move never landed: leave the task for the PM, no orchestrator move
+					// means its state move never landed: leave the task for the PM, no orchestrator
+					// move. The kept exit file makes the exception sticky, so the task waits here
+					// until the PM (or a fresh reviewer spawn, which clears the file) moves it
 					log(root, `${slug}: reviewer exited 0 with the task still in reviewing; left for the PM`);
 				}
 				clearDeadStreak(root, slug);
