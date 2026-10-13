@@ -642,6 +642,9 @@ assert.ok(page.includes("@keyframes shimmer { from { background-position: 100% 0
 assert.match(page, /#m-log-text > \.pulse \{[^}]*animation: chunkIn var\(--fade\) ease-out, shimmer var\(--pulse\) linear infinite/, "the live first line carries the pulse shimmer");
 assert.match(page, /--enter: 200ms; --fade: 150ms; --pulse: 1.8s;/, "the motion durations retune in one place");
 assert.match(page, /@media \(prefers-reduced-motion: reduce\) \{ \.card\.enter, [^}]*\{ animation: none; \} \}/, "reduced motion stops the new animations too");
+// the rule must come after the last base animation rule: equal specificity, so a media rule
+// placed earlier is overridden and reduced motion stays animated (caught in live testing)
+assert.ok(page.indexOf("@keyframes boxIn") < page.indexOf('@media (prefers-reduced-motion: reduce) { .card.enter'), "the reduced-motion rule sits after every base animation rule");
 const pathRule = page.match(/#relations path \{([^}]*)\}/)?.[1] ?? "";
 const baseOpacity = Number(pathRule.match(/stroke-opacity: ([\d.]+)/)?.[1]);
 assert.ok(baseOpacity > 0 && baseOpacity < 1, "the relation lines draw at a reduced opacity, a subtle hint behind the semi-transparent cards");

@@ -151,8 +151,6 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .spin { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border: 2px solid var(--border); border-top-color: var(--fg); border-radius: 50%; vertical-align: -1px; animation: spin .9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } #relations path { animation: none; } }
-/* 000191: reduced motion stops the entrance, chunk and pulse animations too */
-@media (prefers-reduced-motion: reduce) { .card.enter, .agent-card.enter, #modal:not(.hidden), #modal:not(.hidden) #m-box, #m-log:not(.hidden), #m-log-text > *, #m-log-text > .pulse { animation: none; } }
 .chip { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: var(--border); color: var(--soft); }
 .chip.issuer { background: var(--code-bg); color: var(--muted); }
 .chip.cx { background: var(--code-bg); color: var(--muted); }
@@ -218,6 +216,9 @@ never replays it (the class list is untouched while the card stays open) */
 #modal:not(.hidden) #m-box { animation: boxIn var(--enter) ease-out; }
 @keyframes fadeIn { from { opacity: 0; } }
 @keyframes boxIn { from { opacity: 0; transform: translateY(6px) scale(.985); } }
+/* 000191: reduced motion stops the entrance, chunk and pulse animations too; the rule sits
+after every base animation rule so the later equal-specificity selectors cannot override it */
+@media (prefers-reduced-motion: reduce) { .card.enter, .agent-card.enter, #modal:not(.hidden), #modal:not(.hidden) #m-box, #m-log:not(.hidden), #m-log-text > *, #m-log-text > .pulse { animation: none; } }
 #m-box { background: var(--panel); border-radius: 10px; padding: 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
 #m-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 #m-head h2 { font-size: 15px; margin: 0; }
