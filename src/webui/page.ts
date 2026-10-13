@@ -454,11 +454,13 @@ function openTask(file) {
 }
 // the 5 s refresh of the open detail card: every block re-derives from the fresh payload with no
 // close/reopen; renderAgent's keep mode moves only the stats lines on an unchanged run set and
-// leaves the log pane alone
+// leaves the log pane alone, and markLiveLine sweeps the pulse when this refresh drops the dead
+// run's .spin
 function updateOpenTask(t) {
 	writeHead(t);
 	renderAgent(t, true);
 	setBody(t);
+	markLiveLine();
 }
 function closeModal() { closeLog(); document.getElementById("modal").classList.add("hidden"); }
 // the blockedBy row: each stored ref links to its task's card when that task is on the board, and
@@ -641,6 +643,7 @@ function pollLog() {
 	// past agents write no lines: one empty poll is proof, stop the timer
 	if (!live && logState.idle) {
 		if (logTimer) { clearInterval(logTimer); logTimer = null; }
+		markLiveLine(); // the death sweep: a run that died while its log idles drops its pulse here
 		return;
 	}
 	const p = logPane();
