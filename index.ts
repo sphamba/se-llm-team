@@ -6,7 +6,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { createTask, getTask, isLinkedWorktree, kanbanDir, listAll, listTasks, resolveTaskFromCwd, setState, setWorktree, taskNum, updateTask, STATES, type TaskState } from "./src/kanban.ts";
-import { pidAlive, procPgrp } from "./src/pid.ts";
+import { orchestratorWatched, pidAlive, procPgrp } from "./src/pid.ts";
 import { removeTask } from "./src/orchestrator.ts";
 import { REPORT_MAX_AGE_MS, reportsDir } from "./src/orchestrator/report.ts";
 
@@ -176,7 +176,14 @@ export default function (pi: ExtensionAPI) {
 			const root = resolveRoot(ctx.cwd);
 			if (!root) return text("Not a git repository: agents cannot run without git (worktrees, branches, board commits). No orchestrator started.");
 			const pid = readPid(root);
-			if (pid && pidAlive(pid)) return text(`Orchestrator already running (pid ${pid})`);
+			if (pid && pidAlive(pid)) {
+				// 000195: a daemon spawned by a stale session (pre-000192 extension code) has no
+				// --watch supervisor, so a src change never restarts it. null (non-Linux /proc,
+				// or a lock pid that is no daemon) stays silent
+				return orchestratorWatched(pid) === false
+					? text(`Orchestrator already running (pid ${pid}) without a node --watch supervisor: a merge that changes src/ will not restart it. Stop the orchestrator, then start it again to restore the self-restart.`)
+					: text(`Orchestrator already running (pid ${pid})`);
+			}
 			let log: number;
 			try {
 				for (const dir of [".logs", ".pids"]) mkdirSync(join(kanbanDir(root), dir), { recursive: true });
