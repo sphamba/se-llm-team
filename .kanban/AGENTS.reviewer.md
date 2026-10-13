@@ -9,6 +9,9 @@
 - Convention: a task branch merges main into itself before to-merge (see 7ecec18, ed55fe1). Check `git merge-base main HEAD`; if main has moved past it, `git merge main` in the worktree, resolve conflicts, run `npm test`, commit the merge. Record the merge commit in the task Notes.
 - The Merger then fast-forwards or merges cleanly.
 
+## Verifying webui PAGE parity
+- `PAGE` interpolates function source into the served page, so a webui refactor must keep it byte-identical. To check: `git show main:src/webui.ts > src/webui_old_review.ts` (inside src/ so its relative imports resolve), then a 3-line mjs script `await import(process.argv[2])` + `writeFileSync(process.argv[3], mod.PAGE)` run once for the old file and once for `./src/webui/index.ts` (and `./src/webui.ts` for the shim). Diff the outputs. Delete the temp file after. Also compare runtime exports with a name + `String()` diff of the two module objects.
+
 ## Review notes
 - Verify recorded developer assumptions against the code before trusting them; a silent assumption that changes direction is a review finding and belongs in the task Notes.
 - Tests added by tasks are smoke-style (`part X` console sections) in the plain script suites; follow that shape, do not introduce a runner.

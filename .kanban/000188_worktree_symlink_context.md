@@ -14,7 +14,6 @@ blockedBy: "#187"
 Following #187, symlink the task file as SPECS.md and the role notes as AGENTS.md at the worktree root, created before each agent spawn and removed after each agent termination. Pi auto-loads AGENTS.md from cwd, so the prompts lose their absolute paths and the --append-system-prompt flag.
 
 # Specs
-
 ## Symlinks (orchestrator, per spawn and per termination)
 - Before spawning any role, in the task's worktree root create or refresh two symlinks (idempotent, re-point every time):
   - SPECS.md -> .kanban/<taskFile>. The .kanban board is already symlinked into the worktree, so edits through this link land on the task file in the main checkout; the task-file exception rule keeps working.
@@ -23,21 +22,31 @@ Following #187, symlink the task file as SPECS.md and the role notes as AGENTS.m
 - ensureRoleNotes keeps creating .kanban/AGENTS.<role>.md; the files are the symlink targets.
 - Add AGENTS.md and SPECS.md to the repo .gitignore, so agents never commit the symlinks (worktrees share the checked-out .gitignore).
 
+## Optional file on the kanban tools (index.ts, src/kanban.ts)
+- kanban_get, kanban_update and kanban_set_state make the file parameter optional. When omitted, the task resolves from the cwd: readlink of SPECS.md in ctx.cwd gives the .kanban/<taskFile> target; its basename feeds the existing getTask. Helper resolveTaskFromCwd(root) in src/kanban.ts.
+- No SPECS.md symlink (a PM session in the main checkout, or the symlinks removed after termination): the tool reports "no task; pass the file name or run from a worktree with SPECS.md". No fallback to frontmatter guessing.
+- kanban_delete and kanban_set_worktree keep the required file (PM tools; kanban_delete is destructive).
+- Tool descriptions gain "file is optional; resolved from the cwd SPECS.md symlink when omitted".
+
 ## Prompt plumbing (renderPrompt, spawnAgent, agents/*.md)
 - Drop the --append-system-prompt flag from spawnAgent; the AGENTS.md symlink replaces it.
-- {{TASK_FILE}} -> "SPECS.md": the "Task file:" header line and the task-file-exception and open-questions paragraphs reference SPECS.md (the task file in the main checkout, reached through the symlink).
-- {{WORKTREE}} -> cwd prose ("work only here / in the worktree you run in"); the absolute path is no longer needed.
+- No path placeholder survives: {{TASK_FILE}}, {{NAME}} and {{PRIORITY}} are all dropped. The header line becomes "Task file: SPECS.md in your cwd (the task file in the main checkout)"; the task-file-exception and open-questions paragraphs reference SPECS.md. State moves and notes updates call the kanban tools with no file argument.
+- renderPrompt loses the {{ROOT}} (except the reviewer, see below), {{TASK_FILE}}, {{WORKTREE}}, {{WORKTREE_NAME}}, {{NAME}} and {{PRIORITY}} replaceAll lines.
+- {{WORKTREE}} -> cwd prose ("work only here / in the worktree you run in").
 - {{WORKTREE_NAME}} in agents/merger.md -> the merger resolves its branch with git branch --show-current in its cwd; the {{ROOT}}/.worktrees path templates disappear (after #187 the merger touches only its worktree).
-- {{ROOT}} -> remove where the symlinks and #187 cwd make it redundant: the guidance line becomes "Project-specific guidance for your role is loaded into your context as AGENTS.md" (the real file lives at .kanban/AGENTS.<role>.md; editing AGENTS.md edits it), the merger's git -C root commands are gone, the live-tester runs from its cwd. Keep any placeholder only where a use remains.
-- Keep {{NAME}} and {{PRIORITY}}.
+- Reviewer diff base (agents/reviewer.md step 2): the reviewer diffs against the branch the project root checkout has checked out (git -C {{ROOT}} branch --show-current), never a hardcoded main (git diff <base>...HEAD). This is the one remaining {{ROOT}} use in reviewer.md.
+- {{ROOT}} -> remove where the symlinks and #187 cwd make it redundant: the guidance line becomes "Project-specific guidance for your role is loaded into your context as AGENTS.md" (the real file lives at .kanban/AGENTS.<role>.md; editing AGENTS.md edits it), the merger's git -C root commands are gone, the live-tester runs from its cwd. Keep {{ROOT}} only where a use remains (the reviewer's base-branch resolution).
 
-## Tests (tests/orchestrator.test.ts)
-- Test D (worktree board symlink) gains asserts: SPECS.md and AGENTS.md exist before spawn, AGENTS.md points at the role's notes file, they are re-pointed for the next role, and they are removed after the agent terminates.
-- Spawn-args asserts: no --append-system-prompt flag; the prompt carries no absolute task-file or worktree path.
+## Tests
+- tests/kanban.test.ts: resolveTaskFromCwd resolves a task through a SPECS.md symlink, and returns undefined without one.
+- tests/orchestrator.test.ts, test D (worktree board symlink) gains asserts: SPECS.md and AGENTS.md exist before spawn, AGENTS.md points at the role's notes file, they are re-pointed for the next role, and they are removed after the agent terminates.
+- Tool-level asserts (index/extension suites): kanban_set_state with no file moves the task behind cwd SPECS.md; without SPECS.md it errors.
+- Spawn-args and renderPrompt asserts: no --append-system-prompt flag; the prompt carries no absolute task-file or worktree path and no {{NAME}}/{{PRIORITY}}.
+- The reviewer prompt assert: step 2 carries the base-branch resolution (git -C {{ROOT}} branch --show-current) and no hardcoded git diff main.
 - Fold the #187 test rework (A/G/K/K2/AL, ff-sync test) together with these where they touch the same helpers.
 
 ## Docs
-- README.md: the agent cwd table and spawn description mention the SPECS.md and AGENTS.md symlinks replacing --append-system-prompt.
+- README.md: the agent cwd table and spawn description mention the SPECS.md and AGENTS.md symlinks replacing --append-system-prompt, and the optional file on the agent-facing kanban tools.
 - skills/se-llm-team/SKILL.md: the per-role notes description moves from --append-system-prompt to the AGENTS.md symlink.
 
 # Notes
