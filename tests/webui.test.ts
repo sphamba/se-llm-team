@@ -938,7 +938,9 @@ assert.ok(pollSrc.includes("if (!live && logState.idle) {"), "a past run's log s
 // 000191: the live first-line pulse follows the viewed run's aliveness, the same signal the poll
 // timer reads, refreshed from pullLog after every payload and dropped on close
 assert.ok(page.includes("function markLiveLine()"), "the page wires the live first-line pulse");
-assert.ok(page.includes('el.classList.toggle("pulse", on && el === first)'), "the pulse class follows the viewed run's aliveness, on the first line only");
+// the toggle walks every direct child, not the already-pulsed nodes: a list of .pulse elements
+// alone never adds the class, so a fresh log's first line would never engage the shimmer
+assert.ok(page.includes('for (const el of document.querySelectorAll("#m-log-text > *")) el.classList.toggle("pulse", on && el === first)'), "the pulse engages on a fresh first line, walking the direct children");
 assert.ok(page.includes("markLiveLine();"), "pullLog and closeLog drive the pulse");
 
 // 000142 the poll refresh updates the agent row in place: an unchanged run set moves only the

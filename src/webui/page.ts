@@ -499,7 +499,7 @@ function markLiveLine() {
 	// the pulse stays on the first line only: a history back-fill inserts older lines above it,
 	// and a demoted line must not keep the shimmer
 	const first = document.querySelector("#m-log-text > *");
-	for (const el of document.querySelectorAll("#m-log-text > .pulse")) el.classList.toggle("pulse", on && el === first);
+	for (const el of document.querySelectorAll("#m-log-text > *")) el.classList.toggle("pulse", on && el === first);
 }
 const atBottom = () => { const p = logPane(); return p.scrollTop + p.clientHeight >= p.scrollHeight - 4; };
 // the live auto-scroll glides to the bottom, an instant auto scroll under reduced motion
