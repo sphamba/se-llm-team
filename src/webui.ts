@@ -865,9 +865,11 @@ export function agentStatsText(tokens, duration) {
 
 // the summary card's stats line under the chips: totals across all agent entries, input + output
 // tokens and durations summed per entry (#178), the same agentStatsText format the agent cards'
-// stats lines use; hidden when the task has no entries or both totals are 0/null
+// stats lines use; hidden when no entry carries a usage record (#183, usage-less logs and live
+// runs before their first usage record), or the task has no entries, or both totals are 0/null
 export function taskStatsText(t) {
 	const agents = t.agents || [];
+	if (!agents.some((a) => typeof a.tokens === "number" && Number.isFinite(a.tokens))) return "";
 	const toks = agents.reduce((s, a) => s + (typeof a.tokens === "number" ? a.tokens : 0), 0);
 	const dur = agents.reduce((s, a) => s + (typeof a.duration === "number" ? a.duration : 0), 0);
 	if (!toks && !dur) return "";
