@@ -941,7 +941,13 @@ assert.ok(page.includes("function markLiveLine()"), "the page wires the live fir
 // the toggle walks every direct child, not the already-pulsed nodes: a list of .pulse elements
 // alone never adds the class, so a fresh log's first line would never engage the shimmer
 assert.ok(page.includes('for (const el of document.querySelectorAll("#m-log-text > *")) el.classList.toggle("pulse", on && el === first)'), "the pulse engages on a fresh first line, walking the direct children");
-assert.ok(page.includes("markLiveLine();"), "pullLog and closeLog drive the pulse");
+assert.ok(page.includes("markLiveLine();"), "pullLog, closeLog, pollLog's idle stop and the refresh drive the pulse");
+// 000191: the death sweep, the two paths that observe the run's death clear the pulse without a
+// close/reopen: the refresh's open-card update (the same pass that drops the dead run's .spin)
+// and pollLog's idle early-return (which stops the timer before pullLog could sweep)
+assert.ok(upd.includes("markLiveLine();"), "the refresh's open-card update sweeps the pulse when the run dies");
+const idleStop = pollSrc.match(/if \(!live && logState\.idle\) \{[\s\S]*?\n\t\}/)![0];
+assert.ok(idleStop.includes("markLiveLine();"), "pollLog sweeps the pulse when the idle early-return stops the timer on a dead run");
 
 // 000142 the poll refresh updates the agent row in place: an unchanged run set moves only the
 // cards' .agent-stats text, so the live run's .spin node keeps its animation across the poll; a
