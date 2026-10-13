@@ -532,7 +532,7 @@ assert.ok(cardHtml({ file: "000005_e.md", name: "e", priority: "low", complexity
 // format; hidden with no entries or both totals 0/null
 assert.ok(cardHtml({ file: "000007_g.md", name: "g", priority: "low", agents: [{ tokens: 420, duration: 1500 }, { tokens: 1580, duration: 2000 }] }, "doing").includes('<span class="card-stats">2k · 4s</span>'), "a card sums its agent entries' tokens and durations into the stats line");
 assert.ok(!cardHtml({ file: "000008_h.md", name: "h", priority: "low" }, "doing").includes("card-stats"), "a card without agent entries renders no stats line");
-assert.ok(!cardHtml({ file: "000009_i.md", name: "i", priority: "low", agents: [{ tokens: null, duration: 1500 }, { duration: 2000 }] }, "doing").includes("card-stats"), "a card whose agent entries carry durations but no usage renders no stats line (000183)"),
+assert.ok(!cardHtml({ file: "000009_i.md", name: "i", priority: "low", agents: [{ tokens: null, duration: 1500 }, { duration: 2000 }] }, "doing").includes("card-stats"), "a card whose agent entries carry durations but no usage renders no stats line (000183)");
 assert.ok(page.includes(".card-stats {"), "the card stats line style ships in the page css");
 
 // relation lines: one dashed curve per stored relation between rendered cards, running from the
