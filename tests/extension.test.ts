@@ -162,7 +162,8 @@ assert.match(sent[1].message.content, /second/);
 assert.deepEqual(sent[0].options, { triggerTurn: true }, "an idle session gets the report as its next turn");
 assert.ok(!existsSync(reportOld) && !existsSync(reportNew), "delivered reports are deleted");
 assert.ok(!existsSync(staleReport), "a stale report is discarded at startup");
-// drop the dir so the later scenarios run without a live reports watcher interfering
+// the single reports watcher was claimed by the first session_start (it watches the main
+// fixture), so this dir is only exercised through the explicit session_start drains below
 rmSync(reportsPath, { recursive: true, force: true });
 // a busy session gets the report as a follow-up instead of a turn trigger
 mkdirSync(reportsPath, { recursive: true });
