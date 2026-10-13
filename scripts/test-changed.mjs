@@ -11,6 +11,7 @@ const RULES = [
 	[/^src\/pid\.ts$/, ["tests/orchestrator.test.ts"]],
 	[/^agents\/.*\.md$/, ["tests/orchestrator.test.ts"]],
 	[/^src\/webui\.ts$/, ["tests/webui.test.ts"]],
+	[/^src\/webui\/.+\.ts$/, ["tests/webui.test.ts"]],
 	[/^src\/kanban\.ts$/, ["tests/kanban.test.ts", "tests/orchestrator.test.ts", "tests/webui.test.ts"]],
 	[/^src\/hub\.ts$/, ["tests/orchestrator.test.ts", "tests/webui.test.ts"]],
 	[/^index\.ts$/, ["index.test.ts", "tests/extension.test.ts"]],
