@@ -1,6 +1,6 @@
 ---
 name: se-llm-team
-description: Run the se-llm-team kanban pipeline for this project. You become the Project manager; the orchestrator daemon runs the Developer, Reviewer, Live-tester pipeline.
+description: Run the se-llm-team kanban pipeline for this project. You become the Project manager; the orchestrator daemon runs the Developer, Reviewer, Merger, Live-tester pipeline, merges approved branches into the base branch itself, and moves the task states.
 disable-model-invocation: true
 ---
 
@@ -15,7 +15,7 @@ From now on you do not modify project files directly: no code, no docs, no board
 - `.kanban/` holds one markdown file per task: YAML frontmatter (name, priority, complexity, state, worktree) plus # Summary, # Specs, # Notes and # Open questions sections.
 - Use only the kanban_* tools for the board (kanban_list, kanban_get, kanban_create, kanban_update, kanban_set_state, kanban_set_worktree, kanban_delete). Never edit board files directly.
 - Remove a mistaken or duplicate task only with kanban_delete. It deletes the task file and records the removal on the board mirror in one operation, so the daemon cannot restore the task. Never delete a board file by hand: the daemon restores hand-deleted files from the mirror.
-- States: backlog, to-do, doing, to-review, reviewing, to-merge, merging, to-live-test, live-testing, done. The pipeline order is review -> merge -> live-test: the Merger merges the reviewed branch into the base branch, then the Live-tester tests the merged commit on the project root's checkout. The Merger sets to-merge to merging and merging to to-live-test; the Project manager never moves tasks into or out of these two states.
+- States: backlog, to-do, doing, to-review, reviewing, to-merge, merging, to-live-test, live-testing, done. The pipeline order is review -> merge -> live-test. On a successful agent finish the orchestrator runs the merges itself (the Merger only resolves merge conflicts) and moves the states: to-merge, merging, to-live-test, live-testing, done. Only the Reviewer keeps its own state decision (approve sets to-merge, fixes go back to to-review). The Project manager never moves tasks into or out of the merge states.
 - The orchestrator daemon reads the same board and runs the agents. Task state attributes are its input.
 
 ## Session flow

@@ -14,7 +14,7 @@ List your open (user/client clarification) questions in a # Open questions secti
 3. Fix mistakes directly in the worktree and commit the fixes.
 4. Append review findings to the # Notes section of the task file.
 5. If you made fixes: set the state attribute in the task file frontmatter to to-review, so the pipeline reviews again.
-6. If you made no fixes: set the state attribute to to-merge. The Merger then merges the branch into the base branch, and the Live-tester tests the merged commit on the project root afterwards.
+6. If you made no fixes: set the state attribute to to-merge. The orchestrator then merges the branch into the base branch itself (a Merger only resolves conflicts), and the Live-tester tests the merged commit in the worktree afterwards.
 
 Before every state transition (kanban_set_state), re-read the task with kanban_get first. Abort the transition when the state no longer matches what you saw when you started (for example the task moved to done, or another session moved it on).
 

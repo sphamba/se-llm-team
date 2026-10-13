@@ -7,11 +7,22 @@ export const pidPath = (root: string, name: string) => join(kanbanDir(root), ".p
 // /proc/<pid>/stat field 22 (starttime, ticks since boot): a discriminator that survives pid
 // reuse, since a recycled pid starts at a different tick. comm (field 2) can contain spaces
 // and parens, so parse after the last ')'; fields[0] after it is state (field 3), which puts
-// field 22 at index 19. Null when /proc is unreadable (non-Linux)
+// field 22 at index 19 and pgrp (field 5) at index 2. Null when /proc is unreadable (non-Linux)
 function procStartTicks(pid: number): string | null {
 	try {
 		const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
 		return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? null;
+	} catch {
+		return null;
+	}
+}
+
+// process-group id (field 5): equal to the pid only when the process leads its own group,
+// which every detached agent spawn does (the sh wrapper heads a fresh group)
+function procPgrp(pid: number): string | null {
+	try {
+		const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+		return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2] ?? null;
 	} catch {
 		return null;
 	}
@@ -84,4 +95,26 @@ export function pidEntry(root: string, name: string): { pid: number; disc: strin
 export function agentAlive(root: string, name: string): boolean {
 	const { pid, disc } = pidEntry(root, name);
 	return pidAlive(pid, disc);
+}
+
+// kill a spawned agent: the pid file names the sh wrapper (the exit-code recorder), so a bare
+// pid kill would orphan the real agent running under it. When the pid leads its own process
+// group (every detached agent spawn does), signal the whole group; a hand-written pid file
+// can name a non-leader (a test's own child), so the pgrp read keeps the group kill precise.
+// Falls back to the single pid when /proc is unreadable (non-Linux)
+export function killTree(pid: number, signal: NodeJS.Signals = "SIGTERM"): boolean {
+	if (procPgrp(pid) === String(pid)) {
+		try {
+			process.kill(-pid, signal);
+			return true;
+		} catch {
+			/* group gone: fall through to the single-pid kill */
+		}
+	}
+	try {
+		process.kill(pid, signal);
+		return true;
+	} catch {
+		return false; // already gone
+	}
 }

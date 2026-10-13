@@ -48,12 +48,12 @@ function clearMergerAttempt(root: string, slug: string): void {
 		/* already gone */
 	}
 }
-// the to-merge sweep, replacing merge-on-done: a task the reviewer passed (approval, or the
-// per-complexity cap advance) sits in to-merge until a Merger merges main into the branch
-// worktree and then the branch into main. One merger per project (the global pid file,
-// spawned one at a time by the sequential sweep); the task's own agent may still be writing
-// its report, so the spawn defers while that pid lives. The task moves to merging at spawn;
-// a merger that requeues the task re-runs only after the idle cooldown.
+// the to-merge sweep: a task the reviewer passed sits in to-merge until the orchestrator
+// merges main into the branch worktree, then the branch into main, then syncs the branch with
+// --ff-only and sets to-live-test. No merger agent runs on this clean path. On conflicts the
+// merge stays in progress in the worktree and a Merger (cwd = the worktree, pidName merger)
+// resolves only the conflicts and commits; its successful exit requeues the task to to-merge
+// through the poll, and the retry waits for the idle cooldown
 function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	const slug = taskSlug(task.file);
 	// a reviewer approval is a successful run too: consume the armed marker here, since the
@@ -64,7 +64,7 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	// at most one merger at a time, project-wide
 	if (agentAlive(root, "merger")) return;
 	// a task bounced here past the respawn cap (dead merger) also waits for the idle
-	// cooldown before its merger spawns
+	// cooldown before its merge runs
 	if (deadCooldownActive(root, cfg, task)) return;
 	// an earlier attempt on this task failed and requeued it: retry only after it sat idle in
 	// to-merge for the idle interval. Read before any write: ensureWorktree/setWorktree bump the
@@ -79,22 +79,50 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 		return;
 	}
 	const ensured = ensureWorktree(root, task);
-	// a failed spawn would strand the task; leave the state for the next rescan to retry
+	// a failed worktree creation would strand the task; leave the state for the next rescan to retry
 	if (!ensured) {
-		log(root, `${task.file}: worktree could not be created, merger not spawned (state unchanged)`);
+		log(root, `${task.file}: worktree could not be created, merge not started (state unchanged)`);
 		return;
 	}
-	mkdirSync(join(kanbanDir(root), ".pids"), { recursive: true });
-	writeFileSync(mergerAttemptPath(root, slug), "");
-	setMergerLogSlug(slug);
-	spawnAgent(root, cfg, "merger", { ...task, worktree: ensured.wt }, root, "merger");
-	setState(root, task, "merging");
+	// step 1: merge main into the branch, in the worktree
+	if (git(ensured.wtDir, ["merge", "--no-edit", "main"]) === null) {
+		// a failed merge that left MERGE_HEAD is a conflict: leave the merge in progress (no
+		// abort) and let the merger resolve only the conflicts; any other failure (dirty
+		// worktree, missing ref) requeues for a later sweep with no merger
+		mkdirSync(join(kanbanDir(root), ".pids"), { recursive: true });
+		writeFileSync(mergerAttemptPath(root, slug), "");
+		if (git(ensured.wtDir, ["rev-parse", "--verify", "-q", "MERGE_HEAD"], true) !== null) {
+			log(root, `${task.file}: merge conflicts, merger spawned to resolve them`);
+			setMergerLogSlug(slug);
+			spawnAgent(root, cfg, "merger", { ...task, worktree: ensured.wt }, ensured.wtDir, "merger");
+			setState(root, task, "merging");
+		} else {
+			log(root, `${task.file}: merge into the worktree failed, left in to-merge for the retry`);
+		}
+		return;
+	}
+	// step 2: merge the branch into main, at the project root
+	if (git(root, ["merge", "--no-edit", ensured.wt]) === null) {
+		// rare (main moved between the two steps, or a dirty root checkout): abort and requeue
+		// for the retry after the idle cooldown
+		git(root, ["merge", "--abort"], true);
+		writeFileSync(mergerAttemptPath(root, slug), "");
+		log(root, `${task.file}: merge into main failed, left in to-merge for the retry`);
+		return;
+	}
+	// step 3: sync the branch to the merged commit so the live test runs the merged code; a
+	// no-op when the root merge was a fast-forward. The worktree stays: only doneCleanup deletes it
+	if (git(ensured.wtDir, ["merge", "--ff-only", "main"], true) === null) {
+		log(root, `${task.file}: branch sync to main failed; the live test runs the branch tip`);
+	}
+	setState(root, task, "to-live-test");
+	log(root, `${task.file}: merged into main, set to-live-test`);
 }
 
-// a done task's worktree and branch: the Merger merged the branch into main before setting
-// to-live-test and the live test passed, so cleanup is all that is left here. -d refuses an
-// unmerged branch, so a manual done with unfinished work keeps both branch and worktree for
-// a manual merge.
+// a done task's worktree and branch: the orchestrator merged the branch into main before
+// setting to-live-test and the live test passed, so cleanup is all that is left here. -d
+// refuses an unmerged branch, so a manual done with unfinished work keeps both branch and
+// worktree for a manual merge.
 function doneCleanup(root: string, task: Task): void {
 	const wt = task.worktree;
 	if (!wt) return;
@@ -130,9 +158,12 @@ function deadCooldownActive(root: string, cfg: Config, task: Task): boolean {
 
 // stale per-task merger pid leftovers (the old per-task merger scheme, e.g. 000038.merger.pid):
 // current code reads only the global merger pid, so a leftover is dead weight. Drop each one
-// whose process is dead; a live pid keeps its file, and a task still in merging is skipped
+// whose process is dead; a live pid keeps its file, and a task still in merging is skipped.
+// Exit-code files the poll never consumed (the task vanished mid-run) drop with their name:
+// the next spawn clears its own exit file, so only orphaned names are swept here
 function janitorPids(root: string, tasks: Task[]): void {
 	const merging = new Set(tasks.filter((t) => t.state === "merging").map((t) => taskSlug(t.file)));
+	const slugs = new Set(tasks.map((t) => taskSlug(t.file)));
 	let files: string[] = [];
 	try {
 		files = readdirSync(join(kanbanDir(root), ".pids"));
@@ -140,6 +171,18 @@ function janitorPids(root: string, tasks: Task[]): void {
 		return; // no .pids dir yet
 	}
 	for (const f of files) {
+		if (f.endsWith(".exit")) {
+			const name = f.slice(0, -".exit".length);
+			// "merger.exit" clears itself at the next merger spawn; a task slug with no board
+			// task is an orphan
+			if (name === "merger" || slugs.has(name)) continue;
+			try {
+				rmSync(join(kanbanDir(root), ".pids", f));
+			} catch {
+				/* already gone */
+			}
+			continue;
+		}
 		if (!f.endsWith(".merger.pid")) continue;
 		const name = f.slice(0, -".pid".length); // "<slug>.merger"
 		if (merging.has(name.slice(0, -".merger".length))) continue;
@@ -221,28 +264,32 @@ export function rescan(root: string, cfg: Config): void {
 			} else if (task.state === "to-live-test" && !deadCooldownActive(root, cfg, task)) {
 				const slug = taskSlug(task.file);
 				consumeReviewerRun(root, slug);
-				// the live test runs on the merged commit on main, not the feature worktree: an
-				// unmerged branch (in-flight task from a daemon still on the old order, or a manual
-				// placement) or a task with no worktree at all goes to the merger first, so main
-				// never gets tested without this task's merged change
+				// the live test runs on the merged commit, which the orchestrator synced into the
+				// branch: an unmerged branch (in-flight task from a daemon still on the old order, or
+				// a manual placement) or a task with no worktree at all goes back to to-merge first,
+				// so main never gets tested without this task's merged change
 				if (!task.worktree || git(root, ["merge-base", "--is-ancestor", task.worktree, "HEAD"], true) === null) {
 					setState(root, task, "to-merge");
-					log(root, task.worktree ? `${task.file}: branch not merged yet, moving to to-merge for the merger` : `${task.file}: no worktree, moving to to-merge for the merger`);
+					log(root, task.worktree ? `${task.file}: branch not merged yet, moving to to-merge for the orchestrator merge` : `${task.file}: no worktree, moving to to-merge for the orchestrator merge`);
 				} else if (!agentAlive(root, "merger") && !pidAlive(agentPid(root, slug))) {
 					// a live merger would change main under the test (and may still be writing its
 					// report), and a stale agent for this task may still write the task file: defer
 					// the spawn to a later sweep
-					setState(root, task, "live-testing");
-					spawnAgent(root, cfg, "live-tester", task, root);
+					const ensured = ensureWorktree(root, task);
+					if (!ensured) log(root, `${task.file}: worktree could not be created, live-tester not spawned (state unchanged)`);
+					else {
+						setState(root, task, "live-testing");
+						spawnAgent(root, cfg, "live-tester", { ...task, worktree: ensured.wt }, ensured.wtDir);
+					}
 				}
 			} else if (task.state === "to-merge") {
 				sweepToMerge(root, cfg, task);
 			} else if (task.state === "merging") {
 				// its merger runs: the liveness poll requeues the task when the merger dies
 			} else if (task.state === "done") {
-				// cleanup always runs for a done worktree task (the merger merged before setting
-				// to-live-test and the live test passed, so only the worktree/branch removal is
-				// left); the commit is gated on the file actually differing from the mirror, since
+				// cleanup always runs for a done worktree task (the orchestrator merged before setting
+				// to-live-test and the live test passed, so only the worktree/branch removal is left);
+				// the commit is gated on the file actually differing from the mirror, since
 				// an unchanged done task would otherwise issue a whole-board commit every sweep and
 				// fold other tasks' pending changes under its label
 				doneCleanup(root, task);

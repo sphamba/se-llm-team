@@ -1,20 +1,22 @@
-import { statSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getTask, kanbanDir, listAll, setState, taskSlug, type Task, type TaskState } from "../kanban.ts";
-import { clearPid, pidAlive, pidEntry } from "../pid.ts";
+import { clearPid, killTree, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP } from "./config.ts";
-import { bumpCounter, compactFinishedLogs, counterPath, log, logPath, nextRunIndex, readCounter } from "./log.ts";
-import { getMergerLogSlug } from "./spawn.ts";
+import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, logPath, nextRunIndex, readCounter } from "./log.ts";
+import { clearExitFile, getMergerLogSlug, readExitCode } from "./spawn.ts";
 import { dropDoneBlockers, promoteBacklog } from "./pipeline.ts";
 
 // the working states with an agent out: next is the one-state-back bounce target when the
-// agent dies, role is the agent role whose per-run log (.kanban/.logs/<slug>.<role>.<n>.log)
-// the stall check samples
-const WORKING_STATES: Partial<Record<TaskState, { next: TaskState; role: string }>> = {
-	doing: { next: "to-do", role: "developer" },
-	reviewing: { next: "to-review", role: "reviewer" },
-	"live-testing": { next: "to-live-test", role: "live-tester" },
-	merging: { next: "to-merge", role: "merger" },
+// agent dies, success is the state the orchestrator moves the task to on a successful finish
+// (exit 0), role is the agent role whose per-run log (.kanban/.logs/<slug>.<role>.<n>.log)
+// the stall check samples. The reviewer has no success move: it sets the state itself via
+// kanban_set_state, so the orchestrator leaves the task for the PM on its exit-0 finish
+const WORKING_STATES: Partial<Record<TaskState, { next: TaskState; success: TaskState | null; role: string }>> = {
+	doing: { next: "to-do", success: "to-review", role: "developer" },
+	reviewing: { next: "to-review", success: null, role: "reviewer" },
+	"live-testing": { next: "to-live-test", success: "done", role: "live-tester" },
+	merging: { next: "to-merge", success: "to-merge", role: "merger" },
 };
 
 // a live-but-hung agent passes pidAlive forever: the stall check kills it by its log instead
@@ -66,11 +68,7 @@ function bounceDead(root: string, task: Task, next: TaskState, pidName: string, 
 	const slug = taskSlug(task.file);
 	dropLogSamples(slug);
 	if (kill) {
-		try {
-			process.kill(pid, "SIGTERM");
-		} catch {
-			/* already gone */
-		}
+		killTree(pid);
 	}
 	clearPid(root, pidName);
 	// re-read + state-match: a task that moved on underneath (agent, PM or user) wins
@@ -88,6 +86,15 @@ function bounceDead(root: string, task: Task, next: TaskState, pidName: string, 
 	// logged once at cap+1, like the old give-up line
 	if (bumpCounter(root, `${slug}.dead`) === RESPAWN_CAP + 1) {
 		log(root, `${slug}: agent died ${RESPAWN_CAP}+ times; respawn waits for the idle cooldown (state ${next})`);
+	}
+}
+
+// a completed run re-arms the death streak: without the clear, a stale pidfile (or the
+// poll's own exit-0 handling) would defer a later reviewer or merger spawn by a stale cooldown
+function clearDeadStreak(root: string, slug: string): void {
+	if (readCounter(root, `${slug}.dead`) > 0) {
+		writeFileSync(counterPath(root, `${slug}.dead`), "0");
+		log(root, `${slug}: run completed, cleared the dead-agent counter`);
 	}
 }
 
@@ -124,9 +131,23 @@ export function poll(root: string, stallMinutes: number, now = Date.now()): void
 				}
 				continue;
 			}
-			// a dead or missing pid: the dead-pid path owns the task, its stall samples are dropped
+			// a dead or missing pid: the exit file decides between a successful finish and a crash
 			dropLogSamples(slug);
 			const hadPid = pid > 0;
+			const code = readExitCode(root, pidName);
+			// an armed reviewer's run just ended (this dead pid is the armed reviewer's): consume
+			// the marker here, so the pid-file clear below cannot lose the count before a sweep's
+			// consume runs (the approval lands the task in to-merge, where the poll is the first
+			// to see the run end). Counted on a successful end (exit 0) only, like the sweeps
+			try {
+				if (pid > 0 && parseInt(readFileSync(armedPath(root, slug), "utf8").trim(), 10) === pid) {
+					rmSync(armedPath(root, slug));
+					if (code === 0) bumpCounter(root, `${slug}.reviewer-runs`);
+				}
+			} catch {
+				/* no armed marker for this task */
+			}
+			clearExitFile(root, pidName);
 			clearPid(root, pidName);
 			if (!working) {
 				// a completed run leaves its stale pidfile behind, a bounce clears it first, so a
@@ -135,15 +156,34 @@ export function poll(root: string, stallMinutes: number, now = Date.now()): void
 				// wipe the counter of a past-cap task still waiting out its respawn cooldown
 				if (hadPid) {
 					ended = true;
-					if (readCounter(root, `${slug}.dead`) > 0) {
-						writeFileSync(counterPath(root, `${slug}.dead`), "0");
-						log(root, `${slug}: run completed, cleared the dead-agent counter`);
-					}
+					clearDeadStreak(root, slug);
 				}
 				continue;
 			}
-			// the bounce is unconditional: a frozen mid-flight task is worse than a bounced one
-			log(root, `${slug}: agent pid=${pid} dead without state update, ${task.state} -> ${working.next}`);
+			if (code === 0) {
+				// successful finish: the pid files are cleared before the state move, so an
+				// interleaving sweep cannot spawn the task's next agent and lose its pid file
+				ended = true;
+				if (working.success) {
+					// the orchestrator owns the state move (developer -> to-review, merger ->
+					// to-merge, live-tester -> done). Re-read + state-match: a task that moved on
+					// underneath (PM or user) wins
+					const fresh = getTask(root, task.file);
+					if (fresh && fresh.state === task.state) {
+						setState(root, fresh, working.success);
+						log(root, `${slug}: agent exited 0, ${task.state} -> ${working.success}`);
+					}
+				} else {
+					// the reviewer sets the state itself; exit 0 with the task still in reviewing
+					// means its state move never landed: leave the task for the PM, no orchestrator move
+					log(root, `${slug}: reviewer exited 0 with the task still in reviewing; left for the PM`);
+				}
+				clearDeadStreak(root, slug);
+				continue;
+			}
+			// non-zero or missing exit code: a crash, today's dead-pid bounce. The bounce is
+			// unconditional: a frozen mid-flight task is worse than a bounced one
+			log(root, code === null ? `${slug}: agent pid=${pid} dead without state update, ${task.state} -> ${working.next}` : `${slug}: agent pid=${pid} exited ${code} without success, ${task.state} -> ${working.next}`);
 			ended = true;
 			bounceDead(root, task, working.next, pidName, pid, false);
 		} catch (err) {
