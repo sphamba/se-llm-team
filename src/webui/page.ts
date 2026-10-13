@@ -108,17 +108,17 @@ body { display: flex; flex-direction: column; margin: 0; background: var(--bg); 
 /* 000147: buttons inherit the page font instead of the UA Arial default */
 button { font-family: inherit; }
 header { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 6px; background: var(--code-bg); }
-h1 { font-size: 16px; margin: 0; }
-#theme { margin-left: auto; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
+h1 { font-size: 18px; margin: 0; }
+#theme { margin-left: auto; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 14px; }
 #theme:hover { background: var(--hover); }
-#updated { font-size: 12px; color: var(--muted); }
+#updated { font-size: 14px; color: var(--muted); }
 /* 000165: the serving hub's identity, hidden until the first /api/hub answer fills it */
-#hub { padding: 2px 18px 8px; font-size: 11px; color: var(--muted); }
+#hub { padding: 2px 18px 8px; font-size: 13px; color: var(--muted); }
 #hub:empty { display: none; }
 /* 000091: a relative #tabs at z-index 1 keeps the bar above the overlay and clickable while a modal is open; 000119: #modal must sit above #tabs and #relations (both z-index 1) or the relation lines paint over it; 000124: the task cards stack at z-index 2, so #modal bumps to 3 */
 #tabs { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; }
 #tabs:empty { display: none; }
-.tab { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px 6px 0 0; padding: 4px 12px; font-size: 12px; cursor: pointer; }
+.tab { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px 6px 0 0; padding: 4px 12px; font-size: 14px; cursor: pointer; }
 .tab:hover { background: var(--hover); }
 .tab.active { border-color: var(--link); color: var(--link); }
 #board { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; padding: 10px 18px 18px; overflow-x: auto; align-items: flex-start; position: relative; }
@@ -135,7 +135,7 @@ none so the card clicks pass through */
 .col { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; border-top: 3px solid var(--ac); padding: 10px; min-width: 300px; flex: 1 0 300px; }
 /* 000096: as a .pair child the .col basis would act on the height axis and floor it at 300px */
 .pair .col { flex: 0 0 auto; }
-.col h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin: 0 0 10px; color: var(--heading); }
+.col h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .05em; margin: 0 0 10px; color: var(--heading); }
 .count { color: var(--faint); }
 /* 000124: positioned above the z-index-1 relation lines; the semi-transparent background lets a line passing under the card show through faintly (no --card var, --panel is the card's base color in both themes) */
 .card { position: relative; z-index: 2; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--border); border-left: 3px solid var(--ac); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
@@ -144,18 +144,18 @@ none so the card clicks pass through */
 creation and the page drops it on animationend, so a poll or a reorder never replays it */
 .card.enter { animation: cardIn var(--enter) ease-out; }
 @keyframes cardIn { from { opacity: 0; transform: translateY(3px); } }
-.name { font-size: 13px; line-height: 1.35; margin-bottom: 6px; }
+.name { font-size: 15px; line-height: 1.35; margin-bottom: 6px; }
 .num { color: var(--faint); margin-right: 4px; }
 .num-link { color: var(--link); cursor: pointer; }
 .num-link:hover { text-decoration: underline; }
 .spin { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border: 2px solid var(--border); border-top-color: var(--fg); border-radius: 50%; vertical-align: -1px; animation: spin .9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } #relations path { animation: none; } }
-.chip { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: var(--border); color: var(--soft); }
+.chip { font-size: 12px; padding: 1px 7px; border-radius: 999px; background: var(--border); color: var(--soft); }
 .chip.issuer { background: var(--code-bg); color: var(--muted); }
 .chip.cx { background: var(--code-bg); color: var(--muted); }
 .issued { color: var(--muted); }
-.card-stats { display: block; font-size: 10px; color: var(--muted); margin-top: 2px; }
+.card-stats { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
 .p-low { background: var(--low-bg); color: var(--low-fg); }
 .p-medium { background: var(--medium-bg); color: var(--medium-fg); }
 .p-high { background: var(--high-bg); color: var(--high-fg); }
@@ -166,17 +166,17 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .chip.cx-complex { background: var(--critical-bg); color: var(--critical-fg); }
 /* 000143: calm blue-grey tint with the theme foreground, readable in both themes */
 .chip.cx-trivial { background: rgba(100, 130, 165, .18); color: var(--fg); }
-.empty { font-size: 12px; color: var(--faint); }
-.toggle { display: block; width: 100%; margin-top: 2px; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
+.empty { font-size: 14px; color: var(--faint); }
+.toggle { display: block; width: 100%; margin-top: 2px; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 14px; }
 .toggle:hover { background: var(--hover); }
 /* 000120: each run as a card, its subagent cards stacked below it in the same column */
-.agent-card { display: block; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 12px; text-align: left; }
+.agent-card { display: block; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 14px; text-align: left; }
 .agent-card:hover { background: var(--hover); }
 /* 000191: a genuinely new run card rises in with the board cards' entrance */
 .agent-card.enter { animation: cardIn var(--enter) ease-out; }
 .agent-card-active { border-color: var(--link); background: var(--medium-bg); }
 .agent-dead { color: var(--critical-fg); }
-.agent-stats { display: block; font-size: 10px; color: var(--muted); margin-top: 2px; }
+.agent-stats { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
 .agent-col { display: flex; flex-direction: column; gap: 4px; }
 .agent-subs { display: flex; flex-direction: column; gap: 4px; }
 .agent-subs:empty { display: none; }
@@ -193,10 +193,10 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 /* 000194: the matching close, after the entrance rule so the equal-specificity logOut wins */
 #m-log.closing { animation: logOut var(--exit) ease-in forwards; }
 @keyframes logOut { to { opacity: 0; transform: translateY(4px); } }
-#m-log-meta { padding: 6px 10px 0; font-size: 10px; line-height: 1.45; color: var(--muted); }
+#m-log-meta { padding: 6px 10px 0; font-size: 12px; line-height: 1.45; color: var(--muted); }
 #m-log-meta.hidden { display: none; }
 /* the log text renders in the page's Inter stack; 000152: the size matches the card body text, only the line-height stays tuned for logs; blocks are collapsed <details> the client fills in */
-#m-log-text { margin: 0; padding: 8px 10px; font-size: 13px; line-height: 1.45; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; white-space: pre-wrap; overflow-wrap: break-word; }
+#m-log-text { margin: 0; padding: 8px 10px; font-size: 15px; line-height: 1.45; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; white-space: pre-wrap; overflow-wrap: break-word; }
 #m-log-text pre { font: inherit; margin: 0; padding: 0; white-space: pre-wrap; overflow-wrap: break-word; }
 #m-log-text details { margin: 2px 0; }
 #m-log-text summary { cursor: pointer; }
@@ -238,17 +238,17 @@ make the text vanish: the gradient drops and the solid color restores per block 
 @media (prefers-reduced-motion: reduce) { #m-log-text > .pulse { background-image: none; color: var(--fg); } #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { background-image: none; color: var(--muted); } }
 #m-box { background: var(--panel); border-radius: 10px; padding: 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
 #m-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-#m-head h2 { font-size: 15px; margin: 0; }
-#m-close { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 12px; }
+#m-head h2 { font-size: 17px; margin: 0; }
+#m-close { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 14px; }
 #m-close:hover { background: var(--hover); }
-#m-attrs { font-size: 12px; color: var(--soft); margin-bottom: 12px; }
+#m-attrs { font-size: 14px; color: var(--soft); margin-bottom: 12px; }
 #m-attrs div { padding: 3px 0; }
 #m-attrs span:not(.chip):not(.num-link) { display: inline-block; min-width: 80px; color: var(--faint); }
-#m-body { font-size: 13px; line-height: 1.5; }
-#m-body h1, #m-body h2, #m-body h3 { font-size: 13px; margin: 12px 0 4px; }
+#m-body { font-size: 15px; line-height: 1.5; }
+#m-body h1, #m-body h2, #m-body h3 { font-size: 15px; margin: 12px 0 4px; }
 #m-body ul { margin: 4px 0; padding-left: 20px; }
-#m-body pre { background: var(--code-bg); border-radius: 6px; padding: 8px 10px; overflow: auto; font-size: 12px; }
-#m-body code { background: var(--code-bg); border-radius: 4px; padding: 0 4px; font-size: 12px; }
+#m-body pre { background: var(--code-bg); border-radius: 6px; padding: 8px 10px; overflow: auto; font-size: 14px; }
+#m-body code { background: var(--code-bg); border-radius: 4px; padding: 0 4px; font-size: 14px; }
 #m-body pre code { padding: 0; background: none; }
 /* 000153: only inline and fenced code render monospace; the Thinking prose and the tool args/output pres are not code, so the bare #m-log-text pre stays outside this selector and inherits the Inter page font */
 #m-log-text code, #m-log-text pre code, #m-body code, #m-body pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }

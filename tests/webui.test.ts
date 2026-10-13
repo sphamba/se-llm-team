@@ -795,7 +795,7 @@ assert.ok(
 	"the detail card keeps the priority row with only the priority chip",
 );
 assert.ok(page.includes("#m-log.hidden { display: none; }"), "log pane hides");
-assert.ok(page.includes("#m-log-meta { padding: 6px 10px 0; font-size: 10px; line-height: 1.45; color: var(--muted); }") && page.includes("#m-log-meta.hidden { display: none; }"), "the log meta line renders muted grey and hides while no meta is available");
+assert.ok(page.includes("#m-log-meta { padding: 6px 10px 0; font-size: 12px; line-height: 1.45; color: var(--muted); }") && page.includes("#m-log-meta.hidden { display: none; }"), "the log meta line renders muted grey and hides while no meta is available");
 assert.ok(page.includes("/api/agent-log"), "page uses the agent log endpoint");
 assert.ok(page.includes('<span class="check">✓</span>'), "past agent buttons render a green checkmark");
 assert.ok(page.includes('<span class="cross">✗</span>'), "a dead run's card renders a cross instead of the check");
@@ -806,11 +806,17 @@ assert.ok(page.includes(".agent-card-active"), "the shown agent card gets an act
 // 000076: the small font belongs to the log text, not the selector cards; 000120: each run is a
 // bit larger card in one wrapping row of columns, the live run last, its subs stacked below it
 const agentCardCss = page.match(/\.agent-card \{[^}]*\}/)![0];
-assert.ok(agentCardCss.includes("font-size: 12px") && agentCardCss.includes("padding: 6px 10px"), ".agent-card is a bit larger than the old button");
+assert.ok(agentCardCss.includes("font-size: 14px") && agentCardCss.includes("padding: 6px 10px"), ".agent-card is a bit larger than the old button");
 // 000122: the log text renders in the page's sans serif stack, blocks are collapsed details;
 // 000152: the size matches the card body text, no smaller log font-size remains
 const logCss = page.match(/#m-log-text \{[^}]*\}/)![0];
-assert.ok(logCss.includes("font-size: 13px") && !/font-size: 1[0-2]px/.test(logCss), "the agent log text renders at the card body size, no smaller log font-size");
+assert.ok(logCss.includes("font-size: 15px") && !/font-size: 1[0-4]px/.test(logCss), "the agent log text renders at the card body size, no smaller log font-size");
+// 000196: every font-size grew 15%, rounded half up; the exact counts pin the mapping because
+// 12, 13 and 15 survive as values (10 -> 12, 11 -> 13, 13 -> 15), so absence checks cannot
+const sizeCounts = [...page.matchAll(/font-size: (\d+)px/g)].map((m) => m[1]);
+const gotSizes: Record<string, number> = {};
+for (const s of sizeCounts) gotSizes[s] = (gotSizes[s] ?? 0) + 1;
+assert.deepEqual(gotSizes, { "12": 4, "13": 1, "14": 11, "15": 4, "17": 1, "18": 1 }, "every served font-size matches the 15% rounded mapping (10->12, 11->13, 12->14, 13->15, 15->17, 16->18)");
 const logPaneCss = page.match(/#m-log \{[^}]*\}/)![0];
 assert.ok(logPaneCss.includes("max-height: 70vh"), "the log pane grows to 70vh so long logs show more content");
 // 000147: the no-monospace check stays scoped to this font-family declaration now that the code/pre rule adds monospace elsewhere
