@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { execSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
-import { createTask, getTask, listAll, listTasks, parseTask, setState, setWorktree, slugFile, slugWorktree, splitWorktreeRoot, taskFiles, taskNum, updateTask } from "../src/kanban.ts";
+import { createTask, getTask, listAll, listTasks, parseTask, resolveTaskFromCwd, setState, setWorktree, slugFile, slugWorktree, splitWorktreeRoot, taskFiles, taskNum, updateTask } from "../src/kanban.ts";
 
 const root = mkdtempSync(join(tmpdir(), "kanban-test-"));
 const fail = (msg: string) => {
@@ -110,6 +110,16 @@ assert.match(parseTask(root, t1.file).notes, /first note/);
 // get + listing granularities
 assert.equal(getTask(root, t1.file)?.name, "feat: nice thing");
 assert.equal(getTask(root, "000001"), undefined); // exact file names only
+
+// resolveTaskFromCwd: the task behind the cwd SPECS.md symlink (the orchestrator re-points it
+// in the worktree root), undefined without one
+const cwdRoot = mkdtempSync(join(tmpdir(), "kanban-cwd-"));
+const tCwd = createTask(cwdRoot, { name: "feat: cwd resolve", summary: "s", specs: "s" });
+assert.equal(resolveTaskFromCwd(cwdRoot), undefined, "no SPECS.md: no task");
+symlinkSync(join(".kanban", tCwd.file), join(cwdRoot, "SPECS.md"));
+assert.equal(resolveTaskFromCwd(cwdRoot)?.file, tCwd.file, "the task resolves through the SPECS.md symlink");
+assert.equal(resolveTaskFromCwd(cwdRoot)?.name, "feat: cwd resolve");
+rmSync(cwdRoot, { recursive: true, force: true });
 assert.equal(listAll(root).length, 2);
 setState(root, t2, "done");
 assert.deepEqual(listTasks(root, "done").map((t) => t.file), [t2.file]);

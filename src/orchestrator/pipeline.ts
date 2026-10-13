@@ -4,7 +4,7 @@ import { kanbanDir, getTask, listAll, setState, setWorktree, taskFiles, taskSlug
 import { agentAlive, agentPid, clearPid, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP, REVIEWER_RUN_CAP, type Config } from "./config.ts";
 import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, readCounter } from "./log.ts";
-import { setMergerLogSlug, spawnAgent } from "./spawn.ts";
+import { clearMergerSlug, spawnAgent, writeMergerSlug } from "./spawn.ts";
 import { boardStatus, commitKanban, ensureWorktree, git, reconcileBoard } from "./board.ts";
 
 // consumes the armed marker at the state the armed reviewer wrote itself (back to to-review,
@@ -101,7 +101,7 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 		writeFileSync(mergerAttemptPath(root, slug), "");
 		if (git(ensured.wtDir, ["rev-parse", "--verify", "-q", "MERGE_HEAD"], true) !== null) {
 			log(root, `${task.file}: merge conflicts, merger spawned to resolve them`);
-			setMergerLogSlug(slug);
+			writeMergerSlug(root, slug);
 			spawnAgent(root, cfg, "merger", { ...task, worktree: ensured.wt }, ensured.wtDir, "merger");
 			setState(root, task, "merging");
 		} else {
@@ -307,10 +307,13 @@ export function rescan(root: string, cfg: Config): void {
 			log(root, `error handling ${task.file} (${task.state}): ${err instanceof Error ? err.message : err}`);
 		}
 	}
-	// merger spawn bookkeeping: clear the global merger pid once no task is merging and the
-	// merger is gone; the failed-merge markers stay while their task waits, and are dropped once
-	// the task moved on (a successful merge ends in to-live-test)
-	if (!tasks.some((t) => t.state === "merging") && !agentAlive(root, "merger")) clearPid(root, "merger");
+	// merger spawn bookkeeping: clear the global merger pid and its slug file once no task is
+	// merging and the merger is gone; the failed-merge markers stay while their task waits, and
+	// are dropped once the task moved on (a successful merge ends in to-live-test)
+	if (!tasks.some((t) => t.state === "merging") && !agentAlive(root, "merger")) {
+		clearPid(root, "merger");
+		clearMergerSlug(root);
+	}
 	for (const task of tasks) {
 		if (task.state !== "to-merge" && task.state !== "merging") clearMergerAttempt(root, taskSlug(task.file));
 	}
