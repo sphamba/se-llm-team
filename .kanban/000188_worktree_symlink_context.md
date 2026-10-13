@@ -30,7 +30,7 @@ Following #187, symlink the task file as SPECS.md and the role notes as AGENTS.m
 
 ## Prompt plumbing (renderPrompt, spawnAgent, agents/*.md)
 - Drop the --append-system-prompt flag from spawnAgent; the AGENTS.md symlink replaces it.
-- No path placeholder survives: {{TASK_FILE}}, {{NAME}} and {{PRIORITY}} are all dropped. The header line becomes "Task file: SPECS.md in your cwd (the task file in the main checkout)"; the task-file-exception and open-questions paragraphs reference SPECS.md. State moves and notes updates call the kanban tools with no file argument.
+- No path placeholder survives: {{TASK_FILE}}, {{NAME}} and {{PRIORITY}} are all dropped. The header line becomes "Task file: SPECS.md in your cwd (the task file in the main checkout)"; the task-file-exception and open-questions paragraphs reference SPECS.md. Per #187 only the reviewer keeps state moves: its kanban_get and kanban_set_state calls take no file argument (resolved from the cwd SPECS.md). Notes and open-question edits are file edits on SPECS.md.
 - renderPrompt loses the {{ROOT}} (except the reviewer, see below), {{TASK_FILE}}, {{WORKTREE}}, {{WORKTREE_NAME}}, {{NAME}} and {{PRIORITY}} replaceAll lines.
 - {{WORKTREE}} -> cwd prose ("work only here / in the worktree you run in").
 - {{WORKTREE_NAME}} in agents/merger.md -> the merger resolves its branch with git branch --show-current in its cwd; the {{ROOT}}/.worktrees path templates disappear (after #187 the merger touches only its worktree).
