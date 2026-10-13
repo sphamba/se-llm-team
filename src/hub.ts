@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isLinkedWorktree, splitWorktreeRoot } from "./kanban.ts";
 import { pidAlive } from "./pid.ts";
 
 // Hub backend: daemons register on spawn, the hub is elected by a lock race, the registry is
@@ -182,21 +183,6 @@ export function currentCommit(root: string): string {
 		return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 	} catch {
 		return "";
-	}
-}
-
-// 000168: whether root is a linked git worktree, decided by git topology, not path segments:
-// a linked worktree's git dir is a per-worktree dir, not the common dir. A main checkout, a
-// subdir of one, a separate-git-dir checkout and a non-git root all match and stay production,
-// so a worktree created anywhere (not just under .worktrees) is caught
-export function isLinkedWorktree(root: string): boolean {
-	try {
-		const rev = (arg: string): string =>
-			execFileSync("git", ["rev-parse", arg], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-		const abs = (out: string): string => (isAbsolute(out) ? out : join(root, out));
-		return realpathSync(abs(rev("--git-dir"))) !== realpathSync(abs(rev("--git-common-dir")));
-	} catch {
-		return false;
 	}
 }
 

@@ -1,5 +1,6 @@
-import { mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, join, sep } from "node:path";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, isAbsolute, join, sep } from "node:path";
 
 export const STATES = [
 	"backlog",
@@ -75,6 +76,22 @@ export function splitWorktreeRoot(root: string): [string, string] | null {
 	const i = parts.indexOf(".worktrees");
 	if (i < 1) return null;
 	return [parts.slice(0, i).join(sep), parts.slice(i + 1).join(sep)];
+}
+
+// whether root is a linked git worktree, decided by git topology, not path segments: a linked
+// worktree's git dir is a per-worktree dir, not the common dir. A main checkout, a subdir of
+// one, a separate-git-dir checkout and a non-git root all match and stay production, so a
+// worktree created anywhere (not just under .worktrees) is caught. Shared by the hub
+// candidacy rule, the PM report gate and the worktree self-reap
+export function isLinkedWorktree(root: string): boolean {
+	try {
+		const rev = (arg: string): string =>
+			execFileSync("git", ["rev-parse", arg], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+		const abs = (out: string): string => (isAbsolute(out) ? out : join(root, out));
+		return realpathSync(abs(rev("--git-dir"))) !== realpathSync(abs(rev("--git-common-dir")));
+	} catch {
+		return false;
+	}
 }
 
 export function taskFiles(root: string): string[] {

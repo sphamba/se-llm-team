@@ -1,6 +1,6 @@
-import { execFileSync, execSync, spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { kanbanDir, setWorktree, slugWorktree, taskFiles, type Task } from "../kanban.ts";
 import { pidAlive } from "../pid.ts";
 import { bumpCounter, counterPath, log, readCounter } from "./log.ts";
@@ -202,58 +202,6 @@ export function boardStatus(root: string, files: string[]): Map<string, string> 
 	return status;
 }
 
-// board-feed wait for the extension's orchestrator_wait tool: polls the meta/kanban mirror
-// for new kanban: create/done commits. The feed resolves from the git common dir (the main
-// checkout's .git even when the session cwd is a task worktree, whose HEAD is pinned at its
-// branch tip), so every wait sees the main checkout's board commits from any session cwd.
-// Returns the new subjects, or [] on timeout/abort; clamps the timeout to 1-900s.
-export async function waitForBoardCommits(cwd: string, timeoutSeconds: number | undefined, signal?: AbortSignal): Promise<string[]> {
-	const timeout = Math.min(900, Math.max(1, timeoutSeconds ?? 300)) * 1000;
-	const started = Date.now();
-	let feedRoot = cwd;
-	try {
-		const common = execSync("git rev-parse --path-format=absolute --git-common-dir", { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-		if (common) feedRoot = dirname(common);
-	} catch {
-		/* not a git repo: the feed resolution below fails and the wait times out */
-	}
-	const revParse = () => {
-		try {
-			return execSync(`git rev-parse ${KANBAN_REF}`, { cwd: feedRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-		} catch {
-			return "";
-		}
-	};
-	const baseline = revParse();
-	while (Date.now() - started < timeout) {
-		const head = revParse();
-		// no baseline ref at start: the whole mirror appeared during the wait, so all its commits are new
-		if (head && head !== baseline) {
-			try {
-				const subjects = execSync(`git log --format=%s ${baseline ? baseline + ".." : ""}${KANBAN_REF}`, {
-					cwd: feedRoot,
-					encoding: "utf8",
-					stdio: ["ignore", "pipe", "pipe"],
-				})
-					.split("\n")
-					.filter((s) => s.startsWith("kanban: done ") || s.startsWith("kanban: create "));
-				if (subjects.length) return subjects;
-			} catch {
-				/* mirror ref vanished, keep waiting */
-			}
-		}
-		const remaining = started + timeout - Date.now();
-		await new Promise<void>((resolve) => {
-			const timer = setTimeout(resolve, Math.min(2000, remaining));
-			signal?.addEventListener("abort", () => {
-				clearTimeout(timer);
-				resolve();
-			}, { once: true });
-		});
-		if (signal?.aborted) break;
-	}
-	return [];
-}
 // the worktree board is a symlink to the shared root board; hide it from the
 // worktree's git (skip-worktree on the stale tracked entries, per-worktree
 // excludesFile for the symlink itself) so merges never carry board changes

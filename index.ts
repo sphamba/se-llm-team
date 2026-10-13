@@ -1,13 +1,14 @@
 import { execFileSync, spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, watch, type FSWatcher } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, type FSWatcher } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { createTask, getTask, kanbanDir, listAll, listTasks, resolveTaskFromCwd, setState, setWorktree, taskNum, updateTask, STATES, type TaskState } from "./src/kanban.ts";
+import { createTask, getTask, isLinkedWorktree, kanbanDir, listAll, listTasks, resolveTaskFromCwd, setState, setWorktree, taskNum, updateTask, STATES, type TaskState } from "./src/kanban.ts";
 import { pidAlive } from "./src/pid.ts";
-import { removeTask, waitForBoardCommits } from "./src/orchestrator.ts";
+import { removeTask } from "./src/orchestrator.ts";
+import { REPORT_MAX_AGE_MS, reportsDir } from "./src/orchestrator/report.ts";
 
 function text(s: string) {
 	return { content: [{ type: "text" as const, text: s }], details: undefined };
@@ -248,22 +249,6 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerTool({
-		name: "orchestrator_wait",
-		label: "Orchestrator wait",
-		description:
-			"Wait for the orchestrator to record new board commits (kanban: create / kanban: done) on the meta/kanban branch. Blocks up to the timeout, then reports what changed. No update before the timeout is normal.",
-		parameters: Type.Object({
-			timeoutSeconds: Type.Optional(Type.Number({ description: "Seconds to block, 1-900 (default 300)" })),
-		}),
-		async execute(_id, params, signal, _onUpdate, ctx) {
-			const started = Date.now();
-			const subjects = await waitForBoardCommits(ctx.cwd, params.timeoutSeconds, signal);
-			if (subjects.length) return text(subjects.join("\n"));
-			return text(`No board commits in ${Math.round((Date.now() - started) / 1000)}s.`);
-		},
-	});
-
 	// progress notifications for the PM session: tell the user when a task reaches done.
 	// Attached lazily (the board may only be created later in the session) and seeded with
 	// tasks already done, so only done-transitions after the attach notify.
@@ -283,10 +268,80 @@ export default function (pi: ExtensionAPI) {
 			/* no board watching in this session */
 		}
 	};
-	pi.on("session_start", (_event, ctx) => ensureBoardWatcher(ctx));
+	// PM report delivery: the orchestrator queues one report per done sweep in .kanban/.reports/.
+	// Every session watches the queue (same lifecycle as the board watcher); only the session at
+	// the repo root consumes it: a worktree session shares the board through the .kanban symlink,
+	// so the gate is the git-topology check of the hub candidacy rule. Consumption claims the
+	// oldest report by rename, sends it to the PM chat and deletes it: a second root session
+	// loses the rename and never double-sends
+	const canDeliver = (ctx: ExtensionContext) => ctx.hasUI && !isLinkedWorktree(ctx.cwd);
+	const deliverReport = (ctx: ExtensionContext, dir: string, file: string): boolean => {
+		const claim = join(dir, `${file}.claiming`);
+		try {
+			renameSync(join(dir, file), claim);
+		} catch {
+			return false; // another root session claimed it first
+		}
+		try {
+			pi.sendMessage({ customType: "board-report", content: readFileSync(claim, "utf8"), display: true }, ctx.isIdle() ? { triggerTurn: true } : { deliverAs: "followUp" });
+		} finally {
+			rmSync(claim, { force: true });
+		}
+		return true;
+	};
+	const consumeReports = (ctx: ExtensionContext) => {
+		if (!canDeliver(ctx)) return;
+		const dir = reportsDir(ctx.cwd);
+		for (;;) {
+			let oldest: string | undefined;
+			try {
+				oldest = readdirSync(dir).filter((f) => f.endsWith(".md")).sort()[0];
+			} catch {
+				return; // no reports dir in this session
+			}
+			if (!oldest || !deliverReport(ctx, dir, oldest)) return;
+		}
+	};
+	// session start at the repo root drains the queue: reports younger than the cutoff are
+	// delivered (oldest first), stale ones are deleted
+	const drainReports = (ctx: ExtensionContext) => {
+		if (!canDeliver(ctx)) return;
+		const dir = reportsDir(ctx.cwd);
+		let files: string[];
+		try {
+			files = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
+		} catch {
+			return; // no reports dir yet
+		}
+		const now = Date.now();
+		for (const f of files) {
+			try {
+				if (now - statSync(join(dir, f)).mtimeMs > REPORT_MAX_AGE_MS) rmSync(join(dir, f));
+				else deliverReport(ctx, dir, f);
+			} catch {
+				/* vanished mid-drain */
+			}
+		}
+	};
+	let reportsWatcher: FSWatcher | undefined;
+	const ensureReportsWatcher = (ctx: ExtensionContext) => {
+		if (reportsWatcher || !existsSync(reportsDir(ctx.cwd))) return;
+		try {
+			reportsWatcher = watch(reportsDir(ctx.cwd), () => consumeReports(ctx));
+		} catch {
+			/* no report watching in this session */
+		}
+	};
+	pi.on("session_start", (_event, ctx) => {
+		ensureBoardWatcher(ctx);
+		drainReports(ctx);
+		ensureReportsWatcher(ctx);
+	});
 	pi.on("session_shutdown", async () => {
 		boardWatcher?.close();
 		boardWatcher = undefined;
+		reportsWatcher?.close();
+		reportsWatcher = undefined;
 	});
 }
 

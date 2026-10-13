@@ -6,6 +6,7 @@ import { RESPAWN_CAP, REVIEWER_RUN_CAP, type Config } from "./config.ts";
 import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, readCounter } from "./log.ts";
 import { clearMergerSlug, spawnAgent, writeMergerSlug } from "./spawn.ts";
 import { boardStatus, commitKanban, ensureWorktree, git, reconcileBoard } from "./board.ts";
+import { reportDone } from "./report.ts";
 
 // consumes the armed marker at the state the armed reviewer wrote itself (back to to-review,
 // or forward to to-merge on approval): a pid match counts one successful reviewer run; a
@@ -322,7 +323,10 @@ export function rescan(root: string, cfg: Config): void {
 	// then promote every schedulable backlog task; a blocker in done or the live test does not
 	// hold promotion, and promoteBacklog re-checks its gates on a fresh board read before setState
 	dropDoneBlockers(root, tasks);
-	promoteBacklog(root, tasks);
+	const promoted = promoteBacklog(root, tasks);
+	// the PM report: the sweep schedules first, then one report covers the tasks that moved to
+	// done in this sweep (detected against the sweep's own snapshot) plus what it scheduled
+	reportDone(root, tasks, promoted);
 	// every sweep: finished agents' logs compact into .log.gz (idempotent; live pids are skipped)
 	compactFinishedLogs(root);
 }
@@ -392,8 +396,10 @@ export function dropDoneBlockers(root: string, tasks: Task[]): void {
 // promotion is event-driven, the replacement for the old idle failsafe: every sweep and every
 // poll promotes EVERY schedulable backlog task, not one per idle window. Unchained tasks
 // promote and run as parallel lanes the moment a lane frees; the blockedBy chain (the PM
-// encodes it at creation) serializes what must serialize. Exported for the tests
-export function promoteBacklog(root: string, tasks: Task[]): void {
+// encodes it at creation) serializes what must serialize. Returns the promoted tasks (state
+// to-do), the report's Scheduled section; exported for the tests
+export function promoteBacklog(root: string, tasks: Task[]): Task[] {
+	const promoted: Task[] = [];
 	for (const task of tasks) {
 		// conflicted files parse bogus state values: never promotable
 		if (task.conflicted || task.state !== "backlog") continue;
@@ -411,8 +417,10 @@ export function promoteBacklog(root: string, tasks: Task[]): void {
 		log(root, `promoting ${task.file} to to-do (blockers done)`);
 		try {
 			setState(root, fresh, "to-do");
+			promoted.push({ ...fresh, state: "to-do" });
 		} catch (err) {
 			log(root, `promotion of ${task.file} failed: ${err instanceof Error ? err.message : err}`);
 		}
 	}
+	return promoted;
 }
