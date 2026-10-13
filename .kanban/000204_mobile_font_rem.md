@@ -1,8 +1,8 @@
 ---
 name: "feat: mobile font size 15% smaller via rem; block zooming"
 priority: "medium"
-state: "doing"
-worktree: "feat/204-mobile-font-rem"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "trivial"
 shortName: "mobile-font-rem"
@@ -47,3 +47,25 @@ Facts (verified):
 - `npm test` passes (five suites), including the updated count test.
 
 # Notes
+
+## Developer log
+
+- Implemented per the Specs (worktree commit 16cc9de).
+- src/webui/page.ts: all 22 font-size declarations converted from integer px to rem against the 16px base (12->0.75rem, 13->0.8125rem, 14->0.875rem, 15->0.9375rem, 17->1.0625rem, 18->1.125rem). The replace was scoped to `font-size:` so padding/margin px values (header padding, #m-box padding, #m-log-text details padding-left) stayed untouched. No other CSS property changed.
+- Added `@media (max-width: 600px) { html { font-size: 85%; } }` as the last rule in the style block, after the column accent colors. 85% of 16px is 13.6px, 15% smaller, and every rem-based size scales with it.
+- Viewport meta extended to `width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no`.
+- tests/webui.test.ts updated in the same change: the .card-stats/.agent-stats/#m-log-meta rules now assert 0.75rem, .agent-card asserts 0.875rem, the #m-log-text rule asserts 0.9375rem with the no-smaller-size check reworked to `0\.(75|8125|875)rem`, and the count test deep-equals the rem mapping {0.75:4, 0.8125:1, 0.875:11, 0.9375:4, 1.0625:1, 1.125:1}. Added two assertions: the served page carries maximum-scale=1 and user-scalable=no in the viewport meta, and carries the `@media (max-width: 600px) { html { font-size: 85%; } }` rule.
+- Acceptance criteria verified: no px font sizes remain (`rg "font-size: \d+px"` exits 1), exactly 22 rem declarations (4x 0.75rem, 1x 0.8125rem, 11x 0.875rem, 4x 0.9375rem, 1x 1.0625rem, 1x 1.125rem), the viewport meta and the mobile query match. `npm test` passes, five suites.
+- No open questions: the Specs were complete and verified against the code before the change.
+
+## Live-tester log
+
+- Tested the merged worktree (16cc9de) as a user, against the pre-change page (16cc9de^) served side by side: two hub-only fixtures (ports 4461/4462, isolated HOMEs, staleMs raised) sharing one probe task with a live pid and a synthetic usage log (session + text pairs + a tool pair + `turn_end` with model/usage), plus a second registered project so `.tab` renders. Playwright (real Chromium) drove both pages.
+- Served page (the real interface): no `font-size: Npx` remains, exactly 22 rem declarations, the viewport meta carries `maximum-scale=1, user-scalable=no`, and the `@media (max-width: 600px) { html { font-size: 85%; } }` rule is present.
+- Desktop (1280px): computed font sizes are identical to the pre-change page on every measured element (h1 18px, #hub 13px, .name/#m-log-text/#m-body 15px, the rest 12-14px) — no user-visible size change on desktop; html stays 16px.
+- Mobile (390px): html computes 13.6px and every measured element is exactly 85% of its desktop size: h1 15.3px, .tab/.col h2/#theme/#updated/.empty/.toggle/#m-close/#m-attrs 11.9px, #hub 11.05px, .name/#m-log-text/#m-body/#m-body h1 12.75px, .chip/.card-stats/#m-log-meta/.agent-stats 10.2px, #m-head h2 14.45px, #m-body pre/code 11.9px. 20 board + 12 modal selectors checked; zero console errors; no horizontal overflow on html, #m-box, #m-body, #m-log or the log pres (details expanded).
+- `#m-log-text pre.lg-out` computes 12.75px = 0.9375rem scaled: the `font: inherit` constraint holds.
+- Boundary: at 600px width the query applies (13.6px), at 601px it does not (16px).
+- Differential control: the pre-change page at 390px keeps html 16px and desktop sizes — the media query is the only scaling source.
+- Assumptions: (1) "under 600px" follows the Specs' own `max-width: 600px` semantics, so exactly 600px scales down; (2) pinch zoom is not exercisable in headless Chromium, so the viewport meta in the served HTML and DOM is the verification (the Specs' documented standard mechanism, iOS caveat accepted per Specs); (3) board/modal data came from a synthetic fixture, font rendering is data-independent.
+- No issues found; no open questions. No contradictions with the task's stated assumptions.

@@ -1,12 +1,12 @@
 ---
 name: "feat: mobile task details popup flush with the screen sides"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/205-mobile-popup-flush"
 issuer: "user"
 complexity: "trivial"
 shortName: "mobile-popup-flush"
-blockedBy: "#204"
+blockedBy: ""
 ---
 
 # Summary
