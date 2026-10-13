@@ -496,8 +496,10 @@ function markLiveLine() {
 	const run = t && (t.agents || []).find(a => a.alive);
 	const p = logPane();
 	const on = !!run && !!logState && run.handle === logState.handle && !p.classList.contains("hidden");
+	// the pulse stays on the first line only: a history back-fill inserts older lines above it,
+	// and a demoted line must not keep the shimmer
 	const first = document.querySelector("#m-log-text > *");
-	if (first) first.classList.toggle("pulse", on);
+	for (const el of document.querySelectorAll("#m-log-text > .pulse")) el.classList.toggle("pulse", on && el === first);
 }
 const atBottom = () => { const p = logPane(); return p.scrollTop + p.clientHeight >= p.scrollHeight - 4; };
 // the live auto-scroll glides to the bottom, an instant auto scroll under reduced motion
@@ -586,7 +588,12 @@ function fetchSubs(gen, a, box) {
 		box.__html = html;
 		for (const b of box.querySelectorAll(".agent-card")) {
 			b.onclick = () => openSubLog(b.dataset.handle, Number(b.dataset.sub));
-			if (prev && !prev.has(b.dataset.sub)) b.classList.add("enter");
+			if (prev && !prev.has(b.dataset.sub)) {
+				// same one-shot drop as makeCard: a row rebuild re-attaches the carried-over sub
+				// boxes, and a lingering enter class would replay their entrance then
+				b.classList.add("enter");
+				b.onanimationend = () => { b.classList.remove("enter"); b.onanimationend = null; };
+			}
 		}
 		markActiveAgent();
 	}).catch(() => {});

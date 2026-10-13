@@ -907,7 +907,8 @@ assert.ok(page.includes('if (gen !== agentGen || !box) return;'), "a superseded 
 // 000191: the sub list rebuild is html-gated (the keep pass re-fetches every second), and only a
 // newly spawned sub card animates; a genuinely new run card carries the entrance too
 assert.ok(page.includes("if (box.__html === html) return;"), "the sub list rebuild is html-gated, so unchanged subs never replay");
-assert.ok(page.includes('if (prev && !prev.has(b.dataset.sub)) b.classList.add("enter")'), "only a newly spawned sub card animates");
+assert.ok(page.includes('if (prev && !prev.has(b.dataset.sub)) {'), "only a newly spawned sub card animates");
+assert.ok(page.includes('b.onanimationend = () => { b.classList.remove("enter"); b.onanimationend = null; };'), "the sub cards' entrance class is dropped too, the rebuild's box carry-over never replays it");
 assert.ok(page.includes('if (oldSubs && !oldSubs.has(b.dataset.handle)) b.classList.add("enter")'), "only a genuinely new run card animates");
 assert.ok(page.includes('el.onanimationend = () => { el.classList.remove("enter"); el.onanimationend = null; };'), "the page drops the entrance class when the animation ends");
 assert.ok(page.includes("syncBoard(cols, tab.tasks, tab.expanded, cardEls, makeCard, VISIBLE, document)"), "the card pass gets the document for the in-place stats span");
@@ -937,7 +938,7 @@ assert.ok(pollSrc.includes("if (!live && logState.idle) {"), "a past run's log s
 // 000191: the live first-line pulse follows the viewed run's aliveness, the same signal the poll
 // timer reads, refreshed from pullLog after every payload and dropped on close
 assert.ok(page.includes("function markLiveLine()"), "the page wires the live first-line pulse");
-assert.ok(page.includes('first.classList.toggle("pulse", on)'), "the pulse class follows the viewed run's aliveness");
+assert.ok(page.includes('el.classList.toggle("pulse", on && el === first)'), "the pulse class follows the viewed run's aliveness, on the first line only");
 assert.ok(page.includes("markLiveLine();"), "pullLog and closeLog drive the pulse");
 
 // 000142 the poll refresh updates the agent row in place: an unchanged run set moves only the
