@@ -267,6 +267,9 @@ make the text vanish: the gradient drops and the solid color restores per block 
 .c-done { --ac: #22c55e; }
 /* 204: mobile, the root font size 15% smaller so every rem-based size scales down with it */
 @media (max-width: 600px) { html { font-size: 85%; } }
+/* 205: mobile, the task details popup is a full-screen sheet, flush with all four sides; the vh
+line is the fallback for the dvh line (older mobile browsers), max-height none lifts the 82vh cap */
+@media (max-width: 600px) { #m-box { width: 100vw; margin: 0; border-radius: 0; height: 100vh; height: 100dvh; max-height: none; } }
 </style>
 </head>
 <body>
