@@ -1017,6 +1017,10 @@ const closeLogFn = page.match(/function closeLog\(\) \{[\s\S]*?\n\}/)![0];
 assert.ok(closeLogFn.indexOf("clearInterval") < closeLogFn.indexOf("closeAnimated") && closeLogFn.includes("logState = null;"), "closeLog clears the poll and the state before the visual hide");
 assert.ok(closeLogFn.includes("markActiveAgent();") && closeLogFn.includes("markLiveLine();"), "the active-agent highlight and the shine clear at once too");
 assert.ok(page.includes('modal.classList.remove("closing");'), "openTask drops a pending close before reopening");
+// 000209: the popup must show the top on every open; the reset runs after the un-hide because a
+// scrollTop write while the modal is display: none is discarded and the old offset returns on show
+const openTaskSrc = page.match(/function openTask\(file\) \{[\s\S]*?\n\}/)![0];
+assert.ok(openTaskSrc.indexOf('classList.remove("hidden")') < openTaskSrc.indexOf("scrollTop = 0"), "openTask resets the scroll after the un-hide, so every open (same-task reopen included) shows the top");
 assert.match(page, /function openLog\(handle, sub\) \{[\s\S]*?p\.classList\.remove\("closing"\);/, "openLog drops a pending close before reopening");
 
 // 000142 the poll refresh updates the agent row in place: an unchanged run set moves only the

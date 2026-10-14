@@ -477,11 +477,12 @@ function openTask(file) {
 	writeHead(t);
 	renderAgent(t);
 	setBody(t);
-	document.getElementById("m-box").scrollTop = 0;
 	// 000194: a reopen during the close drops .closing first, the pending hide must not re-run
 	const modal = document.getElementById("modal");
 	modal.classList.remove("closing");
 	modal.classList.remove("hidden");
+	// 000209: the reset runs after the un-hide: a scrollTop write while .hidden (display: none) is discarded
+	document.getElementById("m-box").scrollTop = 0;
 }
 // the 5 s refresh of the open detail card: every block re-derives from the fresh payload with no
 // close/reopen; renderAgent's keep mode moves only the stats lines on an unchanged run set and
