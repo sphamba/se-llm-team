@@ -1,8 +1,8 @@
 ---
 name: "fix: complexity order trivial-first; defaults autoScheduleMinutes 1, logStallMinutes 10"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/208-complexity-order-and-defaults"
 issuer: "user"
 complexity: "simple"
 shortName: "complexity-order-and-defaults"
