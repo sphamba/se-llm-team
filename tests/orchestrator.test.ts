@@ -3094,8 +3094,18 @@ const axSpawn = axArgv().at(-1)!;
 const promptIdx = axSpawn.argv.indexOf("--append-system-prompt");
 assert.ok(promptIdx !== -1, "the developer spawn carries --append-system-prompt");
 assert.equal(axSpawn.argv[promptIdx + 1], projectPromptAX, "the project AGENTS.md content rides as one argv element right after the flag");
+// at the cap the injection still rides as one argv element and the spawn works (the real kernel argv limit)
+writeFileSync(join(rootAX, "AGENTS.md"), "x".repeat(131_000));
+const beforeAX0 = axArgv().length;
+const taskAX0 = createTask(rootAX, { name: "feat: agents cap edge", summary: "Injection edge smoke", specs: "n/a" });
+setState(rootAX, taskAX0, "to-do");
+rescan(rootAX, cfgAX);
+await waitFor(() => axArgv().length > beforeAX0, 10000, "the at-cap stub recorded its argv", () => "");
+const axSpawn0 = axArgv().at(-1)!;
+const promptIdx0 = axSpawn0.argv.indexOf("--append-system-prompt");
+assert.equal(axSpawn0.argv[promptIdx0 + 1].length, 131_000, "a 131,000-byte prompt is injected and the spawn succeeds");
 // over the cap the injection skips with one warning line and the spawn continues
-writeFileSync(join(rootAX, "AGENTS.md"), "x".repeat(1_000_001));
+writeFileSync(join(rootAX, "AGENTS.md"), "x".repeat(131_001));
 const beforeAX = axArgv().length;
 const taskAX2 = createTask(rootAX, { name: "feat: agents cap", summary: "Injection cap smoke", specs: "n/a" });
 setState(rootAX, taskAX2, "to-do");
@@ -3104,6 +3114,6 @@ await waitFor(() => axArgv().length > beforeAX, 10000, "the capped stub recorded
 const axSpawn2 = axArgv().at(-1)!;
 assert.equal(axSpawn2.argv.indexOf("--append-system-prompt"), -1, "the injection skipped above the cap");
 const orchLogAX = readFileSync(join(kanbanDir(rootAX), ".logs", "orchestrator.log"), "utf8");
-assert.ok(orchLogAX.includes("AGENTS.md") && orchLogAX.includes("1000001"), "one warning line names the file and its size");
+assert.ok(orchLogAX.includes("AGENTS.md") && orchLogAX.includes("131001"), "one warning line names the file and its size");
 cleanupAll(rootAX);
 console.log("orchestrator.test.ts: ... + agents.md injection smoke passed");

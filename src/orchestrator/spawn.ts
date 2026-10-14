@@ -92,9 +92,9 @@ export function clearContextSymlinks(root: string, task: Task): void {
 // the target project's own AGENTS.md, injected at every spawn and for every role as an
 // appended system prompt: pi loads one context file per directory and the agent cwd's
 // AGENTS.md is the role-notes symlink, so the project's own instructions reach agents no
-// other way. One argv element, capped below the argv limit; above it the injection skips
-// with one logged warning and the spawn continues
-const PROJECT_PROMPT_CAP = 1_000_000;
+// other way. One argv element, capped below the kernel's 131,072-byte argv limit
+// (MAX_ARG_STRLEN); above it the injection skips with one logged warning and the spawn continues
+const PROJECT_PROMPT_CAP = 131_000;
 
 function projectAgentsPrompt(root: string): string | null {
 	const path = join(root, "AGENTS.md");
