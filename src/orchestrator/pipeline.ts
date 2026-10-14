@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { kanbanDir, getTask, listAll, setState, setWorktree, taskFiles, taskSlug, updateAttrs, type Task } from "../kanban.ts";
+import { kanbanDir, getTask, listAll, setState, setWorktree, taskFiles, taskSlug, updateAttrs, ROLE_NOTES_RE, type Task } from "../kanban.ts";
 import { agentAlive, agentPid, clearPid, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP, REVIEWER_RUN_CAP, type Config } from "./config.ts";
 import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, readCounter } from "./log.ts";
@@ -424,6 +424,10 @@ export function promoteBacklog(root: string, tasks: Task[], backlogIdleMinutes =
 	if (backlogIdleMinutes > 0) {
 		let newest = 0;
 		for (const file of taskFiles(root)) {
+			// role notes (AGENTS.<role>.md) are daemon-written board mirror files, not tasks:
+			// ensureRoleNotes writes a fresh one at the first agent spawn, and that write must
+			// not read as PM activity and defer promotion for another whole window
+			if (ROLE_NOTES_RE.test(file)) continue;
 			try {
 				newest = Math.max(newest, statSync(join(kanbanDir(root), file)).mtimeMs);
 			} catch {

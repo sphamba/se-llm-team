@@ -2638,6 +2638,25 @@ assert.equal(parseTask(rootAR2, nowAR2.file).state, "to-do", "the zero-window ta
 cleanupAll(rootAR2);
 console.log("orchestrator.test.ts: ... + backlog idle gate smoke passed");
 
+// --- part AR3 (#212): the idle gate ignores role notes. AGENTS.<role>.md is written by the
+// daemon's own ensureRoleNotes at the first agent spawn, so a fresh note must not count as
+// board activity and defer every backlog promotion for another window ---
+const rootAR3 = fixture();
+cleaned.push(rootAR3);
+mkdirSync(kanbanDir(rootAR3), { recursive: true });
+const gatedAR3 = createTask(rootAR3, { name: "feat: aged behind a role note", summary: "Role notes are not activity", specs: "n/a" });
+const agedAR3 = new Date(Date.now() - 10_000);
+utimesSync(join(kanbanDir(rootAR3), gatedAR3.file), agedAR3, agedAR3);
+writeFileSync(join(kanbanDir(rootAR3), "AGENTS.developer.md"), "# developer:\n");
+assert.equal(promoteBacklog(rootAR3, listAll(rootAR3), 0.05).length, 1, "a fresh role note does not defer promotion");
+assert.equal(parseTask(rootAR3, gatedAR3.file).state, "to-do", "the aged task promoted despite the fresh role note");
+// a fresh real task file beside the same role note still defers: the gate skips notes only
+const freshAR3 = createTask(rootAR3, { name: "feat: fresh beside a role note", summary: "Role notes are not activity", specs: "n/a" });
+assert.equal(promoteBacklog(rootAR3, listAll(rootAR3), 0.05).length, 0, "a fresh task file still defers promotion within the window");
+assert.equal(parseTask(rootAR3, freshAR3.file).state, "backlog", "the fresh task stays gated");
+cleanupAll(rootAR3);
+console.log("orchestrator.test.ts: ... + role notes are not idle-gate activity smoke passed");
+
 // --- part AS: per-role project notes in .kanban, read from the cwd AGENTS.md symlink ---
 // no spawn carries --append-system-prompt (the AGENTS.md cwd symlink replaces it), the daemon
 // creates the file when missing, the notes files are not tasks (promoteBacklog cannot turn
