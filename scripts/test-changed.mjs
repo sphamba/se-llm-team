@@ -4,7 +4,7 @@ import { execSync, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-const ALL = ["tests/kanban.test.ts", "tests/orchestrator.test.ts", "tests/webui.test.ts", "tests/extension.test.ts", "index.test.ts"];
+const ALL = ["tests/kanban.test.ts", "tests/orchestrator.test.ts", "tests/webui.test.ts", "tests/extension.test.ts", "tests/efficiency-analysis.test.ts", "index.test.ts"];
 
 const RULES = [
 	[/^src\/orchestrator\.ts$/, ["tests/orchestrator.test.ts"]],
@@ -12,6 +12,7 @@ const RULES = [
 	[/^agents\/.*\.md$/, ["tests/orchestrator.test.ts"]],
 	[/^src\/webui\.ts$/, ["tests/webui.test.ts"]],
 	[/^src\/webui\/.+\.ts$/, ["tests/webui.test.ts"]],
+	[/^src\/efficiency-analysis\.ts$/, ["tests/efficiency-analysis.test.ts"]],
 	[/^src\/kanban\.ts$/, ["tests/kanban.test.ts", "tests/orchestrator.test.ts", "tests/webui.test.ts"]],
 	[/^src\/hub\.ts$/, ["tests/orchestrator.test.ts", "tests/webui.test.ts"]],
 	[/^index\.ts$/, ["index.test.ts", "tests/extension.test.ts"]],

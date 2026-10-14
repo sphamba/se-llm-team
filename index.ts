@@ -1,13 +1,15 @@
 import { execFileSync, spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, type FSWatcher } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { analyseLog } from "./src/efficiency-analysis.ts";
 import { createTask, getTask, isLinkedWorktree, kanbanDir, listAll, listTasks, resolveTaskFromCwd, setState, setWorktree, taskNum, updateTask, STATES, type TaskState } from "./src/kanban.ts";
 import { orchestratorWatched, pidAlive, procPgrp } from "./src/pid.ts";
 import { removeTask } from "./src/orchestrator.ts";
+import { loadConfig, llmFlags } from "./src/orchestrator/config.ts";
 import { REPORT_MAX_AGE_MS, reportsDir } from "./src/orchestrator/report.ts";
 
 function text(s: string) {
@@ -274,6 +276,33 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	pi.registerTool({
+		name: "efficiency_analysis",
+		exposure: "deferred",
+		label: "Efficiency analysis",
+		description:
+			"Analyse one agent log of this project and report pain points. The tool parses the JSONL log, summarizes each assistant block with a headless analyser, and writes a markdown report next to the log as <name minus the .log or .log.gz suffix>.analysis.md. Returns the final analysis inline with the report path and the block count.",
+		parameters: Type.Object({
+			path: Type.String({ description: "Log file path, absolute or relative to the cwd, .log or .log.gz" }),
+		}),
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const root = ctx.cwd;
+			const absolutePath = resolve(root, params.path);
+			const cfg = loadConfig(root);
+			// the role default applies, no complexity override
+			const flags = llmFlags(root, cfg, "analyser", "");
+			try {
+				const result = await analyseLog(absolutePath, { agent: cfg.agent, llmFlags: flags });
+				return {
+					content: [{ type: "text", text: `${result.analysis}\n\nReport: ${result.reportPath}\nBlocks analysed: ${result.blockCount}` }],
+					details: result,
+				};
+			} catch (err) {
+				return text(`Cannot analyse ${absolutePath}: ${(err as Error).message}`);
+			}
+		},
+	});
+
 	// progress notifications for the PM session: tell the user when a task reaches done.
 	// Attached lazily (the board may only be created later in the session) and seeded with
 	// tasks already done, so only done-transitions after the attach notify.
@@ -362,7 +391,7 @@ export default function (pi: ExtensionAPI) {
 			/* no report watching in this session */
 		}
 	};
-	// the 11 tools are deferred, so every session needs the built-in tool_search to declare them
+	// the 12 tools are deferred, so every session needs the built-in tool_search to declare them
 	// on demand. setActiveTools throws during factory loading ("Extension runtime not initialized"),
 	// so activation happens in this handler, which fires after the runtime binds. Additive and
 	// idempotent: setActiveTools replaces the active set, so spread and check before adding.
