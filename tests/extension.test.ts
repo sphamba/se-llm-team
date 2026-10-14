@@ -126,6 +126,18 @@ assert.equal(updated.content[0].text, `Updated ${t1.file} (#${taskNum(t1.file)})
 assert.notEqual(readFileSync(taskFile(t1.file), "utf8"), before);
 assert.equal(getTask(root, t1.file)?.summary, "after");
 
+// efficiency_analysis is registered as a deferred tool with only the path string
+// parameter. The validator pi runs before execute accepts a path call and rejects a
+// call without one. execute is not run here, it would spawn real analysers
+const ea = tools["efficiency_analysis"];
+if (!ea) fail("efficiency_analysis not registered");
+assert.equal(ea.exposure, "deferred", "efficiency_analysis must be deferred");
+assert.deepEqual(Object.keys(ea.parameters.properties), ["path"], "efficiency_analysis takes only the path parameter");
+assert.equal(ea.parameters.properties.path.type, "string");
+const eaValidator = Compile(ea.parameters);
+assert.equal(eaValidator.Check({ path: "x.log" }), true, "a path call must pass validation");
+assert.equal(eaValidator.Check({}), false, "a call without path must fail validation");
+
 // session_start creates .kanban/.reports when the board dir exists: the dir was the only
 // guard on the queue watcher, so a session that starts before the first report (the dir
 // not there yet) must still get the watcher and consume reports live
