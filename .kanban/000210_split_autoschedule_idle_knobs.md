@@ -1,8 +1,8 @@
 ---
 name: "refactor: split autoScheduleMinutes into backlog-idle and retry-idle knobs"
 priority: "medium"
-state: "live-testing"
-worktree: "refactor/210-split-autoschedule-idle-knobs"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "complex"
 shortName: "split-autoschedule-idle-knobs"

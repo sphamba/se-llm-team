@@ -1,8 +1,8 @@
 ---
 name: "fix: backlog idle gate counts role notes as board activity"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/212-backlog-gate-skips-role-notes"
 issuer: "#210"
 complexity: "simple"
 shortName: "backlog-gate-skips-role-notes"

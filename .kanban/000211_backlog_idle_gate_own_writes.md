@@ -1,8 +1,8 @@
 ---
 name: "fix: backlog idle gate counts the daemon's own task-file writes"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/211-backlog-idle-gate-own-writes"
 issuer: "#210"
 complexity: "moderate"
 shortName: "backlog-idle-gate-own-writes"
