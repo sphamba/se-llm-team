@@ -124,9 +124,9 @@ export function main(argv: string[]): void {
 	});
 
 	sweep();
-	poll(root, cfg.logStallMinutes);
+	poll(root, cfg.logStallMinutes, Date.now(), cfg.backlogIdleMinutes);
 	const timer = setInterval(sweep, rescanSeconds * 1000);
-	const poller = setInterval(() => poll(root, cfg.logStallMinutes), pollMinutes * 60 * 1000);
+	const poller = setInterval(() => poll(root, cfg.logStallMinutes, Date.now(), cfg.backlogIdleMinutes), pollMinutes * 60 * 1000);
 	try {
 		const w = watch(kanbanDir(root), scheduleSweep);
 		w.on("error", (err) => log(root, `fs.watch error, polling only: ${err instanceof Error ? err.message : err}`));

@@ -4,7 +4,10 @@ import { COMPLEXITIES } from "../kanban.ts";
 import { log } from "./log.ts";
 
 const DEFAULT_POLL_MINUTES = 1;
-const DEFAULT_AUTO_SCHEDULE_MINUTES = 1;
+// board-wide PM quiet window: minutes the whole board must sit untouched before backlog tasks auto-schedule
+const DEFAULT_BACKLOG_IDLE_MINUTES = 1;
+// per-task retry cooldown: failed-merge retry, respawn past the 5-death cap
+const DEFAULT_RETRY_IDLE_MINUTES = 1;
 // minutes a working agent's log may keep its size before the agent is assumed dead
 const DEFAULT_LOG_STALL_MINUTES = 10;
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -33,7 +36,8 @@ export interface RoleLlmConfig extends LlmConfig {
 export interface Config {
 	agent: string;
 	pollMinutes: number;
-	autoScheduleMinutes: number;
+	backlogIdleMinutes: number;
+	retryIdleMinutes: number;
 	logStallMinutes: number;
 	llm: LlmConfig;
 	roles: Record<string, RoleLlmConfig>;
@@ -53,8 +57,18 @@ function cleanLlm(root: string, entry: unknown, where = ""): LlmConfig {
 	return clean;
 }
 
+// a non-number or a negative value warns and keeps the default; 0 disables the wait
+function idleMinutes(root: string, value: unknown, key: string, fallback: number): number {
+	if (value === undefined) return fallback;
+	if (typeof value !== "number" || value < 0) {
+		log(root, `${key} ${JSON.stringify(value)} ignored: must be a non-negative number of minutes`);
+		return fallback;
+	}
+	return value;
+}
+
 export function loadConfig(root: string): Config {
-	let cfg: { agent?: string; pollMinutes?: number; autoScheduleMinutes?: number; logStallMinutes?: unknown; provider?: unknown; model?: unknown; thinking?: unknown; roles?: unknown; reviewerCap?: unknown } = {};
+	let cfg: { agent?: string; pollMinutes?: number; backlogIdleMinutes?: unknown; retryIdleMinutes?: unknown; logStallMinutes?: unknown; provider?: unknown; model?: unknown; thinking?: unknown; roles?: unknown; reviewerCap?: unknown } = {};
 	// user-level first, project .kanban/se-llm-team.json overrides it
 	for (const path of [join(process.env.HOME ?? "", ".pi", "agent", "se-llm-team.json"), join(root, ".kanban", "se-llm-team.json")]) {
 		try {
@@ -100,7 +114,8 @@ export function loadConfig(root: string): Config {
 	return {
 		agent: cfg.agent ?? "pi",
 		pollMinutes: cfg.pollMinutes ?? DEFAULT_POLL_MINUTES,
-		autoScheduleMinutes: cfg.autoScheduleMinutes ?? DEFAULT_AUTO_SCHEDULE_MINUTES,
+		backlogIdleMinutes: idleMinutes(root, cfg.backlogIdleMinutes, "backlogIdleMinutes", DEFAULT_BACKLOG_IDLE_MINUTES),
+		retryIdleMinutes: idleMinutes(root, cfg.retryIdleMinutes, "retryIdleMinutes", DEFAULT_RETRY_IDLE_MINUTES),
 		logStallMinutes,
 		llm: cleanLlm(root, cfg, " (global)"),
 		roles,

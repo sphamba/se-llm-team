@@ -73,7 +73,7 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	// an earlier attempt on this task failed and requeued it: retry only after it sat idle in
 	// to-merge for the idle interval. Read before any write: ensureWorktree/setWorktree bump the
 	// task file's mtime, which is the idle clock, so this check must come first
-	if (existsSync(mergerAttemptPath(root, slug)) && Date.now() - statSync(join(kanbanDir(root), task.file)).mtimeMs < cfg.autoScheduleMinutes * 60_000) return;
+	if (existsSync(mergerAttemptPath(root, slug)) && Date.now() - statSync(join(kanbanDir(root), task.file)).mtimeMs < cfg.retryIdleMinutes * 60_000) return;
 	const wt = task.worktree;
 	if (!wt || (git(root, ["branch", "--list", wt], true) === "" && !existsSync(join(root, ".worktrees", wt)))) {
 		// nothing to merge: no worktree and no branch
@@ -173,7 +173,7 @@ function doneCleanup(root: string, task: Task): void {
 // ensureWorktree/setWorktree bump the mtime and would restart the clock mid-check
 function deadCooldownActive(root: string, cfg: Config, task: Task): boolean {
 	if (readCounter(root, `${taskSlug(task.file)}.dead`) <= RESPAWN_CAP) return false;
-	return Date.now() - statSync(join(kanbanDir(root), task.file)).mtimeMs < cfg.autoScheduleMinutes * 60_000;
+	return Date.now() - statSync(join(kanbanDir(root), task.file)).mtimeMs < cfg.retryIdleMinutes * 60_000;
 }
 
 // stale per-task merger pid leftovers (the old per-task merger scheme, e.g. 000038.merger.pid):
@@ -340,7 +340,7 @@ export function rescan(root: string, cfg: Config): void {
 	// promoteBacklog re-checks its gates on a fresh board read before setState
 	const current = listAll(root);
 	dropDoneBlockers(root, current);
-	const promoted = promoteBacklog(root, current);
+	const promoted = promoteBacklog(root, current, cfg.backlogIdleMinutes);
 	// the PM report: the sweep schedules first, then one report covers the tasks that moved to
 	// done in this sweep (detected against the pre-loop snapshot, so a done move this sweep made
 	// is this sweep's transition) plus what it scheduled
@@ -411,12 +411,27 @@ export function dropDoneBlockers(root: string, tasks: Task[]): void {
 	}
 }
 
-// promotion is event-driven, the replacement for the old idle failsafe: every sweep and every
-// poll promotes EVERY schedulable backlog task, not one per idle window. Unchained tasks
-// promote and run as parallel lanes the moment a lane frees; the blockedBy chain (the PM
-// encodes it at creation) serializes what must serialize. Returns the promoted tasks (state
-// to-do), the report's Scheduled section; exported for the tests
-export function promoteBacklog(root: string, tasks: Task[]): Task[] {
+// promotion is event-driven: every sweep and every poll promotes EVERY schedulable backlog
+// task, not one per idle window. A board-wide PM quiet window (backlogIdleMinutes) gates it:
+// the PM may still be creating or chaining a batch of tasks, so any fresh task-file mtime
+// defers all promotion until the board sits idle. Unchained tasks promote and run as parallel
+// lanes the moment a lane frees; the blockedBy chain (the PM encodes it at creation)
+// serializes what must serialize. Returns the promoted tasks (state to-do), the report's
+// Scheduled section; exported for the tests
+export function promoteBacklog(root: string, tasks: Task[], backlogIdleMinutes = 0): Task[] {
+	// board-wide on purpose: one quiet gate for the whole board, so a fresh task file created
+	// or chained mid-batch defers everything. 0 disables the wait
+	if (backlogIdleMinutes > 0) {
+		let newest = 0;
+		for (const file of taskFiles(root)) {
+			try {
+				newest = Math.max(newest, statSync(join(kanbanDir(root), file)).mtimeMs);
+			} catch {
+				/* vanished between readdir and stat: not the newest */
+			}
+		}
+		if (Date.now() - newest < backlogIdleMinutes * 60_000) return [];
+	}
 	const promoted: Task[] = [];
 	for (const task of tasks) {
 		// conflicted files parse bogus state values: never promotable

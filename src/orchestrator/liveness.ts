@@ -102,7 +102,7 @@ function clearDeadStreak(root: string, slug: string): void {
 }
 
 // now is injectable so the stall window is testable without waiting out real minutes
-export function poll(root: string, stallMinutes: number, now = Date.now()): void {
+export function poll(root: string, stallMinutes: number, now = Date.now(), backlogIdleMinutes = 0): void {
 	// a run ended this pass (a bounced working agent, or the stale pidfile of a completed one):
 	// the ended logs are raw, so the pass ends with their retro-compact
 	let ended = false;
@@ -215,11 +215,12 @@ export function poll(root: string, stallMinutes: number, now = Date.now()): void
 		}
 	}
 	// the poll promotes too: it is the second event source (rescan is fs.watch-debounced, the
-	// poll covers boards without inotify), so promotion never waits for a timer. The done-ref
-	// drop runs here too, from the same snapshot: a blocker can reach done between sweeps, and
-	// a poll promotion must not leave the promoted task listing a done blocker
+	// poll covers boards without inotify), gated by the same board-wide PM quiet window as the
+	// sweep (backlogIdleMinutes). The done-ref drop runs here too, from the same snapshot: a
+	// blocker can reach done between sweeps, and a poll promotion must not leave the promoted
+	// task listing a done blocker
 	dropDoneBlockers(root, tasks);
-	promoteBacklog(root, tasks);
+	promoteBacklog(root, tasks, backlogIdleMinutes);
 	// the compactor lives in the retro pass now: a run's raw log is rewritten at its end (the
 	// write-time pipe is gone - the log fd must survive the daemon, so it cannot be a pipe).
 	// compactFinishedLogs skips logs whose writer is still alive

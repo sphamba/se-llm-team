@@ -42,7 +42,6 @@ Optional config in `~/.pi/agent/se-llm-team.json` (a `.kanban/se-llm-team.json` 
 | --- | --- | --- |
 | `agent` | `pi` | Executable the orchestrator spawns for agents. |
 | `pollMinutes` | `1` | Agent liveness poll interval. |
-| `autoScheduleMinutes` | `1` | Idle cooldown for retry paths only: a merger requeued by a failed merge, and a respawn past the 5-death cap, wait this many minutes before the agent spawns again. Backlog promotion does not use it: promotion is event-driven and immediate. |
 | `logStallMinutes` | `10` | A working agent whose log size stays unchanged for this many minutes is assumed dead: the task bounces one state back, the agent process is killed, and the respawn machinery takes over. An invalid value (non-number or <= 0) warns and keeps the default. |
 | `provider` | unset | LLM provider to pass as `--provider`. Requires `model`; a provider without a model is ignored with a warning. |
 | `model` | unset | LLM model or pattern to pass as `--model`. A `:<thinking>` suffix in the pattern keeps working natively. |
