@@ -2,7 +2,7 @@
 
 ## Running the suites
 - `npm test` in the worktree runs all five (kanban, orchestrator, webui, extension, index); ~3-4 min. The orchestrator/webui suites spawn real daemons on free ports with a temp HOME, so run them one at a time and allow up to 10 min.
-- Single suite: `node tests/orchestrator.test.ts` (they are plain node scripts with asserts, no test runner).
+- Single suite: `node tests/orchestrator.test.ts` (they are plain node scripts with asserts, no test runner). The index suite is root-level `node index.test.ts`, not tests/index.test.ts.
 - The concurrency tests in kanban.test.ts are load-sensitive. When touching createTask or anything in the allocation path, run `node tests/kanban.test.ts` several times (3+); a single pass can hide a race.
 
 ## Merge flow (rebase, #199)

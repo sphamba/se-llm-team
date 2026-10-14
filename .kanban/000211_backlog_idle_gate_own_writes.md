@@ -1,8 +1,8 @@
 ---
 name: "fix: backlog idle gate counts the daemon's own task-file writes"
 priority: "high"
-state: "reviewing"
-worktree: "fix/211-backlog-idle-gate-own-writes"
+state: "done"
+worktree: ""
 issuer: "#210"
 complexity: "moderate"
 shortName: "backlog-idle-gate-own-writes"
@@ -56,10 +56,10 @@ Make the gate ignore the writes the daemon itself made during the current pass (
 
 - Follow-up (after #212 merged as b1ef8ff): its gate skip of role notes (ROLE_NOTES_RE in promoteBacklog) covers that slice regardless of writer, so the ensureRoleNotes mask was dropped as redundant. The daemon-driven test part was renamed AR4 (#212's part took the AR3 name) and the branch was rebased onto main in this worktree, so the merge is now a fast-forward of one commit (78f4e69) with both gate rules: role notes skipped first, daemon self-writes second. Full suite green after the rebase.
 
-# Open questions
+- Review (2026-10-14): code verified. Every daemon task-file write point feeds the mask: setState and setWorktree route through updateAttrs, dropDoneBlockers drops refs through updateAttrs, reconcileBoard notes its materializations, and role notes stay skipped by ROLE_NOTES_RE regardless of writer. replaceSections and createTask have no daemon callers, so PM and agent creations still gate. All four assumptions verified against the code: kanban_set_state is a pi extension tool, so agent-role writes run in the agent's own process and stay gated, and the webui has no write endpoints. Suites: kanban and orchestrator both exit 0 (AR2, AR3, AR4 included). Red-check re-done: with the self-write skip reverted, the same-sweep promotion assert fails (0 vs 1). With the fix it passes. Fix made: docs/architecture.md still said every fresh task-file mtime defers promotion. Amended it (commit cf64d4d) and moved the task back to to-review.
+- Re-review (2026-10-14): all five suites exit 0 (kanban, orchestrator with AR2, AR3 and AR4, webui, extension, index). The hub write endpoints (/register, /heartbeat) write hub registry files only. They never write kanban task files, so the webui stays read-only for the board. Fix made: the selfWrites comment in kanban.ts still listed role-note creation as a masked write. That was stale after the #212 rebase, because ensureRoleNotes no longer feeds the mask and the gate skips role notes through ROLE_NOTES_RE. Corrected the comment and pointed at the separate gate skip, so a future refactor cannot reintroduce the redundant mask or remove the gate skip. Cleaned # Open questions: the section held only the verified Assumptions block and no user questions, so the block is removed. An empty section is the normal state.
 
-## Assumptions
-- Only the daemon process's own writes are masked: agent-role writes (e.g. a reviewer setting its task to-merge) still count as board activity and defer promotion by the window.
-- The gate stays mtime-based with the exact-match mask; a PM edit landing in the same timestamp tick as a daemon write to the same file is not distinguished (negligible on ext4/tmpfs).
-- backlogIdleMinutes keeps its current board-wide PM-quiet-window meaning; the mask changes only which writes feed it.
-- The webui is read-only, so no in-daemon PM edits exist that could be wrongly masked by the process-level registry.
+- Live test (2026-10-14, merged 1d7f820, no suites): fixture = scratch origin (deleted refs/heads/meta/kanban) plus a clone, isolated HOME, a sleeping fake-pi, root config `backlogIdleMinutes: 0.2` (a 12 s window), and the merged worktree daemon `--root <fixture> --rescan-seconds 1 --poll-minutes 1 --no-webui`. Probes: `000006_epsilon.md` (to-merge, no worktree), `000008_sched.md` (backlog), `000009_schedblocked.md` (backlog, blockedBy "#6"), all aged 120 s. Same-sweep check PASSED: the first sweep set 000006 done at 11:51:13.121, dropped ref "#6" at 11:51:13.175, promoted both 000008 and 000009 at 11:51:13.176, and queued the report at 11:51:13.178. The report lists both tasks under `## Scheduled (promoted to to-do)`. External-edit check PASSED: a directly written backlog task (000010) promoted at 11:51:55.211, 12.056 s after its write at 11:51:43.155, so a PM write still defers the full window. Stale-mask check PASSED: an external rewrite of a task the daemon already wrote (000006) re-armed the window, and the waiting task (000011) promoted 12.4 s after that rewrite, not 12 s after its own earlier write. Differential control (`git archive f69b818`, same fixture): promotion at 11:54:46.415, 12.035 s after the daemon's own writes at 11:54:34.38, and the report queued at 11:54:34.383 has no Scheduled section. That reproduces the finding exactly.
+- Assumptions: the acceptance example is a 0.5 min window; I used 0.2 min, a nonzero window that is short but still separates the same sweep from the next window. "External write" means a direct file write by the test process, the same shape as a PM session or a hand edit. The fake-pi never writes task files, so every task-file write after setup was the daemon's or the test's. I did not run the suites (developer/reviewer gate). No issues found, so no PM task is needed. No user questions.
+
+# Open questions
