@@ -4,9 +4,9 @@ import { COMPLEXITIES } from "../kanban.ts";
 import { log } from "./log.ts";
 
 const DEFAULT_POLL_MINUTES = 1;
-const DEFAULT_AUTO_SCHEDULE_MINUTES = 5;
+const DEFAULT_AUTO_SCHEDULE_MINUTES = 1;
 // minutes a working agent's log may keep its size before the agent is assumed dead
-const DEFAULT_LOG_STALL_MINUTES = 5;
+const DEFAULT_LOG_STALL_MINUTES = 10;
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 export const RESPAWN_CAP = 5;
 // final fallback for the per-complexity cap when a Config carries no reviewerCap entry for
@@ -14,20 +14,20 @@ export const RESPAWN_CAP = 5;
 export const REVIEWER_RUN_CAP = 3;
 // per-complexity forced-advance caps: successful reviewer runs before to-review moves on to
 // to-merge; each overridable via the top-level reviewerCap config key
-const DEFAULT_REVIEWER_CAP: Record<string, number> = { simple: 1, moderate: 2, complex: 3, trivial: 0 };
+const DEFAULT_REVIEWER_CAP: Record<string, number> = { trivial: 0, simple: 1, moderate: 2, complex: 3 };
 export interface LlmConfig {
 	provider?: string;
 	model?: string;
 	thinking?: string;
 }
 
-// a roles entry may also hold per-complexity sub-objects keyed simple/moderate/complex/trivial, each
+// a roles entry may also hold per-complexity sub-objects keyed trivial/simple/moderate/complex, each
 // an LlmConfig that overrides the role defaults for tasks of that complexity
 export interface RoleLlmConfig extends LlmConfig {
+	trivial?: LlmConfig;
 	simple?: LlmConfig;
 	moderate?: LlmConfig;
 	complex?: LlmConfig;
-	trivial?: LlmConfig;
 }
 
 export interface Config {

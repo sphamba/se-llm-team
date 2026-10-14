@@ -33,7 +33,7 @@ Optional config in `~/.pi/agent/se-llm-team.json` (a `.kanban/se-llm-team.json` 
   "model": "anthropic/claude-sonnet-4-5",
   "thinking": "high",
   "roles": { "developer": { "thinking": "xhigh", "complex": { "model": "big-model" } } },
-  "reviewerCap": { "simple": 1, "moderate": 2, "complex": 3, "trivial": 0 },
+  "reviewerCap": { "trivial": 0, "simple": 1, "moderate": 2, "complex": 3 },
   "webUi": { "enabled": true, "host": "localhost", "port": 4242 }
 }
 ```
@@ -42,14 +42,14 @@ Optional config in `~/.pi/agent/se-llm-team.json` (a `.kanban/se-llm-team.json` 
 | --- | --- | --- |
 | `agent` | `pi` | Executable the orchestrator spawns for agents. |
 | `pollMinutes` | `1` | Agent liveness poll interval. |
-| `autoScheduleMinutes` | `5` | Idle cooldown for retry paths only: a merger requeued by a failed merge, and a respawn past the 5-death cap, wait this many minutes before the agent spawns again. Backlog promotion does not use it: promotion is event-driven and immediate. |
-| `logStallMinutes` | `5` | A working agent whose log size stays unchanged for this many minutes is assumed dead: the task bounces one state back, the agent process is killed, and the respawn machinery takes over. An invalid value (non-number or <= 0) warns and keeps the default. |
+| `autoScheduleMinutes` | `1` | Idle cooldown for retry paths only: a merger requeued by a failed merge, and a respawn past the 5-death cap, wait this many minutes before the agent spawns again. Backlog promotion does not use it: promotion is event-driven and immediate. |
+| `logStallMinutes` | `10` | A working agent whose log size stays unchanged for this many minutes is assumed dead: the task bounces one state back, the agent process is killed, and the respawn machinery takes over. An invalid value (non-number or <= 0) warns and keeps the default. |
 | `provider` | unset | LLM provider to pass as `--provider`. Requires `model`; a provider without a model is ignored with a warning. |
 | `model` | unset | LLM model or pattern to pass as `--model`. A `:<thinking>` suffix in the pattern keeps working natively. |
 | `thinking` | unset | Reasoning level to pass as `--thinking`: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. An unknown value is ignored with a warning. |
 | `roles.<type>.<key>` | unset | Override `provider`, `model` or `thinking` for one agent type (`developer`, `reviewer`, `live-tester`, `merger`); per-field, so unset fields keep the global value. |
-| `roles.<type>.<complexity>.<key>` | unset | Same fields nested under `simple`, `moderate`, `complex` or `trivial` inside a roles entry. Applies to tasks whose `complexity` attribute matches; per-field, so unset fields keep the role default and unset role fields keep the global value. |
-| `reviewerCap.<complexity>` | `1`/`2`/`3`/`0` | Successful reviewer runs before a to-review task force-advances to to-merge, per task complexity: simple `1`, moderate `2`, complex `3`, trivial `0`. An invalid value (non-integer or < 0) warns and keeps the default. |
+| `roles.<type>.<complexity>.<key>` | unset | Same fields nested under `trivial`, `simple`, `moderate` or `complex` inside a roles entry. Applies to tasks whose `complexity` attribute matches; per-field, so unset fields keep the role default and unset role fields keep the global value. |
+| `reviewerCap.<complexity>` | `0`/`1`/`2`/`3` | Successful reviewer runs before a to-review task force-advances to to-merge, per task complexity: trivial `0`, simple `1`, moderate `2`, complex `3`. An invalid value (non-integer or < 0) warns and keeps the default. |
 | `webUi.enabled` | off | Serve the web dashboard with the daemon. |
 | `webUi.host` | `localhost` | Dashboard bind host. |
 | `webUi.port` | `4242` | Dashboard port. |

@@ -2259,7 +2259,7 @@ cleaned.push(rootAL);
 mkdirSync(kanbanDir(rootAL), { recursive: true });
 // the recorder agent writes the rendered prompt into its cwd (the task worktree) and exits
 // without resolving: the orchestrator requeues the task and the merge-attempted cooldown
-// holds any second spawn (default 5 min), so the recorded prompt is the only merger's
+// holds any second spawn (default 1 min), so the recorded prompt is the only merger's
 const recorderAL = join(rootAL, "recorder-agent.cjs");
 writeFileSync(
 	recorderAL,
@@ -2347,7 +2347,7 @@ for (const s of silentOriginSockets) s.destroy();
 console.log("orchestrator.test.ts: ... + non-blocking push smoke passed");
 
 // --- part AN: a live-but-silent agent (log unchanged for the stall window) is bounced, killed
-// and counted. poll() runs directly with an injected clock, so the default 5-minute window is
+// and counted. poll() runs directly with an injected clock, so the 5-minute window is
 // tested without waiting out real minutes ---
 const rootAN = fixture();
 cleaned.push(rootAN);
@@ -2489,8 +2489,8 @@ try {
 }
 console.log("orchestrator.test.ts: ... + configured logStallMinutes smoke passed");
 
-// --- part AP: the logStallMinutes config: a missing key keeps the default 5, a configured
-// value applies, an invalid value warns and keeps 5. loadConfig runs directly; the empty
+// --- part AP: the logStallMinutes config: a missing key keeps the default 10, a configured
+// value applies, an invalid value warns and keeps 10. loadConfig runs directly; the empty
 // temp HOME keeps the ambient user-level config out ---
 const rootAP = fixture();
 cleaned.push(rootAP);
@@ -2500,13 +2500,13 @@ mkdirSync(kanbanDir(rootAP), { recursive: true });
 const savedHomeAP = process.env.HOME;
 process.env.HOME = homeAP;
 try {
-	assert.equal(loadConfig(rootAP).logStallMinutes, 5, "a missing logStallMinutes key keeps the default 5");
+	assert.equal(loadConfig(rootAP).logStallMinutes, 10, "a missing logStallMinutes key keeps the default 10");
 	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ logStallMinutes: 0.05 }));
 	assert.equal(loadConfig(rootAP).logStallMinutes, 0.05, "a configured logStallMinutes applies");
 	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ logStallMinutes: "banana" }));
-	assert.equal(loadConfig(rootAP).logStallMinutes, 5, "a non-number logStallMinutes keeps 5");
+	assert.equal(loadConfig(rootAP).logStallMinutes, 10, "a non-number logStallMinutes keeps 10");
 	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ logStallMinutes: 0 }));
-	assert.equal(loadConfig(rootAP).logStallMinutes, 5, "logStallMinutes <= 0 keeps 5");
+	assert.equal(loadConfig(rootAP).logStallMinutes, 10, "logStallMinutes <= 0 keeps 10");
 } finally {
 	process.env.HOME = savedHomeAP;
 }

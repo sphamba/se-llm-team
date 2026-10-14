@@ -161,11 +161,11 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .p-high { background: var(--high-bg); color: var(--high-fg); }
 .p-critical { background: var(--critical-bg); color: var(--critical-fg); }
 /* 000129: per-value complexity chips reuse the priority palette; .chip.cx above stays as the fallback for an unknown value */
+/* 000143: calm blue-grey tint with the theme foreground, readable in both themes */
+.chip.cx-trivial { background: rgba(100, 130, 165, .18); color: var(--fg); }
 .chip.cx-simple { background: var(--low-bg); color: var(--low-fg); }
 .chip.cx-moderate { background: var(--medium-bg); color: var(--medium-fg); }
 .chip.cx-complex { background: var(--critical-bg); color: var(--critical-fg); }
-/* 000143: calm blue-grey tint with the theme foreground, readable in both themes */
-.chip.cx-trivial { background: rgba(100, 130, 165, .18); color: var(--fg); }
 .empty { font-size: 0.875rem; color: var(--faint); }
 .toggle { display: block; width: 100%; margin-top: 2px; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.875rem; }
 .toggle:hover { background: var(--hover); }
