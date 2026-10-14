@@ -269,9 +269,10 @@ function serializeFrontmatter(attrs: Record<string, string>): string {
 
 // task files this process rewrote (path -> mtimeMs recorded at write time): in the daemon
 // process every task-file write is the daemon's own (state transitions, attr rewrites, mirror
-// materializations, role-note creation), so the backlog promotion gate skips files whose mtime
-// still matches a write made here; a write by any other process (PM session, agent, hand edit)
-// never matches and still defers promotion
+// materializations), so the backlog promotion gate skips files whose mtime still matches a
+// write made here; a write by any other process (PM session, agent, hand edit) never matches
+// and still defers promotion. Role notes are not masked here: the gate skips them separately
+// (ROLE_NOTES_RE) regardless of writer
 const selfWrites = new Map<string, number>();
 
 export function noteSelfWrite(path: string): void {
