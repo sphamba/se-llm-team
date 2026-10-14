@@ -1,8 +1,8 @@
 ---
 name: "fix: sticky task popup header at all widths, not only mobile"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/207-sticky-header-all-widths"
 issuer: "user"
 complexity: "trivial"
 shortName: "sticky-header-all-widths"
