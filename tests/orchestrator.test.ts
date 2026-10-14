@@ -2712,9 +2712,10 @@ cleanupAll(rootAR4);
 console.log("orchestrator.test.ts: ... + gate ignores the daemon's own writes smoke passed");
 
 // --- part AS: per-role project notes in .kanban, read from the cwd AGENTS.md symlink ---
-// no spawn carries --append-system-prompt (the AGENTS.md cwd symlink replaces it), the daemon
-// creates the file when missing, the notes files are not tasks (promoteBacklog cannot turn
-// one into a phantom developer run) and ride the board mirror's snapshot commits
+// no root AGENTS.md in this fixture: nothing to inject, so no spawn carries
+// --append-system-prompt; the daemon creates the file when missing, the notes files are not
+// tasks (promoteBacklog cannot turn one into a phantom developer run) and ride the board
+// mirror's snapshot commits
 const rootAS = fixture();
 cleaned.push(rootAS);
 // an empty temp HOME keeps the ambient user-level config out of loadConfig, as in part X
@@ -2760,7 +2761,7 @@ for (const role of ["developer", "reviewer", "merger", "live-tester"]) {
 	const spawns = asSpawns().filter((s) => s.role === role);
 	assert.ok(spawns.length > 0, `the ${role} ran`);
 	for (const s of spawns) {
-		assert.ok(s.argv.indexOf("--append-system-prompt") === -1, `every ${role} spawn drops --append-system-prompt: the AGENTS.md cwd symlink replaces it`);
+		assert.ok(s.argv.indexOf("--append-system-prompt") === -1, `every ${role} spawn drops --append-system-prompt: no project AGENTS.md at the root`);
 	}
 }
 assert.ok(!listAll(rootAS).some((t) => ROLE_NOTES_RE.test(t.file)), "role notes files are not tasks");
@@ -3043,3 +3044,66 @@ assert.ok(reportAW.includes(blockerAW.name), "the report's Done section names th
 assert.ok(reportAW.includes(dependentAW.name), "the report's Scheduled section names the same-sweep promotion");
 cleanupAll(rootAW);
 console.log("orchestrator.test.ts: ... + same-sweep unblock smoke passed");
+
+// --- part AX: 000213 a target project's own tracked AGENTS.md survives spawn setup and
+// reaches the agent: the worktree's real AGENTS.md is marked skip-worktree before the
+// role-notes symlink replaces it (git status stays clean), and the project root's AGENTS.md
+// content rides as one --append-system-prompt argv element; over the cap the injection
+// skips with one logged warning line and the spawn continues ---
+const rootAX = fixture();
+cleaned.push(rootAX);
+const homeAX = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAX);
+mkdirSync(kanbanDir(rootAX), { recursive: true });
+const savedHomeAX = process.env.HOME;
+process.env.HOME = homeAX;
+let cfgAX: ReturnType<typeof loadConfig>;
+try {
+	cfgAX = loadConfig(rootAX);
+} finally {
+	process.env.HOME = savedHomeAX;
+}
+const projectPromptAX = "# project instructions: answer in ASD-STE100\n";
+writeFileSync(join(rootAX, "AGENTS.md"), projectPromptAX);
+// tracked AGENTS.md: force-added over the fixture's ignore rule, so a worktree checkout
+// carries a real file where the role-notes symlink must go
+execSync("git add -f AGENTS.md && git commit -qm agents", { cwd: rootAX, shell: "/bin/bash" });
+// passive stub: records argv and exits 0 without touching git, so the git-status asserts
+// run against the spawn setup alone
+const stubAX = join(rootAX, "ax-agent.cjs");
+writeFileSync(
+	stubAX,
+	`#!/usr/bin/env node
+const { appendFileSync } = require("node:fs");
+appendFileSync(${JSON.stringify(join(rootAX, "argv.log"))}, JSON.stringify({ argv: process.argv }) + "\\n");
+`,
+);
+chmodSync(stubAX, 0o755);
+cfgAX.agent = stubAX;
+const taskAX = createTask(rootAX, { name: "feat: agents injection", summary: "Injection smoke", specs: "n/a" });
+setState(rootAX, taskAX, "to-do");
+rescan(rootAX, cfgAX);
+const wtAX = join(rootAX, ".worktrees", parseTask(rootAX, taskAX.file).worktree);
+assert.ok(lstatSync(join(wtAX, "AGENTS.md")).isSymbolicLink(), "the AGENTS.md role-notes symlink was created");
+assert.equal(readlinkSync(join(wtAX, "AGENTS.md")), join(".kanban", "AGENTS.developer.md"), "the symlink points at the role notes");
+assert.equal(execSync("git ls-files -v AGENTS.md", { cwd: wtAX, encoding: "utf8" }).trim(), "S AGENTS.md", "the tracked AGENTS.md is marked skip-worktree");
+assert.equal(execSync("git status --porcelain", { cwd: wtAX, encoding: "utf8" }), "", "git status stays clean after the symlink replaced the tracked file");
+await waitFor(() => existsSync(join(rootAX, "argv.log")), 10000, "the stub recorded its argv", () => "");
+const axArgv = () => readFileSync(join(rootAX, "argv.log"), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as { argv: string[] });
+const axSpawn = axArgv().at(-1)!;
+const promptIdx = axSpawn.argv.indexOf("--append-system-prompt");
+assert.ok(promptIdx !== -1, "the developer spawn carries --append-system-prompt");
+assert.equal(axSpawn.argv[promptIdx + 1], projectPromptAX, "the project AGENTS.md content rides as one argv element right after the flag");
+// over the cap the injection skips with one warning line and the spawn continues
+writeFileSync(join(rootAX, "AGENTS.md"), "x".repeat(1_000_001));
+const beforeAX = axArgv().length;
+const taskAX2 = createTask(rootAX, { name: "feat: agents cap", summary: "Injection cap smoke", specs: "n/a" });
+setState(rootAX, taskAX2, "to-do");
+rescan(rootAX, cfgAX);
+await waitFor(() => axArgv().length > beforeAX, 10000, "the capped stub recorded its argv", () => "");
+const axSpawn2 = axArgv().at(-1)!;
+assert.equal(axSpawn2.argv.indexOf("--append-system-prompt"), -1, "the injection skipped above the cap");
+const orchLogAX = readFileSync(join(kanbanDir(rootAX), ".logs", "orchestrator.log"), "utf8");
+assert.ok(orchLogAX.includes("AGENTS.md") && orchLogAX.includes("1000001"), "one warning line names the file and its size");
+cleanupAll(rootAX);
+console.log("orchestrator.test.ts: ... + agents.md injection smoke passed");

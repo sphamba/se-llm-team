@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { kanbanDir, roleNotesPath, taskSlug, type Task } from "../kanban.ts";
 import { writePid } from "../pid.ts";
+import { git } from "./board.ts";
 import { llmFlags, type Config } from "./config.ts";
 import { log, logPath, nextRunIndex } from "./log.ts";
 
@@ -35,7 +36,19 @@ function ensureRoleNotes(root: string, role: string): string {
 // correct role guidance loads (idempotent: a matching link stays untouched)
 export function ensureContextSymlinks(root: string, cwd: string, taskFile: string, role: string): void {
 	repointContextSymlink(root, join(cwd, "SPECS.md"), join(".kanban", taskFile));
+	// a target project's own tracked AGENTS.md sits where the role-notes symlink must go:
+	// skip-worktree hides the replacement from git status (an untracked file cannot be marked;
+	// the failure is ignored), then the symlink replaces it
+	if (isRealFile(join(cwd, "AGENTS.md"))) git(cwd, ["update-index", "--skip-worktree", "AGENTS.md"], true);
 	repointContextSymlink(root, join(cwd, "AGENTS.md"), join(".kanban", `AGENTS.${role}.md`));
+}
+
+function isRealFile(path: string): boolean {
+	try {
+		return lstatSync(path).isFile();
+	} catch {
+		return false;
+	}
 }
 
 function repointContextSymlink(root: string, link: string, target: string): void {
@@ -74,6 +87,30 @@ export function clearContextSymlinks(root: string, task: Task): void {
 			/* already gone */
 		}
 	}
+}
+
+// the target project's own AGENTS.md, injected at every spawn and for every role as an
+// appended system prompt: pi loads one context file per directory and the agent cwd's
+// AGENTS.md is the role-notes symlink, so the project's own instructions reach agents no
+// other way. One argv element, capped below the argv limit; above it the injection skips
+// with one logged warning and the spawn continues
+const PROJECT_PROMPT_CAP = 1_000_000;
+
+function projectAgentsPrompt(root: string): string | null {
+	const path = join(root, "AGENTS.md");
+	let content: string;
+	try {
+		content = readFileSync(path, "utf8");
+	} catch {
+		return null; // missing: nothing to inject
+	}
+	if (!content.trim()) return null;
+	const bytes = Buffer.byteLength(content);
+	if (bytes > PROJECT_PROMPT_CAP) {
+		log(root, `skipping ${path} injection: ${bytes} bytes is over the ${PROJECT_PROMPT_CAP}-byte argv cap`);
+		return null;
+	}
+	return content;
 }
 
 // the exit-code file next to the pid file: the sh wrapper writes it when the agent exits, so
@@ -118,11 +155,14 @@ export function spawnAgent(root: string, cfg: Config, role: string, task: Task, 
 	ensureRoleNotes(root, role);
 	// the cwd symlinks give the session its task (SPECS.md) and role guidance (AGENTS.md) at startup
 	ensureContextSymlinks(root, cwd, task.file, role);
+	// the project's own AGENTS.md rides as an appended system prompt: the cwd AGENTS.md is the
+	// role-notes symlink, so the project's own instructions would otherwise never load
+	const projectPrompt = projectAgentsPrompt(root);
 	// the sh wrapper runs the agent and records its exit code into <name>.exit, so the poll can
 	// tell a successful finish (exit 0) from a crash even after a daemon restart. The agent
 	// command travels as positional args ($1..), so paths with spaces stay safe; $0 is a dummy
 	const exitPath = exitFilePath(root, name);
-	const child = spawn("sh", ["-c", `"$@" ; echo $? > "${exitPath}"`, "sh", cfg.agent, "--approve", "--mode", "json", ...llmFlags(root, cfg, role, task.complexity ?? "moderate"), "-p", renderPrompt(root, role)], {
+	const child = spawn("sh", ["-c", `"$@" ; echo $? > "${exitPath}"`, "sh", cfg.agent, "--approve", "--mode", "json", ...llmFlags(root, cfg, role, task.complexity ?? "moderate"), ...(projectPrompt ? ["--append-system-prompt", projectPrompt] : []), "-p", renderPrompt(root, role)], {
 		cwd,
 		detached: true,
 		stdio: ["ignore", fd, fd],
