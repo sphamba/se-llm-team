@@ -3103,6 +3103,7 @@ rescan(rootAX, cfgAX);
 await waitFor(() => axArgv().length > beforeAX0, 10000, "the at-cap stub recorded its argv", () => "");
 const axSpawn0 = axArgv().at(-1)!;
 const promptIdx0 = axSpawn0.argv.indexOf("--append-system-prompt");
+assert.ok(promptIdx0 !== -1, "the at-cap spawn carries --append-system-prompt");
 assert.equal(axSpawn0.argv[promptIdx0 + 1].length, 131_000, "a 131,000-byte prompt is injected and the spawn succeeds");
 // over the cap the injection skips with one warning line and the spawn continues
 writeFileSync(join(rootAX, "AGENTS.md"), "x".repeat(131_001));
