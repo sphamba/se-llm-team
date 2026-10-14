@@ -1,8 +1,8 @@
 ---
 name: "fix: preserve project AGENTS.md and inject it into agent sessions"
 priority: "high"
-state: "live-testing"
-worktree: "fix/213-agents-md-injection"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "agents-md-injection"
