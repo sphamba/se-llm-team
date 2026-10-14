@@ -477,6 +477,7 @@ function openTask(file) {
 	writeHead(t);
 	renderAgent(t);
 	setBody(t);
+	document.getElementById("m-box").scrollTop = 0;
 	// 000194: a reopen during the close drops .closing first, the pending hide must not re-run
 	const modal = document.getElementById("modal");
 	modal.classList.remove("closing");
