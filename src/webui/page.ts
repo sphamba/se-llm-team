@@ -237,8 +237,12 @@ after every base animation rule so the later equal-specificity selectors cannot 
 /* 000194: under reduced motion the clip animation stops (above) and color: transparent would
 make the text vanish: the gradient drops and the solid color restores per block type */
 @media (prefers-reduced-motion: reduce) { #m-log-text > .pulse { background-image: none; color: var(--fg); } #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { background-image: none; color: var(--muted); } }
-#m-box { background: var(--panel); border-radius: 10px; padding: 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
-#m-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+/* 206/207: the close header is sticky at every width, mobile and desktop: sticky is clamped to the
+containing block, so #m-box drops its top padding and #m-head carries it (else the header pins 18px
+down and scrolled text peeks above it); its own bottom padding keeps 10px clearance under the title
+while content scrolls */
+#m-box { background: var(--panel); border-radius: 10px; padding: 0 18px 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
+#m-head { display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; margin-bottom: 0; padding: 18px 0 10px; background: var(--panel); z-index: 1; }
 #m-head h2 { font-size: 1.0625rem; margin: 0; }
 #m-close { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 0.875rem; }
 #m-close:hover { background: var(--hover); }
@@ -269,11 +273,7 @@ make the text vanish: the gradient drops and the solid color restores per block 
 @media (max-width: 600px) { html { font-size: 85%; } }
 /* 205: mobile, the task details popup is a full-screen sheet, flush with all four sides; the vh
 line is the fallback for the dvh line (older mobile browsers), max-height none lifts the 82vh cap */
-@media (max-width: 600px) { #m-box { width: 100vw; margin: 0; border-radius: 0; height: 100vh; height: 100dvh; max-height: none; padding: 0 18px 18px; } }
-/* 206: mobile, sticky close header: sticky is clamped to the containing block, so #m-box drops
-its top padding and #m-head carries it (else the header pins 18px down and scrolled text peeks
-above it); its own bottom padding keeps 10px clearance under the title while content scrolls */
-@media (max-width: 600px) { #m-head { position: sticky; top: 0; margin-bottom: 0; padding: 18px 0 10px; background: var(--panel); z-index: 1; } }
+@media (max-width: 600px) { #m-box { width: 100vw; margin: 0; border-radius: 0; height: 100vh; height: 100dvh; max-height: none; } }
 </style>
 </head>
 <body>
