@@ -2635,6 +2635,11 @@ assert.equal(parseTask(rootAR2, gatedAR2.file).state, "to-do", "the gated task p
 const nowAR2 = createTask(rootAR2, { name: "feat: zero-window task", summary: "Backlog idle gate", specs: "n/a" });
 assert.equal(promoteBacklog(rootAR2, listAll(rootAR2), 0).length, 1, "a window of 0 promotes immediately");
 assert.equal(parseTask(rootAR2, nowAR2.file).state, "to-do", "the zero-window task promoted");
+// the daemon's own writes are not board activity (211): a setState rewrite (a state transition,
+// a blocker drop) must not re-arm the gate, or every done move defers its dependents by a window
+setState(rootAR2, nowAR2, "backlog");
+assert.equal(promoteBacklog(rootAR2, listAll(rootAR2), 0.05).length, 1, "a self-write does not re-arm the gate");
+assert.equal(parseTask(rootAR2, nowAR2.file).state, "to-do", "the task with only self-written files promoted");
 cleanupAll(rootAR2);
 console.log("orchestrator.test.ts: ... + backlog idle gate smoke passed");
 
@@ -2656,6 +2661,55 @@ assert.equal(promoteBacklog(rootAR3, listAll(rootAR3), 0.05).length, 0, "a fresh
 assert.equal(parseTask(rootAR3, freshAR3.file).state, "backlog", "the fresh task stays gated");
 cleanupAll(rootAR3);
 console.log("orchestrator.test.ts: ... + role notes are not idle-gate activity smoke passed");
+// --- part AR4: the gate ignores the daemon's own writes (#211): with a real sweep and a
+// nonzero window, a blocker reaching done still promotes its dependents in the same sweep
+// and the sweep's report lists them under Scheduled; a genuinely external (PM) board edit
+// still defers promotion for the window ---
+const rootAR4 = fixture();
+cleaned.push(rootAR4);
+mkdirSync(kanbanDir(rootAR4), { recursive: true });
+writeFileSync(join(kanbanDir(rootAR4), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAR4), pollMinutes: 0.01, backlogIdleMinutes: 0.05 }));
+// an empty temp HOME keeps the ambient user-level config out of loadConfig, as in part AP
+const homeAR4 = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAR4);
+const savedHomeAR4 = process.env.HOME;
+process.env.HOME = homeAR4;
+const cfgAR4 = loadConfig(rootAR4);
+process.env.HOME = savedHomeAR4;
+assert.equal(cfgAR4.backlogIdleMinutes, 0.05, "the fixture config carries the nonzero window");
+// the #197 fixture: a to-merge task with nothing to merge (no worktree, no branch) plus a
+// dependent backlog task; sweepToMerge sets the blocker done and dropDoneBlockers drops the
+// dependent's satisfied ref in the same sweep
+const blockerAR4 = createTask(rootAR4, { name: "fix: merged task", summary: "Merged", specs: "n/a" });
+setState(rootAR4, blockerAR4, "to-merge");
+const dependentAR4 = createTask(rootAR4, { name: "feat: unblocked next", summary: "Unblocked", specs: "n/a", blockedBy: `#${taskNum(blockerAR4.file)}` });
+// the setup writes are PM writes: age them past the window, so the only fresh mtimes the
+// sweep leaves behind are the daemon's own (0.05 min = 3 s < 10 s)
+const agedAR4 = new Date(Date.now() - 10_000);
+for (const f of [blockerAR4.file, dependentAR4.file]) utimesSync(join(kanbanDir(rootAR4), f), agedAR4, agedAR4);
+rescan(rootAR4, cfgAR4);
+assert.equal(parseTask(rootAR4, blockerAR4.file).state, "done", "the to-merge task with nothing to merge went done");
+assert.equal(parseTask(rootAR4, dependentAR4.file).state, "to-do", "the dependent promoted in the same sweep despite the daemon's own writes");
+assert.equal(parseTask(rootAR4, dependentAR4.file).blockedBy, "", "the satisfied blocker ref was dropped");
+const reportsAR4 = readdirSync(reportsDir(rootAR4)).filter((f) => f.endsWith(".md")).sort();
+assert.equal(reportsAR4.length, 1, "one report for the done sweep");
+const reportAR4 = readFileSync(join(reportsDir(rootAR4), reportsAR4[0]), "utf8");
+assert.ok(reportAR4.includes(`- ${dependentAR4.name} (${dependentAR4.file}): to-do`), "the report lists the same-sweep promotion under Scheduled");
+// a genuinely external (PM) board edit still defers promotion: a raw write, as a hand edit
+// or another process would make it, re-arms the gate
+const candidateAR4 = createTask(rootAR4, { name: "feat: gated next", summary: "Gated", specs: "n/a" });
+const agedCandidateAR4 = new Date(Date.now() - 10_000);
+utimesSync(join(kanbanDir(rootAR4), candidateAR4.file), agedCandidateAR4, agedCandidateAR4);
+writeFileSync(join(kanbanDir(rootAR4), candidateAR4.file), readFileSync(join(kanbanDir(rootAR4), candidateAR4.file), "utf8").replace("# Notes\n", "# Notes\n\nPM note.\n"));
+assert.equal(promoteBacklog(rootAR4, listAll(rootAR4), 0.05).length, 0, "an external PM edit defers promotion within the window");
+assert.equal(parseTask(rootAR4, candidateAR4.file).state, "backlog", "the externally edited task stays in backlog");
+// aged past the window, the poll path promotes too (the gate's second call site)
+const agedAgainAR4 = new Date(Date.now() - 10_000);
+utimesSync(join(kanbanDir(rootAR4), candidateAR4.file), agedAgainAR4, agedAgainAR4);
+poll(rootAR4, cfgAR4.logStallMinutes, Date.now(), cfgAR4.backlogIdleMinutes);
+assert.equal(parseTask(rootAR4, candidateAR4.file).state, "to-do", "the poll path promotes past the window");
+cleanupAll(rootAR4);
+console.log("orchestrator.test.ts: ... + gate ignores the daemon's own writes smoke passed");
 
 // --- part AS: per-role project notes in .kanban, read from the cwd AGENTS.md symlink ---
 // no spawn carries --append-system-prompt (the AGENTS.md cwd symlink replaces it), the daemon

@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { kanbanDir, setWorktree, slugWorktree, taskFiles, type Task } from "../kanban.ts";
+import { kanbanDir, noteSelfWrite, setWorktree, slugWorktree, taskFiles, type Task } from "../kanban.ts";
 import { pidAlive } from "../pid.ts";
 import { bumpCounter, counterPath, log, readCounter } from "./log.ts";
 
@@ -304,10 +304,12 @@ export function reconcileBoard(root: string): boolean {
 			continue;
 		}
 		try {
+			const path = join(kanbanDir(root), name);
 			writeFileSync(
-				join(kanbanDir(root), name),
+				path,
 				execFileSync("git", ["cat-file", "blob", blob], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
 			);
+			noteSelfWrite(path);
 			updated++;
 		} catch {
 			/* unreadable entry, skip */

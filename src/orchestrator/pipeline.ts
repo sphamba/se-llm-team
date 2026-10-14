@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { kanbanDir, getTask, listAll, setState, setWorktree, taskFiles, taskSlug, updateAttrs, ROLE_NOTES_RE, type Task } from "../kanban.ts";
+import { isSelfWrite, kanbanDir, getTask, listAll, setState, setWorktree, taskFiles, taskSlug, updateAttrs, ROLE_NOTES_RE, type Task } from "../kanban.ts";
 import { agentAlive, agentPid, clearPid, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP, REVIEWER_RUN_CAP, type Config } from "./config.ts";
 import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, readCounter } from "./log.ts";
@@ -414,10 +414,12 @@ export function dropDoneBlockers(root: string, tasks: Task[]): void {
 // promotion is event-driven: every sweep and every poll promotes EVERY schedulable backlog
 // task, not one per idle window. A board-wide PM quiet window (backlogIdleMinutes) gates it:
 // the PM may still be creating or chaining a batch of tasks, so any fresh task-file mtime
-// defers all promotion until the board sits idle. Unchained tasks promote and run as parallel
-// lanes the moment a lane frees; the blockedBy chain (the PM encodes it at creation)
-// serializes what must serialize. Returns the promoted tasks (state to-do), the report's
-// Scheduled section; exported for the tests
+// defers all promotion until the board sits idle, except the daemon's own writes (isSelfWrite):
+// counting those re-armed the gate on every state transition and blocker drop, defeating the
+// same-sweep unblock (#211). Unchained tasks promote and run as parallel lanes the moment a
+// lane frees; the blockedBy chain (the PM encodes it at creation) serializes what must
+// serialize. Returns the promoted tasks (state to-do), the report's Scheduled section; exported
+// for the tests
 export function promoteBacklog(root: string, tasks: Task[], backlogIdleMinutes = 0): Task[] {
 	// board-wide on purpose: one quiet gate for the whole board, so a fresh task file created
 	// or chained mid-batch defers everything. 0 disables the wait
@@ -429,7 +431,12 @@ export function promoteBacklog(root: string, tasks: Task[], backlogIdleMinutes =
 			// not read as PM activity and defer promotion for another whole window
 			if (ROLE_NOTES_RE.test(file)) continue;
 			try {
-				newest = Math.max(newest, statSync(join(kanbanDir(root), file)).mtimeMs);
+				const path = join(kanbanDir(root), file);
+				const mtimeMs = statSync(path).mtimeMs;
+				// the daemon's own writes are not board activity: a blocker reaching done must
+				// still promote its dependents in the same sweep
+				if (isSelfWrite(path, mtimeMs)) continue;
+				newest = Math.max(newest, mtimeMs);
 			} catch {
 				/* vanished between readdir and stat: not the newest */
 			}

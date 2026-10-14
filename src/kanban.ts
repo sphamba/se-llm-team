@@ -267,6 +267,32 @@ function serializeFrontmatter(attrs: Record<string, string>): string {
 	return `---\n${lines.join("\n")}\n---\n`;
 }
 
+// task files this process rewrote (path -> mtimeMs recorded at write time): in the daemon
+// process every task-file write is the daemon's own (state transitions, attr rewrites, mirror
+// materializations, role-note creation), so the backlog promotion gate skips files whose mtime
+// still matches a write made here; a write by any other process (PM session, agent, hand edit)
+// never matches and still defers promotion
+const selfWrites = new Map<string, number>();
+
+export function noteSelfWrite(path: string): void {
+	try {
+		selfWrites.set(path, statSync(path).mtimeMs);
+	} catch {
+		/* vanished between write and stat: nothing to mask */
+	}
+}
+
+// exact mtime match: an unchanged file stats identically later, a rewrite by anyone else
+// never does; a stale entry (the file rewritten by another process in between) is dropped
+// here, so it cannot mask later edits of a recreated file
+export function isSelfWrite(path: string, mtimeMs: number): boolean {
+	const at = selfWrites.get(path);
+	if (at === undefined) return false;
+	if (at === mtimeMs) return true;
+	selfWrites.delete(path);
+	return false;
+}
+
 // Attribute-only rewrite; skips unchanged keys and refuses a conflicted file. Exported for
 // the orchestrator's automatic blockedBy maintenance (updateTask would add a needless cycle
 // check and board re-read to a pure ref removal).
@@ -280,6 +306,7 @@ export function updateAttrs(root: string, task: Task, patch: Record<string, stri
 	if (!changed.length) return;
 	for (const [k, v] of changed) fm.attrs[k] = v;
 	writeFileSync(path, serializeFrontmatter(fm.attrs) + fm.body);
+	noteSelfWrite(path);
 }
 
 export function setState(root: string, task: Task, state: TaskState): void {
