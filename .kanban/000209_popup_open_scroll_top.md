@@ -1,8 +1,8 @@
 ---
 name: "fix: task details popup opens showing the top"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/209-popup-open-scroll-top"
 issuer: "user"
 complexity: "trivial"
 shortName: "popup-open-scroll-top"
@@ -35,3 +35,11 @@ Facts (verified):
 - `npm test` passes (five suites), including the setBody html-gate pin.
 
 # Notes
+
+# Open questions
+No open questions for the user.
+
+Assumptions:
+- The reset applies to the task details popup only. The log popup keeps its own scroll position.
+- The jump is instant (a `scrollTop` assignment), no smooth-scroll animation.
+- `#m-box` is always present when `openTask` runs (static markup in the served page), so no null guard is added.

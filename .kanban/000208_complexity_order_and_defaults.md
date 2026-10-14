@@ -1,7 +1,7 @@
 ---
 name: "fix: complexity order trivial-first; defaults autoScheduleMinutes 1, logStallMinutes 10"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/208-complexity-order-and-defaults"
 issuer: "user"
 complexity: "simple"
@@ -42,3 +42,12 @@ Facts (verified):
 - `npm test` passes (five suites), including the updated logStallMinutes default assertion.
 
 # Notes
+- Implemented in commit 59d0982. Complexity values are now written trivial, simple, moderate, complex in: src/kanban.ts (COMPLEXITIES), index.ts (both StringEnum lists), src/orchestrator/config.ts (DEFAULT_REVIEWER_CAP, RoleLlmConfig field order, comment), src/webui/page.ts (cx-trivial chip first), README.md (JSON example, roles row, reviewerCap row), docs/architecture.md:5. Defaults changed in src/orchestrator/config.ts: DEFAULT_AUTO_SCHEDULE_MINUTES 5 -> 1, DEFAULT_LOG_STALL_MINUTES 5 -> 10; README.md default column now 1 and 10; tests/orchestrator.test.ts part AP asserts 10.
+- Also picked up by the grep: README.md:36 JSON example keys, README.md reviewerCap default column (now `0`/`1`/`2`/`3`), the RoleLlmConfig field order, and stale test comments (part AL "default 1 min", part AN 5-minute window wording, part AP "default 10"). No behavior change beyond the two defaults: the complexity default stays moderate.
+- Verified: `npm test` (five suites) passes; the acceptance greps find no old-order array and show 1 / 10 in config.ts. Neither key exists in ~/.pi/agent/se-llm-team.json, and the project has no .kanban/se-llm-team.json, so the new defaults take effect at the next daemon restart with no migration.
+
+# Open questions
+Assumptions (confirm or correct before this hardens):
+- The complexity default stays `moderate`; only the written order and the docs change, with no behavior change.
+- "Everywhere" includes the README JSON example keys, the reviewerCap default column order, and the RoleLlmConfig interface field order, all reordered cosmetically.
+- autoScheduleMinutes = 1 applies to all its uses (failed-merge requeue and respawn-past-cap wait), not only to one path.
