@@ -1,7 +1,7 @@
 ---
 name: "fix: backlog idle gate counts the daemon's own task-file writes"
 priority: "high"
-state: "doing"
+state: "reviewing"
 worktree: "fix/211-backlog-idle-gate-own-writes"
 issuer: "#210"
 complexity: "moderate"
@@ -48,3 +48,18 @@ Make the gate ignore the writes the daemon itself made during the current pass (
 - Regression coverage exercises the daemon-driven path with a nonzero window, not only `backlogIdleMinutes: 0` / direct `promoteBacklog` calls.
 
 # Notes
+
+- Fix (commit 99620f4): the backlogIdleMinutes gate in promoteBacklog (src/orchestrator/pipeline.ts) now skips task files the daemon itself wrote. kanban.ts keeps a per-process selfWrites map (path -> mtimeMs recorded right after the write), fed by noteSelfWrite at the three daemon write points: updateAttrs (all state transitions, worktree attrs, blockedBy drops), reconcileBoard's mirror materializations (board.ts) and ensureRoleNotes (spawn.ts). The gate skips files whose mtime still exactly matches a recorded self-write (isSelfWrite; a stale entry is dropped on mismatch, so a recreated file is never masked). Writes by any other process (PM session, agents, hand edits) never match and still defer promotion for the window.
+- The mask is process-lifetime, not current-pass-only: a daemon write is never PM activity, so masking it for the process's life gives the same behavior with no per-pass bookkeeping. A daemon restart starts with an empty map, so writes made by the previous process defer promotion for one window (rare, accepted).
+- Tests: part AR2 gained the direct check (a setState self-write does not re-arm the gate); new part AR3 drives the #197 fixture (a to-merge task with nothing to merge plus a dependent backlog task) through a real rescan and poll with backlogIdleMinutes 0.05: same-sweep promotion, the dependent named under Scheduled in that sweep's report, a raw PM edit still defers, and the poll path promotes past the window. A red-check (src fix stashed) confirmed the new assertions fail on the old code.
+- Full suite green: kanban, orchestrator (incl. AR2/AR3), webui, extension, index.
+
+- Follow-up (after #212 merged as b1ef8ff): its gate skip of role notes (ROLE_NOTES_RE in promoteBacklog) covers that slice regardless of writer, so the ensureRoleNotes mask was dropped as redundant. The daemon-driven test part was renamed AR4 (#212's part took the AR3 name) and the branch was rebased onto main in this worktree, so the merge is now a fast-forward of one commit (78f4e69) with both gate rules: role notes skipped first, daemon self-writes second. Full suite green after the rebase.
+
+# Open questions
+
+## Assumptions
+- Only the daemon process's own writes are masked: agent-role writes (e.g. a reviewer setting its task to-merge) still count as board activity and defer promotion by the window.
+- The gate stays mtime-based with the exact-match mask; a PM edit landing in the same timestamp tick as a daemon write to the same file is not distinguished (negligible on ext4/tmpfs).
+- backlogIdleMinutes keeps its current board-wide PM-quiet-window meaning; the mask changes only which writes feed it.
+- The webui is read-only, so no in-daemon PM edits exist that could be wrongly masked by the process-level registry.
