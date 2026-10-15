@@ -1,12 +1,12 @@
 ---
 name: "feat: agent-agnostic spawn layer for pi and claude backends"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/216-agent-agnostic-spawn"
 issuer: "user"
 complexity: "complex"
 shortName: "agent-agnostic-spawn"
-blockedBy: "#215"
+blockedBy: ""
 ---
 
 # Summary
