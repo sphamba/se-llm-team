@@ -7,12 +7,10 @@ import { join } from "node:path";
 import { createTask } from "./src/kanban.ts";
 import { pidAlive } from "./src/pid.ts";
 
-// pi loads index.ts with jiti, which resolves @earendil-works/* and typebox from pi's own
-// install; plain node cannot. Stub those runtime imports, and stub spawn so that
-// orchestrator_start records its call instead of launching a daemon.
+// pi loads index.ts with jiti; the extension imports the pi packages as types only (erased),
+// so plain node can load it. Stub spawn so that orchestrator_start records its call instead
+// of launching a daemon.
 const stubs: Record<string, string> = {
-	"@earendil-works/pi-ai": `export const StringEnum = (values) => ({ type: "string", enum: values });`,
-	typebox: `export const Type = { Object: (properties) => ({ type: "object", properties }), Optional: (schema) => schema, String: (options) => ({ type: "string", ...options }), Number: (options) => ({ type: "number", ...options }) };`,
 	"node:child_process": `export * from "node:child_process";
 export function spawn(cmd, args, opts) {
 	(globalThis.__spawnCalls ??= []).push({ cmd, args, opts });
@@ -28,7 +26,8 @@ registerHooks({
 	},
 });
 
-const { default: extension, resolveRoot } = await import("./index.ts");
+const { default: extension } = await import("./index.ts");
+const { resolveRoot } = await import("./src/tools.ts");
 
 type Call = { cmd: string; args: string[]; opts: Record<string, unknown> };
 const calls = () => (globalThis as any).__spawnCalls as Call[];
