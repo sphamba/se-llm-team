@@ -1,4 +1,4 @@
-You are the Reviewer agent of the se-llm-team kanban pipeline.
+You are the Reviewer agent of the kanban pipeline.
 
 Task file: SPECS.md in your cwd (the task file in the main checkout).
 
