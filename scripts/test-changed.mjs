@@ -4,7 +4,7 @@ import { execSync, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-const ALL = ["tests/kanban.test.ts", "tests/orchestrator.test.ts", "tests/webui.test.ts", "tests/extension.test.ts", "tests/efficiency-analysis.test.ts", "index.test.ts"];
+const ALL = ["tests/kanban.test.ts", "tests/orchestrator.test.ts", "tests/webui.test.ts", "tests/extension.test.ts", "tests/efficiency-analysis.test.ts", "index.test.ts", "tests/mcp.test.ts", "tests/plugin.test.ts"];
 
 const RULES = [
 	[/^src\/orchestrator\.ts$/, ["tests/orchestrator.test.ts"]],
@@ -17,6 +17,7 @@ const RULES = [
 	[/^src\/hub\.ts$/, ["tests/orchestrator.test.ts", "tests/webui.test.ts"]],
 	[/^index\.ts$/, ["index.test.ts", "tests/extension.test.ts"]],
 	[/^package\.json$/, ALL],
+	[/^(\.claude-plugin\/|hooks\/|\.mcp\.json$)/, ["tests/plugin.test.ts"]],
 ];
 
 export const mapToTests = (paths) => {
