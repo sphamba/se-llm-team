@@ -2,7 +2,7 @@
 name: "feat: MCP server exposing the kanban and orchestrator tools"
 priority: "high"
 state: "done"
-worktree: "feat/217-mcp-server-tools"
+worktree: ""
 issuer: "user"
 complexity: "complex"
 shortName: "mcp-server-tools"
