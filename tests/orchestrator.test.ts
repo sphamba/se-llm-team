@@ -2033,6 +2033,33 @@ const turnEndLine = JSON.stringify({ type: "turn_end", message: { role: "assista
 assert.equal(compactLogLine(turnEndLine), turnEndLine, "turn_end kept verbatim");
 assert.equal(compactLogLine("plain stderr line"), "plain stderr line", "non-JSON stderr passthrough");
 
+// claude stream-json records: the stream_event wrappers drop (their deltas repeat what the
+// following authoritative assistant/user records carry), every other claude record keeps
+// verbatim, exactly like unknown pi records
+const claudeFixture = (): string =>
+	[
+		JSON.stringify({ type: "system", subtype: "init", cwd: "/r", session_id: "s1", tools: ["Bash"], model: "claude-opus-4-6" }),
+		JSON.stringify({ type: "assistant", parent_tool_use_id: null, message: { role: "assistant", model: "claude-opus-4-6", content: [{ type: "thinking", thinking: "claude plans" }, { type: "text", text: "claude says" }, { type: "tool_use", id: "toolu_1", name: "Read", input: { file_path: "/r/SPECS.md" } }], id: "msg_1", usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }, timestamp: "2026-10-11T09:36:24.121Z" }),
+		JSON.stringify({ type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "cla" } } }),
+		JSON.stringify({ type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_stop", index: 0 } }),
+		JSON.stringify({ type: "user", parent_tool_use_id: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", is_error: false, content: "specs body" }] } }),
+		JSON.stringify({ type: "result", subtype: "success", is_error: false, duration_ms: 1234, duration_api_ms: 900, num_turns: 2, result: "claude done", usage: { input_tokens: 10, output_tokens: 20 }, total_cost_usd: 0.01 }),
+	].join("\n") + "\n";
+const claudeLines = claudeFixture().split("\n").filter((l) => l !== "");
+for (const claudeLine of claudeLines) {
+	const claudeRec = JSON.parse(claudeLine) as any;
+	if (claudeRec.type !== "stream_event") continue;
+	assert.equal(compactLogLine(claudeLine), null, `claude ${claudeRec.event.type} stream_event dropped`);
+}
+assert.equal(claudeLines.filter((l) => JSON.parse(l).type === "stream_event").length, 2, "both stream_event shapes covered");
+for (const claudeLine of claudeLines) {
+	const claudeRec = JSON.parse(claudeLine) as any;
+	if (claudeRec.type === "stream_event") continue;
+	assert.deepEqual(JSON.parse(compactLogLine(claudeLine) as string), claudeRec, `claude ${claudeRec.type} record kept verbatim`);
+}
+assert.equal(claudeLines.filter((l) => JSON.parse(l).type !== "stream_event").length, 4, "four kept claude records: system, assistant, user, result");
+assert.equal(compactLogLine("claude stderr noise"), "claude stderr noise", "non-JSON line in a claude log kept as its own line");
+
 // the whole fixture line-by-line: compaction is the retro pass now (the fd redirect removed
 // the write-time pipe), so each complete line goes through compactLogLine directly, the way
 // compactFinishedLogs runs it

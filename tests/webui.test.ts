@@ -1288,6 +1288,68 @@ assert.ok(toolInit.text.includes('<details class="lg-tool" data-tc="t9"><summary
 assert.ok(toolInit.text.includes('<pre class="lg-out">the whole output</pre>'), "the tool result stays joined to its call");
 assert.ok(!toolInit.text.includes("lg-tres"), "no orphan-result span: the window never splits start from end");
 
+// 000218: a claude stream-json log renders through the endpoint from the authoritative
+// assistant/user records: text blocks as pending text, thinking and tool_use blocks collapsed, a
+// string tool_result content joins its block once, a plain-string user content renders as a
+// prompt line, stream_event deltas and system/result records render nothing, and an orphan error
+// tool_result shows its failed span
+const claudeLog = [
+	JSON.stringify({ type: "system", subtype: "init", cwd: "/r", session_id: "s1" }),
+	JSON.stringify({ type: "assistant", parent_tool_use_id: null, message: { role: "assistant", model: "claude-opus-4-6", content: [{ type: "thinking", thinking: "claude plans" }, { type: "text", text: "claude says" }, { type: "tool_use", id: "toolu_1", name: "Read", input: { file_path: "/r/SPECS.md" } }] } }),
+	JSON.stringify({ type: "user", parent_tool_use_id: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", is_error: false, content: "specs body" }] } }),
+	JSON.stringify({ type: "assistant", parent_tool_use_id: null, message: { role: "assistant", model: "claude-opus-4-6", content: [{ type: "text", text: "claude done" }], usage: { input_tokens: 30, output_tokens: 70 } } }),
+	JSON.stringify({ type: "user", parent_tool_use_id: null, message: { role: "user", content: "initial prompt" } }),
+	JSON.stringify({ type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "DELTAONLY" } } }),
+	JSON.stringify({ type: "user", parent_tool_use_id: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_9", is_error: true, content: "boom" }] } }),
+	JSON.stringify({ type: "result", subtype: "success", is_error: false, duration_ms: 1234, result: "claude done", usage: { input_tokens: 30, output_tokens: 70 } }),
+].join("\n") + "\n";
+writeFileSync(logFile, claudeLog);
+const claudeServed = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.ok(claudeServed.text.includes('<details class="lg-think"><summary>Thinking</summary>'), "the claude thinking block renders as a closed Thinking block");
+assert.ok(claudeServed.text.includes("<p>claude plans</p>"), "the claude thinking content renders inside the block");
+assert.ok(claudeServed.text.includes("<summary>Read: /r/SPECS.md</summary>"), "the tool_use block summarizes off its file_path input");
+assert.ok(claudeServed.text.includes("&quot;file_path&quot;: &quot;/r/SPECS.md&quot;"), "the tool_use input renders as the escaped args JSON block");
+assert.ok(claudeServed.text.includes('<pre class="lg-out">specs body</pre>'), "a string tool_result content joins its block once");
+assert.ok(claudeServed.text.includes("<p>claude done</p>"), "the claude text block renders as pending text");
+assert.ok(claudeServed.text.includes("[prompt] initial prompt\n"), "a plain-string user content renders as a prompt line");
+assert.ok(!claudeServed.text.includes("DELTAONLY"), "stream_event deltas never double-render the authoritative records");
+assert.ok(claudeServed.text.includes('data-sum="? failed: boom"'), "an orphan error tool_result renders its failed span");
+assert.ok(!claudeServed.text.includes('"type"'), "claude records never leak raw JSON");
+assert.equal(claudeServed.model, "claude-opus-4-6", "the meta line comes off the latest usage-bearing claude record");
+
+// 000218: the claude stats dedupe by message.id (one API turn emits several assistant records
+// sharing the same usage) and a finished run's duration comes from the result record's wall-clock
+// duration_ms, preferred over any record-timestamp difference
+writeFileSync(logFile, [
+	JSON.stringify({ type: "assistant", parent_tool_use_id: null, message: { role: "assistant", model: "claude-opus-4-6", id: "msg_1", content: [{ type: "text", text: "a" }], usage: { input_tokens: 30, output_tokens: 70, cache_read_input_tokens: 500 } }, timestamp: "2026-10-11T09:36:24.121Z" }),
+	JSON.stringify({ type: "assistant", parent_tool_use_id: null, message: { role: "assistant", model: "claude-opus-4-6", id: "msg_1", content: [{ type: "text", text: "a2" }], usage: { input_tokens: 30, output_tokens: 70 } }, timestamp: "2026-10-11T09:36:25.121Z" }),
+	JSON.stringify({ type: "assistant", parent_tool_use_id: null, message: { role: "assistant", model: "claude-opus-4-6", id: "msg_2", content: [{ type: "text", text: "b" }], usage: { input_tokens: 10, output_tokens: 20 } } }),
+	JSON.stringify({ type: "result", subtype: "success", is_error: false, duration_ms: 4321, result: "done", usage: { input_tokens: 40, output_tokens: 90 } }),
+].join("\n") + "\n");
+const claudeEntry = (await (await fetch(`${base}/api/tasks`)).json())[0].agents.find((a) => a.handle === `${slug}.developer`);
+assert.equal(claudeEntry.tokens, 130, "the repeated msg_1 counts once and cache_read_input_tokens stays excluded");
+assert.equal(claudeEntry.duration, 4321, "the result record's wall-clock duration wins over the record-timestamp difference");
+assert.equal((await (await fetch(`${base}/api/agent-log?file=${enc}`)).json()).model, "claude-opus-4-6", "the meta's model comes off the latest usage-bearing record even without a timestamp");
+
+// 000218: a claude stream_event block (content_block_start..content_block_stop with the deltas
+// between, all separate records) counts as ONE collapsed line paired by event.index, so the init
+// window starts at its content_block_start; a block still open at the tail counts as one line
+// from its content_block_start too
+const evStart = JSON.stringify({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } } }) + "\n";
+const evDelta = (t: string) => JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: t } } }) + "\n";
+const evStop = JSON.stringify({ type: "stream_event", event: { type: "content_block_stop", index: 0 } }) + "\n";
+const evSession = JSON.stringify({ type: "session", id: "s" }) + "\n";
+const evRun = Array.from({ length: 150 }, (_, i) => evDelta("d" + i)).join("");
+writeFileSync(logFile, evSession + filler.repeat(100) + evStart + evRun + evStop + userPrompt.repeat(99));
+const evInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.equal(evInit.head, evSession.length + filler.repeat(100).length, "the claude stream block counts as ONE line: it plus the 99 prompt lines make the last 100 collapsed lines");
+assert.ok(!evInit.text.includes("lg-cont"), "the window never starts inside a claude block");
+assert.ok(!evInit.text.includes("thinking_delta"), "the stream deltas render nothing");
+writeFileSync(logFile, evSession + filler.repeat(100) + evStart + evRun);
+const evOpen = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.equal(evOpen.head, evSession.length + filler.length, "an open claude block still counts as one line from its content_block_start");
+assert.ok(!evOpen.text.includes("lg-cont"), "the open block's window never starts inside the block either");
+
 // 000084: a JSONL record split across two poll windows renders exactly once, when its newline
 // arrives. The first poll's tail sits on the last record boundary, so the next poll re-reads the
 // partial record from its start instead of stripping it as a mid-record head line.

@@ -234,6 +234,69 @@ function testAnalyserAnswerEmptyParts() {
 	assert.equal(analyserAnswer(real), "  padded  ");
 }
 
+// --- claude stream-json logs: assistant records carry the authoritative blocks like pi's
+// message_end, user records carry the tool results, and the result record carries the
+// final answer. Parented records are subagent activity and stream_event plus result
+// records contribute no blocks. ---
+
+// one synthetic claude log: a system init, an assistant record with thinking then text then
+// tool_use, the tool_result user record, a parented subagent record, a second turn with an
+// array-content tool result, a stream_event delta and a result record
+const CLAUDE_SYNTHETIC = [
+	JSON.stringify({ type: "system", subtype: "init" }),
+	JSON.stringify({ type: "assistant", parent_tool_use_id: null, message: { role: "assistant", content: [{ type: "thinking", thinking: "claude plans" }, { type: "text", text: "starting" }, { type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "ls" } }] } }),
+	JSON.stringify({ type: "user", parent_tool_use_id: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", is_error: false, content: "out" }] } }),
+	JSON.stringify({ type: "assistant", parent_tool_use_id: "toolu_1", message: { role: "assistant", content: [{ type: "text", text: "subagent text" }] } }),
+	JSON.stringify({ type: "assistant", parent_tool_use_id: null, message: { role: "assistant", content: [{ type: "text", text: "done" }, { type: "tool_use", id: "toolu_2", name: "Read", input: { file_path: "/f" } }] } }),
+	JSON.stringify({ type: "user", parent_tool_use_id: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_2", is_error: false, content: [{ type: "text", text: "file body" }] }] } }),
+	JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "DELTAONLY" } } }),
+	JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "DELTAONLY2" }),
+].join("\n");
+
+function testClaudeBlockExtraction() {
+	const blocks = parseLogBlocks(CLAUDE_SYNTHETIC);
+	assert.equal(blocks.length, 5);
+	assert.deepEqual(blocks.map((b) => b.type), ["thinking", "text", "toolCall", "text", "toolCall"]);
+	assert.equal(blocks[0].index, 1);
+	assert.equal(blocks[4].index, 5);
+	assert.equal(blocks[0].text, "claude plans");
+	assert.equal(blocks[1].text, "starting");
+	assert.equal(blocks[2].toolName, "Bash");
+	assert.equal(blocks[2].text, JSON.stringify({ command: "ls" }));
+	assert.equal(blocks[2].result, "out");
+	assert.equal(blocks[2].isError, false);
+	assert.equal(blocks[3].text, "done");
+	assert.equal(blocks[4].toolName, "Read");
+	assert.equal(blocks[4].text, JSON.stringify({ file_path: "/f" }));
+	assert.equal(blocks[4].result, "file body");
+	// the parented subagent record adds no block, and the stream_event delta plus the result
+	// record are ignored
+	assert.ok(!blocks.some((b) => b.text.includes("subagent text")));
+	assert.ok(!blocks.some((b) => b.text.includes("DELTAONLY")));
+}
+
+function testClaudeAnalyserAnswer() {
+	// a claude stdout ending in a result record: the result field is the final answer
+	const withResult = [
+		JSON.stringify({ type: "system", subtype: "init" }),
+		JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "working" }] } }),
+		'{"type":"result","subtype":"success","is_error":false,"result":"final answer"}',
+	].join("\n");
+	assert.equal(analyserAnswer(withResult), "final answer");
+	// an error result record has no answer, with or without a result field
+	const errorResult = [
+		JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "working" }] } }),
+		'{"type":"result","is_error":true}',
+	].join("\n");
+	assert.equal(analyserAnswer(errorResult), null);
+	// assistant records with no result record still carry the answer, the last one wins
+	const assistantOnly = [
+		JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "earlier" }] } }),
+		JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "latest" }] } }),
+	].join("\n");
+	assert.equal(analyserAnswer(assistantOnly), "latest");
+}
+
 async function testFailedAnalyser() {
 	const dir = fixtureDir("failed");
 	try {
@@ -540,6 +603,8 @@ try {
 	testCommandBuilder();
 	await testClaudeAnalyserPipeline();
 	testAnalyserAnswerEmptyParts();
+	testClaudeBlockExtraction();
+	testClaudeAnalyserAnswer();
 	await testFailedAnalyser();
 	await testRetryRecovers();
 	await testRetryExhaustion();
