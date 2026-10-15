@@ -1,8 +1,10 @@
 # se-llm-team
 
-A pi coding agent extension. One skill, `/skill:se-llm-team`, turns the session into the Project manager and starts an orchestrator daemon that runs a kanban pipeline of headless coding agents.
+A coding agent extension for pi and Claude Code. One skill turns the session into the Project manager and starts an orchestrator daemon that runs a kanban pipeline of headless coding agents.
 
 ## Setup
+
+### pi
 
 Install as a pi package from git:
 
@@ -10,9 +12,24 @@ Install as a pi package from git:
 pi install git:github.com/sphamba/se-llm-team
 ```
 
-The https URL form works too: `pi install https://github.com/sphamba/se-llm-team`. The package provides the kanban/orchestrator tools, the `/skill:se-llm-team` skill, and the agent prompts. Node >= 24 is required: the orchestrator daemon runs the `.ts` sources directly through node's type stripping, so there is no build step.
+The https URL form works too: `pi install https://github.com/sphamba/se-llm-team`. The package provides the kanban/orchestrator tools, the `se-llm-team` skill, and the agent prompts.
 
-Local development alternative: symlink the repo to `~/.pi/agent/extensions/se-llm-team/`. pi loads `index.ts` from it. No build step. Publish the skill with a second symlink (settings `skills` entries only toggle discovered resources, they do not add paths):
+### Claude Code
+
+Add the repo as a plugin marketplace and install the plugin:
+
+```sh
+claude plugin marketplace add github.com/sphamba/se-llm-team
+claude plugin install se-llm-team@se-llm-team
+```
+
+The plugin ships the `se-llm-team` skill, the kanban/orchestrator MCP server, and the hooks that drain board reports into the session. A manual `.mcp.json` without the plugin stays documented as the development path (see [MCP server](#mcp-server-claude-code) below).
+
+### Requirements
+
+Node >= 24 is required for both hosts: the sources are `.ts` files run directly through node's type stripping, so there is no build step for either host.
+
+Local development alternative (pi): symlink the repo to `~/.pi/agent/extensions/se-llm-team/`. pi loads `index.ts` from it. Publish the skill with a second symlink (settings `skills` entries only toggle discovered resources, they do not add paths):
 
 ```sh
 ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
@@ -20,11 +37,11 @@ ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
 
 ## Using it
 
-Start pi in a project and run the `se-llm-team` skill: the skill makes the session the Project manager, the kanban tools drive the board, and `orchestrator_start` runs the daemon. The orchestrator sends board reports to the chat. The mechanics are in [Documentation](#documentation) below.
+Start pi in a project and run the `se-llm-team` skill (in Claude Code: `/se-llm-team:se-llm-team`): the skill makes the session the Project manager, the kanban tools drive the board, and `orchestrator_start` runs the daemon. The orchestrator sends board reports to the chat. The mechanics are in [Documentation](#documentation) below.
 
 ## MCP server (Claude Code)
 
-Claude Code sessions get the same 12 kanban/orchestrator tools through a zero-dependency stdio MCP server. No install step: node >= 24 runs the `.ts` entry directly.
+Claude Code sessions get the same 12 kanban/orchestrator tools through a zero-dependency stdio MCP server. No install step: node >= 24 runs the `.ts` entry directly. The plugin starts it through `.mcp.json`; without the plugin, register it manually:
 
 ```sh
 node /path/to/se-llm-team/src/mcp.ts
