@@ -4,11 +4,14 @@
 // analyst+doctor pipeline on the run's log with the doctor stream persisted next to it, and
 // logs the outcome. Best-effort: a failure logs and exits non-zero, the pipeline moves on.
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { analyseLog } from "./efficiency-analysis.ts";
 import { loadConfig, resolveLlm } from "./orchestrator/config.ts";
 import { log } from "./orchestrator/log.ts";
 import { ensureRoleNotes } from "./orchestrator/spawn.ts";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 const [root, logArg, role] = process.argv.slice(2);
 if (!root || !logArg || !role) {
@@ -23,6 +26,9 @@ if (!root || !logArg || !role) {
 		// the doctor revises the role file, so it must exist even when no agent spawn created it
 		ensureRoleNotes(root, role);
 		await analyseLog(logPath, {
+			// the shipped prompt files travel with the package: a per-project agents dir would
+			// fail every unattended analysis for projects without the files
+			root: join(HERE, ".."),
 			agent: cfg.agent,
 			backend: cfg.backend,
 			llm: resolveLlm(root, cfg, "analyst", ""),

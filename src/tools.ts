@@ -309,7 +309,7 @@ export const TOOLS: Record<string, ToolDef> = {
 			// threshold come from the role config, the module defaults apply when unset. The
 			// analyst and doctor run through the same backend as the spawned agents
 			try {
-				const result = await analyseLog(absolutePath, { agent: cfg.agent, backend: cfg.backend, llm: resolveLlm(root, cfg, "analyst", ""), doctorLlm: resolveLlm(root, cfg, "doctor", ""), concurrency: cfg.roles.analyst?.concurrency, mergeThreshold: cfg.roles.analyst?.mergeThreshold });
+				const result = await analyseLog(absolutePath, { root, agent: cfg.agent, backend: cfg.backend, llm: resolveLlm(root, cfg, "analyst", ""), doctorLlm: resolveLlm(root, cfg, "doctor", ""), concurrency: cfg.roles.analyst?.concurrency, mergeThreshold: cfg.roles.analyst?.mergeThreshold });
 				return ok(`${result.analysis}\n\nReport: ${result.reportPath}\nBlocks analysed: ${result.blockCount}`, result);
 			} catch (err) {
 				return ok(`Cannot analyse ${absolutePath}: ${(err as Error).message}`);

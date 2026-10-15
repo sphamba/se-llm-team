@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { analyseLog, analystAnswer, buildAnalystCommand, buildDoctorCommand, parseLogBlocks, readLogFile } from "../src/efficiency-analysis.ts";
 import { claudeAnalystArgs, claudeDoctorArgs } from "../src/orchestrator/backends.ts";
+import { TOOLS } from "../src/tools.ts";
 
 // one synthetic log with the record shapes the orchestrator logs: a session record, an
 // assistant message_end with thinking then toolCall then text, the tool execution records,
@@ -704,9 +705,9 @@ async function testDoctorPromptWithRoleFile() {
 }
 
 async function testDoctorPromptWithoutRoleFile() {
-	// without roleFile the doctor is report-only: the prompt carries no rewrite
-	// instruction and names no role, and the argv keeps the headless analyst isolation
-	// flags (the doctor argv shape is fixed, roleFile only changes the prompt)
+	// without a roleFile the role file substitutes to the literal "none": the prompt tells
+	// the doctor not to write any file, the role stays unnamed, and the argv keeps the
+	// doctor shape (roleFile only changes the prompt)
 	const dir = fixtureDir("reportonly");
 	try {
 		const logPath = join(dir, "x.log");
@@ -720,9 +721,8 @@ async function testDoctorPromptWithoutRoleFile() {
 		});
 		assert.equal(doctorCalls.length, 1);
 		const prompt = doctorCalls[0][doctorCalls[0].length - 1];
-		assert.ok(!prompt.includes("revise"), "no rewrite instruction without a role file");
-		assert.ok(!prompt.includes("full rewrite authority"), "no rewrite authority without a role file");
-		assert.ok(!prompt.includes("guidance file"), "no role file reference without a role file");
+		assert.ok(prompt.includes("do not write any file"), `the none case forbids writes, got: ${prompt.slice(-600)}`);
+		assert.ok(!prompt.includes("AGENTS."), "no role-file path without a role file");
 		assert.ok(!prompt.includes("developer"), "the role stays unnamed without a role file");
 		// the headless analyst isolation flags stay in the doctor argv
 		assert.deepEqual(doctorCalls[0].slice(0, 7), ["pi", "--approve", "--no-session", "--no-extensions", "--no-skills", "--mode", "json"]);
@@ -831,6 +831,69 @@ async function testRunDoctorInjection() {
 	}
 }
 
+// --- the prompt files: agents/analyst.md and agents/doctor.md are the only prompt
+// source, read once per run from <root>/agents (default the package's own agents dir) ---
+
+async function testPromptFileSubstitution() {
+	// a per-root template renders through the placeholder contract: known placeholders are
+	// replaced, an unknown placeholder stays literal text, toolName is empty for non-tool blocks
+	const dir = fixtureDir("subst");
+	try {
+		const root = join(dir, "proj");
+		mkdirSync(join(root, "agents"), { recursive: true });
+		writeFileSync(join(root, "agents", "analyst.md"), "type={{blockType}} tool={{toolName}}| idx={{blockIndex}} keep={{mystery}}\n{{blockContent}}");
+		writeFileSync(join(root, "agents", "doctor.md"), "s={{stats}} m={{mergedCount}} f={{failedCount}} file={{roleFile}} role={{role}}\n{{reports}}");
+		const logPath = join(dir, "x.log");
+		writeFileSync(logPath, [textEnd("done"), toolCallEnd("tc1", "read", { path: "/x" })].join("\n"));
+		const prompts: string[] = [];
+		await analyseLog(logPath, { root, mergeThreshold: 1, role: "developer", roleFile: "/r/AGENTS.developer.md", runAnalyst: promptRecorder(prompts), runDoctor: promptRecorder(prompts) });
+		assert.equal(prompts.length, 3, "two analyst calls plus the doctor call");
+		assert.equal(prompts[0], "type=text tool=| idx=1 keep={{mystery}}\ndone");
+		assert.equal(prompts[1], `type=toolCall tool= read| idx=2 keep={{mystery}}\nTool call read. Arguments:\n${JSON.stringify({ path: "/x" })}`);
+		assert.equal(
+			prompts[2],
+			"s=Blocks: 2 total (text 1, thinking 0, toolCall 1).\nTool calls per tool: read 1. m=0 f=0 file=/r/AGENTS.developer.md role=developer\n1. [text] S\n   Struggle: none\n2. [toolCall read] S\n   Struggle: none",
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+async function testMissingPromptFileFails() {
+	// both prompt files are required: a missing file fails the analysis with the path
+	// named before any LLM call, and no report is written
+	const dir = fixtureDir("missing");
+	try {
+		const logPath = join(dir, "x.log");
+		writeFileSync(logPath, SYNTHETIC);
+		let calls = 0;
+		await assert.rejects(analyseLog(logPath, { root: dir, runAnalyst: async () => { calls++; return "S"; } }), /agents[/\\]analyst\.md/);
+		assert.equal(calls, 0, "no analyst call before the prompt files load");
+		assert.ok(!existsSync(join(dir, "x.analysis.md")), "no report on a failed prompt load");
+		// a missing doctor.md fails too, even with analyst.md present
+		mkdirSync(join(dir, "agents"));
+		writeFileSync(join(dir, "agents", "analyst.md"), "Block {{blockIndex}}.\n{{blockContent}}");
+		await assert.rejects(analyseLog(logPath, { root: dir, runAnalyst: async () => { calls++; return "S"; } }), /agents[/\\]doctor\.md/);
+		assert.equal(calls, 0, "no analyst call when the doctor prompt file is missing");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+async function testManualToolErrorPath() {
+	// the manual efficiency_analysis tool resolves the prompts from the session cwd's
+	// agents dir: a missing file fails the analysis and the tool reports it as
+	// "Cannot analyse <path>: <msg>" naming the missing prompt file
+	const dir = fixtureDir("toolerr");
+	try {
+		const result = await TOOLS.efficiency_analysis.run({ path: "x.log" }, { cwd: dir, defaultAgent: "pi" });
+		assert.ok(result.text.startsWith(`Cannot analyse ${join(dir, "x.log")}:`), `got: ${result.text}`);
+		assert.ok(result.text.includes("analyst.md"), `the message names the missing prompt file: ${result.text}`);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 async function testDoctorLlm() {
 	// doctorLlm defaults to the analyst llm flags; an explicit doctorLlm overrides the
 	// doctor argv only, the analyst argv keeps its own flags
@@ -892,6 +955,9 @@ try {
 	await testDoctorLogPersistence();
 	await testRunDoctorInjection();
 	await testDoctorLlm();
+	await testPromptFileSubstitution();
+	await testMissingPromptFileFails();
+	await testManualToolErrorPath();
 	console.log("efficiency-analysis tests passed");
 } finally {
 	for (const dir of dirs) rmSync(dir, { recursive: true, force: true });

@@ -5,8 +5,11 @@
 // carry almost no per-event timestamps, so slowness is inferred from content.
 import { spawn } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 import { claudeAnalystArgs, claudeDoctorArgs, piLlmFlags, type Backend } from "./orchestrator/backends.ts";
 import type { LlmConfig } from "./orchestrator/config.ts";
 
@@ -34,6 +37,7 @@ export interface AnalyseOptions {
 	llm?: LlmConfig; // resolved provider/model/thinking for the backend llm flags, default {}
 	concurrency?: number; // max in-flight block analysts, default 8
 	mergeThreshold?: number; // chars: a text or thinking block shorter than this folds into the next block as lead-in context, default 250
+	root?: string; // repo root whose agents/ holds the analyst and doctor prompt templates; default the package's own agents dir
 	delay?: (ms: number) => Promise<void>; // wait before a retry attempt, default a real setTimeout, tests pass a no-op
 	runAnalyst?: (argv: string[]) => Promise<string | null>; // returns the assistant answer text, null on failure
 	runDoctor?: (argv: string[]) => Promise<string | null>; // defaults to the analyst runner with stream output persisted to doctorLogPath
@@ -268,6 +272,19 @@ function blockContent(block: AnalysisBlock): string {
 	return content;
 }
 
+// The block content with the analyst cap: an over-cap block text is cut with a marker.
+function cappedBlockContent(block: AnalysisBlock): string {
+	const content = blockContent(block);
+	if (content.length <= BLOCK_CAP) return content;
+	return content.slice(0, BLOCK_CAP) + "\n[Truncated at 8000 characters. The rest of this block text is cut.]";
+}
+
+// Plain replacement of the known placeholders in one pass. An unknown placeholder stays
+// literal text, and substitution values are never re-scanned.
+function renderTemplate(template: string, values: Record<string, string>): string {
+	return template.replace(/\{\{(\w+)\}\}/g, (token, name: string) => (name in values ? values[name] : token));
+}
+
 // One folded short block that travels in the next block's prompt.
 interface LeadIn {
 	type: AnalysisBlock["type"];
@@ -317,17 +334,18 @@ function cappedLeadIns(leadIns: LeadIn[]): string {
 	return "[Truncated: the oldest lead-ins were cut.]\n" + kept;
 }
 
-function analystPrompt(block: AnalysisBlock, leadIns: LeadIn[]): string {
-	const instruction = "Summarize in 1 to 3 sentences what the agent did and whether it struggled (confusion, errors, retries, repeated work).";
-	const format = 'Answer with two lines: "Summary: <your summary>" then "Struggle: <struggle signals, or none>".';
-	let content = blockContent(block);
-	if (content.length > BLOCK_CAP) content = content.slice(0, BLOCK_CAP) + "\n[Truncated at 8000 characters. The rest of this block text is cut.]";
-	// Ceiling: consecutive short lead-ins accumulate, so many of them grow the prompt. The
-	// joined lead-ins get the same 8000-char cap as the block content. The prompt then stays
-	// far below the kernel argv cap of 131072 bytes.
+// The pass-1 prompt: agents/analyst.md with the block's dynamic parts substituted. The
+// toolName value carries a leading space so it joins the raw type into the header label
+// ("toolCall read", "text").
+function analystPrompt(template: string, block: AnalysisBlock, leadIns: LeadIn[]): string {
 	const leadBlock = cappedLeadIns(leadIns);
-	const lead = leadBlock ? leadBlock + "\n" : "";
-	return `Block ${block.index} of type ${typeLabel(block.type, block.toolName)}.\n${instruction}\n${format}\n\n${lead}${content}`;
+	return renderTemplate(template, {
+		blockIndex: String(block.index),
+		blockType: block.type,
+		toolName: block.type === "toolCall" ? ` ${block.toolName ?? "?"}` : "",
+		blockContent: cappedBlockContent(block),
+		leadIns: leadBlock ? leadBlock + "\n" : "",
+	});
 }
 
 // Split an analyst answer into summary and struggle at the two labels. Without labels the
@@ -347,7 +365,14 @@ function splitAnswer(answer: string): { summary: string; struggle: string } {
 	return { summary: flat(summary), struggle: flat(struggleAt === -1 ? "" : lines[struggleAt].replace(/^struggle:\s*/i, "")) };
 }
 
-function doctorPrompt(blocks: AnalysisBlock[], reports: BlockReport[], failedCount: number, mergedCount: number, roleFile?: string, role?: string): string {
+// Whole-prompt cap: the prompt travels as one argv element and the kernel rejects one over
+// 131072 bytes, so the block summary list is budgeted under it and truncated with a marker
+const PROMPT_CAP = 131_000;
+
+// The pass-2 prompt: agents/doctor.md with the run's dynamic parts substituted. Without a
+// roleFile the role file substitutes to the literal "none" and the template tells the
+// doctor not to write any file.
+function doctorPrompt(template: string, blocks: AnalysisBlock[], reports: BlockReport[], failedCount: number, mergedCount: number, roleFile?: string, role?: string): string {
 	const byType = { text: 0, thinking: 0, toolCall: 0 };
 	const perTool = new Map<string, number>();
 	for (const block of blocks) {
@@ -359,18 +384,25 @@ function doctorPrompt(blocks: AnalysisBlock[], reports: BlockReport[], failedCou
 	}
 	const toolErrors = blocks.filter((block) => block.type === "toolCall" && block.isError === true).length;
 	const tools = perTool.size === 0 ? "none" : [...perTool].map(([name, count]) => `${name} ${count}`).join(", ");
-	const stats = `Blocks: ${blocks.length} total (text ${byType.text}, thinking ${byType.thinking}, toolCall ${byType.toolCall}).\nTool calls per tool: ${tools}.\nMerged lead-in blocks: ${mergedCount} (short blocks folded into the next block as lead-in context).\nErrors: ${toolErrors + failedCount} (tool results with errors plus failed block analyses).`;
-	const instruction = roleFile
-		? `Produce a markdown analysis report of pain points (struggle, wasted time, inefficiency) with block number references. The analysed log is one run of the "${role}" role agent of a kanban pipeline. Identify what the agent lost most of its time on (pain points), then revise the role guidance file at ${roleFile} so future runs of that role go more smoothly. You have full rewrite authority over the role file: restructure or trim the whole file and remove stale guidance, and keep it valid markdown guidance for the role.`
-		: "Produce a markdown analysis report of pain points (struggle, wasted time, inefficiency) with block number references.";
-	// the prompt travels as one argv element. The kernel cap is 131072 bytes, so the prompt
-	// stays below it. An over-cap block summary list is truncated with a marker
-	const cap = 131_000;
+	const values = {
+		stats: `Blocks: ${blocks.length} total (text ${byType.text}, thinking ${byType.thinking}, toolCall ${byType.toolCall}).\nTool calls per tool: ${tools}.`,
+		mergedCount: String(mergedCount),
+		// the errors line counts tool results with errors plus failed block analyses, as before
+		failedCount: String(toolErrors + failedCount),
+		roleFile: roleFile ?? "none",
+		// the role is named only with a role file, as before
+		role: roleFile ? (role ?? "") : "none",
+	};
+	// render everything but the list, then budget the list so the whole prompt stays one
+	// argv element under the kernel cap
+	const shell = renderTemplate(template, values);
+	const at = shell.indexOf("{{reports}}");
+	if (at === -1) return shell;
 	const marker = "[Truncated: the block summary list was cut here. The blocks after this point are missing.]";
 	const entries = reports.map((report, i) => `${i + 1}. [${typeLabel(report.type, report.toolName)}] ${report.summary}\n   Struggle: ${report.struggle || "none"}`);
-	const head = `${stats}\n\nBlock summaries:\n`;
-	const tail = `\n\n${instruction}`;
-	const budget = cap - Buffer.byteLength(head) - Buffer.byteLength(tail) - Buffer.byteLength(marker) - 1;
+	const prefix = shell.slice(0, at);
+	const suffix = shell.slice(at + "{{reports}}".length);
+	const budget = PROMPT_CAP - Buffer.byteLength(prefix) - Buffer.byteLength(suffix) - Buffer.byteLength(marker) - 1;
 	const kept: string[] = [];
 	let used = 0;
 	for (const entry of entries) {
@@ -381,7 +413,7 @@ function doctorPrompt(blocks: AnalysisBlock[], reports: BlockReport[], failedCou
 	}
 	let list = kept.join("\n");
 	if (kept.length < entries.length) list += "\n" + marker;
-	return head + list + tail;
+	return prefix + list + suffix;
 }
 
 // The default runner spawns the analyst and reads its JSONL stdout. The cwd is the
@@ -504,6 +536,11 @@ async function callWithRetry(run: (argv: string[]) => Promise<string | null>, ar
 // roleFile option also revises that file. The report is written next to the log as the
 // name minus the .log or .log.gz suffix plus .analysis.md.
 export async function analyseLog(logPath: string, opts: AnalyseOptions = {}): Promise<AnalyseResult> {
+	// the prompt files are the only prompt source, read once per run before any LLM call: a
+	// missing or unreadable file fails the analysis with the path named, no inline fallback
+	const promptDir = opts.root ? join(opts.root, "agents") : join(HERE, "..", "agents");
+	const analystTemplate = readFileSync(join(promptDir, "analyst.md"), "utf8").trimEnd();
+	const doctorTemplate = readFileSync(join(promptDir, "doctor.md"), "utf8").trimEnd();
 	const agent = opts.agent ?? "pi";
 	const backend = opts.backend ?? "pi";
 	const llm = opts.llm ?? {};
@@ -525,7 +562,7 @@ export async function analyseLog(logPath: string, opts: AnalyseOptions = {}): Pr
 	const { units, mergedCount } = mergeLeadIns(blocks, mergeThreshold);
 	// pass 1: one analyst call per kept block, in log order
 	const outcomes = await pool(units, concurrency, async (unit): Promise<{ report: BlockReport; failed: boolean }> => {
-		const { answer, reason } = await callWithRetry(run, buildArgs(analystPrompt(unit.block, unit.leadIns)), delay);
+		const { answer, reason } = await callWithRetry(run, buildArgs(analystPrompt(analystTemplate, unit.block, unit.leadIns)), delay);
 		if (answer === null) {
 			return {
 				failed: true,
@@ -544,7 +581,7 @@ export async function analyseLog(logPath: string, opts: AnalyseOptions = {}): Pr
 	// crash before the doctor pass never re-fires the orchestrator's spawn
 	if (opts.doctorLogPath) writeFileSync(opts.doctorLogPath, "");
 	// pass 2: one doctor call for the whole report, with a roleFile also revising it
-	const second = await callWithRetry(runDoctor, buildDoctorArgs(doctorPrompt(units.map((unit) => unit.block), reports, failedCount, mergedCount, opts.roleFile, opts.role)), delay);
+	const second = await callWithRetry(runDoctor, buildDoctorArgs(doctorPrompt(doctorTemplate, units.map((unit) => unit.block), reports, failedCount, mergedCount, opts.roleFile, opts.role)), delay);
 	const analysis = second.answer === null ? `Analysis failed after ${RETRY_ATTEMPTS} attempts: ${second.reason}` : second.answer.trim();
 	const reportPath = reportPathFor(logPath);
 	writeFileSync(reportPath, renderReport(logPath, reports, analysis));
