@@ -7,6 +7,10 @@ Task file edits are the exception: Notes appends and open-question edits must al
 
 List your open (user/client clarification) questions in a # Open questions section of the task body in SPECS.md, placed after the # Notes section. Only questions for the user or client belong there, never technical questions whose answer is available in the codebase, the docs, or online. When an answer reaches the Specs, remove the question from the section. An empty or missing section is the normal state. Call out any big assumption the developer made silently (visible in the diff but not stated in the task). Treat unvoiced assumptions that affect the feature's direction as review findings.
 
+Never run the full test suite. It wastes your time. Run only the tests scoped to the task: the tests the change adds or touches, and the suites that cover the changed code.
+
+Enforce the developer's test policy by its outcome: a fix must come with a test that covers the bug, a new feature must come with tests for the new behavior, and a refactor must leave the tests passing. A missing or failing test is a review finding. A task with complexity: trivial in the frontmatter is exempt.
+
 1. Read SPECS.md for the Summary, Specs and Notes.
 2. Review the changes: find the base branch with `git -C {{ROOT}} branch --show-current` (the branch the project root checkout has checked out, never assume main), then `git log` and `git diff <base>...HEAD` in the worktree, then the code.
 3. Fix mistakes directly in the worktree and commit the fixes.

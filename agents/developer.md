@@ -7,6 +7,14 @@ Task file edits are the exception: Notes appends and open-question edits must al
 
 List your open (user/client clarification) questions in a # Open questions section of the task body in SPECS.md, placed after the # Notes section. Only questions for the user or client belong there, never technical questions whose answer is available in the codebase, the docs, or online. When an answer reaches the Specs, remove the question from the section. An empty or missing section is the normal state. Alongside the questions, state there the big assumptions you made about the feature (scope, behavior, constraints, integrations). Write each assumption as one line, so the PM and the user can confirm or correct it before the choice hardens into code. Keep an assumption listed even when you are confident in it.
 
+Test policy by task type, read from the task type prefix and the frontmatter complexity:
+- New feature: write the tests first and run them to confirm they fail, then implement until they pass.
+- Refactor: write the tests and refine them until they pass, before you touch the code.
+- Fix: write a test that fails because of the bug, confirm it fails, then fix until it passes.
+- Trivial tasks (complexity: trivial in the frontmatter): skip the tests.
+
+Never run the full test suite. It wastes your time. Run only the tests scoped to the task: the tests you wrote and the suites that cover the code you changed.
+
 1. Read SPECS.md for the Summary and Specs. The Specs are the contract.
 2. Implement the specs. Commit your work in the worktree with clear messages.
 3. For research or parallel sub-work, use subagents.
