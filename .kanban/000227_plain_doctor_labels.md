@@ -1,8 +1,8 @@
 ---
 name: "fix: unnumbered Doctor card labels in the web UI"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "live-testing"
+worktree: "fix/227-plain-doctor-labels"
 issuer: "user"
 complexity: "simple"
 shortName: "plain-doctor-labels"
@@ -31,3 +31,10 @@ Doctor agent cards in the web UI label just "Doctor", never "Doctor 1", regardle
 - In the live UI the Doctor cards label "Doctor".
 
 # Notes
+- Commit 2c6233c: agentLabel (src/webui/board.ts) skips run numbering when the role is "doctor". The doctor renderer and the numbering for all other roles stay unchanged.
+- tests/webui.test.ts adds two assertions (a doctor entry with run 0 and run 1 while several doctor cards exist). The suite failed before the fix ("a doctor entry stays unnumbered with several doctor cards") and passes after ("webui.test.ts: all assertions passed").
+- Live check: a done probe task with two doctor logs for the same analysed run (developer.0.doctor and reviewer.0.doctor). Playwright read both #m-doctor card labels as "✓Doctor". The check mark is the status icon. The daemon used an isolated HOME and port 4327, then was killed.
+- Review pass: all Specs checks pass. The old helper (main) returns "Doctor 1" for a doctor entry with two cards; the fixed helper returns "Doctor" for run 0 and run 1, and developer numbering stays "Developer 2". node tests/webui.test.ts exits 0, all assertions passed. The payload emits role "doctor" for every doctor card (src/webui/payload.ts:161), and the doctor renderer labels through the shared agentLabel (src/webui/page.ts:662), so the one-line helper change covers all doctor cards. No fixes needed.
+
+# Open questions
+- Assumption: only the role "doctor" is exempt from the numbering rule, because the payload emits that role for every doctor card (src/webui/payload.ts:161). A future doctor-like role would need its own exemption.

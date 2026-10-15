@@ -1,14 +1,23 @@
 # developer: append project-specific guidance for this role below (e.g. how to run the project, how to live-test) so future agents of your kind start faster.
 
-## Process discipline
+## Task start
 
-- Read each target file once, then edit. One read pass plus greps covers a sweep. Do not re-scan or re-derive findings for files already read (#225: first edit at block 38 of 71 for 9 small edits).
-- Settle placement in one decision, then edit. A repo-specific sentence removed from agents/*.md or SKILL.md goes as one bullet into .kanban/AGENTS.<role>.md in the main checkout, under the closest section. Do not reopen a settled decision in a later thinking block (#225: two long deliberation loops over two sentences).
+- Judge the diff size before the read set. For a one-line or small fix (a label, a color, a chip, a condition), the read set is the one helper and its test. No knowledge-base search, no extra source files, no caller sweeps beyond the grep that names the helper (#227: first edit at block 15 of 46 for a one-line fix; the Hindsight search, a page.ts read and a doctorHistory grep contributed nothing to the diff. Same lesson in #226: first edit at block 24 of 69).
+- Add the failing assertion first, run the suite once, then fix. The failing run is the before-proof: never re-verify pre-fix behavior by hand or live afterwards (#227 blocks 15 to 18; the later pre-fix doubt in block 34 was pointless).
+- One decision per question, made once. Do not re-derive or re-weigh facts this file records (daemon flags, endpoint paths, ports, anchors, live-check rules) in later thinking blocks (#227 block 25 re-derived --poll-minutes and the /api/board 404; block 22 spent a full block weighing a binary live-check choice). If the acceptance criteria ask for a UI check, run it; if not, do not.
+- For colors, mirror the nearest existing pattern and go straight to the test edit, then the source edit. Do not weigh variable counts or tint options across several thinking blocks (#226: blocks 9 to 21, about 30% of the run, for a 15-line diff).
+
+## Scope and process discipline
+
+- Read each target file once, then edit. One read pass plus greps covers a sweep. Do not re-scan or re-derive findings for files already read (#225: first edit at block 38 of 71 for 9 small edits; #226: page.ts read in three separate windows).
+- Settle placement in one decision, then edit. A repo-specific sentence removed from agents/*.md or SKILL.md goes as one bullet into .kanban/AGENTS.<role>.md in the main checkout, under the closest section (#225: two long deliberation loops over two sentences).
 - SPECS.md bookkeeping is fixed: completed-work facts go under the task's # Notes, assumptions and open points under # Open questions. Pick once.
-- Anchor every SPECS.md edit with unique surrounding text: the string "# Notes" occurs more than once in SPECS.md, so a heading-only match fails the uniqueness check and costs a grep plus a retry (#225).
+- Anchor every SPECS.md edit with unique surrounding sentence text, never a bare heading: "# Notes" can occur more than once in SPECS.md. If unsure, one grep to confirm uniqueness, then edit in the next call (#225: a heading-only match cost a grep plus a retry; #227 block 40 spent a whole thinking block on the same question).
 - Keep each bash call single-purpose. Do not merge greps with ls or file dumps: one oversized call truncates, hides the result, and forces a rerun (#225). This applies to greps, not only test suites.
 - Fix the acceptance battery before editing: the greps plus the one suite that reads the real files (plugin.test.ts for SKILL.md changes). Run it once before commit and once at the end. No mid-check re-derivations of match counts.
 - Keep the todo list at one item per requirement, not per edit.
+- Trust facts this file records (playwright path, production webui port 4242, hub lock path): do not spend a bash call re-probing them (#226 block 20).
+- An untracked file in git status is usually not yours. Check mtime or git log once, then move on (#226 block 66: TODO.md doubt).
 
 ## Running and testing
 
@@ -17,11 +26,16 @@
 - Commit messages state only verified facts. Diff old vs new output before claiming byte-identity or behavior parity. An overclaim forces a soft-reset re-commit (#224).
 - Spec contradictions resolve by wiring, not re-reading. Read the callers, decide once, implement, and record the choice under Open questions in SPECS.md (#224).
 
+## Temp fixture scripts
+
+- Write a temp fixture script complete on the first write. Copy call shapes from the tests (e.g. setState takes a Task from getTask(root, file), not a file reference) and copy JSONL record shapes from the fixtures the tests build. A wrong call costs a TypeError, a signature grep, and a rerun (#226: blocks 43 to 48).
+- Never patch temp scripts with sed. Use the edit tool. sed also fails with "unknown option to `s'" when the replacement contains `|` or `/` (delimiter clash), and a sed patch left a TS non-null assertion (!) in a .mjs file, so node died on syntax (#226: blocks 47 and 48).
+- Verify a new fixture with find, not ls -R: ls -R does not list hidden dirs, so it prints a bare empty `root/` and triggers a false alarm about a failed setup (#227 blocks 26 to 28).
+
 ## Stale-test triage
 
 - When a suite fails on prompt text, do not build a harness first. Read the assertion, then grep the prompt source (agents/*.md) for the asserted phrase. If the phrase is absent at HEAD, the test is stale: `git log -S'<phrase>' -- <file>` names the commit that dropped it. A one-line assertion fix ends it. A stale agents/merger.md assertion cost 40% of a developer run before this triage ran (#224, commit de1b859).
 - Flake vs regression: `git stash push`, run the failing suite at HEAD, `git stash pop`. Fix test-race flakes at the root cause: gate the fixture write against the racing machinery (e.g. an openQuestions-backed task is never promoted).
-- `sed -i` fails with "unknown option to `s'" when the replacement contains `|` or `/` (delimiter clash). Use the edit tool for such replacements.
 
 ## Test recipes
 
@@ -42,10 +56,12 @@
 
 ## Live webui checks
 
-- Live webui check (reusable recipe, #205/#206): temp root `/tmp/<name>/root` with `.kanban/000001_probe.md` (long body) and `.kanban/se-llm-team.json` `{"webUi":{"enabled":true,"host":"127.0.0.1","port":4321}}` (project config overrides the global port), daemon `node src/orchestrator.ts --root <tmp> --rescan-seconds 30 --poll-minutes 5 &` (the CLI entry is src/orchestrator.ts, src/orchestrator/main.ts has no self-call and exits silently), then a Playwright script against `http://127.0.0.1:4321/` (playwright at `/home/phamba/repos/paseo/node_modules/playwright/index.mjs`, template `/tmp/t205lt/check.mjs`). Run that daemon with an isolated HOME (`HOME=/tmp/<name>/home`): the production daemon holds the global hub lock (`~/.pi/agent/se-llm-team-hub.lock`), so under the real HOME the probe logs "hub lock held by another daemon, standing down" and serves no UI. Never run a live-check daemon without the per-root port override: it reads the global config and binds the production webui port (global config: 4242 on 0.0.0.0, held by a long-running daemon under the real HOME; never signal that one). Health-probe with `curl -sf http://127.0.0.1:4321/` (`/api/board` is 404 in this build, only `GET /` serves). Kill it by the pid listening on the port (`ss -ltnp | grep :4321`), after checking `/proc/<pid>/cmdline` contains `--root /tmp/<name>/root`; `$!` after `nohup ... &` can be a wrapper subshell, and `pkill -f "<pattern>"` matches your own bash -c command line and kills the shell (exit 143).
-- Playwright and the popup: `#modal` is `position: fixed; inset: 0; z-index: 3`, so while a popup is open every card click is intercepted (`<div id="modal"> intercepts pointer events`). Close with Escape and wait for `#modal.hidden` before clicking the next card, or call `window.openTask(file)` via `page.evaluate` to bypass hit-testing.
-- Modal scroll gotcha: `#modal.hidden` is `display: none`, so a `scrollTop` write on `#m-box` while hidden is discarded and the browser restores the stored offset on the next show; any open-time scroll reset must run after the un-hide (#209).
-- Seed the live-check probe task in state `done`: a `backlog` task auto-promotes to `to-do` at the first sweep and the daemon spawns a real agent for it. `done` renders the popup and spawns nothing.
+- Fixture (reusable recipe, #205/#206): temp root `/tmp/<name>/root` with `.kanban/000001_probe.md` (long body) and `.kanban/se-llm-team.json` `{"webUi":{"enabled":true,"host":"127.0.0.1","port":4321}}` (project config overrides the global port). Seed the probe task in state `done`: a `backlog` task auto-promotes to `to-do` at the first sweep and the daemon spawns a real agent for it; `done` renders the popup and spawns nothing.
+- Daemon: `node src/orchestrator.ts --root <tmp> --rescan-seconds 30 --poll-minutes 5 &` (the CLI entry is src/orchestrator.ts, src/orchestrator/main.ts has no self-call and exits silently). Run it with an isolated HOME (`HOME=/tmp/<name>/home`): the production daemon holds the global hub lock (`~/.pi/agent/se-llm-team-hub.lock`), so under the real HOME the probe logs "hub lock held by another daemon, standing down" and serves no UI. Never run a live-check daemon without the per-root port override: it reads the global config and binds the production webui port (global config: 4242 on 0.0.0.0, held by a long-running daemon under the real HOME; never signal that one).
+- Playwright script: module at `/home/phamba/repos/paseo/node_modules/playwright/index.mjs`. Write a fresh `/tmp/<name>/check.mjs` each run and never probe a past task's script path: old check scripts under /tmp do not survive cleanup (#226 block 37; #227 block 23 still probed /tmp/t205lt/check.mjs and got exit 2). Health-probe with `curl -sf http://127.0.0.1:4321/` (`/api/board` is 404 in this build, only `GET /` serves).
+- Kill the daemon by the pid listening on the port (`ss -ltnp | grep :4321`), after checking `/proc/<pid>/cmdline` contains `--root /tmp/<name>/root`; `$!` after `nohup ... &` can be a wrapper subshell, and `pkill -f "<pattern>"` matches your own bash -c command line and kills the shell (exit 143).
+- Popup gotchas: `#modal` is `position: fixed; inset: 0; z-index: 3`, so while a popup is open every card click is intercepted. Close with Escape and wait for `#modal.hidden` before clicking the next card, or call `window.openTask(file)` via `page.evaluate` to bypass hit-testing. `#modal.hidden` is `display: none`, so a `scrollTop` write on `#m-box` while hidden is discarded and the browser restores the stored offset on the next show; any open-time scroll reset must run after the un-hide (#209).
+- Card CSS and theme check (#226): to render run, doctor and sub cards, add `.kanban/.logs/<slug>.developer.0.log` (a `session` plus a `turn_end` JSONL record) and `<slug>.<role>.<n>.doctor.log` (no `.doctor.pid` = a past doctor card, spawns nothing). A sub card also needs a `tool_execution_end` record in the run log whose text holds `Agent ID: x` and `Output file: /tmp/pi-subagents-1000/x.output` (SUB_ROOT is hard-coded in src/webui/payload.ts) plus that file on disk. Read computed colors off `#m-doctor .agent-card`, `#m-agent-btns .agent-card` and `.agent-subs .agent-card`; use one fresh Playwright context per scheme (`newContext({ colorScheme: "dark" | "light" })`), because a fresh context stores no theme in localStorage and matchMedia then decides. Click the doctor card to get the `.agent-card-active` state.
 - Live-test artifacts: daemon log `.kanban/.logs/orchestrator.log` (also daemon stdout), PM reports `.kanban/.reports/*.md` (one per sweep with a done transition, oldest first by name).
 
 ## Project facts
