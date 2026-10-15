@@ -6,7 +6,7 @@ worktree: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "claude-plugin-packaging"
-blockedBy: "#217, #218"
+blockedBy: "#218"
 ---
 
 # Summary

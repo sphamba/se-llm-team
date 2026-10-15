@@ -1,12 +1,12 @@
 ---
 name: "feat: dual-format log renderers for claude stream-json"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/218-claude-log-renderers"
 issuer: "user"
 complexity: "complex"
 shortName: "claude-log-renderers"
-blockedBy: "#216"
+blockedBy: ""
 ---
 
 # Summary
