@@ -1,0 +1,6 @@
+{
+	"name": "se-llm-team",
+	"version": "0.1.0",
+	"description": "Kanban pipeline for coding agents: one PM skill, a 12-tool kanban/orchestrator MCP server and hook-based board report delivery.",
+	"agents": []
+}

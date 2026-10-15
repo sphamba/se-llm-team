@@ -1,0 +1,13 @@
+{
+	"name": "se-llm-team",
+	"owner": {
+		"name": "sphamba"
+	},
+	"plugins": [
+		{
+			"name": "se-llm-team",
+			"description": "Kanban pipeline for coding agents: one PM skill, a 12-tool kanban/orchestrator MCP server and hook-based board report delivery.",
+			"source": "./"
+		}
+	]
+}

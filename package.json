@@ -1,10 +1,11 @@
 {
 	"name": "se-llm-team",
+	"version": "0.1.0",
 	"private": true,
 	"type": "module",
 	"packageManager": "pnpm@12.11.2",
 	"scripts": {
-		"test": "node tests/kanban.test.ts && node tests/orchestrator.test.ts && node tests/webui.test.ts && node tests/extension.test.ts && node tests/efficiency-analysis.test.ts && node index.test.ts && node tests/mcp.test.ts",
+		"test": "node tests/kanban.test.ts && node tests/orchestrator.test.ts && node tests/webui.test.ts && node tests/extension.test.ts && node tests/efficiency-analysis.test.ts && node index.test.ts && node tests/mcp.test.ts && node tests/plugin.test.ts",
 		"test:changed": "node scripts/test-changed.mjs"
 	},
 	"engines": {
