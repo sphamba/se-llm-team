@@ -2516,6 +2516,14 @@ try {
 	assert.equal(loadConfig(rootAP).roles.analyser?.concurrency, undefined, "a non-positive roles.analyser.concurrency stays unset");
 	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyser: { concurrency: 2.5 } } }));
 	assert.equal(loadConfig(rootAP).roles.analyser?.concurrency, undefined, "a non-integer roles.analyser.concurrency stays unset");
+	// roles.analyser.mergeThreshold: a valid positive integer applies, an invalid value warns
+	// and stays unset, so the module default of 250 applies
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyser: { mergeThreshold: 300 } } }));
+	assert.equal(loadConfig(rootAP).roles.analyser?.mergeThreshold, 300, "a valid roles.analyser.mergeThreshold applies");
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyser: { mergeThreshold: 0 } } }));
+	assert.equal(loadConfig(rootAP).roles.analyser?.mergeThreshold, undefined, "a non-positive roles.analyser.mergeThreshold stays unset");
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyser: { mergeThreshold: 2.5 } } }));
+	assert.equal(loadConfig(rootAP).roles.analyser?.mergeThreshold, undefined, "a non-integer roles.analyser.mergeThreshold stays unset");
 } finally {
 	process.env.HOME = savedHomeAP;
 }
@@ -2524,6 +2532,8 @@ assert.ok(orchLogAP().includes('logStallMinutes "banana" ignored: must be a posi
 assert.ok(orchLogAP().includes("logStallMinutes 0 ignored: must be a positive number of minutes"), "logStallMinutes <= 0 warned about");
 assert.ok(orchLogAP().includes('invalid roles.analyser.concurrency 0, ignored (expected a positive integer)'), "a non-positive roles.analyser.concurrency warned about");
 assert.ok(orchLogAP().includes('invalid roles.analyser.concurrency 2.5, ignored (expected a positive integer)'), "a non-integer roles.analyser.concurrency warned about");
+assert.ok(orchLogAP().includes('invalid roles.analyser.mergeThreshold 0, ignored (expected a positive integer)'), "a non-positive roles.analyser.mergeThreshold warned about");
+assert.ok(orchLogAP().includes('invalid roles.analyser.mergeThreshold 2.5, ignored (expected a positive integer)'), "a non-integer roles.analyser.mergeThreshold warned about");
 console.log("orchestrator.test.ts: ... + logStallMinutes config smoke passed");
 
 // --- part AQ: killing or restarting the daemon must not kill the spawned agents. The agent's
