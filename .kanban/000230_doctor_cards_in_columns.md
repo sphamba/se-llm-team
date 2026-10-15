@@ -1,7 +1,7 @@
 ---
 name: "feat: doctor cards in their analysed run's column"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "feat/230-doctor-cards-in-columns"
 issuer: "user"
 complexity: "moderate"
@@ -28,3 +28,35 @@ Move each web UI doctor card out of the separate #m-doctor row and into the colu
 - Unmatched-doctor fallback still renders in the residual row.
 
 # Notes
+- Implemented (commit 2316f6b): renderDoctor slots each doctor card into its analysed run's
+.agent-col below the run card, matched by handle via the new board helper doctorCol (strips the
+trailing .doctor, compares the run card's data-handle); unmatched cards keep the residual
+#m-doctor row, still hidden when empty. The blue styling moved from the #m-doctor-scoped rules
+to .agent-doctor marker-class rules (same three theme blocks, values unchanged), plus a new
+.agent-doctor .check rule for the blue checkmark; the base .check and .agent-card rules are
+untouched. The keep pass is a new board helper syncDoctorCards (sig + card identities + slot
+check, stats lines move in place so the live doctor's spinner survives polls) sharing the
+extracted syncStatsLine with syncAgentStats; syncAgentStats now assumes .agent-col wrappers
+since renderDoctor no longer calls it, and renderAgent's sub-box carry-over selector skips
+doctor cards.
+- Tests: webui.test.ts gained unit tests for doctorCol, syncDoctorCards (in-place stats move,
+spinner identity, rebuild on doctor added/gone, on a run-row rebuild detaching the slotted
+cards, and on the live->dead sig flip) and syncStatsLine; the old bare-card doctorRow block was
+replaced, the #m-doctor CSS greps became .agent-doctor greps, and renderDoctor source greps
+cover the keep pass and the slotting. tests/webui.test.ts passes in full.
+- Live check (temp root + daemon on 127.0.0.1:4321, Playwright, isolated HOME): the matched
+doctor card renders inside its run's .agent-col and not in #m-doctor, the unmatched card renders
+in #m-doctor (the only card there), the doctor log click opens in the shared log pane, and in
+both color schemes the card text and the check read the theme doctor blue (dark rgb(89, 167,
+255), light rgb(47, 111, 221)) while the run card's check keeps low-fg. Daemon stopped, port
+closed, fixture under /tmp/t230 left for reference.
+
+# Open questions
+No open questions for the user or client. Assumptions made:
+- Doctor cards append at the column end (after the run's sub boxes), below the run card as the
+spec asks; the live doctor keeps moving rightmost in the doctor order and slots into its own
+run's column like the past cards.
+- Doctor cards rebuild on any run-row structure change (spinner restart, as run cards today);
+only genuinely new handles animate in, and polls keep the cards alive via the stats-line pass.
+- No payload/API change: the doctors payload, its handle scheme and the doctor-log serving are
+untouched; the residual #m-doctor row keeps its markup position and hides when empty.
