@@ -85,6 +85,12 @@ function testPlainTextFallback() {
 	assert.equal(sessionBlocks.length, 1);
 	assert.equal(sessionBlocks[0].type, "text");
 	assert.equal(sessionBlocks[0].text, onlySession);
+	// a leading BOM does not turn the first record into a junk text block (line trim strips it)
+	const bomLog = "\uFEFF" + '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"after bom"}]}}';
+	const bomBlocks = parseLogBlocks(bomLog);
+	assert.equal(bomBlocks.length, 1);
+	assert.equal(bomBlocks[0].type, "text");
+	assert.equal(bomBlocks[0].text, "after bom");
 }
 
 function testPlainOrderBeforeFallbackCall() {
