@@ -1,7 +1,7 @@
 ---
 name: "feat: dual-format log renderers for claude stream-json"
 priority: "high"
-state: "doing"
+state: "reviewing"
 worktree: "feat/218-claude-log-renderers"
 issuer: "user"
 complexity: "complex"
@@ -37,3 +37,26 @@ Agent logs written by claude backend agents (stream-json) render in the webui lo
 - node tests/kanban.test.ts passes unchanged.
 
 # Notes
+## Verified claude stream-json record shapes (claude CLI docs, headless + agent-sdk streaming-output + sdk.d.ts)
+- system init: `{type:"system",subtype:"init",session_id,cwd,model,tools:[...],permissionMode,...}` (camelCase permissionMode).
+- assistant: `{type:"assistant",message:{id,role:"assistant",model,content:[{type:"text",text}|{type:"thinking",thinking}|{type:"tool_use",id,name,input}],usage:{input_tokens,output_tokens,cache_read_input_tokens,cache_creation_input_tokens}},parent_tool_use_id,timestamp?}`. One API turn emits one assistant record per completed content block, so several records share message.id and the intermediate usage is not final. Newer emitters carry an optional top-level ISO timestamp.
+- user: `{type:"user",message:{role:"user",content: string | [{type:"tool_result",tool_use_id,content,is_error}]},parent_tool_use_id}`. Prompt echoes are plain strings; is_error is snake_case and optional.
+- stream_event (only with --include-partial-messages, which our spawn does not pass): `{type:"stream_event",event:{type:content_block_start|content_block_delta|content_block_stop,index,delta}}`, deltas text_delta{text}, thinking_delta{thinking}, input_json_delta{partial_json}.
+- result: `{type:"result",subtype:"success"|error_max_turns|error_during_execution|...,duration_ms,duration_api_ms,is_error,num_turns,result,total_cost_usd,usage,modelUsage}`. The result usage covers the main agent loop only (no Task subagents); modelUsage covers everything.
+- parent_tool_use_id non-null marks subagent (Task tool) activity. Without --include-partial-messages the CLI emits no stream_event records.
+
+## Compactor policy (compactLogLine)
+- Kept verbatim: system, assistant, user, result, and any unknown type (byte-for-byte, same as unknown pi records).
+- Dropped: stream_event (the authoritative assistant/user records carry the content).
+- Non-JSON lines (stderr diagnostics) pass through unchanged. Orchestrator.log, counters and armed markers never match the role-log pattern, so the pass never touches them.
+
+## Implementation
+- Webui: claude assistant content blocks render through the existing UI (text pending, thinking and tool_use collapsed); user records render prompt lines and tool_result joins the block by id; stream_event renders nothing. Tokens sum the assistant records' usage (input_tokens + output_tokens, cache excluded, deduped by message.id, last record per id wins); a finished run's duration prefers the result record's wall-clock duration_ms; the meta line's model comes off the latest usage-bearing record. linesBack counts a stream_event block (start..stop, deltas between) as one collapsed line by index pairing, open blocks included.
+- efficiency-analysis: claude assistant records are authoritative blocks (thinking/text/tool_use) like pi message_end; user tool_result records fill the result map; parented records skip as subagent activity; the analyser answer reads the result record's result field (error runs give none) with the last assistant text as fallback.
+- Commits in the worktree: 4ebcf3d (feat: src), 884ac1a (test: fixtures). Full npm test passes.
+
+# Open questions
+- Assumption: the claude spawn stays without --include-partial-messages, so live claude logs carry no stream_event records and the stream_event handling is defensive for logs that have them.
+- Assumption: token stats sum the per-API-call usage on assistant records, so subagent usage present in the log counts, and the result record's main-loop-only usage is not double-counted.
+- Assumption: a finished claude run's duration is the result record's wall-clock duration_ms; a live claude run reads null duration until it finishes or its records carry timestamps.
+- Assumption: claude Task-tool subagents produce no sub-list entries in the log pane; the sub-list parser keys on pi's own /tmp .output transcripts and stays pi-only.

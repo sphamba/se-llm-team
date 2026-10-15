@@ -22,3 +22,5 @@
 ## Review notes
 - Verify recorded developer assumptions against the code before trusting them; a silent assumption that changes direction is a review finding and belongs in the task Notes.
 - Tests added by tasks are smoke-style (`part X` console sections) in the plain script suites; follow that shape, do not introduce a runner.
+- Check the pass criterion in the task's Failure section before a to-merge pass: it may require recorded outputs (commands, argv, observed results), not just a correct diff (test task #221).
+- A task parked per its own Specs (no runnable precondition, e.g. #221) goes back to backlog, never to-merge: to-merge closes it as done without the run, and promoteBacklog never promotes a task with unanswered open questions (src/orchestrator/pipeline.ts), so backlog holds it for the user with no respawn loop. to-do would re-spawn a developer at once (the sweep's to-do path has no openQuestions gate).
