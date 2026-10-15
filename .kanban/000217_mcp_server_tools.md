@@ -1,7 +1,7 @@
 ---
 name: "feat: MCP server exposing the kanban and orchestrator tools"
 priority: "high"
-state: "live-testing"
+state: "done"
 worktree: "feat/217-mcp-server-tools"
 issuer: "user"
 complexity: "complex"
@@ -51,6 +51,30 @@ Claude Code sessions get the 12 se-llm-team tools through a zero-dependency stdi
 - index.test.ts: resolveRoot now imports from src/tools.ts. The dead pi-ai and typebox stubs are gone, because index.ts imports the pi packages as types only now.
 - package.json: tests/mcp.test.ts joined the test chain. No new dependency. README documents the node src/mcp.ts entry for manual mcp-config use.
 - All 7 test files pass: kanban, orchestrator, webui, extension, efficiency-analysis, index, mcp.
+
+## Live test (live-tester)
+Ran the merged commit 17a2e88 from a bare git clone with no node_modules (no install step), against a temp git repo with an empty .kanban. Isolated HOME and XDG_CONFIG_HOME. A node driver spawned `node <clone>/src/mcp.ts` with cwd set to the temp repo and spoke newline JSON-RPC on stdio. 27 of 27 checks passed.
+
+Protocol: initialize echoes 2025-11-25 and 2025-06-18, an absent or an unknown protocolVersion gets the latest supported 2025-11-25, capabilities.tools and serverInfo {name: se-llm-team, version: 0.0.0} are present. A notification gets no reply and the next reply belongs to the following request. ping gives an empty result. Every stdout line was valid JSON.
+
+tools/list returns the 12 expected names. Each tool carries a description and a JSON Schema inputSchema. Enums serialize (kanban_list scope, kanban_set_state with 10 states).
+
+tools/call: kanban_create wrote 000001_mcp_live_probe.md to the fixture .kanban, kanban_list and kanban_get read it back. The review fix holds on the wire: an out-of-enum state or priority returns isError with "invalid state"/"invalid priority" and the board file stays at backlog. Unknown tool gives -32602. Unknown method gives -32601. A raw broken JSON line gives -32700 with id null. A call with a missing name gives isError and the server stays alive.
+
+orchestrator e2e: orchestrator_start spawned a real daemon. `ps` showed `node --watch <clone>/src/orchestrator.ts --root <fixture> --default-agent claude`, and the daemon log line read `orchestrator started (root=..., agent=claude, backend=claude, ...)`. orchestrator_status saw the daemon, orchestrator_poke hit it, orchestrator_stop sent SIGTERM. The pid was gone after the stop. The server exited 0 on stdin close.
+
+pi adapter smoke: `pi -p --mode json` in the fixture repo with the merged extension (main HEAD was 17a2e88, the auto-loaded extension symlink). tool_search loaded the deferred tools, kanban_create created 000002_pi_adapter_probe.md, and kanban_list returned the board. The pi behavior is unchanged.
+
+README: the `node /path/to/se-llm-team/src/mcp.ts` entry and the `.mcp.json` snippet are accurate. The tested start shape was exactly the snippet shape.
+
+Assumptions made for the usage tests: Claude Code starts the server with cwd set to the project directory (the driver did this). A line that is broken JSON is a raw truncated line, not a JSON string. The initialize fallback list is exercised through its first element only. Board state is read back from disk after each call.
+
+Observations, not findings:
+- A call with a missing required argument (name) returns the raw handler TypeError `Cannot read properties of undefined (reading 'trim')` as the isError text. This matches the documented no-wire-validation assumption. pi rejects the same call in typebox before the handler, so the two hosts show different error text for that shape.
+- serverInfo.version is 0.0.0 because package.json carries no version field. The user question about a version field stays open.
+- Test note: the first malformed-JSON attempt failed because the driver JSON-encoded the broken line into a valid JSON string. The server rightly answered -32600 for a valid JSON non-object. The raw broken line gives -32700.
+
+No finding needed a new task.
 
 # Open questions
 - Assumption: only orchestrator_start differs on the MCP host. The shared handler takes the default agent from ctx, so the MCP server passes claude and pi passes pi. efficiency_analysis also passes the host default to the analyser config; for pi this changes nothing (pi is already the fallback).

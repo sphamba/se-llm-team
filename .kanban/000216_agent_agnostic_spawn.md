@@ -1,8 +1,8 @@
 ---
 name: "feat: agent-agnostic spawn layer for pi and claude backends"
 priority: "high"
-state: "live-testing"
-worktree: "feat/216-agent-agnostic-spawn"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "complex"
 shortName: "agent-agnostic-spawn"
@@ -62,7 +62,7 @@ The daemon and the efficiency-analysis tool spawn agents through a configurable 
 - Effort mapping: thinking=minimal gives `--effort low` and no `--provider` for claude. In-process map: off and minimal -> low, low/medium/high/xhigh/max pass through, unset -> no flag.
 - efficiency_analysis through the extension tool (agent=claude, PATH stub): the tool spawned the claude analyser 9 times (2 blocks x 3 attempts plus pass 2) with `--bare --no-session-persistence -p <prompt> --permission-mode bypassPermissions --output-format stream-json --verbose --model cc-model --effort xhigh`. No crash, no ENOENT. The tool returned `Analysis failed after 3 attempts: the analyser returned no answer` and wrote the report with 2 blocks. This empty result is the documented limitation, tracked as #218. The pre-change analyser spawned the same executable with its pi flags (`--approve --no-session ... --mode json --thinking xhigh`), so the backend switch is real.
 - Extension orchestrator_start: start -> `orchestrator_status` `running (pid N); board: {"doing":1}` -> a developer spawn -> stop. The daemon log shows `agent=<stub>, backend=pi`, so the host flag --default-agent pi works end to end.
-- Assumptions of the test design: the stubs record `process.argv` and the child cwd, so the argv evidence is exact. Daemon fixtures isolated HOME and XDG_CONFIG_HOME; the two extension-tool runs used the real HOME (the extension symlink lives there) with the root config supplying the analyser role, so the resolved model and effort stay deterministic. Test artifacts only, not findings: an executable override in the agent key keeps the pi backend (documented), and the machine global config can override project model/thinking (existing merge behavior, out of scope). No PM task was created because no product issue was found.
+- Assumptions of the test design: the stubs record `process.argv` and the child cwd, so the argv evidence is exact. Daemon fixtures isolated HOME and XDG_CONFIG_HOME; the two extension-tool runs used the real HOME (the extension symlink lives there) with the root config supplying the analyser role, so the resolved model and effort stay deterministic. Test artifacts only, not findings: an executable override in the agent key keeps the pi backend (documented), and the machine global config can override project model/thinking (existing merge behavior, out of scope). No product issue was found. The one technical difficulty, no claude CLI on this machine so the real claude flow ran with argv-recording stubs only, was reported to the PM, which created task #221.
 
 # Open questions
 - Assumption: the config agent key doubles as backend selector (pi/claude) and executable override (any other value); a future Claude host would pass --default-agent claude. The pi extension passes pi.
