@@ -22,7 +22,7 @@ Replace the inline prompt builders in src/efficiency-analysis.ts (analystPrompt 
 - A failing analysis must never affect the pipeline (best-effort, #222 constraint).
 
 # Requirements
-1. New files agents/analyst.md and agents/doctor.md at the repo root, holding the CURRENT prompt scaffolds verbatim (static text only), with the dynamic parts as {{placeholder}} tokens. Behavior is otherwise unchanged: same prompts, same caps, same instructions.
+1. New files agents/analyst.md and agents/doctor.md at the repo root, holding the CURRENT prompt scaffolds verbatim (static text only), with the dynamic parts as {{placeholder}} tokens. Behavior is otherwise unchanged: same prompts except the deliberate combined doctor scaffold (decided 2026-10-15 in #228: the none-parenthetical stays unconditionally present, including with a role file, and the no-roleFile revision paragraph stays as shipped), same caps, same instructions.
 2. Placeholder contract:
    - agents/analyst.md: {{blockType}} (text|thinking|toolCall), {{toolName}} (empty string for non-tool blocks), {{blockContent}} (block text capped at 8,000 chars), {{leadIns}} (merged lead-in context capped at 8,000, empty string when none).
    - agents/doctor.md: {{stats}} (block counts by type, tool calls per tool, merged count, error count), {{reports}} (the numbered block-summary list, byte-budgeted as today), {{failedCount}}, {{mergedCount}}, {{roleFile}} (absolute path of the role file, or the literal "none"), {{role}}.
@@ -76,12 +76,10 @@ Assumptions made while designing the tests: the two prompt files are the only pr
 
 # Open questions
 
-- Doctor prompt wording (live-test finding 1): accept the one combined agents/doctor.md (its none-parenthetical always present, its no-roleFile revision paragraph longer than the old report-only one-liner), or restore the roleFile variant byte-for-byte as requirement 1 ("same prompts") says?
-
 Assumptions (confirm or correct before the choice hardens):
 
 - The prompt files resolve from a repo root (opts.root), not from the agent cwd; the default is the package's own agents dir.
-- One combined doctor template is acceptable: the none-parenthetical appears in both variants, and the no-roleFile prompt grows beyond the old report-only one-liner.
+- One combined doctor template is acceptable: the none-parenthetical appears in both variants, and the no-roleFile prompt grows beyond the old report-only one-liner. Confirmed 2026-10-15 (#228): accepted and recorded in requirement 1.
 - {{role}} substitutes to the literal "none" when no role file is given, even when the analysed run has a role.
 - The manual efficiency_analysis tool needs agents/analyst.md and agents/doctor.md in the session project to work; other projects copy the two files to tune their prompts.
 - The orchestrator hook analyses always use the shipped package prompts, never a per-project agents dir, because a per-project lookup would fail every unattended analysis for projects without the files.

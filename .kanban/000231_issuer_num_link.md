@@ -1,8 +1,8 @@
 ---
 name: "fix: issuer task number links to its task card in the detail modal"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/231-issuer-num-link"
 issuer: "user"
 complexity: "simple"
 shortName: "issuer-num-link"
