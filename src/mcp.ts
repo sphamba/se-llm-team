@@ -13,7 +13,7 @@ const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "
 
 const serverInfo = {
 	name: "se-llm-team",
-	// the repo's package.json carries no version field, 0.0.0 is the fallback
+	// the package.json version, 0.0.0 is the fallback when absent
 	version: (JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8")) as { version?: string }).version ?? "0.0.0",
 };
 

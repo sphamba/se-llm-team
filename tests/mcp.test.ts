@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -78,7 +78,7 @@ try {
 	const init = await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
 	assert.equal(init.result.protocolVersion, "2025-06-18", "a supported version is echoed");
 	assert.equal(init.result.serverInfo.name, "se-llm-team");
-	assert.equal(typeof init.result.serverInfo.version, "string", "serverInfo.version is a string");
+	assert.equal(init.result.serverInfo.version, JSON.parse(readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8")).version, "serverInfo.version comes from package.json");
 	assert.ok(init.result.capabilities && typeof init.result.capabilities.tools === "object", "the server declares the tools capability");
 
 	// an unsupported version gets the latest we support
