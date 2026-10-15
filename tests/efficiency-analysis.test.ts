@@ -396,6 +396,29 @@ async function testConsecutiveLeadIns() {
 	}
 }
 
+async function testLeadInCap() {
+	// many consecutive short lead-ins grow the prompt: the joined lead-ins get the same
+	// 8000-char cap as the block content, and the lead-ins closest to the block stay
+	const dir = fixtureDir("leadcap");
+	try {
+		const records: string[] = [];
+		for (let i = 0; i < 60; i++) records.push(textEnd(`note ${i} ${"x".repeat(240)}`));
+		records.push(toolCallEnd("tc1", "read", { path: "/x" }));
+		const logPath = join(dir, "cap.log");
+		writeFileSync(logPath, records.join("\n"));
+		const prompts: string[] = [];
+		const result = await analyseLog(logPath, { runAnalyser: promptRecorder(prompts) });
+		assert.equal(result.blockCount, 1, "all 60 short blocks fold into the tool call");
+		assert.ok(prompts[0].includes("[Truncated: the oldest lead-ins were cut.]"), `the over-cap lead-ins carry the marker, got: ${prompts[0].slice(0, 400)}`);
+		assert.ok(!prompts[0].includes(`note 0 ${"x".repeat(240)}`), "the oldest lead-in is cut");
+		assert.ok(prompts[0].includes(`note 59 ${"x".repeat(240)}`), "the lead-in closest to the block stays");
+		assert.ok(prompts[0].length < 10000, `the prompt stays bounded, got ${prompts[0].length} chars`);
+		assert.ok(prompts[1].includes("Merged lead-in blocks: 60"), `pass 2 counts all folded blocks, got: ${prompts[1]}`);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 async function testTrailingShortBlockStandalone() {
 	// a short block at the end of the log has no following block: it keeps its own analyser
 	// call and report entry
@@ -475,6 +498,7 @@ try {
 	await testConcurrencyLimit();
 	await testShortLeadInMerge();
 	await testConsecutiveLeadIns();
+	await testLeadInCap();
 	await testTrailingShortBlockStandalone();
 	await testThresholdBoundary();
 	console.log("efficiency-analysis tests passed");

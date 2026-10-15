@@ -256,14 +256,27 @@ function mergeLeadIns(blocks: AnalysisBlock[], threshold: number): { units: Merg
 	return { units, mergedCount };
 }
 
+// The joined lead-in lines with the same 8000-char cap as the block content. The lead-ins
+// closest to the block are the direct context, so the cap keeps them and cuts the rest.
+function cappedLeadIns(leadIns: LeadIn[]): string {
+	const joined = leadIns.map((lead) => `lead-in [${lead.type}]: "${lead.text}"`).join("\n");
+	if (joined.length <= BLOCK_CAP) return joined;
+	// The tail keeps the lead-ins closest to the block. A half line at the start goes too.
+	const tail = joined.slice(joined.length - BLOCK_CAP);
+	const firstLine = tail.indexOf("\n");
+	const kept = firstLine === -1 ? tail : tail.slice(firstLine + 1);
+	return "[Truncated: the oldest lead-ins were cut.]\n" + kept;
+}
+
 function pass1Prompt(block: AnalysisBlock, leadIns: LeadIn[]): string {
 	const instruction = "Summarize in 1 to 3 sentences what the agent did and whether it struggled (confusion, errors, retries, repeated work).";
 	const format = 'Answer with two lines: "Summary: <your summary>" then "Struggle: <struggle signals, or none>".';
 	let content = blockContent(block);
 	if (content.length > BLOCK_CAP) content = content.slice(0, BLOCK_CAP) + "\n[Truncated at 8000 characters. The rest of this block text is cut.]";
-	// Ceiling: consecutive short lead-ins accumulate, so many of them grow the prompt. Each
-	// lead-in is one short block, so the kernel argv cap of 131072 bytes stays far away.
-	const leadBlock = leadIns.map((lead) => `lead-in [${lead.type}]: "${lead.text}"`).join("\n");
+	// Ceiling: consecutive short lead-ins accumulate, so many of them grow the prompt. The
+	// joined lead-ins get the same 8000-char cap as the block content. The prompt then stays
+	// far below the kernel argv cap of 131072 bytes.
+	const leadBlock = cappedLeadIns(leadIns);
 	const lead = leadBlock ? leadBlock + "\n" : "";
 	return `Block ${block.index} of type ${typeLabel(block.type, block.toolName)}.\n${instruction}\n${format}\n\n${lead}${content}`;
 }
