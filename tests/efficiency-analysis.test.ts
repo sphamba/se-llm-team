@@ -666,6 +666,29 @@ async function testThresholdBoundary() {
 // --- the doctor pass: argv builders, prompt with and without a role file, doctor log
 // persistence, runner injection and the llm override ---
 
+// The shipped agents/doctor.md rendered over the synthetic fixture, as a byte pin: any
+// deliberate wording change must update this literal (accepted combined scaffold, #228).
+function shippedDoctorPrompt(roleFile: string, role: string): string {
+	return `Blocks: 5 total (text 3, thinking 1, toolCall 1).
+Tool calls per tool: read 1.
+Merged lead-in blocks: 0 (short blocks folded into the next block as lead-in context).
+Errors: 1 (tool results with errors plus failed block analyses).
+
+Block summaries:
+1. [thinking] S: x
+   Struggle: none
+2. [toolCall read] S: x
+   Struggle: none
+3. [text] S: x
+   Struggle: none
+4. [text] S: x
+   Struggle: none
+5. [text] S: x
+   Struggle: none
+
+Produce a markdown analysis report of pain points (struggle, wasted time, inefficiency) with block number references. The analysed log is one run of the "${role}" role agent of a kanban pipeline. Identify what the agent lost most of its time on (pain points), then revise the role guidance file at ${roleFile} so future runs of that role go more smoothly (a role file of none means there is no role file: do not write any file, produce the report only). You have full rewrite authority over the role file: restructure or trim the whole file and remove stale guidance, and keep it valid markdown guidance for the role.`;
+}
+
 async function testDoctorPromptWithRoleFile() {
 	// with roleFile the doctor prompt carries the role file path, names the role and asks
 	// for the rewrite; the pi doctor argv drops the tool isolation while the analyst keeps it
@@ -685,9 +708,7 @@ async function testDoctorPromptWithRoleFile() {
 		});
 		assert.equal(doctorCalls.length, 1, "the doctor runs once");
 		const prompt = doctorCalls[0][doctorCalls[0].length - 1];
-		assert.ok(prompt.includes(roleFile), `the doctor prompt carries the role file path, got: ${prompt.slice(0, 400)}`);
-		assert.ok(prompt.includes("full rewrite authority"), "the doctor prompt asks for the rewrite");
-		assert.ok(prompt.includes('one run of the "developer" role agent'), "the doctor prompt names the role");
+		assert.equal(prompt, shippedDoctorPrompt(roleFile, "developer"), "the doctor prompt pins the shipped agents/doctor.md bytes");
 		// the pi doctor argv drops --no-mcp and --no-tools, the analyst argv keeps them
 		assert.equal(doctorCalls[0].indexOf("--no-mcp"), -1, "--no-mcp stays out of the doctor argv");
 		assert.equal(doctorCalls[0].indexOf("--no-tools"), -1, "--no-tools stays out of the doctor argv");
@@ -713,7 +734,7 @@ async function testDoctorPromptWithoutRoleFile() {
 		const logPath = join(dir, "x.log");
 		writeFileSync(logPath, SYNTHETIC);
 		const doctorCalls: string[][] = [];
-		await analyseLog(logPath, {
+		const result = await analyseLog(logPath, {
 			mergeThreshold: 10,
 			role: "developer",
 			runAnalyst: async () => "S: x\nStruggle: none",
@@ -721,9 +742,11 @@ async function testDoctorPromptWithoutRoleFile() {
 		});
 		assert.equal(doctorCalls.length, 1);
 		const prompt = doctorCalls[0][doctorCalls[0].length - 1];
-		assert.ok(prompt.includes("do not write any file"), `the none case forbids writes, got: ${prompt.slice(-600)}`);
-		assert.ok(!prompt.includes("AGENTS."), "no role-file path without a role file");
+		assert.equal(prompt, shippedDoctorPrompt("none", "none"), "the no-roleFile doctor prompt pins the shipped agents/doctor.md bytes");
+		assert.ok(prompt.includes("do not write any file"), "the none case forbids writes");
 		assert.ok(!prompt.includes("developer"), "the role stays unnamed without a role file");
+		assert.equal(result.analysis, "PLAIN ANALYSIS");
+		assert.ok(existsSync(result.reportPath), "the report is written without a role file");
 		// the headless analyst isolation flags stay in the doctor argv
 		assert.deepEqual(doctorCalls[0].slice(0, 7), ["pi", "--approve", "--no-session", "--no-extensions", "--no-skills", "--mode", "json"]);
 		assert.equal(doctorCalls[0][7], "-p");
