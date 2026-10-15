@@ -64,7 +64,7 @@ try {
 	assert.ok(!existsSync(fixture), "the drained file is removed");
 	assert.ok(!existsSync(stale), "the stale file is removed");
 	assert.ok(!existsSync(`${fixture}.claiming`), "no claim file is left behind");
-console.log("plugin.test.ts: all assertions passed");
+	console.log("plugin.test.ts: all assertions passed");
 } finally {
 	rmSync(root, { recursive: true, force: true });
 }

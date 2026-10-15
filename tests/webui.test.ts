@@ -1525,9 +1525,11 @@ assert.equal(statEntry.tokens, 27515, "tokens sums input + output across the run
 assert.ok(statEntry.duration >= 600000, "a live run's duration ticks with now - first (the session record here), not the frozen parsed last - first");
 // 000169: a finished run is not live, so its duration stays the parsed last - first even when
 // the run ended long ago
+// both timestamps derive from one base: two Date.now() calls can straddle a ms boundary under load, making the parsed duration 5001+ and failing the exact assertion below
+const finishedBase = Date.now() - 600000;
 writeFileSync(lt1, [
-	JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date(Date.now() - 600000).toISOString() }),
-	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 10 } }, timestamp: new Date(Date.now() - 595000).toISOString() }),
+	JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date(finishedBase).toISOString() }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 10 } }, timestamp: new Date(finishedBase + 5000).toISOString() }),
 ].join("\n") + "\n");
 const finishedEntry = (await (await fetch(`${base}/api/tasks`)).json())[0].agents.find((a) => a.handle === `${slug}.live-tester.1`);
 assert.equal(finishedEntry.duration, 5000, "a finished run keeps the parsed last - first");
