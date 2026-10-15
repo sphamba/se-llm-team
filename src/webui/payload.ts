@@ -135,13 +135,54 @@ function agentHistory(root: string, t: Task, files: string[]): AgentEntry[] {
 		.map(({ role, run, alive, status, handle, tokens, duration }) => ({ role, run, alive, status, handle, tokens, duration }));
 }
 
+// one entry per existing doctor log `.logs/<slug>.<analysed role>.<n>.doctor.log`: the doctor
+// pass's stream output for the analysed run, ordered by the first in-log record timestamp like
+// the run history; alive = the run's analysis pid is still alive (spawnRunAnalysis's pid file),
+// so a running doctor's card spins and its log keeps polling; tokens and duration parse off the
+// same JSONL stream the agent logs carry
+function doctorHistory(root: string, t: Task, files: string[]): AgentEntry[] {
+	const slug = taskSlug(t.file);
+	const dir = join(kanbanDir(root), ".logs");
+	const now = Date.now();
+	const entries: (AgentEntry & { mtime: number; start: number | null })[] = [];
+	for (const f of files) {
+		const m = f.match(/^(.+)\.([a-z-]+)\.(\d+)\.doctor\.log$/);
+		if (!m || m[1] !== slug) continue;
+		const path = join(dir, f);
+		let mtime = 0;
+		try {
+			mtime = statSync(path).mtimeMs;
+		} catch {
+			/* raced away between readdir and stat */
+		}
+		const stats = logStats(path);
+		const alive = agentAlive(root, `${slug}.${m[2]}.${m[3]}.analysis`);
+		const duration = alive && stats.first != null ? Math.max(0, now - stats.first) : stats.duration;
+		entries.push({ role: "doctor", run: Number(m[3]), alive, status: alive ? "live" : "ok", handle: `${slug}.${m[2]}.${m[3]}.doctor`, tokens: stats.tokens, duration, mtime, start: stats.first });
+	}
+	// stable sort: the readdir order breaks the ties
+	return entries
+		.sort((a, b) => (a.start ?? a.mtime) - (b.start ?? b.mtime) || a.mtime - b.mtime)
+		.map(({ role, run, alive, status, handle, tokens, duration }) => ({ role, run, alive, status, handle, tokens, duration }));
+}
+
 // rebuild the log path from the handle: the task must exist on the board and the handle must be
-// `<slug>.<role>` or `<slug>.<role>.<n>` for a role the orchestrator actually writes, so a raw
-// client-supplied path can never reach the fs
+// `<slug>.<role>` or `<slug>.<role>.<n>` for a role the orchestrator actually writes, or a doctor
+// log handle `<slug>.<role>.<n>.doctor` for the analysed run, so a raw client-supplied path can
+// never reach the fs
 function agentLogPath(root: string, handle: string): string | null {
-	const m = handle.match(/^(.+)\.(developer|reviewer|live-tester|merger)(?:\.(\d+))?$/);
-	if (!m || !taskFiles(root).includes(`${m[1]}.md`)) return null;
-	return runLogPath(join(kanbanDir(root), ".logs"), m[3] === undefined ? `${m[1]}.${m[2]}` : `${m[1]}.${m[2]}.${m[3]}`);
+	const m = handle.match(/^(.+)\.(developer|reviewer|live-tester|merger|doctor)(?:\.(\d+))?$/);
+	if (!m) return null;
+	let slug = m[1];
+	if (m[2] === "doctor") {
+		// a doctor log names the analysed run: its task file is the analysed run's task, so the
+		// slug is the handle minus the trailing .<role>.<n>
+		const dm = slug.match(/^(.+)\.(?:developer|reviewer|live-tester|merger)\.(\d+)$/);
+		if (!dm) return null;
+		slug = dm[1];
+	}
+	if (!taskFiles(root).includes(`${slug}.md`)) return null;
+	return runLogPath(join(kanbanDir(root), ".logs"), handle);
 }
 
 // pi's background Agent tool writes each subagent transcript under this dir and names it in the
@@ -422,6 +463,7 @@ export function taskPayload(root: string) {
 			body: taskBody(root, t.file),
 			agents,
 			agent: agentInfo(root, t, agents),
+			doctors: doctorHistory(root, t, files),
 		};
 	});
 }

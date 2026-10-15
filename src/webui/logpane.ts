@@ -10,8 +10,10 @@ export const LOG_LINES = 100;
 
 // working state -> the agent role the orchestrator spawns for it (spawnAgent, src/orchestrator.ts)
 export const AGENT_ROLE = { doing: "developer", reviewing: "reviewer", "live-testing": "live-tester" };
-// the roles the orchestrator writes per task log, in pipeline order, plus the merger
-export const LOG_ROLES = [...Object.values(AGENT_ROLE), "merger"];
+// the roles the orchestrator writes per task log, in pipeline order, plus the merger; the doctor
+// analysis writes no per-task run log: its stream output rides next to the analysed run's log as
+// <slug>.<role>.<n>.doctor.log, enumerated by the payload builder's doctor history
+export const LOG_ROLES = [...Object.values(AGENT_ROLE), "merger", "doctor"];
 
 // html escape, shipped to the client and shared with the tab renderer
 export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

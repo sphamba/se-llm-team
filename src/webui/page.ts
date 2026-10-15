@@ -184,6 +184,8 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .agent-subs { display: flex; flex-direction: column; gap: 4px; }
 .agent-subs:empty { display: none; }
 #m-agent-btns { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
+#m-doctor { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-top: 8px; }
+#m-doctor:empty { display: none; }
 .check { color: var(--low-fg); margin-right: 5px; }
 .cross { color: var(--critical-fg); margin-right: 5px; }
 #m-agent { margin-bottom: 12px; }
@@ -287,7 +289,7 @@ line is the fallback for the dvh line (older mobile browsers), max-height none l
 <div id="modal" class="hidden"><div id="m-box">
 <div id="m-head"><h2 id="m-title"></h2><button id="m-close" onclick="closeModal()">Close</button></div>
 <div id="m-attrs"></div>
-<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log-meta" class="hidden"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>
+<div id="m-agent"><div id="m-agent-btns"></div><div id="m-doctor"></div><div id="m-log-meta" class="hidden"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>
 <div id="m-body"></div>
 </div></div>
 <script>
@@ -479,6 +481,7 @@ function openTask(file) {
 	modalFile = file;
 	writeHead(t);
 	renderAgent(t);
+	renderDoctor(t);
 	setBody(t);
 	// 000194: a reopen during the close drops .closing first, the pending hide must not re-run
 	const modal = document.getElementById("modal");
@@ -494,6 +497,7 @@ function openTask(file) {
 function updateOpenTask(t) {
 	writeHead(t);
 	renderAgent(t, true);
+	renderDoctor(t, true);
 	setBody(t);
 	markLiveLine();
 }
@@ -638,6 +642,29 @@ function renderAgent(t, keep) {
 	const boxes = el.querySelectorAll(".agent-subs");
 	runs.forEach((a, i) => fetchSubs(gen, a, boxes[i]));
 }
+// the doctor history as one horizontal row below the run columns: one card per analysed run's
+// doctor step, oldest leftmost, the live doctor rightmost; keep=true is the poll refresh: an
+// unchanged set moves only the stats lines (syncAgentStats), a structure change rebuilds the row
+// and only genuinely new cards animate in
+function renderDoctor(t, keep) {
+	const el = document.getElementById("m-doctor");
+	const docs = (t.doctors || []).slice();
+	const live = docs.find(d => d.alive);
+	if (live) { docs.splice(docs.indexOf(live), 1); docs.push(live); }
+	if (!docs.length) { el.innerHTML = ""; el.__sig = ""; return; }
+	if (keep && syncAgentStats(el, docs, document)) return;
+	el.__sig = agentRowSig(docs);
+	const oldHandles = keep ? new Set([...el.querySelectorAll(".agent-card")].map(b => b.dataset.handle)) : null;
+	const count = {};
+	for (const d of docs) count[d.role] = (count[d.role] || 0) + 1;
+	el.innerHTML = docs.map(d =>
+		agentCardHtml(d.alive ? "agent-live" : "agent-past", 'data-handle="' + esc(d.handle) + '"', agentLabel(d, count), d.tokens, d.duration, d.alive ? '<span class="spin"></span>' : '<span class="check">✓</span>')).join("");
+	for (const b of el.querySelectorAll(".agent-card")) {
+		b.onclick = () => openAgentLog(b.dataset.handle);
+		if (oldHandles && !oldHandles.has(b.dataset.handle)) b.classList.add("enter");
+	}
+	markActiveAgent();
+}
 // one run's subagent cards, labeled Sub-<caller role> without the id string, one per background
 // Agent call in log order
 function fetchSubs(gen, a, box) {
@@ -705,8 +732,10 @@ function pollLog() {
 	const t = activeBoard().tasks.find(x => x.file === modalFile);
 	const liveRun = t && (t.agents || []).find(a => a.alive);
 	// logState carries the parent run's handle for a sub view too, so run aliveness keeps both the
-	// run's own log and its sub transcripts polling while the run is alive
-	const live = !!liveRun && liveRun.handle === logState.handle;
+	// run's own log and its sub transcripts polling while the run is alive; a live doctor entry
+	// keeps its log polling the same way
+	const liveDoctor = t && (t.doctors || []).find(d => d.alive);
+	const live = (!!liveRun && liveRun.handle === logState.handle) || (!!liveDoctor && liveDoctor.handle === logState.handle);
 	// past agents write no lines: one empty poll is proof, stop the timer
 	if (!live && logState.idle) {
 		if (logTimer) { clearInterval(logTimer); logTimer = null; }
