@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-import { analyseLog, analyserAnswer, buildAnalyserCommand, parseLogBlocks, readLogFile } from "../src/efficiency-analysis.ts";
+import { analyseLog, analystAnswer, buildAnalystCommand, buildDoctorCommand, parseLogBlocks, readLogFile } from "../src/efficiency-analysis.ts";
+import { claudeAnalystArgs, claudeDoctorArgs } from "../src/orchestrator/backends.ts";
 
 // one synthetic log with the record shapes the orchestrator logs: a session record, an
 // assistant message_end with thinking then toolCall then text, the tool execution records,
@@ -112,11 +113,16 @@ async function testReportPipeline() {
 		const logPath = join(dir, "foo.developer.0.log");
 		writeFileSync(logPath, SYNTHETIC);
 		const calls: string[][] = [];
+		const doctorCalls: string[][] = [];
 		// the fixture blocks are short lead-ins, so a threshold of 10 keeps them all standalone
 		const result = await analyseLog(logPath, {
 			mergeThreshold: 10,
-			runAnalyser: async (argv) => {
+			runAnalyst: async (argv) => {
 				calls.push(argv);
+				return "FIXED ANALYSIS TEXT";
+			},
+			runDoctor: async (argv) => {
+				doctorCalls.push(argv);
 				return "FIXED ANALYSIS TEXT";
 			},
 		});
@@ -135,14 +141,16 @@ async function testReportPipeline() {
 		assert.equal(result.blocks.length, 5);
 		assert.equal(result.blocks[0].summary, "FIXED ANALYSIS TEXT");
 		assert.equal(result.blocks[0].struggle, "");
-		// one call per block plus pass 2, with the default agent and the fixed argv shape
-		assert.equal(calls.length, 6);
+		// one analyst call per kept block plus one doctor call, with the default agent and
+		// the fixed argv shape
+		assert.equal(calls.length, 5);
+		assert.equal(doctorCalls.length, 1);
 		assert.deepEqual(calls[0].slice(0, 9), ["pi", "--approve", "--no-session", "--no-extensions", "--no-skills", "--no-mcp", "--no-tools", "--mode", "json"]);
 		assert.equal(calls[0][9], "-p");
 		// the gz log writes the report under the same name minus the .log.gz suffix
 		const gzPath = join(dir, "bar.developer.0.log.gz");
 		writeFileSync(gzPath, gzipSync(Buffer.from(SYNTHETIC)));
-		const gzResult = await analyseLog(gzPath, { runAnalyser: async () => "GZ ANALYSIS" });
+		const gzResult = await analyseLog(gzPath, { runAnalyst: async () => "GZ ANALYSIS", runDoctor: async () => "GZ ANALYSIS" });
 		assert.equal(gzResult.reportPath, join(dir, "bar.developer.0.analysis.md"));
 		assert.ok(existsSync(gzResult.reportPath));
 		assert.ok(readFileSync(gzResult.reportPath, "utf8").includes("GZ ANALYSIS"));
@@ -151,18 +159,44 @@ async function testReportPipeline() {
 	}
 }
 
-function testCommandBuilder() {
+function testAnalystCommandBuilder() {
 	assert.deepEqual(
-		buildAnalyserCommand("pi", ["--model", "m1"], "summarize this"),
+		buildAnalystCommand("pi", ["--model", "m1"], "summarize this"),
 		["pi", "--approve", "--no-session", "--no-extensions", "--no-skills", "--no-mcp", "--no-tools", "--mode", "json", "--model", "m1", "-p", "summarize this"],
 	);
 	assert.deepEqual(
-		buildAnalyserCommand("other-agent", [], "p"),
+		buildAnalystCommand("other-agent", [], "p"),
 		["other-agent", "--approve", "--no-session", "--no-extensions", "--no-skills", "--no-mcp", "--no-tools", "--mode", "json", "-p", "p"],
 	);
 }
 
-async function testClaudeAnalyserPipeline() {
+function testDoctorCommandBuilder() {
+	// the doctor argv is the analyst argv minus --no-mcp and --no-tools: the headless
+	// shape stays, the doctor may edit files
+	assert.deepEqual(
+		buildDoctorCommand("pi", ["--model", "m1"], "analyze this"),
+		["pi", "--approve", "--no-session", "--no-extensions", "--no-skills", "--mode", "json", "--model", "m1", "-p", "analyze this"],
+	);
+	assert.deepEqual(
+		buildDoctorCommand("other-agent", [], "p"),
+		["other-agent", "--approve", "--no-session", "--no-extensions", "--no-skills", "--mode", "json", "-p", "p"],
+	);
+}
+
+function testClaudeArgBuilders() {
+	// the claude analyst argv prepends --bare to the doctor args, so the analyst reads no
+	// files; the doctor args keep the stream-json shape without --bare
+	assert.deepEqual(
+		claudeAnalystArgs({ model: "cc-model", thinking: "high" }, "analyze"),
+		["--bare", "--no-session-persistence", "-p", "analyze", "--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose", "--model", "cc-model", "--effort", "high"],
+	);
+	assert.deepEqual(
+		claudeDoctorArgs({ model: "cc-model" }, "analyze"),
+		["--no-session-persistence", "-p", "analyze", "--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose", "--model", "cc-model"],
+	);
+}
+
+async function testClaudeAnalystPipeline() {
 	// the claude backend swaps pi's isolation flags for --bare, stream-json output and
 	// bypassPermissions; the model and thinking pass through as --model/--effort
 	const dir = fixtureDir("claude");
@@ -170,68 +204,76 @@ async function testClaudeAnalyserPipeline() {
 		const logPath = join(dir, "foo.developer.0.log");
 		writeFileSync(logPath, SYNTHETIC);
 		const calls: string[][] = [];
+		const doctorCalls: string[][] = [];
 		await analyseLog(logPath, {
 			agent: "claude",
 			backend: "claude",
 			llm: { model: "cc-model", thinking: "high" },
 			mergeThreshold: 10,
-			runAnalyser: async (argv) => {
+			runAnalyst: async (argv) => {
 				calls.push(argv);
 				return "Summary: done.\nStruggle: none";
 			},
+			runDoctor: async (argv) => {
+				doctorCalls.push(argv);
+				return "Summary: done.\nStruggle: none";
+			},
 		});
-		assert.equal(calls.length, 6);
+		assert.equal(calls.length, 5, "one analyst call per kept block");
 		const head = ["claude", "--bare", "--no-session-persistence", "-p"];
 		assert.deepEqual(calls[0].slice(0, 4), head);
 		assert.ok(calls[0][4].startsWith("Block 1 of type thinking"), "the prompt travels as the -p positional");
 		assert.deepEqual(calls[0].slice(5), ["--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose", "--model", "cc-model", "--effort", "high"]);
-		assert.deepEqual(calls[5].slice(0, 4), head, "pass 2 uses the claude argv too");
+		// pass 2 uses the claude doctor argv: the stream-json shape without --bare
+		assert.equal(doctorCalls.length, 1);
+		assert.deepEqual(doctorCalls[0].slice(0, 3), ["claude", "--no-session-persistence", "-p"]);
+		assert.equal(doctorCalls[0].indexOf("--bare"), -1, "--bare stays out of the doctor argv");
 		// no pi flags in the claude argv
-		for (const flag of ["--approve", "--mode", "--thinking", "--provider", "--no-tools"]) assert.equal(calls[0].indexOf(flag), -1, `${flag} stays out of the claude analyser argv`);
+		for (const flag of ["--approve", "--mode", "--thinking", "--provider", "--no-tools"]) assert.equal(calls[0].indexOf(flag), -1, `${flag} stays out of the claude analyst argv`);
 		// no model and no thinking: no model/effort flags; off and minimal have no claude effort, both map to low
 		const seen: string[][] = [];
-		await analyseLog(logPath, { agent: "claude", backend: "claude", llm: {}, runAnalyser: async (argv) => (seen.push(argv), "S: x\nStruggle: none") });
+		await analyseLog(logPath, { agent: "claude", backend: "claude", llm: {}, runAnalyst: async (argv) => (seen.push(argv), "S: x\nStruggle: none"), runDoctor: async () => "S: x\nStruggle: none" });
 		assert.deepEqual(seen[0].slice(5), ["--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose"]);
 		const seenOff: string[][] = [];
-		await analyseLog(logPath, { agent: "claude", backend: "claude", llm: { thinking: "off" }, runAnalyser: async (argv) => (seenOff.push(argv), "S: x\nStruggle: none") });
+		await analyseLog(logPath, { agent: "claude", backend: "claude", llm: { thinking: "off" }, runAnalyst: async (argv) => (seenOff.push(argv), "S: x\nStruggle: none"), runDoctor: async () => "S: x\nStruggle: none" });
 		assert.deepEqual(seenOff[0].slice(-2), ["--effort", "low"]);
 		const seenMin: string[][] = [];
-		await analyseLog(logPath, { agent: "claude", backend: "claude", llm: { thinking: "minimal" }, runAnalyser: async (argv) => (seenMin.push(argv), "S: x\nStruggle: none") });
+		await analyseLog(logPath, { agent: "claude", backend: "claude", llm: { thinking: "minimal" }, runAnalyst: async (argv) => (seenMin.push(argv), "S: x\nStruggle: none"), runDoctor: async () => "S: x\nStruggle: none" });
 		assert.deepEqual(seenMin[0].slice(-2), ["--effort", "low"]);
 		const seenMax: string[][] = [];
-		await analyseLog(logPath, { agent: "claude", backend: "claude", llm: { thinking: "max" }, runAnalyser: async (argv) => (seenMax.push(argv), "S: x\nStruggle: none") });
+		await analyseLog(logPath, { agent: "claude", backend: "claude", llm: { thinking: "max" }, runAnalyst: async (argv) => (seenMax.push(argv), "S: x\nStruggle: none"), runDoctor: async () => "S: x\nStruggle: none" });
 		assert.deepEqual(seenMax[0].slice(-2), ["--effort", "max"]);
 		// the pi backend stays the default: no backend and no llm gives the byte-identical pi argv
 		const piCalls: string[][] = [];
-		await analyseLog(logPath, { runAnalyser: async (argv) => (piCalls.push(argv), "S: x\nStruggle: none") });
+		await analyseLog(logPath, { runAnalyst: async (argv) => (piCalls.push(argv), "S: x\nStruggle: none"), runDoctor: async () => "S: x\nStruggle: none" });
 		assert.deepEqual(piCalls[0].slice(0, 9), ["pi", "--approve", "--no-session", "--no-extensions", "--no-skills", "--no-mcp", "--no-tools", "--mode", "json"]);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
 }
 
-function testAnalyserAnswerEmptyParts() {
+function testAnalystAnswerEmptyParts() {
 	// a message_end with an empty text part: the joined text is empty, so no answer
 	const emptyText = '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":""}]}}';
-	assert.equal(analyserAnswer(emptyText), null);
+	assert.equal(analystAnswer(emptyText), null);
 	// whitespace-only text: also no answer
 	const wsText = '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"  \\n\\t "}]}}';
-	assert.equal(analyserAnswer(wsText), null);
+	assert.equal(analystAnswer(wsText), null);
 	// missing text parts: no content, an empty content array, a text part without text,
 	// and content with only a thinking part
-	assert.equal(analyserAnswer('{"type":"message_end","message":{"role":"assistant"}}'), null);
-	assert.equal(analyserAnswer('{"type":"message_end","message":{"role":"assistant","content":[]}}'), null);
-	assert.equal(analyserAnswer('{"type":"message_end","message":{"role":"assistant","content":[{"type":"text"}]}}'), null);
-	assert.equal(analyserAnswer('{"type":"message_end","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hmm"}]}}'), null);
+	assert.equal(analystAnswer('{"type":"message_end","message":{"role":"assistant"}}'), null);
+	assert.equal(analystAnswer('{"type":"message_end","message":{"role":"assistant","content":[]}}'), null);
+	assert.equal(analystAnswer('{"type":"message_end","message":{"role":"assistant","content":[{"type":"text"}]}}'), null);
+	assert.equal(analystAnswer('{"type":"message_end","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hmm"}]}}'), null);
 	// the last assistant message_end wins: a trailing empty text discards an earlier answer
 	const lastWins = [
 		'{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"earlier answer"}]}}',
 		'{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":" "}]}}',
 	].join("\n");
-	assert.equal(analyserAnswer(lastWins), null);
+	assert.equal(analystAnswer(lastWins), null);
 	// a non-empty answer still comes back unchanged, without trimming
 	const real = '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"  padded  "}]}}';
-	assert.equal(analyserAnswer(real), "  padded  ");
+	assert.equal(analystAnswer(real), "  padded  ");
 }
 
 // --- claude stream-json logs: assistant records carry the authoritative blocks like pi's
@@ -275,29 +317,29 @@ function testClaudeBlockExtraction() {
 	assert.ok(!blocks.some((b) => b.text.includes("DELTAONLY")));
 }
 
-function testClaudeAnalyserAnswer() {
+function testClaudeAnalystAnswer() {
 	// a claude stdout ending in a result record: the result field is the final answer
 	const withResult = [
 		JSON.stringify({ type: "system", subtype: "init" }),
 		JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "working" }] } }),
 		'{"type":"result","subtype":"success","is_error":false,"result":"final answer"}',
 	].join("\n");
-	assert.equal(analyserAnswer(withResult), "final answer");
+	assert.equal(analystAnswer(withResult), "final answer");
 	// an error result record has no answer, with or without a result field
 	const errorResult = [
 		JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "working" }] } }),
 		'{"type":"result","is_error":true}',
 	].join("\n");
-	assert.equal(analyserAnswer(errorResult), null);
+	assert.equal(analystAnswer(errorResult), null);
 	// assistant records with no result record still carry the answer, the last one wins
 	const assistantOnly = [
 		JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "earlier" }] } }),
 		JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "latest" }] } }),
 	].join("\n");
-	assert.equal(analyserAnswer(assistantOnly), "latest");
+	assert.equal(analystAnswer(assistantOnly), "latest");
 }
 
-async function testFailedAnalyser() {
+async function testFailedAnalyst() {
 	const dir = fixtureDir("failed");
 	try {
 		const logPath = join(dir, "x.log");
@@ -306,7 +348,8 @@ async function testFailedAnalyser() {
 		// the fixture blocks are short lead-ins, so a threshold of 10 keeps them all standalone
 		const result = await analyseLog(logPath, {
 			mergeThreshold: 10,
-			runAnalyser: async () => null,
+			runAnalyst: async () => null,
+			runDoctor: async () => null,
 			delay: async (ms) => {
 				delays.push(ms);
 			},
@@ -333,15 +376,26 @@ async function testRetryRecovers() {
 		const logPath = join(dir, "x.log");
 		writeFileSync(logPath, '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}');
 		let calls = 0;
+		let doctorCalls = 0;
 		const delays: number[] = [];
 		const run = async () => {
 			calls++;
 			if (calls === 1) throw new Error("boom");
 			return "RECOVERED";
 		};
-		const result = await analyseLog(logPath, { runAnalyser: run, delay: async (ms) => { delays.push(ms); } });
-		// the thrown pass 1 call waits 5000 ms, retries and succeeds, then pass 2 runs once
-		assert.equal(calls, 3);
+		const result = await analyseLog(logPath, {
+			runAnalyst: run,
+			runDoctor: async () => {
+				doctorCalls++;
+				return "RECOVERED";
+			},
+			delay: async (ms) => {
+				delays.push(ms);
+			},
+		});
+		// the thrown pass 1 call waits 5000 ms, retries and succeeds, then the doctor runs once
+		assert.equal(calls, 2);
+		assert.equal(doctorCalls, 1);
 		assert.deepEqual(delays, [5000]);
 		assert.equal(result.blocks[0].summary, "RECOVERED");
 		assert.equal(result.analysis, "RECOVERED");
@@ -362,11 +416,17 @@ async function testRetryExhaustion() {
 			if (calls <= 3) return null;
 			return "RECOVERED";
 		};
-		const result = await analyseLog(logPath, { runAnalyser: run, delay: async (ms) => { delays.push(ms); } });
-		// pass 1 uses 3 attempts with two 5000 ms waits, then pass 2 succeeds first try
-		assert.equal(calls, 4);
+		const result = await analyseLog(logPath, {
+			runAnalyst: run,
+			runDoctor: async () => "RECOVERED",
+			delay: async (ms) => {
+				delays.push(ms);
+			},
+		});
+		// pass 1 uses 3 attempts with two 5000 ms waits, then the doctor succeeds first try
+		assert.equal(calls, 3);
 		assert.deepEqual(delays, [5000, 5000]);
-		assert.equal(result.blocks[0].summary, "Block analysis failed after 3 attempts: the analyser returned no answer");
+		assert.equal(result.blocks[0].summary, "Block analysis failed after 3 attempts: the analyst returned no answer");
 		assert.equal(result.analysis, "RECOVERED");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -378,9 +438,10 @@ async function testEmptyAnswerRetried() {
 	try {
 		const logPath = join(dir, "x.log");
 		writeFileSync(logPath, '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}');
-		// a stub analyser whose only answer is an empty string: the empty answer must
+		// a stub analyst whose only answer is an empty string: the empty answer must
 		// count as no answer, so each call retries all 3 attempts. The stub appends one
-		// character per run to a file in its cwd, so the test can count the runs.
+		// character per run to a file in its cwd, so the test can count the runs. No
+		// runner stubs: the default runners spawn the stub in both passes.
 		const stubPath = join(dir, "empty-stub.js");
 		const stub = [
 			"#!/usr/bin/env node",
@@ -394,7 +455,7 @@ async function testEmptyAnswerRetried() {
 		// one block plus pass 2, each call runs the stub 3 times with two 5000 ms waits
 		assert.equal(readFileSync(join(dir, "calls"), "utf8").length, 6);
 		assert.deepEqual(delays, [5000, 5000, 5000, 5000]);
-		assert.equal(result.blocks[0].summary, "Block analysis failed after 3 attempts: the analyser returned no answer");
+		assert.equal(result.blocks[0].summary, "Block analysis failed after 3 attempts: the analyst returned no answer");
 		assert.ok(result.analysis.startsWith("Analysis failed after 3 attempts"));
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -427,13 +488,13 @@ async function testConcurrencyLimit() {
 		// the fixture blocks are short, so a threshold of 1 keeps every block standalone
 		// the default cap of 8 applies when no override is set
 		const def = track();
-		const result = await analyseLog(logPath, { runAnalyser: def.run, mergeThreshold: 1 });
+		const result = await analyseLog(logPath, { runAnalyst: def.run, runDoctor: async () => "ok", mergeThreshold: 1 });
 		assert.equal(result.blockCount, 20);
 		assert.ok(def.max() <= 8, `max in-flight was ${def.max()}, expected at most 8`);
 		assert.ok(def.max() > 1, "the block analysers did not run in parallel");
 		// a concurrency override tightens the cap
 		const capped = track();
-		const cappedResult = await analyseLog(logPath, { runAnalyser: capped.run, concurrency: 3, mergeThreshold: 1 });
+		const cappedResult = await analyseLog(logPath, { runAnalyst: capped.run, runDoctor: async () => "ok", concurrency: 3, mergeThreshold: 1 });
 		assert.equal(cappedResult.blockCount, 20);
 		assert.ok(capped.max() <= 3, `max in-flight was ${capped.max()}, expected at most 3`);
 		assert.ok(capped.max() > 1, "the capped block analysers did not run in parallel");
@@ -455,11 +516,19 @@ function toolCallEnd(id: string, name: string, args: unknown): string {
 	return JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }] } });
 }
 
-// the last argv element of a buildAnalyserCommand call is the prompt
+// the last argv element of a buildAnalystCommand call is the prompt
 function promptRecorder(prompts: string[]): (argv: string[]) => Promise<string | null> {
 	return async (argv) => {
 		prompts.push(argv[argv.length - 1]);
 		return "S";
+	};
+}
+
+// an argv recorder stub: pushes every received argv and returns a fixed answer
+function argvRecorder(calls: string[][], answer: string): (argv: string[]) => Promise<string | null> {
+	return async (argv) => {
+		calls.push(argv);
+		return answer;
 	};
 }
 
@@ -474,7 +543,7 @@ async function testShortLeadInMerge() {
 		const logPath = join(dir, "merge.log");
 		writeFileSync(logPath, [textEnd("Now let me read the tests file:"), toolCallEnd("tc1", "read", { path: "/x/tests.ts" })].join("\n"));
 		const prompts: string[] = [];
-		const result = await analyseLog(logPath, { runAnalyser: promptRecorder(prompts) });
+		const result = await analyseLog(logPath, { runAnalyst: promptRecorder(prompts), runDoctor: promptRecorder(prompts) });
 		assert.equal(result.blockCount, 1, "the short text block folds into the tool call");
 		assert.equal(result.blocks.length, 1);
 		assert.equal(result.blocks[0].type, "toolCall");
@@ -495,7 +564,7 @@ async function testConsecutiveLeadIns() {
 		const logPath = join(dir, "leadins.log");
 		writeFileSync(logPath, [textEnd("First I check the board:"), thinkingEnd("The board looks stale."), textEnd(long)].join("\n"));
 		const prompts: string[] = [];
-		const result = await analyseLog(logPath, { runAnalyser: promptRecorder(prompts) });
+		const result = await analyseLog(logPath, { runAnalyst: promptRecorder(prompts), runDoctor: promptRecorder(prompts) });
 		assert.equal(result.blockCount, 1, "both short blocks fold into the long block");
 		const textAt = prompts[0].indexOf('lead-in [text]: "First I check the board:"');
 		const thinkingAt = prompts[0].indexOf('lead-in [thinking]: "The board looks stale."');
@@ -518,7 +587,7 @@ async function testLeadInCap() {
 		const logPath = join(dir, "cap.log");
 		writeFileSync(logPath, records.join("\n"));
 		const prompts: string[] = [];
-		const result = await analyseLog(logPath, { runAnalyser: promptRecorder(prompts) });
+		const result = await analyseLog(logPath, { runAnalyst: promptRecorder(prompts), runDoctor: promptRecorder(prompts) });
 		assert.equal(result.blockCount, 1, "all 60 short blocks fold into the tool call");
 		assert.ok(prompts[0].includes("[Truncated: the oldest lead-ins were cut.]"), `the over-cap lead-ins carry the marker, got: ${prompts[0].slice(0, 400)}`);
 		assert.ok(!prompts[0].includes(`note 0 ${"x".repeat(240)}`), "the oldest lead-in is cut");
@@ -538,7 +607,7 @@ async function testTrailingShortBlockStandalone() {
 		const logPath = join(dir, "trailing.log");
 		writeFileSync(logPath, textEnd("done"));
 		const prompts: string[] = [];
-		const result = await analyseLog(logPath, { runAnalyser: promptRecorder(prompts) });
+		const result = await analyseLog(logPath, { runAnalyst: promptRecorder(prompts), runDoctor: promptRecorder(prompts) });
 		assert.equal(result.blockCount, 1);
 		assert.equal(result.blocks.length, 1);
 		assert.ok(!prompts[0].includes("lead-in"), `a standalone block carries no lead-in, got: ${prompts[0]}`);
@@ -549,7 +618,7 @@ async function testTrailingShortBlockStandalone() {
 		const pairPath = join(dir, "pair.log");
 		writeFileSync(pairPath, [textEnd("First I check:"), textEnd("done")].join("\n"));
 		const pairPrompts: string[] = [];
-		const pair = await analyseLog(pairPath, { runAnalyser: promptRecorder(pairPrompts) });
+		const pair = await analyseLog(pairPath, { runAnalyst: promptRecorder(pairPrompts), runDoctor: promptRecorder(pairPrompts) });
 		assert.equal(pair.blockCount, 1, "the first short block folds into the trailing short block");
 		assert.ok(pairPrompts[0].includes('lead-in [text]: "First I check:"'), `the trailing prompt carries the lead-in, got: ${pairPrompts[0]}`);
 	} finally {
@@ -567,27 +636,227 @@ async function testThresholdBoundary() {
 		const atPrompts: string[] = [];
 		const atPath = join(dir, "at.log");
 		writeFileSync(atPath, mkLog("x".repeat(250)));
-		const at = await analyseLog(atPath, { runAnalyser: promptRecorder(atPrompts) });
+		const at = await analyseLog(atPath, { runAnalyst: promptRecorder(atPrompts), runDoctor: promptRecorder(atPrompts) });
 		assert.equal(at.blockCount, 2, "a block at exactly 250 chars stays standalone");
 		assert.ok(!atPrompts.slice(0, 2).some((p) => p.includes("lead-in [")), "no block folds at the threshold");
 		const belowPrompts: string[] = [];
 		const belowPath = join(dir, "below.log");
 		writeFileSync(belowPath, mkLog("x".repeat(249)));
-		const below = await analyseLog(belowPath, { runAnalyser: promptRecorder(belowPrompts) });
+		const below = await analyseLog(belowPath, { runAnalyst: promptRecorder(belowPrompts), runDoctor: promptRecorder(belowPrompts) });
 		assert.equal(below.blockCount, 1, "a block one char below the threshold folds");
 		assert.ok(belowPrompts[0].includes(`lead-in [text]: "${"x".repeat(249)}"`), `the prompt carries the folded text, got: ${belowPrompts[0]}`);
 		// an explicit mergeThreshold overrides the default
 		const customPrompts: string[] = [];
 		const customPath = join(dir, "custom.log");
 		writeFileSync(customPath, mkLog("y".repeat(9)));
-		const custom = await analyseLog(customPath, { runAnalyser: promptRecorder(customPrompts), mergeThreshold: 10 });
+		const custom = await analyseLog(customPath, { runAnalyst: promptRecorder(customPrompts), runDoctor: promptRecorder(customPrompts), mergeThreshold: 10 });
 		assert.equal(custom.blockCount, 1, "a block below an explicit threshold folds");
 		assert.ok(customPrompts[0].includes(`lead-in [text]: "${"y".repeat(9)}"`), `the prompt carries the folded text, got: ${customPrompts[0]}`);
 		const customAtPrompts: string[] = [];
 		const customAtPath = join(dir, "custom-at.log");
 		writeFileSync(customAtPath, mkLog("y".repeat(10)));
-		const customAt = await analyseLog(customAtPath, { runAnalyser: promptRecorder(customAtPrompts), mergeThreshold: 10 });
+		const customAt = await analyseLog(customAtPath, { runAnalyst: promptRecorder(customAtPrompts), runDoctor: promptRecorder(customAtPrompts), mergeThreshold: 10 });
 		assert.equal(customAt.blockCount, 2, "a block at an explicit threshold stays standalone");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+// --- the doctor pass: argv builders, prompt with and without a role file, doctor log
+// persistence, runner injection and the llm override ---
+
+async function testDoctorPromptWithRoleFile() {
+	// with roleFile the doctor prompt carries the role file path, names the role and asks
+	// for the rewrite; the pi doctor argv drops the tool isolation while the analyst keeps it
+	const dir = fixtureDir("rolefile");
+	try {
+		const logPath = join(dir, "foo.developer.0.log");
+		writeFileSync(logPath, SYNTHETIC);
+		const roleFile = join(dir, "developer.md");
+		const analystCalls: string[][] = [];
+		const doctorCalls: string[][] = [];
+		const result = await analyseLog(logPath, {
+			mergeThreshold: 10,
+			role: "developer",
+			roleFile,
+			runAnalyst: argvRecorder(analystCalls, "S: x\nStruggle: none"),
+			runDoctor: argvRecorder(doctorCalls, "DOCTOR ANALYSIS"),
+		});
+		assert.equal(doctorCalls.length, 1, "the doctor runs once");
+		const prompt = doctorCalls[0][doctorCalls[0].length - 1];
+		assert.ok(prompt.includes(roleFile), `the doctor prompt carries the role file path, got: ${prompt.slice(0, 400)}`);
+		assert.ok(prompt.includes("full rewrite authority"), "the doctor prompt asks for the rewrite");
+		assert.ok(prompt.includes('one run of the "developer" role agent'), "the doctor prompt names the role");
+		// the pi doctor argv drops --no-mcp and --no-tools, the analyst argv keeps them
+		assert.equal(doctorCalls[0].indexOf("--no-mcp"), -1, "--no-mcp stays out of the doctor argv");
+		assert.equal(doctorCalls[0].indexOf("--no-tools"), -1, "--no-tools stays out of the doctor argv");
+		assert.equal(analystCalls.length, 5);
+		for (const argv of analystCalls) {
+			assert.ok(argv.includes("--no-mcp"), "the analyst argv keeps --no-mcp");
+			assert.ok(argv.includes("--no-tools"), "the analyst argv keeps --no-tools");
+		}
+		// the analyst prompts stay block-only: no role file path and no rewrite ask
+		assert.ok(analystCalls.every((argv) => !argv[argv.length - 1].includes(roleFile)), "the analyst prompts carry no role file path");
+		assert.equal(result.analysis, "DOCTOR ANALYSIS");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+async function testDoctorPromptWithoutRoleFile() {
+	// without roleFile the doctor is report-only: the prompt carries no rewrite
+	// instruction and names no role, and the argv keeps the headless analyst isolation
+	// flags (the doctor argv shape is fixed, roleFile only changes the prompt)
+	const dir = fixtureDir("reportonly");
+	try {
+		const logPath = join(dir, "x.log");
+		writeFileSync(logPath, SYNTHETIC);
+		const doctorCalls: string[][] = [];
+		await analyseLog(logPath, {
+			mergeThreshold: 10,
+			role: "developer",
+			runAnalyst: async () => "S: x\nStruggle: none",
+			runDoctor: argvRecorder(doctorCalls, "PLAIN ANALYSIS"),
+		});
+		assert.equal(doctorCalls.length, 1);
+		const prompt = doctorCalls[0][doctorCalls[0].length - 1];
+		assert.ok(!prompt.includes("revise"), "no rewrite instruction without a role file");
+		assert.ok(!prompt.includes("full rewrite authority"), "no rewrite authority without a role file");
+		assert.ok(!prompt.includes("guidance file"), "no role file reference without a role file");
+		assert.ok(!prompt.includes("developer"), "the role stays unnamed without a role file");
+		// the headless analyst isolation flags stay in the doctor argv
+		assert.deepEqual(doctorCalls[0].slice(0, 7), ["pi", "--approve", "--no-session", "--no-extensions", "--no-skills", "--mode", "json"]);
+		assert.equal(doctorCalls[0][7], "-p");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+async function testDoctorLogPath() {
+	const dir = fixtureDir("doctorlog");
+	try {
+		const logPath = join(dir, "x.log");
+		writeFileSync(logPath, SYNTHETIC);
+		const doctorLogPath = join(dir, "x.doctor.log");
+		// with a stubbed doctor the log is still created eagerly, empty, before the pass
+		await analyseLog(logPath, {
+			mergeThreshold: 10,
+			doctorLogPath,
+			runAnalyst: async () => "S: x\nStruggle: none",
+			runDoctor: async () => "DOCTOR",
+		});
+		assert.ok(existsSync(doctorLogPath), "the doctor log is created eagerly before the doctor pass");
+		assert.equal(readFileSync(doctorLogPath, "utf8"), "", "a stubbed doctor writes nothing to the log");
+		// without doctorLogPath no file is created for the doctor pass
+		rmSync(doctorLogPath, { force: true });
+		await analyseLog(logPath, {
+			mergeThreshold: 10,
+			runAnalyst: async () => "S: x\nStruggle: none",
+			runDoctor: async () => "DOCTOR",
+		});
+		assert.ok(!existsSync(doctorLogPath), "no doctor log without doctorLogPath");
+		assert.deepEqual(readdirSync(dir).sort(), ["x.analysis.md", "x.log"]);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+async function testDoctorLogPersistence() {
+	// with no runner stubs the real spawn runs the stub agent in both passes: the doctor
+	// pass persists its stream to doctorLogPath while the analyst pass keeps its stdout
+	// in memory, and the stub answer becomes the Analysis section
+	const dir = fixtureDir("persist");
+	try {
+		const logPath = join(dir, "stub.log");
+		writeFileSync(logPath, SYNTHETIC);
+		const stubPath = join(dir, "stub-agent.js");
+		const stub = [
+			"#!/usr/bin/env node",
+			'process.stdout.write(\'{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"DOCTOR REWRITE DONE"}]}}\\n\');',
+		].join("\n");
+		writeFileSync(stubPath, stub);
+		chmodSync(stubPath, 0o755);
+		const roleFile = join(dir, "developer.md");
+		writeFileSync(roleFile, "# developer guidance\n");
+		const doctorLogPath = join(dir, "stub.doctor.log");
+		const result = await analyseLog(logPath, {
+			agent: stubPath,
+			backend: "pi",
+			llm: {},
+			role: "developer",
+			roleFile,
+			doctorLogPath,
+		});
+		assert.ok(existsSync(doctorLogPath));
+		const doctorLog = readFileSync(doctorLogPath, "utf8");
+		assert.ok(doctorLog.includes("DOCTOR REWRITE DONE"), "the doctor log holds the stub stdout");
+		assert.equal(doctorLog.trim().split("\n").length, 1, "only the doctor pass appends to the doctor log");
+		// no separate analyst log: the dir holds only the fixture files and the report
+		assert.deepEqual(readdirSync(dir).sort(), ["developer.md", "stub-agent.js", "stub.analysis.md", "stub.doctor.log", "stub.log"]);
+		const report = readFileSync(result.reportPath, "utf8");
+		const at = report.indexOf("## Analysis");
+		assert.ok(at !== -1, "the report has an Analysis section");
+		assert.ok(report.slice(at).includes("DOCTOR REWRITE DONE"), "the stub answer is the Analysis section");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+async function testRunDoctorInjection() {
+	// an injected runDoctor decides the analysis: its answer lands in the result and the
+	// report, it runs exactly once with the doctor argv, and runAnalyst runs once per kept block
+	const dir = fixtureDir("injection");
+	try {
+		const logPath = join(dir, "x.log");
+		writeFileSync(logPath, SYNTHETIC);
+		const analystCalls: string[][] = [];
+		const doctorCalls: string[][] = [];
+		const result = await analyseLog(logPath, {
+			mergeThreshold: 10,
+			runAnalyst: argvRecorder(analystCalls, "S: x\nStruggle: none"),
+			runDoctor: argvRecorder(doctorCalls, "INJECTED ANALYSIS"),
+		});
+		assert.equal(result.blockCount, 5);
+		assert.equal(analystCalls.length, result.blockCount, "one analyst call per kept block");
+		assert.equal(doctorCalls.length, 1, "the doctor runs exactly once");
+		assert.deepEqual(doctorCalls[0].slice(0, 7), ["pi", "--approve", "--no-session", "--no-extensions", "--no-skills", "--mode", "json"], "the doctor gets the doctor argv");
+		assert.equal(doctorCalls[0][7], "-p");
+		assert.equal(result.analysis, "INJECTED ANALYSIS", "the doctor answer becomes the analysis");
+		const report = readFileSync(result.reportPath, "utf8");
+		const at = report.indexOf("## Analysis");
+		assert.ok(at !== -1);
+		assert.ok(report.slice(at).includes("INJECTED ANALYSIS"), "the report carries the doctor answer");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+async function testDoctorLlm() {
+	// doctorLlm defaults to the analyst llm flags; an explicit doctorLlm overrides the
+	// doctor argv only, the analyst argv keeps its own flags
+	const dir = fixtureDir("doctorllm");
+	try {
+		const logPath = join(dir, "x.log");
+		writeFileSync(logPath, SYNTHETIC);
+		const analystCalls: string[][] = [];
+		const doctorCalls: string[][] = [];
+		await analyseLog(logPath, {
+			mergeThreshold: 10,
+			llm: { model: "analyst-model", thinking: "high" },
+			runAnalyst: argvRecorder(analystCalls, "S: x\nStruggle: none"),
+			runDoctor: argvRecorder(doctorCalls, "DOCTOR"),
+		});
+		assert.deepEqual(doctorCalls[0].slice(7, 11), ["--model", "analyst-model", "--thinking", "high"], "the doctor defaults to the analyst llm flags");
+		assert.deepEqual(analystCalls[0].slice(9, 13), ["--model", "analyst-model", "--thinking", "high"]);
+		const override: string[][] = [];
+		await analyseLog(logPath, {
+			mergeThreshold: 10,
+			llm: { model: "analyst-model", thinking: "high" },
+			doctorLlm: { model: "doctor-model", thinking: "low" },
+			runAnalyst: async () => "S: x\nStruggle: none",
+			runDoctor: argvRecorder(override, "DOCTOR"),
+		});
+		assert.deepEqual(override[0].slice(7, 11), ["--model", "doctor-model", "--thinking", "low"], "an explicit doctorLlm overrides the doctor flags");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -600,12 +869,14 @@ try {
 	testPlainTextFallback();
 	testPlainOrderBeforeFallbackCall();
 	await testReportPipeline();
-	testCommandBuilder();
-	await testClaudeAnalyserPipeline();
-	testAnalyserAnswerEmptyParts();
+	testAnalystCommandBuilder();
+	testDoctorCommandBuilder();
+	testClaudeArgBuilders();
+	await testClaudeAnalystPipeline();
+	testAnalystAnswerEmptyParts();
 	testClaudeBlockExtraction();
-	testClaudeAnalyserAnswer();
-	await testFailedAnalyser();
+	testClaudeAnalystAnswer();
+	await testFailedAnalyst();
 	await testRetryRecovers();
 	await testRetryExhaustion();
 	await testEmptyAnswerRetried();
@@ -615,6 +886,12 @@ try {
 	await testLeadInCap();
 	await testTrailingShortBlockStandalone();
 	await testThresholdBoundary();
+	await testDoctorPromptWithRoleFile();
+	await testDoctorPromptWithoutRoleFile();
+	await testDoctorLogPath();
+	await testDoctorLogPersistence();
+	await testRunDoctorInjection();
+	await testDoctorLlm();
 	console.log("efficiency-analysis tests passed");
 } finally {
 	for (const dir of dirs) rmSync(dir, { recursive: true, force: true });

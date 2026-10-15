@@ -6,7 +6,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, PRIORITY_RANK, setState } from "../src/kanban.ts";
 import { startHub } from "../src/hub.ts";
-import { agentLabel, agentRowSig, agentStatsText, boardOf, buildShell, cardBaseHtml, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats } from "../src/webui.ts";
+import { agentLabel, agentRowSig, agentStatsText, agentLogPayload, boardOf, buildShell, cardBaseHtml, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, syncCardStats, tabNames, tabsHtml, taskPayload, taskStats } from "../src/webui.ts";
+// not re-exported by the webui barrel: import directly from the logpane module
+import { LOG_ROLES } from "../src/webui/logpane.ts";
 import { gzipSync } from "node:zlib";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -876,7 +878,14 @@ const upd = page.match(/function updateOpenTask\(t\) \{[\s\S]*?\n\}/)![0];
 assert.ok(page.includes("if (open) updateOpenTask(open); else closeModal();"), "the refresh updates the open card in place and closes it when its task is gone");
 assert.ok(upd.includes("writeHead(t)") && upd.includes("renderAgent(t, true)") && upd.includes("setBody(t)"), "the refresh re-derives title, attrs, agent row and body from the fresh payload");
 assert.ok(!upd.includes("closeLog") && !upd.includes("logState"), "the refresh path never touches the log pane, logState or the log timer");
-assert.ok(page.includes('<div id="m-agent"><div id="m-agent-btns"></div><div id="m-log-meta" class="hidden"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>'), "000154: the meta line ships as a sibling above the log pane, hidden until a payload carries meta");
+assert.ok(page.includes('<div id="m-agent"><div id="m-agent-btns"></div><div id="m-doctor"></div><div id="m-log-meta" class="hidden"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>'), "000154: the meta line ships as a sibling above the log pane, hidden until a payload carries meta; 000222 adds the doctor row between the run columns and the meta line");
+// 000222 the Doctor card: the doctor row sits between the run columns and the log meta, one card
+// per analysed run's doctor step, clicking it opens the doctor log in the shared log pane
+assert.ok(page.indexOf('id="m-doctor"') > page.indexOf('id="m-agent-btns"') && page.indexOf('id="m-doctor"') < page.indexOf('id="m-log-meta"'), "#m-doctor sits between #m-agent-btns and #m-log-meta inside the agent area");
+assert.ok(page.includes("function renderDoctor(t, keep)"), "the script defines renderDoctor for the doctor row");
+const rd = page.match(/function renderDoctor\(t, keep\) \{[\s\S]*?\n\}/)![0];
+assert.ok(rd.includes("(t.doctors || []).slice()"), "renderDoctor builds one card per doctors entry of the fresh payload");
+assert.ok(rd.includes("openAgentLog(b.dataset.handle)"), "a doctor card's click opens its doctor log by handle");
 assert.ok(page.includes('meta.classList.toggle("hidden", !label)') && page.includes('" \u00b7 thinking "'), "openLog/pullLog fill the meta line on init and every poll, model name then thinking level");
 assert.ok(!page.includes(`+ '</div><div id="m-log"`), "renderAgent no longer rebuilds the log pane with the run cards");
 const setBodySrc = page.match(/function setBody\(t\) \{[\s\S]*?\n\}/)![0];
@@ -890,7 +899,10 @@ assert.ok(ra.indexOf("if (keep) {") < ra.indexOf("++agentGen"), "the keep refres
 // 000130: a sub transcript of a still-alive parent keeps polling (an empty poll is not proof a
 // growing transcript stopped); a past run's log still stops after the first empty poll
 const pollSrc = page.match(/function pollLog\(\) \{[\s\S]*?\n\}/)![0];
-assert.ok(pollSrc.includes("const live = !!liveRun && liveRun.handle === logState.handle;"), "a sub view of a still-alive parent stays live: the pane keeps its poll timer after an empty poll");
+assert.ok(pollSrc.includes("const live = (!!liveRun && liveRun.handle === logState.handle) || (!!liveDoctor && liveDoctor.handle === logState.handle);"), "a sub view of a still-alive parent stays live: the pane keeps its poll timer after an empty poll");
+// 000222: a live doctor entry keeps its log polling the same way, so a running doctor's pane
+// never freezes after an empty poll
+assert.ok(pollSrc.includes('const liveDoctor = t && (t.doctors || []).find(d => d.alive);'), "pollLog's live check also matches a live doctors entry, so a live doctor log keeps polling");
 assert.ok(!pollSrc.includes("logState.sub == null"), "a sub view is no longer hard-wired non-live, which froze the pane after the first empty poll");
 assert.ok(pollSrc.includes("if (!live && logState.idle) {"), "a past run's log still stops the timer after the first empty poll");
 // 000194: the live pulse follows the viewed run's aliveness, the same signal the poll timer
@@ -1671,6 +1683,68 @@ assert.deepEqual(
 rmSync(logFile, { force: true });
 rmSync(`${dev0}.gz`, { force: true });
 rmSync(`${dev1}.gz`, { force: true });
+
+// 000222 the Doctor card payload: one doctors entry per existing
+// `.logs/<slug>.<analysed role>.<n>.doctor.log` (the slug must match the task), tokens and
+// duration parsed off the same JSONL stream the agent logs carry, alive = the analysed run's
+// analysis pid is still alive; another task's doctor logs stay that task's entries, oldest first
+const docRoot = mkdtempSync(join(tmpdir(), "webui-doctor-"));
+const docTask = createTask(docRoot, { name: "feat: doctor payload", summary: "s", specs: "s" });
+const docSlug = docTask.file.replace(/\.md$/, "");
+const docLogs = join(docRoot, ".kanban", ".logs");
+mkdirSync(docLogs, { recursive: true });
+assert.deepEqual(taskPayload(docRoot).find((t) => t.file === docTask.file)!.doctors, [], "no doctor logs yet, empty doctor history");
+// finished doctor logs with relative timestamps: the in-log first record timestamp is the sort
+// key, so the entries read oldest first regardless of file mtimes
+const docBase = Date.now() - 600000;
+writeFileSync(join(docLogs, `${docSlug}.developer.0.doctor.log`), [
+	JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date(docBase).toISOString() }),
+	"DOCTOR RUN ZERO",
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 12, output: 8, cacheRead: 500, cacheWrite: 300 } }, timestamp: new Date(docBase + 5000).toISOString() }),
+].join("\n") + "\n");
+writeFileSync(join(docLogs, `${docSlug}.developer.1.doctor.log`), [
+	JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date(docBase + 10000).toISOString() }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 20, output: 10 } }, timestamp: new Date(docBase + 13000).toISOString() }),
+].join("\n") + "\n");
+// a doctor log of a DIFFERENT task's slug: it belongs to that task's payload, never this one's
+const otherTask = createTask(docRoot, { name: "fix: other doctor task", summary: "s", specs: "s" });
+const otherSlug = otherTask.file.replace(/\.md$/, "");
+writeFileSync(join(docLogs, `${otherSlug}.developer.0.doctor.log`), "OTHER TASK DOCTOR\n");
+assert.deepEqual(
+	taskPayload(docRoot).find((t) => t.file === docTask.file)!.doctors,
+	[
+		{ role: "doctor", run: 0, alive: false, status: "ok", handle: `${docSlug}.developer.0.doctor`, tokens: 20, duration: 5000 },
+		{ role: "doctor", run: 1, alive: false, status: "ok", handle: `${docSlug}.developer.1.doctor`, tokens: 30, duration: 3000 },
+	],
+	"one doctor entry per doctor log, tokens sum input + output (cache excluded), duration is last - first record timestamp, sorted oldest first",
+);
+assert.deepEqual(
+	taskPayload(docRoot).find((t) => t.file === otherTask.file)!.doctors,
+	[{ role: "doctor", run: 0, alive: false, status: "ok", handle: `${otherSlug}.developer.0.doctor`, tokens: null, duration: null }],
+	"a doctor log belongs to its own task's payload, another task's slug is excluded",
+);
+
+// a live analysed run: the analysis pid file keeps the doctor entry live and its duration ticks
+mkdirSync(join(docRoot, ".kanban", ".pids"), { recursive: true });
+writeFileSync(join(docRoot, ".kanban", ".pids", `${docSlug}.developer.0.analysis.pid`), String(process.pid));
+const docLive = taskPayload(docRoot).find((t) => t.file === docTask.file)!.doctors[0];
+assert.equal(docLive.alive, true, "a live analysis pid marks the analysed run's doctor entry alive");
+assert.equal(docLive.status, "live", "a live doctor entry reads live, so its card spins");
+assert.ok(docLive.duration! >= 600000, "a live doctor's duration ticks with now - first, not the frozen parsed last - first");
+rmSync(join(docRoot, ".kanban", ".pids", `${docSlug}.developer.0.analysis.pid`));
+
+// the doctor handle serves the doctor log through the same chunked payload; the handle needs the
+// analysed run's task on the board and its run index, like any agent handle
+const docServed = JSON.parse(agentLogPayload(docRoot, new URLSearchParams("file=" + encodeURIComponent(`${docSlug}.developer.0.doctor`)))!);
+assert.ok(docServed.text.includes("DOCTOR RUN ZERO\n"), "the doctor handle serves the doctor log's text");
+assert.equal(docServed.atStart, true, "a short doctor log serves whole from its start");
+assert.equal(agentLogPayload(docRoot, new URLSearchParams("file=" + encodeURIComponent(`${docSlug}.developer.doctor`))), null, "a doctor handle without the analysed run index is rejected");
+assert.equal(agentLogPayload(docRoot, new URLSearchParams("file=" + encodeURIComponent(`${docSlug}.auditor.0.doctor`))), null, "a doctor handle over an unknown analysed role is rejected");
+assert.equal(agentLogPayload(docRoot, new URLSearchParams("file=" + encodeURIComponent(`nope.developer.0.doctor`))), null, "a doctor handle needs its task on the board");
+
+// LOG_ROLES: the doctor analysis writes no per-task run log, its role is enumerated last
+assert.equal(LOG_ROLES[LOG_ROLES.length - 1], "doctor", "doctor is the last LOG_ROLES entry, after the merger");
+rmSync(docRoot, { recursive: true, force: true });
 
 // a second hub on the taken port reports failure instead of throwing
 assert.equal(await startHub({ name: "webui-test", root, host: "localhost", port: ui.port }), null);

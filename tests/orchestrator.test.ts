@@ -11,9 +11,9 @@ import { createTask, isLinkedWorktree, kanbanDir, listAll, parseTask, setState, 
 import { REPORT_MAX_AGE_MS, reportsDir } from "../src/orchestrator/report.ts";
 import { compactFinishedLogs, compactLogLine, dropDoneBlockers, loadConfig, nextRunIndex, poll, promoteBacklog, removeTask } from "../src/orchestrator.ts";
 import { rescan } from "../src/orchestrator/pipeline.ts";
-import { gunzipSync } from "node:zlib";
+import { gzipSync, gunzipSync } from "node:zlib";
 import { agentAlive, agentPid, killTree, pidAlive, pidPath } from "../src/pid.ts";
-import { exitFilePath, readMergerSlug, renderPrompt, readExitCode, spawnAgent } from "../src/orchestrator/spawn.ts";
+import { exitFilePath, readMergerSlug, renderPrompt, readExitCode, spawnAgent, spawnRunAnalysis } from "../src/orchestrator/spawn.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -185,7 +185,44 @@ ${out()}`);
 	process.exit(1);
 };
 const cleaned: string[] = [];
-const cleanupAll = (...roots: string[]) => roots.forEach((r) => rmSync(r, { recursive: true, force: true }));
+// a finished-run analysis the orchestrator spawned (spawnRunAnalysis) keeps running detached
+// for ~30 s (3 retries x 5 s when the agent produces no answer) and its final log(root, ...)
+// would recreate a removed fixture dir and break later tests: before every fixture rm, kill
+// every analysis process group a .analysis.pid file names (detached spawns lead their own
+// process group, so -pid takes the sh wrapper and the node runner together), then drop the
+// pid files. The pid file's discriminator guards against a recycled pid
+const killAnalyses = (root: string) => {
+	const pids = join(kanbanDir(root), ".pids");
+	let names: string[];
+	try {
+		names = readdirSync(pids);
+	} catch {
+		return; // no .pids dir: nothing spawned here
+	}
+	for (const f of names) {
+		if (!f.endsWith(".analysis.pid")) continue;
+		const [pidStr, ...rest] = readFileSync(join(pids, f), "utf8").trim().split(/\s+/);
+		const pid = parseInt(pidStr, 10);
+		const disc = rest.length ? rest.join(" ") : null;
+		if (pid > 0 && pid !== process.pid && pidAlive(pid, disc)) {
+			try {
+				process.kill(-pid, "SIGKILL");
+			} catch {
+				/* group already gone */
+			}
+		}
+		try {
+			rmSync(join(pids, f));
+		} catch {
+			/* already gone */
+		}
+	}
+};
+const cleanupAll = (...roots: string[]) =>
+	roots.forEach((r) => {
+		killAnalyses(r);
+		rmSync(r, { recursive: true, force: true });
+	});
 const daemons: { daemon: ChildProcess; root: string }[] = [];
 // agents the daemons spawned run detached, so the test learns their pids from the daemon's pidfiles;
 // the cmdline guard keeps a recycled pid from getting an unrelated process killed
@@ -2125,6 +2162,13 @@ assert.equal(readFileSync(logAC(`${slugDoneAC}.reviewer-armed`), "utf8"), "123",
 assert.equal(readFileSync(logAC("push-failures.count"), "utf8"), "3", "counter skipped");
 assert.equal(compactFinishedLogs(rootAC).files, 0, "already-gzipped logs never match: a second pass is a no-op");
 assert.equal(nextRunIndex(rootAC, slugDoneAC, "developer"), 1, "a gzipped run still counts, so a fresh spawn never reuses the index");
+// a .doctor.log sibling of an analysed run never matches the compactor's role-log pattern:
+// never gzipped, never consumed, and it never advances the per-run index
+writeFileSync(logAC(`${slugDoneAC}.developer.0.doctor.log`), "doctor stream\n");
+assert.equal(compactFinishedLogs(rootAC).files, 0, "a .doctor.log sibling is never gzipped or consumed");
+assert.ok(existsSync(logAC(`${slugDoneAC}.developer.0.doctor.log`)) && !existsSync(logAC(`${slugDoneAC}.developer.0.doctor.log.gz`)), "the doctor.log stays plain");
+assert.equal(readFileSync(logAC(`${slugDoneAC}.developer.0.doctor.log`), "utf8"), "doctor stream\n", "the doctor.log content is untouched");
+assert.equal(nextRunIndex(rootAC, slugDoneAC, "developer"), 1, "a .doctor.log never advances the per-run index");
 console.log("orchestrator.test.ts: ... + retro sweep smoke passed");
 
 // --- part AF: a live agent pid defers the sweep spawn, so a to-do rewrite cannot twin it ---
@@ -2670,32 +2714,39 @@ try {
 	assert.equal(loadConfig(rootAP).logStallMinutes, 10, "a non-number logStallMinutes keeps 10");
 	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ logStallMinutes: 0, backlogIdleMinutes: 0 }));
 	assert.equal(loadConfig(rootAP).logStallMinutes, 10, "logStallMinutes <= 0 keeps 10");
-	// roles.analyser.concurrency: a valid positive integer applies, an invalid value warns
+	// roles.analyst.concurrency: a valid positive integer applies, an invalid value warns
 	// and stays unset, so the module default of 8 applies
-	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyser: { concurrency: 4 } } }));
-	assert.equal(loadConfig(rootAP).roles.analyser?.concurrency, 4, "a valid roles.analyser.concurrency applies");
-	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyser: { concurrency: 0 } } }));
-	assert.equal(loadConfig(rootAP).roles.analyser?.concurrency, undefined, "a non-positive roles.analyser.concurrency stays unset");
-	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyser: { concurrency: 2.5 } } }));
-	assert.equal(loadConfig(rootAP).roles.analyser?.concurrency, undefined, "a non-integer roles.analyser.concurrency stays unset");
-	// roles.analyser.mergeThreshold: a valid positive integer applies, an invalid value warns
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyst: { concurrency: 4 } } }));
+	assert.equal(loadConfig(rootAP).roles.analyst?.concurrency, 4, "a valid roles.analyst.concurrency applies");
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyst: { concurrency: 0 } } }));
+	assert.equal(loadConfig(rootAP).roles.analyst?.concurrency, undefined, "a non-positive roles.analyst.concurrency stays unset");
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyst: { concurrency: 2.5 } } }));
+	assert.equal(loadConfig(rootAP).roles.analyst?.concurrency, undefined, "a non-integer roles.analyst.concurrency stays unset");
+	// roles.analyst.mergeThreshold: a valid positive integer applies, an invalid value warns
 	// and stays unset, so the module default of 250 applies
-	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyser: { mergeThreshold: 300 } } }));
-	assert.equal(loadConfig(rootAP).roles.analyser?.mergeThreshold, 300, "a valid roles.analyser.mergeThreshold applies");
-	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyser: { mergeThreshold: 0 } } }));
-	assert.equal(loadConfig(rootAP).roles.analyser?.mergeThreshold, undefined, "a non-positive roles.analyser.mergeThreshold stays unset");
-	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyser: { mergeThreshold: 2.5 } } }));
-	assert.equal(loadConfig(rootAP).roles.analyser?.mergeThreshold, undefined, "a non-integer roles.analyser.mergeThreshold stays unset");
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyst: { mergeThreshold: 300 } } }));
+	assert.equal(loadConfig(rootAP).roles.analyst?.mergeThreshold, 300, "a valid roles.analyst.mergeThreshold applies");
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyst: { mergeThreshold: 0 } } }));
+	assert.equal(loadConfig(rootAP).roles.analyst?.mergeThreshold, undefined, "a non-positive roles.analyst.mergeThreshold stays unset");
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyst: { mergeThreshold: 2.5 } } }));
+	assert.equal(loadConfig(rootAP).roles.analyst?.mergeThreshold, undefined, "a non-integer roles.analyst.mergeThreshold stays unset");
+	// backward compat: a pre-rename roles.analyser entry serves as roles.analyst when
+	// roles.analyst is absent, and is ignored when roles.analyst is present
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyser: { concurrency: 6, mergeThreshold: 400 } } }));
+	assert.equal(loadConfig(rootAP).roles.analyst?.concurrency, 6, "a pre-rename roles.analyser entry maps to roles.analyst");
+	assert.equal(loadConfig(rootAP).roles.analyst?.mergeThreshold, 400, "the analyser entry's mergeThreshold maps too");
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyser: { concurrency: 6 }, analyst: { concurrency: 2 } } }));
+	assert.equal(loadConfig(rootAP).roles.analyst?.concurrency, 2, "roles.analyst wins when both entries exist");
 } finally {
 	process.env.HOME = savedHomeAP;
 }
 const orchLogAP = () => readFileSync(join(kanbanDir(rootAP), ".logs", "orchestrator.log"), "utf8");
 assert.ok(orchLogAP().includes('logStallMinutes "banana" ignored: must be a positive number of minutes'), "a non-number logStallMinutes warned about");
 assert.ok(orchLogAP().includes("logStallMinutes 0 ignored: must be a positive number of minutes"), "logStallMinutes <= 0 warned about");
-assert.ok(orchLogAP().includes('invalid roles.analyser.concurrency 0, ignored (expected a positive integer)'), "a non-positive roles.analyser.concurrency warned about");
-assert.ok(orchLogAP().includes('invalid roles.analyser.concurrency 2.5, ignored (expected a positive integer)'), "a non-integer roles.analyser.concurrency warned about");
-assert.ok(orchLogAP().includes('invalid roles.analyser.mergeThreshold 0, ignored (expected a positive integer)'), "a non-positive roles.analyser.mergeThreshold warned about");
-assert.ok(orchLogAP().includes('invalid roles.analyser.mergeThreshold 2.5, ignored (expected a positive integer)'), "a non-integer roles.analyser.mergeThreshold warned about");
+assert.ok(orchLogAP().includes('invalid roles.analyst.concurrency 0, ignored (expected a positive integer)'), "a non-positive roles.analyst.concurrency warned about");
+assert.ok(orchLogAP().includes('invalid roles.analyst.concurrency 2.5, ignored (expected a positive integer)'), "a non-integer roles.analyst.concurrency warned about");
+assert.ok(orchLogAP().includes('invalid roles.analyst.mergeThreshold 0, ignored (expected a positive integer)'), "a non-positive roles.analyst.mergeThreshold warned about");
+assert.ok(orchLogAP().includes('invalid roles.analyst.mergeThreshold 2.5, ignored (expected a positive integer)'), "a non-integer roles.analyst.mergeThreshold warned about");
 console.log("orchestrator.test.ts: ... + logStallMinutes config smoke passed");
 
 // --- part AQ: killing or restarting the daemon must not kill the spawned agents. The agent's
@@ -3042,6 +3093,209 @@ poll(rootAT, 5);
 assert.equal(parseTask(rootAT, taskAT.file).state, "reviewing", "the exception is sticky: no crash bounce on the next pass");
 assert.ok(!orchLogAT().includes("agent pid=0 dead without state update"), "no spurious dead-pid bounce for the pid-less reviewing task");
 console.log("orchestrator.test.ts: ... + exit-code file smoke passed");
+
+// --- part AT2: the auto-run analysis: every successful agent run (exit 0) spawns the
+// detached analyst+doctor runner (spawnRunAnalysis) exactly once, with skip paths for
+// already analysed or in-flight runs. poll driven directly: hand-written finished runs
+// (per-run log + wrapper exit file) fire the spawn in the exit-0 path, and a fast JSONL
+// stub stands in for the real agent so no LLM is ever called ---
+const rootAT2 = fixture();
+cleaned.push(rootAT2);
+const homeAT2 = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAT2);
+mkdirSync(kanbanDir(rootAT2), { recursive: true });
+// the detached runner loads the project config itself (the spawn carries only root, log,
+// role), so the stub agent must be on disk: otherwise the analysis would run the ambient
+// user-level agent. The stub prints one valid JSONL answer line and exits 0, from any cwd
+const fastStubAT2 = join(rootAT2, "fast-analyst.cjs");
+writeFileSync(
+	fastStubAT2,
+	`#!/usr/bin/env node
+process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "S: x\\nStruggle: none" }] } }) + "\\n");
+`,
+);
+chmodSync(fastStubAT2, 0o755);
+writeFileSync(join(kanbanDir(rootAT2), "se-llm-team.json"), JSON.stringify({ agent: fastStubAT2 }));
+const logsAT2 = join(kanbanDir(rootAT2), ".logs");
+const pidsAT2 = join(kanbanDir(rootAT2), ".pids");
+const orchLogAT2 = () => readFileSync(join(logsAT2, "orchestrator.log"), "utf8");
+const analysisFilesAT2 = (base: string) => ({
+	pid: join(pidsAT2, `${base}.analysis.pid`),
+	exit: join(pidsAT2, `${base}.analysis.exit`),
+	doctor: join(logsAT2, `${base}.doctor.log`),
+	report: join(logsAT2, `${base}.analysis.md`),
+});
+// a finished run: the per-run log with real content plus the wrapper's exit file. The
+// merger's shared pid name needs its slug file too, so the poll serves this task's merger
+const finishedRunAT2 = (slug: string, role: string) => {
+	mkdirSync(logsAT2, { recursive: true });
+	mkdirSync(pidsAT2, { recursive: true });
+	writeFileSync(
+		join(logsAT2, `${slug}.${role}.0.log`),
+		[
+			JSON.stringify({ type: "message_start", message: { role: "assistant", content: [] } }),
+			JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "did the work" }] } }),
+		].join("\n") + "\n",
+	);
+	writeFileSync(join(pidsAT2, `${role === "merger" ? "merger" : slug}.exit`), "0");
+	if (role === "merger") writeFileSync(join(pidsAT2, "merger.slug"), `${slug}\n`);
+};
+// one task per working state: doing (developer), reviewing (reviewer, success null left
+// for the PM), merging (merger), live-testing (live-tester)
+const rolesAT2: Array<{ role: string; state: "doing" | "reviewing" | "merging" | "live-testing" }> = [
+	{ role: "developer", state: "doing" },
+	{ role: "reviewer", state: "reviewing" },
+	{ role: "merger", state: "merging" },
+	{ role: "live-tester", state: "live-testing" },
+];
+const slugsAT2: Record<string, string> = {};
+const taskFilesAT2: Record<string, string> = {};
+for (const { role, state } of rolesAT2) {
+	const task = createTask(rootAT2, { name: `feat: auto-run ${role}`, summary: "Auto-run analysis smoke", specs: "n/a" });
+	setState(rootAT2, task, state);
+	slugsAT2[role] = taskSlug(task.file);
+	taskFilesAT2[role] = task.file;
+	finishedRunAT2(slugsAT2[role], role);
+}
+// a temp HOME around the polls keeps the ambient user-level config out of loadConfig, for
+// the in-process cfg and for the detached runner's own loadConfig (inherited env) alike
+const savedHomeAT2 = process.env.HOME;
+process.env.HOME = homeAT2;
+// the skip paths run on their own root: the slugs never collide with the fired runs above,
+// so the no-spawn asserts can read the whole orchestrator log
+const rootAT3 = fixture();
+cleaned.push(rootAT3);
+const stubAT3 = join(rootAT3, "fast-analyst.cjs");
+writeFileSync(stubAT3, readFileSync(fastStubAT2, "utf8"));
+chmodSync(stubAT3, 0o755);
+mkdirSync(kanbanDir(rootAT3), { recursive: true });
+writeFileSync(join(kanbanDir(rootAT3), "se-llm-team.json"), JSON.stringify({ agent: stubAT3 }));
+const logsAT3 = join(kanbanDir(rootAT3), ".logs");
+const pidsAT3 = join(kanbanDir(rootAT3), ".pids");
+mkdirSync(logsAT3, { recursive: true });
+mkdirSync(pidsAT3, { recursive: true });
+const pidFileAT3 = (base: string) => join(pidsAT3, `${base}.analysis.pid`);
+const orchLogAT3 = () => {
+	try {
+		return readFileSync(join(logsAT3, "orchestrator.log"), "utf8");
+	} catch {
+		return ""; // no log yet: nothing was ever logged on this root
+	}
+};
+const noSpawnAT3 = (what: string, base: string) => {
+	assert.ok(!existsSync(pidFileAT3(base)), `${what}: no analysis pid file`);
+	assert.ok(!existsSync(join(pidsAT3, `${base}.analysis.exit`)), `${what}: no analysis exit file`);
+};
+try {
+	const cfgAT2 = loadConfig(rootAT2);
+	assert.equal(cfgAT2.agent, fastStubAT2, "the project config's stub agent resolved");
+	poll(rootAT2, 5, Date.now(), 0);
+	// one analysis per finished run, each with a live-wrapped pid file (pid + discriminator):
+	// the spawn is detached, the wrapper heads its own process group
+	for (const { role } of rolesAT2) {
+		const base = `${slugsAT2[role]}.${role}.0`;
+		const files = analysisFilesAT2(base);
+		assert.ok(existsSync(files.pid), `the ${role} run spawned its analysis (pid file written)`);
+		const [pidStr, ...rest] = readFileSync(files.pid, "utf8").trim().split(/\s+/);
+		const pid = parseInt(pidStr, 10);
+		assert.ok(pid > 0 && rest.length > 0, `the ${role} analysis pid file is the wrapped pid+discriminator shape`);
+		assert.ok(pidAlive(pid, rest.join(" ")), `the ${role} analysis runner is alive`);
+	}
+	assert.equal(orchLogAT2().split("spawned analysis pid=").length - 1, 4, "one analysis spawned per finished run");
+	// the exit-0 state moves happened before the spawn: the orchestrator's own moves, the
+	// reviewer exception sticky (exit file kept) and the reviewer left for the PM
+	assert.equal(parseTask(rootAT2, taskFilesAT2.developer).state, "to-review", "the developer's exit 0 moved doing -> to-review");
+	assert.equal(parseTask(rootAT2, taskFilesAT2.reviewer).state, "reviewing", "the reviewer's exit 0 left the task for the PM");
+	assert.ok(existsSync(join(pidsAT2, `${slugsAT2.reviewer}.exit`)), "the reviewer exception keeps the exit file, so the next pass re-takes it");
+	assert.equal(parseTask(rootAT2, taskFilesAT2.merger).state, "to-merge", "the merger's exit 0 kept merging -> to-merge");
+	assert.equal(parseTask(rootAT2, taskFilesAT2["live-tester"]).state, "done", "the live-tester's exit 0 moved live-testing -> done");
+	// wait for every detached analysis: the runner's exit file, the doctor stream and the report
+	await waitFor(
+		() =>
+			rolesAT2.every(({ role }) => {
+				const files = analysisFilesAT2(`${slugsAT2[role]}.${role}.0`);
+				return existsSync(files.exit) && existsSync(files.doctor) && existsSync(files.report);
+			}),
+		20000,
+		"every auto-run analysis finished (exit file, doctor log, report)",
+		() => "",
+	);
+	for (const { role } of rolesAT2) {
+		const files = analysisFilesAT2(`${slugsAT2[role]}.${role}.0`);
+		assert.equal(readFileSync(files.exit, "utf8").trim(), "0", `the ${role} analysis exited 0`);
+		assert.ok(!existsSync(files.pid), `the ${role} analysis pid file self-removed at exit`);
+		const doctor = readFileSync(files.doctor, "utf8");
+		assert.ok(doctor.includes('"message_end"') && doctor.includes("Struggle: none"), `the ${role} doctor log carries the stub's output`);
+		const report = readFileSync(files.report, "utf8");
+		assert.ok(report.includes("## Analysis") && report.includes("S: x"), `the ${role} report carries the doctor answer`);
+	}
+	// exactly once: the sticky reviewer exit file makes the second poll re-take the exception
+	// path, but the finished analysis is never re-fired (no new pid file, doctor log untouched)
+	const reviewerFilesAT2 = analysisFilesAT2(`${slugsAT2.reviewer}.reviewer.0`);
+	const doctorMtimeAT2 = statSync(reviewerFilesAT2.doctor).mtimeMs;
+	poll(rootAT2, 5, Date.now(), 0);
+	assert.equal(parseTask(rootAT2, taskFilesAT2.reviewer).state, "reviewing", "the reviewer task still waits for the PM on the second poll");
+	assert.ok(!existsSync(reviewerFilesAT2.pid), "the second poll spawned no new analysis for the reviewer run");
+	assert.equal(statSync(reviewerFilesAT2.doctor).mtimeMs, doctorMtimeAT2, "the finished analysis was not re-fired or rewritten");
+
+	// skip paths: direct spawnRunAnalysis calls on a quiet root, nothing spawns
+	// nothing indexed at all: n < 0, silent return
+	const slugAT3 = "000901_skip_empty";
+	spawnRunAnalysis(rootAT3, slugAT3, "developer");
+	noSpawnAT3("no run log at all", `${slugAT3}.developer.0`);
+	// only another role's run log: n < 0 for the asked role
+	writeFileSync(join(logsAT3, `${slugAT3}.developer.0.log`), "other role\n");
+	spawnRunAnalysis(rootAT3, slugAT3, "reviewer");
+	noSpawnAT3("only another role's run log", `${slugAT3}.reviewer.0`);
+	// only a legacy unsuffixed log: it never counts toward the index, n < 0
+	writeFileSync(join(logsAT3, `${slugAT3}.merger.log`), "legacy\n");
+	spawnRunAnalysis(rootAT3, slugAT3, "merger");
+	noSpawnAT3("only a legacy unsuffixed run log", `${slugAT3}.merger.0`);
+	// the run log missing in both variants: the name lists in readdir (so n = 0) but neither
+	// the plain nor the .gz file resolves (a broken symlink), the vanished-log race the
+	// existsSync guard covers
+	symlinkSync(join(logsAT3, "gone.log"), join(logsAT3, `${slugAT3}.live-tester.0.log`));
+	spawnRunAnalysis(rootAT3, slugAT3, "live-tester");
+	noSpawnAT3("run log missing in both variants", `${slugAT3}.live-tester.0`);
+	// already analysed: the report exists
+	const slugMdAT3 = "000902_skip_report";
+	writeFileSync(join(logsAT3, `${slugMdAT3}.developer.0.log`), "run\n");
+	writeFileSync(join(logsAT3, `${slugMdAT3}.developer.0.analysis.md`), "old report\n");
+	spawnRunAnalysis(rootAT3, slugMdAT3, "developer");
+	noSpawnAT3("the report already exists", `${slugMdAT3}.developer.0`);
+	// analysing right now: the doctor log exists from the runner's first moment
+	const slugDoctorAT3 = "000903_skip_doctor";
+	writeFileSync(join(logsAT3, `${slugDoctorAT3}.developer.0.log`), "run\n");
+	writeFileSync(join(logsAT3, `${slugDoctorAT3}.developer.0.doctor.log`), "");
+	spawnRunAnalysis(rootAT3, slugDoctorAT3, "developer");
+	noSpawnAT3("the doctor log already exists", `${slugDoctorAT3}.developer.0`);
+	// an in-flight analysis: the pid file names a live process (this test's own pid)
+	const slugAliveAT3 = "000904_skip_alive";
+	writeFileSync(join(logsAT3, `${slugAliveAT3}.developer.0.log`), "run\n");
+	writeFileSync(pidFileAT3(`${slugAliveAT3}.developer.0`), String(process.pid));
+	spawnRunAnalysis(rootAT3, slugAliveAT3, "developer");
+	// the hand-written pid file stays untouched: a spawn would rewrite it with the wrapped
+	// pid+disc shape, and only a spawn writes the exit file
+	assert.equal(readFileSync(pidFileAT3(`${slugAliveAT3}.developer.0`), "utf8").trim(), String(process.pid), "the in-flight analysis case left the pid file untouched");
+	assert.ok(!existsSync(join(pidsAT3, `${slugAliveAT3}.developer.0.analysis.exit`)), "the in-flight analysis case wrote no exit file");
+	rmSync(pidFileAT3(`${slugAliveAT3}.developer.0`)); // our own pid: never leave it for the cleanup kill
+	assert.ok(!orchLogAT3().includes("spawned analysis"), "no skip case spawned an analysis");
+	// the compacted variant fires: only the .log.gz exists, the spawn resolves it and the
+	// runner reads the gz (the compactor may gzip between the spawn and the read)
+	const slugGzAT3 = "000905_gz_run";
+	const gzLogAT3 = join(logsAT3, `${slugGzAT3}.developer.0.log`);
+	writeFileSync(gzLogAT3, [JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "gz run" }] } })].join("\n") + "\n");
+	writeFileSync(`${gzLogAT3}.gz`, gzipSync(readFileSync(gzLogAT3)));
+	rmSync(gzLogAT3);
+	spawnRunAnalysis(rootAT3, slugGzAT3, "developer");
+	assert.ok(existsSync(pidFileAT3(`${slugGzAT3}.developer.0`)), "the .gz variant resolves and spawns the analysis");
+	await waitFor(() => existsSync(join(pidsAT3, `${slugGzAT3}.developer.0.analysis.exit`)), 20000, "the gz-variant analysis finished", () => "");
+	assert.ok(existsSync(join(logsAT3, `${slugGzAT3}.developer.0.analysis.md`)), "the gz-variant analysis wrote its report");
+	assert.ok(existsSync(join(logsAT3, `${slugGzAT3}.developer.0.doctor.log`)), "the gz-variant analysis wrote the doctor log");
+} finally {
+	process.env.HOME = savedHomeAT2;
+}
+console.log("orchestrator.test.ts: ... + auto-run analysis smoke passed");
 
 // --- part AU: 000189 two conflicted to-merge tasks, one merger at a time. The second
 // merger's spawn supersedes the first task's unconsumed merger exit (it clears the shared
