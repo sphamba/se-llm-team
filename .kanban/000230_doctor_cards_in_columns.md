@@ -1,12 +1,12 @@
 ---
 name: "feat: doctor cards in their analysed run's column"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/230-doctor-cards-in-columns"
 issuer: "user"
 complexity: "moderate"
 shortName: "doctor-cards-in-columns"
-blockedBy: "#226, #227"
+blockedBy: ""
 ---
 
 # Summary
