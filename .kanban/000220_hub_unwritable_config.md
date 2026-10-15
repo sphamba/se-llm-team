@@ -1,8 +1,8 @@
 ---
 name: "fix: hub setup survives an unwritable neutral config dir"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/220-hub-unwritable-config"
+state: "done"
+worktree: ""
 issuer: "#215"
 complexity: "simple"
 shortName: "hub-unwritable-config"
