@@ -1,7 +1,7 @@
 ---
 name: "refactor: genericize the agents role prompts"
 priority: "medium"
-state: "doing"
+state: "live-testing"
 worktree: "refactor/225-generic-role-prompts"
 issuer: "user"
 complexity: "moderate"
@@ -46,5 +46,20 @@ The agents/*.md role prompts and skills/se-llm-team/SKILL.md ship with se-llm-te
 - `grep -rn "tests/kanban.test.ts\|tests/orchestrator.test.ts\|tests/webui.test.ts\|tsconfig" skills/se-llm-team/SKILL.md` returns nothing, and the SKILL's acceptance guidance names no suite and no full-suite run.
 - The SKILL's acceptance guidance states the trivial no-test rule and points the testing specifics at the agents' role prompts.
 - The moved sentences exist in the main checkout's .kanban/AGENTS.developer.md and .kanban/AGENTS.live-tester.md.
-
 # Notes
+
+- Swept the four daemon role prompts (commit 43cdb72): opening lines genericized to "You are the <Role> agent of the kanban pipeline.", developer.md's smoke-daemon webui sentence removed, live-tester.md's suite ban genericized to "never run any *.test.ts file, and never run the repo's test suites".
+- analyst.md and doctor.md (from #224) hold only generic prompt scaffolds (placeholder templates for block summaries and the analysis report); no repo-specific sentence found in them, nothing moved.
+- skills/se-llm-team/SKILL.md step 5 acceptance bullets replaced: no suite names, no full-suite run; acceptance criteria must be checkable commands that exist in the target repo, trivial-complexity tasks get no test command, testing specifics point at the agents' role prompts. The tsconfig/typecheck sentence was removed, not moved (se-llm-team-specific in a shipped skill and stale against the 8-suite package.json test script).
+- SKILL repetition sweep against the agents' prompts: only the acceptance bullets repeated agent-carried testing policy. The state-transition guard (kanban_get before kanban_set_state) also sits in reviewer.md but stays in the SKILL: the PM holds kanban_set_state as a board tool. The live-tester-report filing in SKILL step 3 and Board reports is the complementary other side of live-tester.md's PM-subagent instruction, not a repetition.
+- Moved sentences into the main checkout's project-local AGENTS files directly (untracked there, the merge cannot carry them): the smoke-daemon sentence verbatim (--no-webui, SE_LLM_TEAM_NO_WEBUI=1, the reason) into .kanban/AGENTS.developer.md under "Environment and safety"; the named node suites into .kanban/AGENTS.live-tester.md under "Run discipline", naming all eight package.json suites (the three from the old prompt line plus extension, efficiency-analysis, index, mcp, plugin, verified in package.json).
+- Checks: the acceptance greps were confirmed failing before the sweep and passing after; node tests/kanban.test.ts passed as the sanity gate; node tests/plugin.test.ts passed (it reads the real SKILL.md for the frontmatter flag). No suite asserts the role-prompt content; the reviewer verifies the sweep.
+- Reviewer pass, no fixes: re-ran the acceptance greps, all pass. Read all six agents/*.md and the SKILL; no repo-specific sentence left (a wider grep for tests/, src/, /home/, 4242, webui, tsconfig, typecheck also found nothing). analyst.md and doctor.md are pure placeholder scaffolds. The four opening lines are generic. The smoke-daemon sentence sits in the main checkout's .kanban/AGENTS.developer.md word for word (--no-webui, SE_LLM_TEAM_NO_WEBUI=1, the reason); the named suites sit in .kanban/AGENTS.live-tester.md with the full eight-suite count from the package.json test script. The SKILL acceptance bullets name no suite, never run the full suite, state the trivial no-test rule, and point the testing specifics at the agents' role prompts. No src/, hooks/ or tests/ file hardcodes the changed prompt text. The reviewer re-ran tests/plugin.test.ts, the one suite that reads the real SKILL.md: pass. The four recorded assumptions are sound; none changes the feature direction.
+
+# Open questions
+
+No user questions; assumptions to confirm:
+- The skill keeps its own "se-llm-team" name references (frontmatter name, description, heading): the skill itself ships as the se-llm-team skill and the acceptance greps cover only agents/.
+- The state-transition guard stays in the SKILL although reviewer.md carries it too: the PM holds kanban_set_state as a board tool, so it is board-tool guidance the PM needs.
+- The AGENTS.live-tester.md moved note names all eight package.json suites, not only the three from the old prompt line: the specs verified the test script now runs 8 suites.
+- The moved sentences in .kanban/AGENTS.<role>.md stay project-local and untracked (outside the merge); the doctor may compact them later (accepted per #222).

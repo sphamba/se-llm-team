@@ -1,5 +1,15 @@
 # developer: append project-specific guidance for this role below (e.g. how to run the project, how to live-test) so future agents of your kind start faster.
 
+## Process discipline
+
+- Read each target file once, then edit. One read pass plus greps covers a sweep. Do not re-scan or re-derive findings for files already read (#225: first edit at block 38 of 71 for 9 small edits).
+- Settle placement in one decision, then edit. A repo-specific sentence removed from agents/*.md or SKILL.md goes as one bullet into .kanban/AGENTS.<role>.md in the main checkout, under the closest section. Do not reopen a settled decision in a later thinking block (#225: two long deliberation loops over two sentences).
+- SPECS.md bookkeeping is fixed: completed-work facts go under the task's # Notes, assumptions and open points under # Open questions. Pick once.
+- Anchor every SPECS.md edit with unique surrounding text: the string "# Notes" occurs more than once in SPECS.md, so a heading-only match fails the uniqueness check and costs a grep plus a retry (#225).
+- Keep each bash call single-purpose. Do not merge greps with ls or file dumps: one oversized call truncates, hides the result, and forces a rerun (#225). This applies to greps, not only test suites.
+- Fix the acceptance battery before editing: the greps plus the one suite that reads the real files (plugin.test.ts for SKILL.md changes). Run it once before commit and once at the end. No mid-check re-derivations of match counts.
+- Keep the todo list at one item per requirement, not per edit.
+
 ## Running and testing
 
 - Tests are plain assert-style ESM scripts, no framework: `node tests/<file>.test.ts` per file, `npm test` for the suite. There is no typecheck: `npx tsc` prints "This is not the tsc command you are looking for". The repo runs `.ts` directly through node (24), so the suites are the only check.
@@ -28,6 +38,7 @@
 - process.env.X = undefined sets the env to the string "undefined" in node; delete process.env.X instead when restoring an unset variable, else later code resolves paths like undefined/se-llm-team and litters the cwd (#215).
 - Neutral shared paths (#215): the global config, hub registry and hub lock live at $XDG_CONFIG_HOME/se-llm-team/ (else ~/.config/se-llm-team/), with the legacy ~/.pi/agent paths as read-only fallbacks; every temp-HOME test env must also set or delete XDG_CONFIG_HOME, since the real environment may set it and leak the production config into tests.
 - Large argv elements: the kernel rejects a single argument over 131,072 bytes with E2BIG (MAX_ARG_STRLEN); node spawn reports it as a child 'error' event and the child never starts (#213). The AGENTS.md injection cap (PROJECT_PROMPT_CAP, src/orchestrator/spawn.ts) is 131,000, and the at-cap boundary is covered by a real stub spawn in tests/orchestrator.test.ts (#214).
+- Smoke-testing the pipeline (a daemon run against a temp root) must not touch the production webui: start smoke daemons with `--no-webui` (or set `SE_LLM_TEAM_NO_WEBUI=1`), because a smoke daemon reads the global config and binds the production webui port, wedging the real UI.
 
 ## Live webui checks
 

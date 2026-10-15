@@ -1,8 +1,8 @@
 ---
 name: "feat: blue doctor agent cards in the web UI"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/226-blue-doctor-cards"
 issuer: "user"
 complexity: "simple"
 shortName: "blue-doctor-cards"
