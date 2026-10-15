@@ -3,8 +3,8 @@ import { isAbsolute, join } from "node:path";
 import { isSelfWrite, kanbanDir, getTask, listAll, setState, setWorktree, taskFiles, taskSlug, updateAttrs, ROLE_NOTES_RE, type Task } from "../kanban.ts";
 import { agentAlive, agentPid, clearPid, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP, REVIEWER_RUN_CAP, type Config } from "./config.ts";
-import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, readCounter } from "./log.ts";
-import { clearMergerSlug, spawnAgent, writeMergerSlug } from "./spawn.ts";
+import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, newestRunRole, readCounter } from "./log.ts";
+import { clearMergerSlug, readExitCode, spawnAgent, spawnRunAnalysis, writeMergerSlug } from "./spawn.ts";
 import { boardStatus, commitKanban, ensureWorktree, git, reconcileBoard } from "./board.ts";
 import { reportDone } from "./report.ts";
 
@@ -65,6 +65,16 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	consumeReviewerRun(root, slug);
 	// the reviewer may still be committing and writing its report after setting to-merge
 	if (agentAlive(root, slug)) return;
+	// a self-advanced run's success is recognized here too: the poll's 60 s cadence usually
+	// misses the ~10 s window before the next spawn of the slug overwrites its stale pid/exit
+	// pair, so the sweep's to-merge pass fires the analysis first. Best-effort: the spawn
+	// skips already-analysed and in-flight runs itself, and a crashed last run (non-zero
+	// exit) never fires. newestRunRole names the exited run (never a merger log)
+	const exitCode = readExitCode(root, slug);
+	if (exitCode === 0) {
+		const role = newestRunRole(root, slug);
+		if (role) spawnRunAnalysis(root, slug, role);
+	}
 	// at most one merger at a time, project-wide
 	if (agentAlive(root, "merger")) return;
 	// a task bounced here past the respawn cap (dead merger) also waits for the idle

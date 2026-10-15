@@ -3315,6 +3315,84 @@ try {
 }
 console.log("orchestrator.test.ts: ... + auto-run analysis smoke passed");
 
+// --- part AT4: the sweep-side recognition of a self-advanced exit (sweepToMerge): the
+// poll's 60 s cadence usually misses the ~10 s window before the next spawn of the slug
+// overwrites the stale pid/exit pair, so the sweep's to-merge pass fires the analysis; and
+// newestRunRole never names a merger log (the stale pair is the slug's own, so the exited
+// run is never a merger run) — a crashed merger's log is never analysed instead ---
+const rootAT4 = fixture();
+cleaned.push(rootAT4);
+const homeAT4 = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAT4);
+mkdirSync(kanbanDir(rootAT4), { recursive: true });
+const stubAT4 = join(rootAT4, "fast-analyst.cjs");
+writeFileSync(stubAT4, readFileSync(fastStubAT2, "utf8"));
+chmodSync(stubAT4, 0o755);
+writeFileSync(join(kanbanDir(rootAT4), "se-llm-team.json"), JSON.stringify({ agent: stubAT4 }));
+const logsAT4 = join(kanbanDir(rootAT4), ".logs");
+const pidsAT4 = join(kanbanDir(rootAT4), ".pids");
+mkdirSync(logsAT4, { recursive: true });
+mkdirSync(pidsAT4, { recursive: true });
+const runLogAT4 = (slug: string, role: string) => {
+	writeFileSync(
+		join(logsAT4, `${slug}.${role}.0.log`),
+		[
+			JSON.stringify({ type: "message_start", message: { role: "assistant", content: [] } }),
+			JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "did the work" }] } }),
+		].join("\n") + "\n",
+	);
+};
+// the stale pair the self-advanced recognition keys on: a dead wrapper pid + exit 0
+const stalePairAT4 = (slug: string) => {
+	writeFileSync(pidPath(rootAT4, slug), "999999999\n");
+	writeFileSync(exitFilePath(rootAT4, slug), "0\n");
+};
+const analysisTouchedAT4 = (base: string) =>
+	existsSync(join(pidsAT4, `${base}.analysis.pid`)) || existsSync(join(pidsAT4, `${base}.analysis.exit`)) || existsSync(join(logsAT4, `${base}.analysis.md`));
+const savedHomeAT4 = process.env.HOME;
+try {
+	process.env.HOME = homeAT4;
+	// the clean self-advance: the sweep's to-merge pass fires the analysis inside the window
+	const taskAT4a = createTask(rootAT4, { name: "feat: sweep-side analysis", summary: "Sweep-side recognition smoke", specs: "n/a" });
+	setState(rootAT4, taskAT4a, "to-merge");
+	const slugAT4a = taskSlug(taskAT4a.file);
+	runLogAT4(slugAT4a, "reviewer");
+	stalePairAT4(slugAT4a);
+	rescan(rootAT4, loadConfig(rootAT4));
+	assert.ok(analysisTouchedAT4(`${slugAT4a}.reviewer.0`), "the sweep's to-merge pass spawned the analysis for the self-advanced run");
+	await waitFor(
+		() => existsSync(join(pidsAT4, `${slugAT4a}.reviewer.0.analysis.exit`)) && existsSync(join(logsAT4, `${slugAT4a}.reviewer.0.doctor.log`)),
+		20000,
+		"the sweep-side analysis finished (exit file, doctor log)",
+		() => "",
+	);
+	// only a merger log: the stale pair is the slug's own (the merger's exits ride the global
+	// merger pair), so the exited run is never a merger run and its log is never named
+	const taskAT4b = createTask(rootAT4, { name: "feat: crashed merger log", summary: "Crashed merger no-misfire smoke", specs: "n/a" });
+	setState(rootAT4, taskAT4b, "to-merge");
+	const slugAT4b = taskSlug(taskAT4b.file);
+	runLogAT4(slugAT4b, "merger");
+	stalePairAT4(slugAT4b);
+	rescan(rootAT4, loadConfig(rootAT4));
+	poll(rootAT4, 5, Date.now(), 0);
+	assert.ok(!analysisTouchedAT4(`${slugAT4b}.merger.0`), "a crashed merger's log is never analysed by the stale-pair recognition");
+	// the conflict requeue: a crashed merger's log (newest by mtime) must not shadow the
+	// self-advanced reviewer run the stale pair belongs to
+	const taskAT4c = createTask(rootAT4, { name: "feat: requeue misfire", summary: "Requeue misfire smoke", specs: "n/a" });
+	setState(rootAT4, taskAT4c, "to-merge");
+	const slugAT4c = taskSlug(taskAT4c.file);
+	runLogAT4(slugAT4c, "reviewer");
+	runLogAT4(slugAT4c, "merger");
+	stalePairAT4(slugAT4c);
+	poll(rootAT4, 5, Date.now(), 0);
+	assert.ok(analysisTouchedAT4(`${slugAT4c}.reviewer.0`), "the self-advanced reviewer run is analysed at the requeue");
+	assert.ok(!analysisTouchedAT4(`${slugAT4c}.merger.0`), "the crashed merger's log is not analysed instead");
+} finally {
+	process.env.HOME = savedHomeAT4;
+}
+cleanupAll(rootAT4);
+console.log("orchestrator.test.ts: ... + sweep-side self-advanced analysis smoke passed");
+
 // --- part AU: 000189 two conflicted to-merge tasks, one merger at a time. The second
 // merger's spawn supersedes the first task's unconsumed merger exit (it clears the shared
 // exit file), so the poll must requeue the superseded task instead of false-bouncing it: no

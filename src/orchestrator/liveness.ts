@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { getTask, kanbanDir, listAll, setState, taskSlug, type Task, type TaskState } from "../kanban.ts";
 import { clearPid, killTree, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP } from "./config.ts";
-import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, logPath, nextRunIndex, readCounter } from "./log.ts";
+import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, logPath, newestRunRole, nextRunIndex, readCounter } from "./log.ts";
 import { clearContextSymlinks, clearExitFile, readExitCode, readMergerSlug, spawnRunAnalysis } from "./spawn.ts";
 import { dropDoneBlockers, promoteBacklog } from "./pipeline.ts";
 
@@ -18,26 +18,6 @@ const WORKING_STATES: Partial<Record<TaskState, { next: TaskState; success: Task
 	"live-testing": { next: "to-live-test", success: "done", role: "live-tester" },
 	merging: { next: "to-merge", success: "to-merge", role: "merger" },
 };
-
-// the slug's newest run log's role: a self-advanced run (the reviewer sets to-merge itself)
-// names its own role in the log name (.logs/<slug>.<role>.<n>.log). The .gz replacement counts
-// too: every sweep gzips finished logs (compactFinishedLogs), so the log is usually already
-// compacted when the poll's next pass detects the self-advanced exit
-function newestRunRole(root: string, slug: string): string | null {
-	let best: { role: string; mtime: number } | null = null;
-	try {
-		const logs = join(kanbanDir(root), ".logs");
-		for (const f of readdirSync(logs)) {
-			const m = f.match(/^(.+)\.(developer|reviewer|live-tester|merger)\.\d+\.log(?:\.gz)?$/);
-			if (!m || m[1] !== slug) continue;
-			const mtime = statSync(join(logs, f)).mtimeMs;
-			if (!best || mtime > best.mtime) best = { role: m[2], mtime };
-		}
-	} catch {
-		/* no logs dir yet */
-	}
-	return best ? best.role : null;
-}
 
 // a live-but-hung agent passes pidAlive forever: the stall check kills it by its log instead
 // (the window itself is the logStallMinutes config, default DEFAULT_LOG_STALL_MINUTES)

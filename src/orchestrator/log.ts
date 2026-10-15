@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { kanbanDir } from "../kanban.ts";
@@ -10,6 +10,29 @@ export const counterPath = (root: string, name: string) => join(kanbanDir(root),
 // that spawn's pid, so a later developer spawn (pidfile overwrite) or a poll-cleared pidfile
 // (died run) reads as a mismatch and never counts as a reviewer success
 export const armedPath = (root: string, slug: string) => join(kanbanDir(root), ".logs", `${slug}.reviewer-armed`);
+
+// the slug's newest run log's role: a self-advanced run (the reviewer sets to-merge itself)
+// names its own role in the log name (.logs/<slug>.<role>.<n>.log). Only the slug-named roles
+// count: the merger's exits ride the global merger pid/exit pair, so the stale pair the
+// self-advanced path keys on never belongs to a merger run, and a merger log (a crashed
+// merger's, newest by mtime) must not shadow the exited run. The .gz replacement counts too:
+// every sweep gzips finished logs (compactFinishedLogs), so the log is usually already
+// compacted when the poll's next pass detects the self-advanced exit
+export function newestRunRole(root: string, slug: string): string | null {
+	let best: { role: string; mtime: number } | null = null;
+	try {
+		const logs = join(kanbanDir(root), ".logs");
+		for (const f of readdirSync(logs)) {
+			const m = f.match(/^(.+)\.(developer|reviewer|live-tester)\.\d+\.log(?:\.gz)?$/);
+			if (!m || m[1] !== slug) continue;
+			const mtime = statSync(join(logs, f)).mtimeMs;
+			if (!best || mtime > best.mtime) best = { role: m[2], mtime };
+		}
+	} catch {
+		/* no logs dir yet */
+	}
+	return best ? best.role : null;
+}
 
 export function log(root: string, message: string): void {
 	mkdirSync(join(kanbanDir(root), ".logs"), { recursive: true });
