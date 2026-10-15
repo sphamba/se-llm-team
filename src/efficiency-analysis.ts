@@ -29,6 +29,7 @@ export interface AnalyseOptions {
 	agent?: string; // default "pi"
 	llmFlags?: string[]; // default []
 	concurrency?: number; // max in-flight block analysers, default 8
+	mergeThreshold?: number; // chars: a text or thinking block shorter than this folds into the next block as lead-in context, default 250
 	delay?: (ms: number) => Promise<void>; // wait before a retry attempt, default a real setTimeout, tests pass a no-op
 	runAnalyser?: (argv: string[]) => Promise<string | null>; // returns the assistant answer text, null on failure
 }
@@ -218,12 +219,53 @@ function blockContent(block: AnalysisBlock): string {
 	return content;
 }
 
-function pass1Prompt(block: AnalysisBlock): string {
+// One folded short block that travels in the next block's prompt.
+interface LeadIn {
+	type: AnalysisBlock["type"];
+	text: string;
+}
+
+// One analysed block with its lead-in context.
+interface MergedUnit {
+	block: AnalysisBlock;
+	leadIns: LeadIn[];
+}
+
+// Chars below which a text or thinking block folds into the next block as lead-in context.
+const DEFAULT_MERGE_THRESHOLD = 250;
+
+// One forward pass over the ordered blocks. A text or thinking block shorter than the
+// threshold joins the next block as lead-in context, so no standalone meaningless fragment
+// gets an analyser call. Consecutive short lead-ins accumulate in order. A short block with
+// no following block stays standalone. A block at or above the threshold stays standalone.
+function mergeLeadIns(blocks: AnalysisBlock[], threshold: number): { units: MergedUnit[]; mergedCount: number } {
+	const units: MergedUnit[] = [];
+	const pending: AnalysisBlock[] = [];
+	let mergedCount = 0;
+	for (let i = 0; i < blocks.length; i++) {
+		const block = blocks[i];
+		const short = (block.type === "text" || block.type === "thinking") && block.text.length < threshold;
+		if (short && i < blocks.length - 1) {
+			pending.push(block);
+			mergedCount++;
+			continue;
+		}
+		units.push({ block, leadIns: pending.map((lead) => ({ type: lead.type, text: lead.text })) });
+		pending.length = 0;
+	}
+	return { units, mergedCount };
+}
+
+function pass1Prompt(block: AnalysisBlock, leadIns: LeadIn[]): string {
 	const instruction = "Summarize in 1 to 3 sentences what the agent did and whether it struggled (confusion, errors, retries, repeated work).";
 	const format = 'Answer with two lines: "Summary: <your summary>" then "Struggle: <struggle signals, or none>".';
 	let content = blockContent(block);
 	if (content.length > BLOCK_CAP) content = content.slice(0, BLOCK_CAP) + "\n[Truncated at 8000 characters. The rest of this block text is cut.]";
-	return `Block ${block.index} of type ${typeLabel(block.type, block.toolName)}.\n${instruction}\n${format}\n\n${content}`;
+	// Ceiling: consecutive short lead-ins accumulate, so many of them grow the prompt. Each
+	// lead-in is one short block, so the kernel argv cap of 131072 bytes stays far away.
+	const leadBlock = leadIns.map((lead) => `lead-in [${lead.type}]: "${lead.text}"`).join("\n");
+	const lead = leadBlock ? leadBlock + "\n" : "";
+	return `Block ${block.index} of type ${typeLabel(block.type, block.toolName)}.\n${instruction}\n${format}\n\n${lead}${content}`;
 }
 
 // Split an analyser answer into summary and struggle at the two labels. Without labels the
@@ -243,7 +285,7 @@ function splitAnswer(answer: string): { summary: string; struggle: string } {
 	return { summary: flat(summary), struggle: flat(struggleAt === -1 ? "" : lines[struggleAt].replace(/^struggle:\s*/i, "")) };
 }
 
-function pass2Prompt(blocks: AnalysisBlock[], reports: BlockReport[], failedCount: number): string {
+function pass2Prompt(blocks: AnalysisBlock[], reports: BlockReport[], failedCount: number, mergedCount: number): string {
 	const byType = { text: 0, thinking: 0, toolCall: 0 };
 	const perTool = new Map<string, number>();
 	for (const block of blocks) {
@@ -255,7 +297,7 @@ function pass2Prompt(blocks: AnalysisBlock[], reports: BlockReport[], failedCoun
 	}
 	const toolErrors = blocks.filter((block) => block.type === "toolCall" && block.isError === true).length;
 	const tools = perTool.size === 0 ? "none" : [...perTool].map(([name, count]) => `${name} ${count}`).join(", ");
-	const stats = `Blocks: ${blocks.length} total (text ${byType.text}, thinking ${byType.thinking}, toolCall ${byType.toolCall}).\nTool calls per tool: ${tools}.\nErrors: ${toolErrors + failedCount} (tool results with errors plus failed block analyses).`;
+	const stats = `Blocks: ${blocks.length} total (text ${byType.text}, thinking ${byType.thinking}, toolCall ${byType.toolCall}).\nTool calls per tool: ${tools}.\nMerged lead-in blocks: ${mergedCount} (short blocks folded into the next block as lead-in context).\nErrors: ${toolErrors + failedCount} (tool results with errors plus failed block analyses).`;
 	const instruction = "Produce a markdown analysis report of pain points (struggle, wasted time, inefficiency) with block number references.";
 	// the prompt travels as one argv element. The kernel cap is 131072 bytes, so the prompt
 	// stays below it. An over-cap block summary list is truncated with a marker
@@ -364,41 +406,44 @@ async function callWithRetry(run: (argv: string[]) => Promise<string | null>, ar
 	return { answer: null, reason };
 }
 
-// Full pipeline: read the log, parse the blocks, summarize each block in pass 1 with at
-// most concurrency analysers in flight (default 8), then produce the final analysis in
-// pass 2. The report is written next to the log as the name minus the .log or .log.gz
-// suffix plus .analysis.md.
+// Full pipeline: read the log, parse the blocks, merge short lead-in blocks forward, then
+// summarize each kept block in pass 1 with at most concurrency analysers in flight
+// (default 8), then produce the final analysis in pass 2. The report is written next to
+// the log as the name minus the .log or .log.gz suffix plus .analysis.md.
 export async function analyseLog(logPath: string, opts: AnalyseOptions = {}): Promise<AnalyseResult> {
 	const agent = opts.agent ?? "pi";
 	const flags = opts.llmFlags ?? [];
 	const concurrency = opts.concurrency ?? 8;
+	const mergeThreshold = opts.mergeThreshold ?? DEFAULT_MERGE_THRESHOLD;
 	const delay = opts.delay ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 	const run = opts.runAnalyser ?? ((argv: string[]) => spawnAnalyser(argv, dirname(logPath)));
 	const content = readLogFile(logPath);
 	const blocks = parseLogBlocks(content);
-	// pass 1: one analyser per block, in log order
-	const outcomes = await pool(blocks, concurrency, async (block): Promise<{ report: BlockReport; failed: boolean }> => {
-		const { answer, reason } = await callWithRetry(run, buildAnalyserCommand(agent, flags, pass1Prompt(block)), delay);
+	// merge pass: short text and thinking blocks fold into the next block as lead-in context
+	const { units, mergedCount } = mergeLeadIns(blocks, mergeThreshold);
+	// pass 1: one analyser per kept block, in log order
+	const outcomes = await pool(units, concurrency, async (unit): Promise<{ report: BlockReport; failed: boolean }> => {
+		const { answer, reason } = await callWithRetry(run, buildAnalyserCommand(agent, flags, pass1Prompt(unit.block, unit.leadIns)), delay);
 		if (answer === null) {
 			return {
 				failed: true,
-				report: { index: block.index, type: block.type, toolName: block.toolName, summary: `Block analysis failed after ${RETRY_ATTEMPTS} attempts: ${reason}`, struggle: "" },
+				report: { index: unit.block.index, type: unit.block.type, toolName: unit.block.toolName, summary: `Block analysis failed after ${RETRY_ATTEMPTS} attempts: ${reason}`, struggle: "" },
 			};
 		}
 		const { summary, struggle } = splitAnswer(answer);
 		return {
 			failed: false,
-			report: { index: block.index, type: block.type, toolName: block.toolName, summary: summary || "the analyser returned no summary", struggle },
+			report: { index: unit.block.index, type: unit.block.type, toolName: unit.block.toolName, summary: summary || "the analyser returned no summary", struggle },
 		};
 	});
 	const reports = outcomes.map((outcome) => outcome.report);
 	const failedCount = outcomes.filter((outcome) => outcome.failed).length;
 	// pass 2: one analyser for the whole report
-	const second = await callWithRetry(run, buildAnalyserCommand(agent, flags, pass2Prompt(blocks, reports, failedCount)), delay);
+	const second = await callWithRetry(run, buildAnalyserCommand(agent, flags, pass2Prompt(units.map((unit) => unit.block), reports, failedCount, mergedCount)), delay);
 	const analysis = second.answer === null ? `Analysis failed after ${RETRY_ATTEMPTS} attempts: ${second.reason}` : second.answer.trim();
 	const reportPath = reportPathFor(logPath);
 	writeFileSync(reportPath, renderReport(logPath, reports, analysis));
-	return { reportPath, blockCount: blocks.length, analysis, blocks: reports };
+	return { reportPath, blockCount: units.length, analysis, blocks: reports };
 }
 
 // The report sits next to the log. foo.log and foo.log.gz both become foo.analysis.md.

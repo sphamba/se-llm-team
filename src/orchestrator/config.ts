@@ -28,6 +28,7 @@ export interface LlmConfig {
 // an LlmConfig that overrides the role defaults for tasks of that complexity
 export interface RoleLlmConfig extends LlmConfig {
 	concurrency?: number;
+	mergeThreshold?: number;
 	trivial?: LlmConfig;
 	simple?: LlmConfig;
 	moderate?: LlmConfig;
@@ -98,6 +99,14 @@ export function loadConfig(root: string): Config {
 			if (rawConcurrency !== undefined) {
 				if (typeof rawConcurrency === "number" && Number.isInteger(rawConcurrency) && rawConcurrency > 0) clean.concurrency = rawConcurrency;
 				else log(root, `invalid roles.${role}.concurrency ${JSON.stringify(rawConcurrency)}, ignored (expected a positive integer)`);
+			}
+			// the lead-in merge threshold for the role: cleanLlm drops it, so it needs its own
+			// parse. A non-integer or non-positive value warns and stays unset, so the module
+			// default of 250 applies
+			const rawMergeThreshold = src.mergeThreshold;
+			if (rawMergeThreshold !== undefined) {
+				if (typeof rawMergeThreshold === "number" && Number.isInteger(rawMergeThreshold) && rawMergeThreshold > 0) clean.mergeThreshold = rawMergeThreshold;
+				else log(root, `invalid roles.${role}.mergeThreshold ${JSON.stringify(rawMergeThreshold)}, ignored (expected a positive integer)`);
 			}
 			roles[role] = clean;
 		}
