@@ -24,7 +24,7 @@ Start pi in a project and run the `se-llm-team` skill: the skill makes the sessi
 
 ## Configuration
 
-Optional config in `~/.pi/agent/se-llm-team.json` (a `.kanban/se-llm-team.json` in the project overrides it):
+Optional config in the global config file `$XDG_CONFIG_HOME/se-llm-team/se-llm-team.json` (or `~/.config/se-llm-team/se-llm-team.json` when `XDG_CONFIG_HOME` is unset; a `.kanban/se-llm-team.json` in the project overrides it). Setups from before the move keep working: when the neutral file is absent, the legacy `~/.pi/agent/se-llm-team.json` is read as a fallback, and the code never writes there.
 
 ```json
 {
