@@ -1,8 +1,8 @@
 ---
 name: "feat: analyst and doctor analysis after every agent run"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/222-analyst-doctor-auto-run"
 issuer: "user"
 complexity: "complex"
 shortName: "analyst-doctor-auto-run"

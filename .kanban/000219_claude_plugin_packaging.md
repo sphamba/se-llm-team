@@ -1,12 +1,12 @@
 ---
 name: "feat: Claude Code plugin and marketplace packaging"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/219-claude-plugin-packaging"
 issuer: "user"
 complexity: "moderate"
 shortName: "claude-plugin-packaging"
-blockedBy: "#218"
+blockedBy: ""
 ---
 
 # Summary
