@@ -1,7 +1,7 @@
 ---
 name: "fix: stop respawning a failed analysis on every to-merge sweep"
 priority: "medium"
-state: "doing"
+state: "live-testing"
 worktree: "fix/229-analysis-failure-respawn"
 issuer: "#224"
 complexity: "moderate"
@@ -39,11 +39,11 @@ Implemented 2026-10-15 (worktree fix/229-analysis-failure-respawn, commit 698937
 - Test: new part AT5 in tests/orchestrator.test.ts, end to end: a to-merge task with a finished run whose log is a corrupt .log.gz; the first sweep spawns the failing analysis once (non-zero exit marker, no report, no doctor log); two later sweeps keep spawned-count at 1 with the skip logged and the marker surviving the janitor; the task stays in to-merge (detached root, the PM-resolves path); a fresh reviewer run (new index) still fires and completes its analysis. Confirmed failing before the fix (the marker did not survive the janitor), passing after; tests/orchestrator.test.ts passes in full (exit 0, 53 parts).
 - Manual runs are unaffected: the guard lives in spawnRunAnalysis, not in analysis-run.ts, and a manual run writes no marker, so a manual analysis run is never blocked.
 
-# Open questions
+Reviewed 2026-10-15 (reviewer): no fixes.
 
-No open user questions; the decision was recorded above. Assumptions to confirm:
-
-- Any exit code counts as attempted: a successful analysis is already skipped silently by the report check, so the marker check only ever catches failures in practice.
-- A task re-entering to-merge with the same last run is not re-analysed (one attempt per run); only a fresh run (a new run index) re-fires the analysis.
-- Exit markers accumulate one per run in .kanban/.pids while the task exists; bounded by run count, swept when the task is removed from the board.
+- All three fire sites call the single guarded spawnRunAnalysis (verified by grep): the to-merge sweep (src/orchestrator/pipeline.ts:76), the poll's run-end pass (src/orchestrator/liveness.ts:187) and the poll's self-advanced pass (src/orchestrator/liveness.ts:216).
+- Guard ordering verified in src/orchestrator/spawn.ts: the marker check sits after the report/doctor-log and pid-alive checks, before the spawn, so an in-flight analysis (pid alive, marker not yet written) still skips, and any finished failure hits the guard.
+- The janitor's split(".")[0] key is safe: slugs contain only a-z0-9 and hyphens (non-alphanumerics are separators, src/kanban.ts:235).
+- tests/orchestrator.test.ts ran in full (exit 0), part AT5 present ("one failed analysis attempt per run passed"): spawn-once, the logged skip, the marker surviving the janitor, the task staying in to-merge, and a fresh run (new index) firing despite the stale marker are all pinned.
+- The Open-questions assumptions are confirmed against the code and removed: a success is caught earlier by the report check, so the marker check only catches failures; the marker keys on the run index, so only a fresh run re-fires; markers accumulate one per run and are swept with the task.
 
