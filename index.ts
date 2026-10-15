@@ -289,10 +289,11 @@ export default function (pi: ExtensionAPI) {
 			const root = ctx.cwd;
 			const absolutePath = resolve(root, params.path);
 			const cfg = loadConfig(root);
-			// the role default applies, no complexity override
+			// the role default applies, no complexity override. The in-flight cap comes from the
+			// role config, the module default of 8 applies when unset
 			const flags = llmFlags(root, cfg, "analyser", "");
 			try {
-				const result = await analyseLog(absolutePath, { agent: cfg.agent, llmFlags: flags });
+				const result = await analyseLog(absolutePath, { agent: cfg.agent, llmFlags: flags, concurrency: cfg.roles.analyser?.concurrency });
 				return {
 					content: [{ type: "text", text: `${result.analysis}\n\nReport: ${result.reportPath}\nBlocks analysed: ${result.blockCount}` }],
 					details: result,

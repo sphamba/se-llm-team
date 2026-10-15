@@ -28,6 +28,8 @@ export interface BlockReport {
 export interface AnalyseOptions {
 	agent?: string; // default "pi"
 	llmFlags?: string[]; // default []
+	concurrency?: number; // max in-flight block analysers, default 8
+	delay?: (ms: number) => Promise<void>; // wait before a retry attempt, default a real setTimeout, tests pass a no-op
 	runAnalyser?: (argv: string[]) => Promise<string | null>; // returns the assistant answer text, null on failure
 }
 
@@ -341,10 +343,16 @@ async function pool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>
 	return out;
 }
 
-// One analyser call with a single retry. The reason feeds the failure notes.
-async function callWithRetry(run: (argv: string[]) => Promise<string | null>, argv: string[]): Promise<{ answer: string | null; reason: string }> {
+// 3 attempts per analyser call, with this fixed wait before attempts 2 and 3.
+const RETRY_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 5000;
+
+// One analyser call with 3 attempts and a fixed 5000 ms wait between attempts. The reason
+// feeds the failure notes.
+async function callWithRetry(run: (argv: string[]) => Promise<string | null>, argv: string[], delay: (ms: number) => Promise<void>): Promise<{ answer: string | null; reason: string }> {
 	let reason = "the analyser returned no answer";
-	for (let attempt = 0; attempt < 2; attempt++) {
+	for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt++) {
+		if (attempt > 0) await delay(RETRY_DELAY_MS);
 		try {
 			const answer = await run(argv);
 			if (answer !== null) return { answer, reason: "" };
@@ -356,21 +364,24 @@ async function callWithRetry(run: (argv: string[]) => Promise<string | null>, ar
 }
 
 // Full pipeline: read the log, parse the blocks, summarize each block in pass 1 with at
-// most 8 analysers in flight, then produce the final analysis in pass 2. The report is
-// written next to the log as the name minus the .log or .log.gz suffix plus .analysis.md.
+// most concurrency analysers in flight (default 8), then produce the final analysis in
+// pass 2. The report is written next to the log as the name minus the .log or .log.gz
+// suffix plus .analysis.md.
 export async function analyseLog(logPath: string, opts: AnalyseOptions = {}): Promise<AnalyseResult> {
 	const agent = opts.agent ?? "pi";
 	const flags = opts.llmFlags ?? [];
+	const concurrency = opts.concurrency ?? 8;
+	const delay = opts.delay ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 	const run = opts.runAnalyser ?? ((argv: string[]) => spawnAnalyser(argv, dirname(logPath)));
 	const content = readLogFile(logPath);
 	const blocks = parseLogBlocks(content);
 	// pass 1: one analyser per block, in log order
-	const outcomes = await pool(blocks, 8, async (block): Promise<{ report: BlockReport; failed: boolean }> => {
-		const { answer, reason } = await callWithRetry(run, buildAnalyserCommand(agent, flags, pass1Prompt(block)));
+	const outcomes = await pool(blocks, concurrency, async (block): Promise<{ report: BlockReport; failed: boolean }> => {
+		const { answer, reason } = await callWithRetry(run, buildAnalyserCommand(agent, flags, pass1Prompt(block)), delay);
 		if (answer === null) {
 			return {
 				failed: true,
-				report: { index: block.index, type: block.type, toolName: block.toolName, summary: `Block analysis failed after one retry: ${reason}`, struggle: "" },
+				report: { index: block.index, type: block.type, toolName: block.toolName, summary: `Block analysis failed after ${RETRY_ATTEMPTS} attempts: ${reason}`, struggle: "" },
 			};
 		}
 		const { summary, struggle } = splitAnswer(answer);
@@ -382,8 +393,8 @@ export async function analyseLog(logPath: string, opts: AnalyseOptions = {}): Pr
 	const reports = outcomes.map((outcome) => outcome.report);
 	const failedCount = outcomes.filter((outcome) => outcome.failed).length;
 	// pass 2: one analyser for the whole report
-	const second = await callWithRetry(run, buildAnalyserCommand(agent, flags, pass2Prompt(blocks, reports, failedCount)));
-	const analysis = second.answer === null ? `Analysis failed after one retry: ${second.reason}` : second.answer.trim();
+	const second = await callWithRetry(run, buildAnalyserCommand(agent, flags, pass2Prompt(blocks, reports, failedCount)), delay);
+	const analysis = second.answer === null ? `Analysis failed after ${RETRY_ATTEMPTS} attempts: ${second.reason}` : second.answer.trim();
 	const reportPath = reportPathFor(logPath);
 	writeFileSync(reportPath, renderReport(logPath, reports, analysis));
 	return { reportPath, blockCount: blocks.length, analysis, blocks: reports };

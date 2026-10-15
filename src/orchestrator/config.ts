@@ -27,6 +27,7 @@ export interface LlmConfig {
 // a roles entry may also hold per-complexity sub-objects keyed trivial/simple/moderate/complex, each
 // an LlmConfig that overrides the role defaults for tasks of that complexity
 export interface RoleLlmConfig extends LlmConfig {
+	concurrency?: number;
 	trivial?: LlmConfig;
 	simple?: LlmConfig;
 	moderate?: LlmConfig;
@@ -89,6 +90,14 @@ export function loadConfig(root: string): Config {
 				if (v === undefined) continue;
 				if (v && typeof v === "object" && !Array.isArray(v)) clean[cx] = cleanLlm(root, v, ` for role "${role}" ${cx}`);
 				else log(root, `non-object complexity override ${JSON.stringify(v)} for role "${role}" ${cx}, ignored`);
+			}
+			// the in-flight analyser cap for the role: cleanLlm drops it, so it needs its own
+			// parse. A non-integer or non-positive value warns and stays unset, so the module
+			// default of 8 applies
+			const rawConcurrency = src.concurrency;
+			if (rawConcurrency !== undefined) {
+				if (typeof rawConcurrency === "number" && Number.isInteger(rawConcurrency) && rawConcurrency > 0) clean.concurrency = rawConcurrency;
+				else log(root, `invalid roles.${role}.concurrency ${JSON.stringify(rawConcurrency)}, ignored (expected a positive integer)`);
 			}
 			roles[role] = clean;
 		}
