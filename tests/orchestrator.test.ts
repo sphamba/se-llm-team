@@ -3292,6 +3292,24 @@ try {
 	await waitFor(() => existsSync(join(pidsAT3, `${slugGzAT3}.developer.0.analysis.exit`)), 20000, "the gz-variant analysis finished", () => "");
 	assert.ok(existsSync(join(logsAT3, `${slugGzAT3}.developer.0.analysis.md`)), "the gz-variant analysis wrote its report");
 	assert.ok(existsSync(join(logsAT3, `${slugGzAT3}.developer.0.doctor.log`)), "the gz-variant analysis wrote the doctor log");
+	// the self-advanced path: a to-merge task whose stale pid file names a dead process, the
+	// reviewer log already gzipped by a sweep — the newest run log is the .gz and it names the
+	// reviewer role (m[2], not the slug m[1]), so the analysis still fires
+	const taskSelfAT3 = createTask(rootAT3, { name: "feat: self-advanced gz", summary: "s", specs: "n/a" });
+	setState(rootAT3, taskSelfAT3, "to-merge");
+	const selfSlugAT3 = taskSlug(taskSelfAT3.file);
+	const selfBaseAT3 = `${selfSlugAT3}.reviewer.0`;
+	writeFileSync(
+		join(logsAT3, `${selfBaseAT3}.log.gz`),
+		gzipSync(Buffer.from(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "self-advanced" }] } }) + "\n")),
+	);
+	writeFileSync(pidPath(rootAT3, selfSlugAT3), "999999999\n");
+	writeFileSync(exitFilePath(rootAT3, selfSlugAT3), "0\n");
+	poll(rootAT3, 5, Date.now(), 0);
+	assert.ok(existsSync(pidFileAT3(selfBaseAT3)), "the self-advanced run's .gz log fires its analysis");
+	await waitFor(() => existsSync(join(pidsAT3, `${selfBaseAT3}.analysis.exit`)), 20000, "the self-advanced analysis finished", () => "");
+	assert.equal(readFileSync(join(pidsAT3, `${selfBaseAT3}.analysis.exit`), "utf8").trim(), "0", "the self-advanced analysis exited 0");
+	assert.ok(existsSync(join(logsAT3, `${selfBaseAT3}.doctor.log`)), "the self-advanced analysis wrote its doctor log");
 } finally {
 	process.env.HOME = savedHomeAT2;
 }

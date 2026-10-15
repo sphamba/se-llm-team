@@ -20,16 +20,18 @@ const WORKING_STATES: Partial<Record<TaskState, { next: TaskState; success: Task
 };
 
 // the slug's newest run log's role: a self-advanced run (the reviewer sets to-merge itself)
-// names its own role in the log name (.logs/<slug>.<role>.<n>.log)
+// names its own role in the log name (.logs/<slug>.<role>.<n>.log). The .gz replacement counts
+// too: every sweep gzips finished logs (compactFinishedLogs), so the log is usually already
+// compacted when the poll's next pass detects the self-advanced exit
 function newestRunRole(root: string, slug: string): string | null {
 	let best: { role: string; mtime: number } | null = null;
 	try {
 		const logs = join(kanbanDir(root), ".logs");
 		for (const f of readdirSync(logs)) {
-			const m = f.match(/^(.+)\.(developer|reviewer|live-tester|merger)\.\d+\.log$/);
+			const m = f.match(/^(.+)\.(developer|reviewer|live-tester|merger)\.\d+\.log(?:\.gz)?$/);
 			if (!m || m[1] !== slug) continue;
 			const mtime = statSync(join(logs, f)).mtimeMs;
-			if (!best || mtime > best.mtime) best = { role: m[1], mtime };
+			if (!best || mtime > best.mtime) best = { role: m[2], mtime };
 		}
 	} catch {
 		/* no logs dir yet */

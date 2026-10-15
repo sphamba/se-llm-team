@@ -491,7 +491,7 @@ async function testConcurrencyLimit() {
 		const result = await analyseLog(logPath, { runAnalyst: def.run, runDoctor: async () => "ok", mergeThreshold: 1 });
 		assert.equal(result.blockCount, 20);
 		assert.ok(def.max() <= 8, `max in-flight was ${def.max()}, expected at most 8`);
-		assert.ok(def.max() > 1, "the block analysers did not run in parallel");
+		assert.ok(def.max() > 1, "the block analysts did not run in parallel");
 		// a concurrency override tightens the cap
 		const capped = track();
 		const cappedResult = await analyseLog(logPath, { runAnalyst: capped.run, runDoctor: async () => "ok", concurrency: 3, mergeThreshold: 1 });

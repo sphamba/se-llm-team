@@ -118,7 +118,12 @@ export function compactFinishedLogs(root: string): { files: number; before: numb
 		const guards = m[2] === "merger" ? ["merger", `${m[1]}.merger`] : [m[1]];
 		if (guards.some((g) => agentAlive(root, g))) continue;
 		const path = join(kanbanDir(root), ".logs", name);
-		const before = readFileSync(path, "utf8");
+		let before: string;
+		try {
+			before = readFileSync(path, "utf8");
+		} catch {
+			continue; // raced away or an unresolvable entry (a broken symlink): the next pass retries
+		}
 		const after = before.split("\n").map(compactLogLine).filter((l) => l !== null).join("\n");
 		const tmp = `${path}.gz.compact-tmp`;
 		try {
