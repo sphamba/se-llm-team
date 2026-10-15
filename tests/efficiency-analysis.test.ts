@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-import { analyseLog, buildAnalyserCommand, parseLogBlocks, readLogFile } from "../src/efficiency-analysis.ts";
+import { analyseLog, analyserAnswer, buildAnalyserCommand, parseLogBlocks, readLogFile } from "../src/efficiency-analysis.ts";
 
 // one synthetic log with the record shapes the orchestrator logs: a session record, an
 // assistant message_end with thinking then toolCall then text, the tool execution records,
@@ -160,6 +160,30 @@ function testCommandBuilder() {
 	);
 }
 
+function testAnalyserAnswerEmptyParts() {
+	// a message_end with an empty text part: the joined text is empty, so no answer
+	const emptyText = '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":""}]}}';
+	assert.equal(analyserAnswer(emptyText), null);
+	// whitespace-only text: also no answer
+	const wsText = '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"  \\n\\t "}]}}';
+	assert.equal(analyserAnswer(wsText), null);
+	// missing text parts: no content, an empty content array, a text part without text,
+	// and content with only a thinking part
+	assert.equal(analyserAnswer('{"type":"message_end","message":{"role":"assistant"}}'), null);
+	assert.equal(analyserAnswer('{"type":"message_end","message":{"role":"assistant","content":[]}}'), null);
+	assert.equal(analyserAnswer('{"type":"message_end","message":{"role":"assistant","content":[{"type":"text"}]}}'), null);
+	assert.equal(analyserAnswer('{"type":"message_end","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hmm"}]}}'), null);
+	// the last assistant message_end wins: a trailing empty text discards an earlier answer
+	const lastWins = [
+		'{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"earlier answer"}]}}',
+		'{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":" "}]}}',
+	].join("\n");
+	assert.equal(analyserAnswer(lastWins), null);
+	// a non-empty answer still comes back unchanged, without trimming
+	const real = '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"  padded  "}]}}';
+	assert.equal(analyserAnswer(real), "  padded  ");
+}
+
 async function testFailedAnalyser() {
 	const dir = fixtureDir("failed");
 	try {
@@ -234,6 +258,34 @@ async function testRetryExhaustion() {
 	}
 }
 
+async function testEmptyAnswerRetried() {
+	const dir = fixtureDir("empty");
+	try {
+		const logPath = join(dir, "x.log");
+		writeFileSync(logPath, '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}');
+		// a stub analyser whose only answer is an empty string: the empty answer must
+		// count as no answer, so each call retries all 3 attempts. The stub appends one
+		// character per run to a file in its cwd, so the test can count the runs.
+		const stubPath = join(dir, "empty-stub.js");
+		const stub = [
+			"#!/usr/bin/env node",
+			'require("fs").appendFileSync("calls", "1");',
+			'process.stdout.write(\'{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":""}]}}\\n\');',
+		].join("\n");
+		writeFileSync(stubPath, stub);
+		chmodSync(stubPath, 0o755);
+		const delays: number[] = [];
+		const result = await analyseLog(logPath, { agent: stubPath, delay: async (ms) => { delays.push(ms); } });
+		// one block plus pass 2, each call runs the stub 3 times with two 5000 ms waits
+		assert.equal(readFileSync(join(dir, "calls"), "utf8").length, 6);
+		assert.deepEqual(delays, [5000, 5000, 5000, 5000]);
+		assert.equal(result.blocks[0].summary, "Block analysis failed after 3 attempts: the analyser returned no answer");
+		assert.ok(result.analysis.startsWith("Analysis failed after 3 attempts"));
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 async function testConcurrencyLimit() {
 	const dir = fixtureDir("concurrency");
 	try {
@@ -282,9 +334,11 @@ try {
 	testPlainOrderBeforeFallbackCall();
 	await testReportPipeline();
 	testCommandBuilder();
+	testAnalyserAnswerEmptyParts();
 	await testFailedAnalyser();
 	await testRetryRecovers();
 	await testRetryExhaustion();
+	await testEmptyAnswerRetried();
 	await testConcurrencyLimit();
 	console.log("efficiency-analysis tests passed");
 } finally {

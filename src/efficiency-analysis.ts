@@ -300,7 +300,7 @@ function spawnAnalyser(argv: string[], cwd: string): Promise<string | null> {
 }
 
 // The last assistant message_end in the analyser stdout. Non-JSON lines are ignored.
-function analyserAnswer(stdout: string): string | null {
+export function analyserAnswer(stdout: string): string | null {
 	let answer: string | null = null;
 	for (const line of stdout.split("\n")) {
 		const trimmed = line.trim();
@@ -315,10 +315,11 @@ function analyserAnswer(stdout: string): string | null {
 		const msg = rec.message;
 		if (!msg || typeof msg !== "object" || msg.role !== "assistant") continue;
 		const parts = Array.isArray(msg.content) ? msg.content : [];
-		answer = parts
+		const text = parts
 			.filter((part) => part && typeof part === "object" && part.type === "text" && typeof part.text === "string")
 			.map((part) => (part as { text: string }).text)
 			.join("\n");
+		answer = text.trim() ? text : null;
 	}
 	return answer;
 }
