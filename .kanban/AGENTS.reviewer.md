@@ -6,18 +6,18 @@
 3. Verify each spec requirement: one command, record pass/fail in the finding, move on.
 4. Run the suites the diff touches (Coverage map), once.
 5. Append findings to # Notes in one edit; close Open questions in the same edit.
-6. tool_search("kanban") → kanban_set_state → end the run. No closing summary: the findings in SPECS.md are the verdict.
+6. State transition (below): tool_search → kanban_get → kanban_set_state. Output nothing after set_state: the findings in SPECS.md are the verdict.
 
 ## Recon (exactly two bash calls)
-- Call 1, state and stat. The variable removes all branch substitution, no placeholder work:
-  `b=$(git -C /home/phamba/repos/se-llm-team branch --show-current) && git branch --show-current && git log --oneline -5 && git status --short && git diff "$b"...HEAD --stat`
-- Call 2, full diff: `git diff <branch-printed-by-call-1>...HEAD`.
+- Call 1, state and stat. It prints `base=<name>`; that echo is the only branch name call 2 needs (the worktree branch is visible in the task frontmatter, not printed):
+  `b=$(git -C /home/phamba/repos/se-llm-team branch --show-current) && echo "base=$b" && git log --oneline -5 && git status --short && git diff "$b"...HEAD --stat`
+- Call 2, full diff: `git diff <name-from-base=...>...HEAD`, a mechanical substitution of the printed name. Never re-derive the base name, never assume main, never deliberate about how to obtain it.
 - The `-C` lookup reads the main checkout because the task worktree sits on the task branch and the base branch does not. No root-vs-worktree question exists.
 - Branches stack: the base diff carries other tasks' commits. When Notes name the implemented commit, review `git show <sha>` and treat the rest as out of scope. No per-commit attribution beyond that.
 - Do not search project memory or the web for task context: SPECS.md plus the diff is the record.
 
 ## Checks
-- One requirement, one command, one recorded pass/fail. A settled check never reopens, and no block restates settled checks, the plan, or the verdict. If you catch yourself recapping a passed check, start the findings edit.
+- One requirement, one command, one recorded pass/fail. A settled check never reopens. Each verdict is written once, in the findings edit: no lead-in text, no recap block, no closing summary restates it. If you catch yourself recapping a passed check, start the findings edit.
 - Output already in context is evidence: never re-grep or re-read a site you just confirmed.
 - Shape and type doubts end at one grep of the producing site. No cross-file traces, no hypothetical variants the compiler or the diff already rejects.
 - A claim that names a commit: one `git show <sha>`, stop. No `git show <base>:<file>` extraction, no running old code.
@@ -49,8 +49,8 @@
 
 ## State transition (always last, three steps)
 1. tool_search("kanban") loads the MCP tools (kanban_get, kanban_set_state, kanban_list).
-2. kanban_set_state({ state }) and stop. kanban_get first is a wasted call: set_state takes only `{ state }` and resolves the task from the cwd SPECS.md symlink.
-3. End the run.
+2. kanban_get({}) before set_state: the spawn prompt mandates the re-read, so make it and move on. Abort when the state no longer matches what you saw at start.
+3. kanban_set_state({ state }) and end the run. Output nothing after it: the findings in SPECS.md are the verdict, a closing text block only restates them.
 - Pass → to-merge. A task parked per its own specs (no runnable precondition) → backlog, never to-merge: to-merge closes it as done without the run, and promoteBacklog never promotes a task with unanswered open questions (src/orchestrator/pipeline.ts), so backlog holds it for the user with no respawn loop. to-do re-spawns a developer at once.
 
 ## Files
