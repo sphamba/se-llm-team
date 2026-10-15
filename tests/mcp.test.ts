@@ -120,6 +120,12 @@ try {
 	assert.equal(refs.length, 1);
 	assert.equal(refs[0].name, "feat: mcp probe");
 
+	// an out-of-enum value fails as isError before the handler runs: the MCP wire has no
+	// schema validator, a bad state must not silently write to the board
+	const badState = await request("tools/call", { name: "kanban_set_state", arguments: { state: "banana" } });
+	assert.equal(badState.result.isError, true, "an invalid state must set isError");
+	assert.match(badState.result.content[0].text, /invalid state/);
+
 	// a throwing call sets isError true with the message
 	const bad = await request("tools/call", { name: "kanban_create", arguments: { name: "feat: bad slug", summary: "s", shortName: "INVALID SLUG" } });
 	assert.equal(bad.result.isError, true, "a failed call sets isError");

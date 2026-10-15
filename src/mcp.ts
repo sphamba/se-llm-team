@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TOOLS, type ToolCtx } from "./tools.ts";
+import { checkEnums, TOOLS, type ToolCtx } from "./tools.ts";
 
 // the protocol versions we support, newest first (pi's MCP client uses the same list)
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
@@ -52,7 +52,9 @@ async function dispatch(id: unknown, method: string, params: any) {
 				return;
 			}
 			try {
-				const result = await tool.run(params.arguments ?? {}, ctx);
+				const args = params.arguments ?? {};
+				checkEnums(tool, args);
+				const result = await tool.run(args, ctx);
 				reply(id, { content: [{ type: "text", text: result.text }] });
 			} catch (err) {
 				reply(id, { content: [{ type: "text", text: (err as Error).message }], isError: true });

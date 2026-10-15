@@ -32,6 +32,17 @@ export interface ToolDef {
 	run: (params: any, ctx: ToolCtx) => Promise<ToolResult>;
 }
 
+// enum guard for hosts without a wire validator (the MCP server has no typebox): pi
+// validates the schemas with typebox before execute, so an MCP client must not silently
+// write an out-of-enum value (e.g. a kanban_set_state state) to the board
+export function checkEnums(tool: ToolDef, params: Record<string, unknown>): void {
+	for (const [name, prop] of Object.entries((tool.parameters as { properties?: Record<string, unknown> }).properties ?? {})) {
+		const allowed = (prop as { enum?: string[] }).enum;
+		const value = params[name];
+		if (allowed && value !== undefined && !allowed.includes(value as string)) throw new Error(`invalid ${name} ${JSON.stringify(value)}; expected one of ${allowed.join(", ")}`);
+	}
+}
+
 export function resolveRoot(cwd: string): string | null {
 	try {
 		return execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim() || null;
