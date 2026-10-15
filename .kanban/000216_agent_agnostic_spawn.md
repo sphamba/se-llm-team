@@ -1,7 +1,7 @@
 ---
 name: "feat: agent-agnostic spawn layer for pi and claude backends"
 priority: "high"
-state: "doing"
+state: "reviewing"
 worktree: "feat/216-agent-agnostic-spawn"
 issuer: "user"
 complexity: "complex"
@@ -46,3 +46,15 @@ The daemon and the efficiency-analysis tool spawn agents through a configurable 
 - node tests/kanban.test.ts, node tests/webui.test.ts, node tests/extension.test.ts pass unchanged.
 
 # Notes
+- 2026-10-15: Implemented the agent-agnostic spawn layer. New src/orchestrator/backends.ts holds the per-backend argv builders (piSpawnArgs, claudeSpawnArgs, claudeAnalyserArgs, claudeEffort) and the Backend type ("pi" | "claude").
+- 2026-10-15: Backend resolution in loadConfig(root, defaultAgent?): a config agent key that names a backend wins, then the host-passed --default-agent, then pi; any other agent value stays an executable override (stubs, custom wrappers). parseArgs accepts --default-agent; main threads it into loadConfig and logs the backend; an invalid --default-agent warns and falls back to pi.
+- 2026-10-15: spawnAgent dispatches per backend. Pi argv byte-identical to the pre-backend construction (suite asserts it). Claude spawn argv: -p <prompt> --permission-mode bypassPermissions --output-format stream-json --verbose [--model <model>] [--effort <effort>] [--append-system-prompt-file <file>]. Verified against the claude CLI docs (code.claude.com): -p/--print headless with the prompt positional; bypassPermissions is a valid --permission-mode value (equivalent documented: --dangerously-skip-permissions); stream-json in print mode errors without --verbose; --model takes an alias or full id; --effort accepts low/medium/high/xhigh/max (plus ultracode), no off/minimal, so both map to low; --append-system-prompt and --append-system-prompt-file exist but the same flag does not repeat twice (from v2.1.283+ the text form and its file form can combine), so the system prompt travels as ONE file ref.
+- 2026-10-15: Claude system-prompt mechanism chosen: the project AGENTS.md (same 131000-byte policy, skips with one logged warning above the cap) and the role notes .kanban/AGENTS.<role>.md are concatenated into one file .kanban/.pids/<name>.system-prompt.md at every spawn, passed as --append-system-prompt-file. Chosen over the cwd-symlink option because the flag does not repeat and claude's AGENTS.md auto-load from cwd is not relied on (claude reads AGENTS.md only when no CLAUDE.md exists). The SPECS.md and AGENTS.md cwd symlinks stay identical for both backends.
+- 2026-10-15: index.ts orchestrator_start passes --default-agent pi to the daemon; the efficiency_analysis tool passes backend + the resolved llm triple to analyseLog. Efficiency-analysis AnalyseOptions: llmFlags replaced by backend + llm; buildAnalyserCommand keeps its pi shape byte-identical. Claude analyser argv: claude --bare --no-session-persistence -p <prompt> --permission-mode bypassPermissions --output-format stream-json --verbose [--model] [--effort]. --bare skips hooks, skills, commands, subagents, plugins, MCP servers and memory (the isolated-run equivalent of pi's --no-* flags; it still leaves Bash/read/edit tools, pi's --no-tools removes all). Parsing of claude stream-json output is out of scope: until the renderer task lands, efficiency-analysis with the claude backend spawns the analyser but does not produce parsed results (the pi-format analyserAnswer parser reads nothing from stream-json lines).
+- 2026-10-15: Operational notes for the claude backend: --bare ignores OAuth/keychain, so agents need ANTHROPIC_API_KEY or an apiKeyHelper via --settings; --effort support depends on the model. Suite: node tests/orchestrator.test.ts gained a claude-backend part (resolution asserts, full claude argv stub case, effort mapping, cap policy), tests/efficiency-analysis.test.ts gained claude analyser argv cases, index.test.ts asserts --default-agent pi. All six test files pass.
+
+# Open questions
+- Assumption: the config agent key doubles as backend selector (pi/claude) and executable override (any other value); a future Claude host would pass --default-agent claude. The pi extension passes pi.
+- Assumption: claude role agents keep session persistence (pi does the same); only the analyser runs with --no-session-persistence.
+- Assumption: --permission-mode bypassPermissions for headless claude agents matches pi's --approve containment (risk limited to the task worktree); the analyser gets it too because headless claude cannot answer permission prompts.
+- Assumption: claude stream-json log parsing and rendering stays a separate task; until it lands, claude-backend efficiency analysis spawns the analyser but returns no parsed results.
