@@ -22,6 +22,29 @@ ln -s /path/to/se-llm-team/skills/se-llm-team ~/.pi/agent/skills/se-llm-team
 
 Start pi in a project and run the `se-llm-team` skill: the skill makes the session the Project manager, the kanban tools drive the board, and `orchestrator_start` runs the daemon. The orchestrator sends board reports to the chat. The mechanics are in [Documentation](#documentation) below.
 
+## MCP server (Claude Code)
+
+Claude Code sessions get the same 12 kanban/orchestrator tools through a zero-dependency stdio MCP server. No install step: node >= 24 runs the `.ts` entry directly.
+
+```sh
+node /path/to/se-llm-team/src/mcp.ts
+```
+
+For a manual `.mcp.json` in the project:
+
+```json
+{
+  "mcpServers": {
+    "se-llm-team": {
+      "command": "node",
+      "args": ["/path/to/se-llm-team/src/mcp.ts"]
+    }
+  }
+}
+```
+
+The server resolves the project root from its cwd (the directory the client starts it in), and its `orchestrator_start` passes `--default-agent claude` to the daemon. Board reports do not travel through the MCP server; plugin hooks deliver them.
+
 ## Configuration
 
 Optional config in the global config file `$XDG_CONFIG_HOME/se-llm-team/se-llm-team.json` (or `~/.config/se-llm-team/se-llm-team.json` when `XDG_CONFIG_HOME` is unset; a `.kanban/se-llm-team.json` in the project overrides it). Setups from before the move keep working: when the neutral file is absent, the legacy `~/.pi/agent/se-llm-team.json` is read as a fallback, and the code never writes there.
