@@ -1,8 +1,8 @@
 ---
 name: "feat: Claude Code plugin and marketplace packaging"
 priority: "high"
-state: "live-testing"
-worktree: "feat/219-claude-plugin-packaging"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "claude-plugin-packaging"
