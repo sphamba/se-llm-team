@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PRIORITY_RANK } from "../kanban.ts";
 import { esc, inline, logFixups, md } from "./logpane.ts";
-import { agentLabel, agentRowSig, agentStatsText, buildShell, cardBaseHtml, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, numLinkHtml, relationPaths, spinnerHtml, syncAgentStats, syncBoard, syncCardStats, taskStats, taskStatsText } from "./board.ts";
+import { agentLabel, agentRowSig, agentStatsText, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, numLinkHtml, relationPaths, spinnerHtml, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, taskStats, taskStatsText } from "./board.ts";
 
 // the served page: PAGE interpolates the tested renderers and helpers as client source; the
 // webui config loader and the per-tab client state helpers live here too
@@ -193,10 +193,14 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 #m-agent-btns { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
 #m-doctor { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-top: 8px; }
 #m-doctor:empty { display: none; }
-/* 000226: the doctor cards read blue (text, outline, highlight) in both themes, scoped to #m-doctor so the run buttons and the sub cards keep the link gold */
-#m-doctor .agent-card { color: var(--doctor-fg); border-color: var(--doctor-fg); background: var(--doctor-bg); }
-#m-doctor .agent-card:hover { background: var(--doctor-bg-strong); }
-#m-doctor .agent-card-active { border-color: var(--doctor-fg); background: var(--doctor-bg-strong); }
+/* 000226: the doctor cards read blue (text, outline, highlight) in both themes, scoped to the
+.agent-doctor marker so the run buttons and the sub cards keep the link gold; 000230: the marker
+covers the cards in their analysed run's column and in the residual #m-doctor row alike, and the
+check mark goes blue with the card text */
+.agent-doctor { color: var(--doctor-fg); border-color: var(--doctor-fg); background: var(--doctor-bg); }
+.agent-doctor:hover { background: var(--doctor-bg-strong); }
+.agent-doctor.agent-card-active { border-color: var(--doctor-fg); background: var(--doctor-bg-strong); }
+.agent-doctor .check { color: var(--doctor-fg); }
 .check { color: var(--low-fg); margin-right: 5px; }
 .cross { color: var(--critical-fg); margin-right: 5px; }
 #m-agent { margin-bottom: 12px; }
@@ -352,6 +356,9 @@ ${taskStats}
 ${taskStatsText}
 ${agentRowSig}
 ${syncAgentStats}
+${syncStatsLine}
+${doctorCol}
+${syncDoctorCards}
 ${syncCardStats}
 ${refreshMs}
 // tabs: one per registered project, the active one renders that project's board
@@ -632,7 +639,7 @@ function renderAgent(t, keep) {
 	}
 	el.__sig = agentRowSig(runs);
 	const oldSubs = keep ? new Map() : null;
-	if (oldSubs) for (const c of el.querySelectorAll(".agent-col > .agent-card")) oldSubs.set(c.dataset.handle, c.parentElement.querySelector(".agent-subs"));
+	if (oldSubs) for (const c of el.querySelectorAll(".agent-col > .agent-card:not(.agent-doctor)")) oldSubs.set(c.dataset.handle, c.parentElement.querySelector(".agent-subs"));
 	const count = {};
 	for (const a of runs) count[a.role] = (count[a.role] || 0) + 1;
 	el.innerHTML = runs.map(a =>
@@ -663,27 +670,38 @@ function renderAgent(t, keep) {
 	const boxes = el.querySelectorAll(".agent-subs");
 	runs.forEach((a, i) => fetchSubs(gen, a, boxes[i]));
 }
-// the doctor history as one horizontal row below the run columns: one card per analysed run's
-// doctor step, oldest leftmost, the live doctor rightmost; keep=true is the poll refresh: an
-// unchanged set moves only the stats lines (syncAgentStats), a structure change rebuilds the row
-// and only genuinely new cards animate in
+// the doctor history: one card per analysed run's doctor step, slotted into the analysed run's
+// column below the run card (the handle is the run's plus the .doctor suffix), oldest leftmost,
+// the live doctor rightmost; cards whose run column is gone keep the residual #m-doctor row.
+// keep=true is the poll refresh: an unchanged set moves only the stats lines (syncDoctorCards),
+// a structure change rebuilds the cards, only genuinely new ones animate in
 function renderDoctor(t, keep) {
 	const el = document.getElementById("m-doctor");
+	const row = document.getElementById("m-agent-btns");
 	const docs = (t.doctors || []).slice();
 	const live = docs.find(d => d.alive);
 	if (live) { docs.splice(docs.indexOf(live), 1); docs.push(live); }
-	if (!docs.length) { el.innerHTML = ""; el.__sig = ""; return; }
-	if (keep && syncAgentStats(el, docs, document)) return;
+	const cards = el.__cards || [];
+	if (keep && syncDoctorCards(cards, docs, row, el, document)) return;
 	el.__sig = agentRowSig(docs);
-	const oldHandles = keep ? new Set([...el.querySelectorAll(".agent-card")].map(b => b.dataset.handle)) : null;
+	// old handles gate the enter animation, taken from __cards because a run-row rebuild may
+	// already have detached the slotted cards
+	const oldHandles = keep ? new Set(cards.map(c => c.dataset.handle)) : null;
+	for (const c of cards) c.remove();
 	const count = {};
 	for (const d of docs) count[d.role] = (count[d.role] || 0) + 1;
-	el.innerHTML = docs.map(d =>
-		agentCardHtml(d.alive ? "agent-live" : "agent-past", 'data-handle="' + esc(d.handle) + '"', agentLabel(d, count), d.tokens, d.duration, d.alive ? '<span class="spin"></span>' : '<span class="check">✓</span>')).join("");
-	for (const b of el.querySelectorAll(".agent-card")) {
+	const tmp = document.createElement("div");
+	el.__cards = docs.map(d => {
+		tmp.innerHTML = agentCardHtml("agent-doctor " + (d.alive ? "agent-live" : "agent-past"), 'data-handle="' + esc(d.handle) + '"', agentLabel(d, count), d.tokens, d.duration, d.alive ? '<span class="spin"></span>' : '<span class="check">✓</span>');
+		const b = tmp.firstChild;
+		(doctorCol(row, d.handle) ?? el).appendChild(b);
 		b.onclick = () => openAgentLog(b.dataset.handle);
-		if (oldHandles && !oldHandles.has(b.dataset.handle)) b.classList.add("enter");
-	}
+		if (oldHandles && !oldHandles.has(b.dataset.handle)) {
+			b.classList.add("enter");
+			b.onanimationend = () => { b.classList.remove("enter"); b.onanimationend = null; };
+		}
+		return b;
+	});
 	markActiveAgent();
 }
 // one run's subagent cards, labeled Sub-<caller role> without the id string, one per background

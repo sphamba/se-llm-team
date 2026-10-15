@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, PRIORITY_RANK, setState } from "../src/kanban.ts";
 import { startHub } from "../src/hub.ts";
-import { agentLabel, agentRowSig, agentStatsText, agentLogPayload, boardOf, buildShell, cardBaseHtml, cardHtml, curve, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, syncCardStats, tabNames, tabsHtml, taskPayload, taskStats } from "../src/webui.ts";
+import { agentLabel, agentRowSig, agentStatsText, agentLogPayload, boardOf, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, tabNames, tabsHtml, taskPayload, taskStats } from "../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the logpane module
 import { LOG_ROLES } from "../src/webui/logpane.ts";
 import { gzipSync } from "node:zlib";
@@ -399,6 +399,7 @@ class El {
 	style: Record<string, string> = {};
 	children: El[] = [];
 	parent: El | null = null;
+	get parentElement(): El | null { return this.parent; }
 	writes = 0;
 	html = "";
 	constructor(tag: string) { this.tag = tag; }
@@ -880,13 +881,17 @@ assert.ok(page.includes("if (open) updateOpenTask(open); else closeModal();"), "
 assert.ok(upd.includes("writeHead(t)") && upd.includes("renderAgent(t, true)") && upd.includes("setBody(t)"), "the refresh re-derives title, attrs, agent row and body from the fresh payload");
 assert.ok(!upd.includes("closeLog") && !upd.includes("logState"), "the refresh path never touches the log pane, logState or the log timer");
 assert.ok(page.includes('<div id="m-agent"><div id="m-agent-btns"></div><div id="m-doctor"></div><div id="m-log-meta" class="hidden"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>'), "000154: the meta line ships as a sibling above the log pane, hidden until a payload carries meta; 000222 adds the doctor row between the run columns and the meta line");
-// 000222 the Doctor card: the doctor row sits between the run columns and the log meta, one card
-// per analysed run's doctor step, clicking it opens the doctor log in the shared log pane
+// 000222/000230 the Doctor card: one card per analysed run's doctor step, slotted into the
+// analysed run's column below the run card (matched by handle, the run's plus the .doctor
+// suffix); the residual #m-doctor row sits between the run columns and the log meta and keeps
+// only the cards whose run column is gone, clicking a card opens the doctor log
 assert.ok(page.indexOf('id="m-doctor"') > page.indexOf('id="m-agent-btns"') && page.indexOf('id="m-doctor"') < page.indexOf('id="m-log-meta"'), "#m-doctor sits between #m-agent-btns and #m-log-meta inside the agent area");
-assert.ok(page.includes("function renderDoctor(t, keep)"), "the script defines renderDoctor for the doctor row");
+assert.ok(page.includes("function renderDoctor(t, keep)"), "the script defines renderDoctor for the doctor cards");
 const rd = page.match(/function renderDoctor\(t, keep\) \{[\s\S]*?\n\}/)![0];
 assert.ok(rd.includes("(t.doctors || []).slice()"), "renderDoctor builds one card per doctors entry of the fresh payload");
 assert.ok(rd.includes("openAgentLog(b.dataset.handle)"), "a doctor card's click opens its doctor log by handle");
+assert.ok(rd.includes("syncDoctorCards(cards, docs, row, el, document)"), "the keep pass runs syncDoctorCards, so an unchanged doctor set moves only the stats lines and the live doctor's spinner survives");
+assert.ok(rd.includes("(doctorCol(row, d.handle) ?? el).appendChild(b)"), "each doctor card slots into its analysed run's column, unmatched cards fall back to the residual row");
 assert.ok(page.includes('meta.classList.toggle("hidden", !label)') && page.includes('" \u00b7 thinking "'), "openLog/pullLog fill the meta line on init and every poll, model name then thinking level");
 assert.ok(!page.includes(`+ '</div><div id="m-log"`), "renderAgent no longer rebuilds the log pane with the run cards");
 const setBodySrc = page.match(/function setBody\(t\) \{[\s\S]*?\n\}/)![0];
@@ -917,10 +922,12 @@ for (const [theme, block] of [["light", lightVars], ["dark", darkVars], ["prefer
 }
 assert.equal(lightVars.match(/--doctor-fg: (#[0-9a-f]{6})/)![1], "#2f6fdd", "the light doctor blue is the deeper #2f6fdd");
 assert.equal(darkVars.match(/--doctor-fg: (#[0-9a-f]{6})/)![1], "#59a7ff", "the dark doctor blue is the lighter #59a7ff");
-assert.ok(page.includes("#m-doctor .agent-card { color: var(--doctor-fg); border-color: var(--doctor-fg); background: var(--doctor-bg); }"), "#m-doctor scopes blue text, outline and highlight onto the doctor card");
-assert.ok(page.includes("#m-doctor .agent-card:hover { background: var(--doctor-bg-strong); }"), "the doctor card's hover deepens the blue highlight");
-assert.ok(page.includes("#m-doctor .agent-card-active { border-color: var(--doctor-fg); background: var(--doctor-bg-strong); }"), "the active doctor card keeps the blue outline and highlight, never the base link/medium-bg pair");
-assert.ok(page.includes('agentCardHtml(d.alive ? "agent-live" : "agent-past"'), "doctor cards keep their agent-live/agent-past classes, so no unscoped per-variant rule sets a color on them");
+assert.ok(page.includes(".agent-doctor { color: var(--doctor-fg); border-color: var(--doctor-fg); background: var(--doctor-bg); }"), "the .agent-doctor marker scopes blue text, outline and highlight onto the doctor cards, in their run's column and in the residual row alike");
+assert.ok(page.includes(".agent-doctor:hover { background: var(--doctor-bg-strong); }"), "the doctor card's hover deepens the blue highlight");
+assert.ok(page.includes(".agent-doctor.agent-card-active { border-color: var(--doctor-fg); background: var(--doctor-bg-strong); }"), "the active doctor card keeps the blue outline and highlight, never the base link/medium-bg pair");
+assert.ok(page.includes(".agent-doctor .check { color: var(--doctor-fg); }"), "the doctor card's checkmark reads the same blue as the card text");
+assert.ok(page.includes(".check { color: var(--low-fg); margin-right: 5px; }"), "the unscoped .check keeps var(--low-fg) for the run cards' and sub cards' checkmarks");
+assert.ok(page.includes('agentCardHtml("agent-doctor " + (d.alive ? "agent-live" : "agent-past")'), "doctor cards keep their agent-live/agent-past classes under the agent-doctor marker, so no unscoped per-variant rule sets a color on them");
 assert.ok(agentCardCss.includes("color: var(--link)") && agentCardCss.includes("border: 1px solid var(--border)") && agentCardCss.includes("background: var(--panel)"), "the unscoped .agent-card keeps gold text, grey outline and panel background for the run and sub cards");
 assert.ok(page.includes(".agent-card:hover { background: var(--hover); }") && page.includes(".agent-card-active { border-color: var(--link); background: var(--medium-bg); }"), "the unscoped hover and active rules keep today's colors");
 // 000194: the live pulse follows the viewed run's aliveness, the same signal the poll timer
@@ -1112,45 +1119,70 @@ assert.ok(syncAgentStats(bare, [{ role: "developer", run: null, alive: true, sta
 assert.equal(bare.children[0].children[0].children[1].textContent, "999 · 1s", "the span joins the card when stats arrive");
 assert.ok(syncAgentStats(bare, [{ role: "developer", run: null, alive: true, status: "live", handle: "t.developer", tokens: null, duration: null }], docStub), "the unchanged run set still updates in place");
 assert.equal(bare.children[0].children[0].children.length, 1, "the span drops when the stats vanish");
-// 000222 the doctor row's cards are bare .agent-card buttons in #m-doctor, no .agent-col wrapper:
-// the same keep pass must move the card's stats line, not append a stray span inside the mark span
-const doctorRow = (docs: any[]) => {
-	const row = new El("div");
-	for (const d of docs) {
-		const card = new El("button");
-		card.className = "agent-card " + (d.alive ? "agent-live" : "agent-past");
-		card.dataset.handle = d.handle;
-		const mark = new El("span");
-		mark.className = d.alive ? "spin" : "check";
-		card.appendChild(mark);
-		const stats = agentStatsText(d.tokens, d.duration);
-		if (stats) { const s = new El("span"); s.className = "agent-stats"; s.textContent = stats; card.appendChild(s); }
-		row.appendChild(card);
-	}
-	row.__sig = agentRowSig(docs);
-	return row;
+// 000230 the doctor cards slot into their analysed run's column, matched by handle: a doctor
+// entry's handle is the parent run's handle plus the .doctor suffix; unmatched cards (run log
+// rotated away) keep the residual #m-doctor row. syncStatsLine moves one card's stats line in
+// place, the markup agentCardHtml renders, shared by syncAgentStats and the doctor keep pass
+const doctorCardEl = (d: any) => {
+	const card = new El("button");
+	card.className = "agent-card agent-doctor " + (d.alive ? "agent-live" : "agent-past");
+	card.dataset.handle = d.handle;
+	const mark = new El("span");
+	mark.className = d.alive ? "spin" : "check";
+	card.appendChild(mark);
+	const stats = agentStatsText(d.tokens, d.duration);
+	if (stats) { const s = new El("span"); s.className = "agent-stats"; s.textContent = stats; card.appendChild(s); }
+	return card;
 };
-const doctorCards = doctorRow([
-	{ role: "doctor", run: 0, alive: false, status: "ok", handle: "t.developer.0.doctor", tokens: 20, duration: 5000 },
-	{ role: "doctor", run: 1, alive: true, status: "live", handle: "t.developer.1.doctor", tokens: 30, duration: 60000 },
+const mkDoc = (handle: string, alive: boolean, tokens: number | null, duration: number | null) =>
+	({ role: "doctor", run: 0, alive, status: alive ? "live" : "ok", handle, tokens, duration });
+const slotRow = runRow([
+	{ role: "developer", run: 0, alive: false, status: "ok", handle: "t.developer.0", tokens: null, duration: null },
+	{ role: "reviewer", run: 1, alive: false, status: "ok", handle: "t.reviewer.1", tokens: null, duration: null },
 ]);
-const docSpin = doctorCards.children[1].children[0];
+assert.equal(doctorCol(slotRow, "t.developer.0.doctor"), slotRow.children[0], "the doctor handle strips the .doctor suffix and matches the analysed run's column");
+assert.equal(doctorCol(slotRow, "t.developer.9.doctor"), null, "no run column carries the handle (run log rotated away), the card falls back to the residual row");
+const residual = new El("div");
+const doctorDocs = [mkDoc("t.developer.0.doctor", false, 20, 5000), mkDoc("t.missing.0.doctor", true, 30, 60000)];
+const doctorCards = doctorDocs.map((d) => {
+	const card = doctorCardEl(d);
+	(doctorCol(slotRow, d.handle) ?? residual).appendChild(card);
+	return card;
+});
+residual.__sig = agentRowSig(doctorDocs);
+const docSpin = doctorCards[1].children[0];
 assert.ok(docSpin.className === "spin", "the live doctor card carries its spinner");
-const doctorGrew = [
-	{ role: "doctor", run: 0, alive: false, status: "ok", handle: "t.developer.0.doctor", tokens: 30, duration: 9000 },
-	{ role: "doctor", run: 1, alive: true, status: "live", handle: "t.developer.1.doctor", tokens: 40, duration: 90000 },
-];
-assert.ok(syncAgentStats(doctorCards, doctorGrew, docStub), "an unchanged doctor set updates the row in place");
-assert.equal(doctorCards.children[1].children[0], docSpin, "the same .spin node keeps its animation running");
-assert.equal(doctorCards.children[1].children[1].textContent, "40 · 1m 30s", "the live doctor card's stats line moved");
-assert.equal(doctorCards.children[0].children[1].textContent, "30 · 9s", "the past doctor card's stats line moved too");
-assert.equal(doctorCards.children[1].children[0].children.length, 0, "no stray span lands inside the mark span");
-assert.equal(syncAgentStats(doctorCards, doctorGrew.slice(1), docStub), false, "a doctor card gone rebuilds");
+assert.equal(doctorCards[0].parentElement, slotRow.children[0], "the matched card slots into its analysed run's column");
+assert.equal(doctorCards[1].parentElement, residual, "the unmatched card stays in the residual row");
+const doctorGrew = [mkDoc("t.developer.0.doctor", false, 30, 9000), mkDoc("t.missing.0.doctor", true, 40, 90000)];
+residual.__sig = agentRowSig(doctorGrew);
+assert.ok(syncDoctorCards(doctorCards, doctorGrew, slotRow, residual, docStub), "an unchanged doctor set updates the cards in place");
+assert.equal(doctorCards[1].children[0], docSpin, "the same .spin node keeps its animation running");
+assert.equal(doctorCards[1].children[1].textContent, "40 · 1m 30s", "the live doctor card's stats line moved");
+assert.equal(doctorCards[0].children[1].textContent, "30 · 9s", "the past doctor card's stats line moved too");
+assert.equal(doctorCards[1].children[0].children.length, 0, "no stray span lands inside the mark span");
+assert.equal(syncDoctorCards(doctorCards, doctorGrew.slice(1), slotRow, residual, docStub), false, "a doctor card gone rebuilds");
+assert.equal(syncDoctorCards(doctorCards, [...doctorGrew, mkDoc("t.developer.9.doctor", false, 1, 1)], slotRow, residual, docStub), false, "a doctor card added rebuilds");
+const rebuiltRow = runRow([
+	{ role: "developer", run: 0, alive: false, status: "ok", handle: "t.developer.0", tokens: null, duration: null },
+	{ role: "reviewer", run: 1, alive: false, status: "ok", handle: "t.reviewer.1", tokens: null, duration: null },
+]);
+assert.equal(syncDoctorCards(doctorCards, doctorGrew, rebuiltRow, residual, docStub), false, "a run-row rebuild detaches the slotted cards, the keep pass rebuilds and re-slots");
+residual.__sig = agentRowSig(doctorGrew.map((d) => (d.alive ? { ...d, alive: false, status: "ok" } : d)));
+assert.equal(syncDoctorCards(doctorCards, doctorGrew, slotRow, residual, docStub), false, "live -> dead flips the signature, the rebuild swaps the spinner for the check");
+const lone = doctorCardEl(mkDoc("t.developer.0.doctor", false, null, null));
+assert.equal(lone.children.length, 1, "empty stats render no span");
+syncStatsLine(lone, 999, 1200, docStub);
+assert.equal(lone.children[1].textContent, "999 · 1s", "the span joins the card when stats arrive");
+syncStatsLine(lone, null, null, docStub);
+assert.equal(lone.children.length, 1, "the span drops when the stats vanish");
 // the page wires the helpers: the rebuild seeds the signature, the keep pass syncs the stats
 assert.ok(ra.includes("if (keep && syncAgentStats(el, runs, document))"), "the keep pass updates an unchanged row's stats in place");
 assert.ok(ra.includes("el.__sig = agentRowSig(runs)"), "the rebuild seeds the structure signature the keep pass matches");
 assert.ok(ra.includes('el.__sig = "";'), "an empty run set clears the signature");
 assert.ok(page.includes(String(agentRowSig)) && page.includes(String(syncAgentStats)), "the page runs the tested agent-row helpers");
+assert.ok(page.includes(String(syncStatsLine)) && page.includes(String(doctorCol)) && page.includes(String(syncDoctorCards)), "the page runs the tested doctor-slot helpers");
+assert.ok(page.includes('for (const b of document.querySelectorAll("#m-agent .agent-card"))'), "markActiveAgent's #m-agent scope still hits the in-column doctor cards");
 // the cadence: 1 s while the open task has a live agent, 5 s otherwise, log pane open or closed
 assert.equal(refreshMs({ agents: [{ alive: true }] }), 1000, "a live agent on the open card ticks the poll at 1 s");
 assert.equal(refreshMs({ agents: [{ alive: false }], doctors: [{ alive: true }] }), 1000, "a live doctor with no live agent also ticks the poll at 1 s");

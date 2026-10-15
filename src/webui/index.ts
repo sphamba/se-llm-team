@@ -8,6 +8,7 @@ export {
 	cardBaseHtml,
 	cardHtml,
 	curve,
+	doctorCol,
 	flipDiff,
 	fmtDur,
 	fmtTokens,
@@ -19,6 +20,8 @@ export {
 	syncAgentStats,
 	syncBoard,
 	syncCardStats,
+	syncDoctorCards,
+	syncStatsLine,
 	taskStats,
 	taskStatsText,
 } from "./board.ts";

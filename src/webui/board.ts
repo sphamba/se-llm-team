@@ -80,31 +80,62 @@ export function agentRowSig(runs) {
 	return runs.map((a) => [a.role, a.run, a.alive ? "live" : a.status, a.handle].join("/")).join("|");
 }
 
+// one agent card's stats line moved in place: the span joins when stats arrive and drops when
+// they vanish, matching agentCardHtml's markup; syncAgentStats and the doctor keep pass
+// (syncDoctorCards) share it, so both render the same line. doc is injected so tests run this
+// without a DOM
+export function syncStatsLine(card, tokens, duration, doc) {
+	const stats = agentStatsText(tokens, duration);
+	if (card.__stats === stats) return;
+	card.__stats = stats;
+	const span = [...card.children].find((c) => c.className === "agent-stats");
+	if (span) {
+		if (stats) span.textContent = stats;
+		else span.remove();
+	} else if (stats) {
+		const s = doc.createElement("span");
+		s.className = "agent-stats";
+		s.textContent = stats;
+		card.appendChild(s);
+	}
+}
+
 // 000142: an unchanged agent row updates its cards' stats lines in place, so the live run's
 // spinner animation survives the poll; a structure change (a run added or gone, live -> dead)
-// returns false and the caller rebuilds, re-seeding the signature. The stats span joins the card
-// html only when the stats are non-empty, matching agentCardHtml's markup; doc is injected so
-// tests run this without a DOM.
+// returns false and the caller rebuilds, re-seeding the signature. The run row's cards sit in
+// .agent-col wrappers, the run card first (the doctor cards slot below the sub boxes). doc is
+// injected so tests run this without a DOM.
 export function syncAgentStats(el, runs, doc) {
 	if (el.__sig !== agentRowSig(runs) || el.children.length !== runs.length) return false;
-	for (let i = 0; i < runs.length; i++) {
-		const stats = agentStatsText(runs[i].tokens, runs[i].duration);
-		// the run row's cards sit in .agent-col wrappers, the doctor row's are bare .agent-card buttons
-		const child = el.children[i];
-		const card = child.className.split(" ").includes("agent-card") ? child : child.children[0];
-		if (card.__stats === stats) continue;
-		card.__stats = stats;
-		const span = [...card.children].find((c) => c.className === "agent-stats");
-		if (span) {
-			if (stats) span.textContent = stats;
-			else span.remove();
-		} else if (stats) {
-			const s = doc.createElement("span");
-			s.className = "agent-stats";
-			s.textContent = stats;
-			card.appendChild(s);
-		}
+	for (let i = 0; i < runs.length; i++) syncStatsLine(el.children[i].children[0], runs[i].tokens, runs[i].duration, doc);
+	return true;
+}
+
+// 000230 the analysed run's column for a doctor card: a doctor entry's handle is the parent run's
+// handle plus the .doctor suffix, so strip it and match the run card's data-handle (the run card
+// is the column's first child); null when no column carries it (the run log rotated away) and the
+// card falls back to the residual #m-doctor row
+export function doctorCol(row, handle) {
+	const parent = handle.replace(/\.doctor$/, "");
+	for (const col of row.children) {
+		const card = col.children[0];
+		if (card && card.dataset.handle === parent) return col;
 	}
+	return null;
+}
+
+// 000230 the doctor keep pass: an unchanged set whose cards still sit in their slots moves only
+// the stats lines in place, so the live doctor's spinner survives the poll; a structure change (a
+// doctor added or gone, a slot change, a run-row rebuild that detached the slotted cards, live ->
+// dead via the sig) returns false and renderDoctor rebuilds. residual is the #m-doctor fallback
+// row for the cards whose run column is gone. doc is injected so tests run this without a DOM
+export function syncDoctorCards(cards, docs, row, residual, doc) {
+	if (residual.__sig !== agentRowSig(docs) || docs.length !== cards.length) return false;
+	for (let i = 0; i < docs.length; i++) {
+		if (!cards[i] || cards[i].dataset.handle !== docs[i].handle) return false;
+		if (cards[i].parentElement !== (doctorCol(row, docs[i].handle) ?? residual)) return false;
+	}
+	for (let i = 0; i < docs.length; i++) syncStatsLine(cards[i], docs[i].tokens, docs[i].duration, doc);
 	return true;
 }
 
