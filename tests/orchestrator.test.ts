@@ -2500,7 +2500,7 @@ assert.ok(promptAL.includes("resolve the conflicts"), "the merger only resolves 
 assert.ok(promptAL.includes("conclude the replayed commit with git rebase --continue"), "the merger concludes with git rebase --continue");
 assert.ok(promptAL.includes("never start a rebase or merge yourself"), "the merger starts no merge");
 assert.ok(promptAL.includes("never set a task state"), "the merger sets no state");
-assert.ok(promptAL.includes("never run test suites"), "the merger runs no test suites");
+assert.ok(promptAL.includes("run the full test suite in your worktree"), "the merger runs the full suite after the replay");
 assert.ok(!promptAL.includes(rootAL) && !promptAL.includes(wtAL), "no absolute path survives rendering");
 assert.ok(!promptAL.includes("{{"), "no placeholder survives rendering");
 assert.ok(promptAL.includes("git branch --show-current"), "the merger resolves its branch in its cwd");
