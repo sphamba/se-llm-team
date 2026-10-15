@@ -686,7 +686,7 @@ Block summaries:
 5. [text] S: x
    Struggle: none
 
-Produce a markdown analysis report of pain points (struggle, wasted time, inefficiency) with block number references. The analysed log is one run of the "${role}" role agent of a kanban pipeline. Identify what the agent lost most of its time on (pain points), then revise the role guidance file at ${roleFile} so future runs of that role go more smoothly (a role file of none means there is no role file: do not write any file, produce the report only). You have full rewrite authority over the role file: restructure or trim the whole file and remove stale guidance, and keep it valid markdown guidance for the role.`;
+Produce a markdown analysis report of pain points (struggle, wasted time, inefficiency) with block number references. The analysed log is one run of the "${role}" role agent of a kanban pipeline. Identify what the agent lost most of its time on (pain points), then revise the role guidance file at ${roleFile} so future runs of that role go more smoothly (a role file of none means there is no role file: do not write any file, produce the report only). You have full rewrite authority over the role file: compact it each run by merging duplicate guidance without losing unique rules, remove stale guidance, and keep it valid markdown guidance for the role.`;
 }
 
 async function testDoctorPromptWithRoleFile() {
