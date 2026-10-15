@@ -1,4 +1,4 @@
-// Per-backend argv builders for the agent CLIs the orchestrator and the efficiency analyser
+// Per-backend argv builders for the agent CLIs the orchestrator and the efficiency analysis
 // spawn: pi and claude. The pi argv stays byte-identical to the pre-backend construction
 // (tests assert it). The claude flags are verified against the claude CLI docs: stream-json
 // output in print mode requires --verbose, --effort knows no off/minimal, and
@@ -51,10 +51,10 @@ export function claudeSpawnArgs(llm: LlmConfig, prompt: string, systemPromptFile
 	return flags;
 }
 
-// claude analyser argv: --bare skips the auto-discovery of hooks, skills, commands,
+// claude analyst argv: --bare skips the auto-discovery of hooks, skills, commands,
 // subagents, plugins, MCP servers and memory, the isolated-run equivalent of pi's --no-*
-// flags; --no-session-persistence keeps the one-shot call out of the session store
-// claude analyst args: --bare isolates the analyst from the workspace, so it reads no files
+// flags, so the analyst reads no files; --no-session-persistence keeps the one-shot call
+// out of the session store
 export function claudeAnalystArgs(llm: LlmConfig, prompt: string): string[] {
 	return ["--bare", ...claudeDoctorArgs(llm, prompt)];
 }

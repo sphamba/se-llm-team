@@ -24,7 +24,7 @@ export interface BlockReport {
 	index: number;
 	type: "text" | "thinking" | "toolCall";
 	toolName?: string; // tool calls only
-	summary: string; // 1 to 3 sentences, or the failure note when the analyser failed
+	summary: string; // 1 to 3 sentences, or the failure note when the analyst failed
 	struggle: string; // struggle signals (confusion, errors, retries, repeated work) or ""
 }
 
@@ -32,7 +32,7 @@ export interface AnalyseOptions {
 	agent?: string; // default "pi"
 	backend?: Backend; // default "pi"
 	llm?: LlmConfig; // resolved provider/model/thinking for the backend llm flags, default {}
-	concurrency?: number; // max in-flight block analysers, default 8
+	concurrency?: number; // max in-flight block analysts, default 8
 	mergeThreshold?: number; // chars: a text or thinking block shorter than this folds into the next block as lead-in context, default 250
 	delay?: (ms: number) => Promise<void>; // wait before a retry attempt, default a real setTimeout, tests pass a no-op
 	runAnalyst?: (argv: string[]) => Promise<string | null>; // returns the assistant answer text, null on failure
@@ -258,7 +258,7 @@ function typeLabel(type: AnalysisBlock["type"], toolName?: string): string {
 	return type === "toolCall" ? `toolCall ${toolName ?? "?"}` : type;
 }
 
-// One block content cap in the analyser prompt, in characters.
+// One block content cap in the analyst prompt, in characters.
 const BLOCK_CAP = 8000;
 
 function blockContent(block: AnalysisBlock): string {
@@ -285,7 +285,7 @@ const DEFAULT_MERGE_THRESHOLD = 250;
 
 // One forward pass over the ordered blocks. A text or thinking block shorter than the
 // threshold joins the next block as lead-in context, so no standalone meaningless fragment
-// gets an analyser call. Consecutive short lead-ins accumulate in order. A short block with
+// gets an analyst call. Consecutive short lead-ins accumulate in order. A short block with
 // no following block stays standalone. A block at or above the threshold stays standalone.
 function mergeLeadIns(blocks: AnalysisBlock[], threshold: number): { units: MergedUnit[]; mergedCount: number } {
 	const units: MergedUnit[] = [];

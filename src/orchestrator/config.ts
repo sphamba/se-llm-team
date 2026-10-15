@@ -113,7 +113,7 @@ export function loadConfig(root: string, defaultAgent?: string): Config {
 				if (v && typeof v === "object" && !Array.isArray(v)) clean[cx] = cleanLlm(root, v, ` for role "${role}" ${cx}`);
 				else log(root, `non-object complexity override ${JSON.stringify(v)} for role "${role}" ${cx}, ignored`);
 			}
-			// the in-flight analyser cap for the role: cleanLlm drops it, so it needs its own
+			// the in-flight analysis cap for the role: cleanLlm drops it, so it needs its own
 			// parse. A non-integer or non-positive value warns and stays unset, so the module
 			// default of 8 applies
 			const rawConcurrency = src.concurrency;
