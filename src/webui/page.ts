@@ -81,10 +81,14 @@ export function refreshMs(t) {
 const DARK_VARS = `
 :root[data-theme="dark"] { --bg: #10141c; --fg: #bfbdb6; --panel: #141821; --border: #1b1f29; --heading: #bfbdb6; --muted: #5a6673; --faint: #5a6673; --soft: #bfbdb6; --hover: #1b1f29; --overlay: rgba(0, 0, 0, .6); --code-bg: #010102; --link: #e6b450;
 /* 000129: medium/critical hues widened (yellow / strong red) so the priority chips read apart; -bg tints match their fg */
---low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252; }
+--low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252;
+/* 000226: the doctor card's blue, the dark pair */
+--doctor-fg: #59a7ff; --doctor-bg: rgba(89, 167, 255, .15); --doctor-bg-strong: rgba(89, 167, 255, .28); }
 :root[data-theme="dark"] #theme { color: var(--link); border-color: var(--link); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #10141c; --fg: #bfbdb6; --panel: #141821; --border: #1b1f29; --heading: #bfbdb6; --muted: #5a6673; --faint: #5a6673; --soft: #bfbdb6; --hover: #1b1f29; --overlay: rgba(0, 0, 0, .6); --code-bg: #010102; --link: #e6b450;
---low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252; }
+--low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252;
+/* 000226: the doctor card's blue, the dark pair */
+--doctor-fg: #59a7ff; --doctor-bg: rgba(89, 167, 255, .15); --doctor-bg-strong: rgba(89, 167, 255, .28); }
 :root:not([data-theme="light"]) #theme { color: var(--link); border-color: var(--link); } }
 `;
 
@@ -105,7 +109,9 @@ export const PAGE = `<!doctype html>
 :root { --bg: #fcfcfc; --fg: #5c6166; --panel: #ffffff; --border: rgba(107, 125, 143, .12); --heading: #5c6166; --muted: #adaeb1; --faint: #adaeb1; --soft: #5c6166; --hover: rgba(130, 142, 159, .1); --overlay: rgba(15, 23, 42, .45); --code-bg: #ebeef0; --link: #f29718;
 --low-bg: rgba(134, 179, 0, .15); --low-fg: #86b300; --medium-bg: rgba(201, 151, 0, .15); --medium-fg: #c99700; --high-bg: rgba(250, 133, 50, .15); --high-fg: #fa8532; --critical-bg: rgba(230, 80, 80, .15); --critical-fg: #e65050;
 /* 000191: motion knobs, one place to retune the entrances, the chunk fade and the pulse loop; 000194: --exit runs the closes, --shine is the whiter band mix */
---enter: 200ms; --exit: 180ms; --fade: 150ms; --pulse: 2s; --shine: 45%; }
+--enter: 200ms; --exit: 180ms; --fade: 150ms; --pulse: 2s; --shine: 45%;
+/* 000226: the doctor card's blue, the light pair */
+--doctor-fg: #2f6fdd; --doctor-bg: rgba(47, 111, 221, .12); --doctor-bg-strong: rgba(47, 111, 221, .24); }
 ${DARK_VARS}
 html, body { height: 100%; }
 body { display: flex; flex-direction: column; margin: 0; background: var(--bg); color: var(--fg); font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
@@ -187,6 +193,10 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 #m-agent-btns { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
 #m-doctor { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-top: 8px; }
 #m-doctor:empty { display: none; }
+/* 000226: the doctor cards read blue (text, outline, highlight) in both themes, scoped to #m-doctor so the run buttons and the sub cards keep the link gold */
+#m-doctor .agent-card { color: var(--doctor-fg); border-color: var(--doctor-fg); background: var(--doctor-bg); }
+#m-doctor .agent-card:hover { background: var(--doctor-bg-strong); }
+#m-doctor .agent-card-active { border-color: var(--doctor-fg); background: var(--doctor-bg-strong); }
 .check { color: var(--low-fg); margin-right: 5px; }
 .cross { color: var(--critical-fg); margin-right: 5px; }
 #m-agent { margin-bottom: 12px; }

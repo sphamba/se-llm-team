@@ -905,6 +905,23 @@ assert.ok(pollSrc.includes("const live = (!!liveRun && liveRun.handle === logSta
 assert.ok(pollSrc.includes('const liveDoctor = t && (t.doctors || []).find(d => d.alive);'), "pollLog's live check also matches a live doctors entry, so a live doctor log keeps polling");
 assert.ok(!pollSrc.includes("logState.sub == null"), "a sub view is no longer hard-wired non-live, which froze the pane after the first empty poll");
 assert.ok(pollSrc.includes("if (!live && logState.idle) {"), "a past run's log still stops the timer after the first empty poll");
+// 000226: the doctor cards read blue (text, outline, highlight) from the #m-doctor scope; all
+// three theme blocks carry the blue variables and the unscoped .agent-card rules keep their
+// colors for the run columns and the sub cards
+const lightVars = page.match(/:root \{ --bg: [^}]*\}/)![0];
+const darkVars = page.match(/:root\[data-theme="dark"\] \{ --bg: [^}]*\}/)![0];
+const mediaVars = page.match(/:root:not\(\[data-theme="light"\]\) \{ --bg: [^}]*\}/)![0];
+for (const [theme, block] of [["light", lightVars], ["dark", darkVars], ["prefers-dark", mediaVars]] as const) {
+	for (const v of ["--doctor-fg:", "--doctor-bg:", "--doctor-bg-strong:"]) assert.ok(block.includes(v), `the ${theme} theme block defines ${v}`);
+}
+assert.equal(lightVars.match(/--doctor-fg: (#[0-9a-f]{6})/)![1], "#2f6fdd", "the light doctor blue is the deeper #2f6fdd");
+assert.equal(darkVars.match(/--doctor-fg: (#[0-9a-f]{6})/)![1], "#59a7ff", "the dark doctor blue is the lighter #59a7ff");
+assert.ok(page.includes("#m-doctor .agent-card { color: var(--doctor-fg); border-color: var(--doctor-fg); background: var(--doctor-bg); }"), "#m-doctor scopes blue text, outline and highlight onto the doctor card");
+assert.ok(page.includes("#m-doctor .agent-card:hover { background: var(--doctor-bg-strong); }"), "the doctor card's hover deepens the blue highlight");
+assert.ok(page.includes("#m-doctor .agent-card-active { border-color: var(--doctor-fg); background: var(--doctor-bg-strong); }"), "the active doctor card keeps the blue outline and highlight, never the base link/medium-bg pair");
+assert.ok(page.includes('agentCardHtml(d.alive ? "agent-live" : "agent-past"'), "doctor cards keep their agent-live/agent-past classes, so no unscoped per-variant rule sets a color on them");
+assert.ok(agentCardCss.includes("color: var(--link)") && agentCardCss.includes("border: 1px solid var(--border)") && agentCardCss.includes("background: var(--panel)"), "the unscoped .agent-card keeps gold text, grey outline and panel background for the run and sub cards");
+assert.ok(page.includes(".agent-card:hover { background: var(--hover); }") && page.includes(".agent-card-active { border-color: var(--link); background: var(--medium-bg); }"), "the unscoped hover and active rules keep today's colors");
 // 000194: the live pulse follows the viewed run's aliveness, the same signal the poll timer
 // reads, refreshed from pullLog after every payload and dropped on close
 assert.ok(page.includes("function markLiveLine()"), "the page wires the live block pulse");
