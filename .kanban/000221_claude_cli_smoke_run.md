@@ -15,6 +15,9 @@ Exercise the real claude CLI end to end through the #216 agent-agnostic spawn la
 # Decision (user, 2026-10-15)
 A real claude CLI run is NOT a gate for production use of the claude backend. The stub-verified acceptance of #216 (exact argv, system-prompt file delivery, wrapper/process-group/pid/exit mechanics, effort mapping, every flag checked against the claude docs) counts as proof that the pipeline calls claude correctly. This task is optional: run it whenever a machine with the claude CLI and Anthropic auth is available, not before then.
 
+# Parking (answered 2026-10-15)
+No install on this machine: the developer and reviewer runs verified (fresh shells, HEAD 17a2e88) that no claude binary exists anywhere (PATH, npm globals, ~/.local/bin, ~/bin, /usr/local/bin) and no Anthropic auth exists (no ANTHROPIC_*/CLAUDE_* env var, no ~/.claude directory, no apiKeyHelper). A claude binary without auth cannot do a headless `claude -p` run, so installing it here alone is useless. The task stays parked in backlog (the openQuestions gate keeps it there) until this machine or another has the claude CLI plus auth. The future run uses the live-check recipe of the role guidance (temp root, isolated HOME, --no-webui) with config `agent: "claude"` and one small self-contained task in to-do; it consumes a small amount of Anthropic API credit (one real claude developer plus one analyser call on its log).
+
 # Goal
 Run the real claude CLI end to end through the agent-agnostic spawn layer of #216, which no run has exercised for real on this machine (`which claude` returns nothing; it needs Anthropic auth). Run this when the claude CLI plus Anthropic auth (an API key or an apiKeyHelper) are available.
 
@@ -55,13 +58,4 @@ Checked in the worktree so a future run does not re-check:
 - The task was moved to to-review after the park note, but to-review has no park exit (re-review or merge only). Re-parked to backlog: promoteBacklog never promotes a task with unanswered open questions (src/orchestrator/pipeline.ts), so backlog holds the task for the user with no developer re-spawn. The open question stays in front of the user. When the claude CLI and auth are installed and the question is answered, the task promotes and runs.
 
 # Open questions
-
-Questions:
-- Can you install the claude CLI on this machine and provide Anthropic auth (an API key env var, or an apiKeyHelper in the claude settings)? If not, this task stays parked per the decision in the Specs, and a machine with both runs it later.
-
-Assumptions:
-- No install without auth: a claude binary without Anthropic auth cannot do a headless `claude -p` run, so installing it here alone is useless.
-- The stub-verified acceptance of #216 stands as proof of correctness until a real run happens (the user decision of 2026-10-15 in the Specs).
-- The run will use the live-check recipe of the role guidance (temp root, isolated HOME, --no-webui) with config `agent: "claude"` and one small self-contained task in to-do.
-- A real run consumes Anthropic API credit (one real claude developer plus one analyser call on its log), cost is small.
-
+Gate (answered 2026-10-15: no, see Specs): does this machine now have the claude CLI plus Anthropic auth (API key env var or apiKeyHelper)? While the answer is no, this section stays non-empty on purpose so the orchestrator keeps the task parked in backlog with no developer re-spawn. When the answer changes to yes (claude installed and authed here, or the task moves to a machine with both), the PM folds the answer into the Specs, clears this section, and the task promotes and runs.
