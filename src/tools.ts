@@ -293,7 +293,7 @@ export const TOOLS: Record<string, ToolDef> = {
 
 	efficiency_analysis: {
 		description:
-			"Analyse one agent log of this project and report pain points. The tool parses the JSONL log, summarizes each assistant block with a headless analyser, and writes a markdown report next to the log as <name minus the .log or .log.gz suffix>.analysis.md. Returns the final analysis inline with the report path and the block count.",
+			"Analyse one agent log of this project and report pain points. The tool parses the JSONL log, summarizes each assistant block with a headless analyst, and has a doctor pass turn the summaries into a markdown report next to the log as <name minus the .log or .log.gz suffix>.analysis.md. Returns the final analysis inline with the report path and the block count.",
 		parameters: {
 			type: "object",
 			properties: {
@@ -307,9 +307,9 @@ export const TOOLS: Record<string, ToolDef> = {
 			const cfg = loadConfig(root, ctx.defaultAgent);
 			// the role default applies, no complexity override. The in-flight cap and the merge
 			// threshold come from the role config, the module defaults apply when unset. The
-			// analyser runs through the same backend as the spawned agents
+			// analyst and doctor run through the same backend as the spawned agents
 			try {
-				const result = await analyseLog(absolutePath, { agent: cfg.agent, backend: cfg.backend, llm: resolveLlm(root, cfg, "analyser", ""), concurrency: cfg.roles.analyser?.concurrency, mergeThreshold: cfg.roles.analyser?.mergeThreshold });
+				const result = await analyseLog(absolutePath, { agent: cfg.agent, backend: cfg.backend, llm: resolveLlm(root, cfg, "analyst", ""), doctorLlm: resolveLlm(root, cfg, "doctor", ""), concurrency: cfg.roles.analyst?.concurrency, mergeThreshold: cfg.roles.analyst?.mergeThreshold });
 				return ok(`${result.analysis}\n\nReport: ${result.reportPath}\nBlocks analysed: ${result.blockCount}`, result);
 			} catch (err) {
 				return ok(`Cannot analyse ${absolutePath}: ${(err as Error).message}`);

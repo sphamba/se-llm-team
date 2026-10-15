@@ -132,6 +132,8 @@ export function loadConfig(root: string, defaultAgent?: string): Config {
 			roles[role] = clean;
 		}
 	}
+	// backward compat: a pre-rename roles.analyser entry serves as roles.analyst when absent
+	if (roles.analyser && !roles.analyst) roles.analyst = roles.analyser;
 	const reviewerCap: Record<string, number> = { ...DEFAULT_REVIEWER_CAP };
 	if (cfg.reviewerCap && typeof cfg.reviewerCap === "object" && !Array.isArray(cfg.reviewerCap)) {
 		for (const cx of COMPLEXITIES) {

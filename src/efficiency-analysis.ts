@@ -1,12 +1,13 @@
 // Efficiency analysis for one agent log. It parses the JSONL event stream, summarizes each
-// assistant block with a headless analyser in pass 1, and turns the summaries plus simple
-// stats into a markdown pain-point report in pass 2. No wall-clock durations: compacted logs
+// assistant block with a headless analyst in pass 1, and turns the summaries plus simple
+// stats into a markdown pain-point report in pass 2 with the doctor, which with a roleFile
+// also revises the analysed role's guidance file. No wall-clock durations: compacted logs
 // carry almost no per-event timestamps, so slowness is inferred from content.
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { gunzipSync } from "node:zlib";
-import { claudeAnalyserArgs, piLlmFlags, type Backend } from "./orchestrator/backends.ts";
+import { claudeAnalystArgs, claudeDoctorArgs, piLlmFlags, type Backend } from "./orchestrator/backends.ts";
 import type { LlmConfig } from "./orchestrator/config.ts";
 
 // One ordered assistant block from the log.
@@ -34,7 +35,12 @@ export interface AnalyseOptions {
 	concurrency?: number; // max in-flight block analysers, default 8
 	mergeThreshold?: number; // chars: a text or thinking block shorter than this folds into the next block as lead-in context, default 250
 	delay?: (ms: number) => Promise<void>; // wait before a retry attempt, default a real setTimeout, tests pass a no-op
-	runAnalyser?: (argv: string[]) => Promise<string | null>; // returns the assistant answer text, null on failure
+	runAnalyst?: (argv: string[]) => Promise<string | null>; // returns the assistant answer text, null on failure
+	runDoctor?: (argv: string[]) => Promise<string | null>; // defaults to the analyst runner with stream output persisted to doctorLogPath
+	role?: string; // the analysed run's kanban role, named in the doctor prompt with roleFile
+	roleFile?: string; // absolute path of the role file the doctor may revise; unset keeps the doctor report-only
+	doctorLlm?: LlmConfig; // the doctor pass's resolved llm flags, default the analyst llm
+	doctorLogPath?: string; // where the doctor pass's stream output persists; unset keeps it in memory
 }
 
 export interface AnalyseResult {
@@ -237,9 +243,15 @@ export function parseLogBlocks(content: string): AnalysisBlock[] {
 	return blocks;
 }
 
-// The pure analyser argv: the executable, the headless flags, then the prompt with -p.
-export function buildAnalyserCommand(agent: string, llmFlags: string[], prompt: string): string[] {
+// The pure analyst argv: the executable, the headless flags, then the prompt with -p.
+export function buildAnalystCommand(agent: string, llmFlags: string[], prompt: string): string[] {
 	return [agent, "--approve", "--no-session", "--no-extensions", "--no-skills", "--no-mcp", "--no-tools", "--mode", "json", ...llmFlags, "-p", prompt];
+}
+
+// The doctor argv: the analyst argv without --no-mcp and --no-tools, so the doctor may edit
+// files (the role file rewrite).
+export function buildDoctorCommand(agent: string, llmFlags: string[], prompt: string): string[] {
+	return [agent, "--approve", "--no-session", "--no-extensions", "--no-skills", "--mode", "json", ...llmFlags, "-p", prompt];
 }
 
 function typeLabel(type: AnalysisBlock["type"], toolName?: string): string {
@@ -305,7 +317,7 @@ function cappedLeadIns(leadIns: LeadIn[]): string {
 	return "[Truncated: the oldest lead-ins were cut.]\n" + kept;
 }
 
-function pass1Prompt(block: AnalysisBlock, leadIns: LeadIn[]): string {
+function analystPrompt(block: AnalysisBlock, leadIns: LeadIn[]): string {
 	const instruction = "Summarize in 1 to 3 sentences what the agent did and whether it struggled (confusion, errors, retries, repeated work).";
 	const format = 'Answer with two lines: "Summary: <your summary>" then "Struggle: <struggle signals, or none>".';
 	let content = blockContent(block);
@@ -318,7 +330,7 @@ function pass1Prompt(block: AnalysisBlock, leadIns: LeadIn[]): string {
 	return `Block ${block.index} of type ${typeLabel(block.type, block.toolName)}.\n${instruction}\n${format}\n\n${lead}${content}`;
 }
 
-// Split an analyser answer into summary and struggle at the two labels. Without labels the
+// Split an analyst answer into summary and struggle at the two labels. Without labels the
 // whole answer is the summary.
 function splitAnswer(answer: string): { summary: string; struggle: string } {
 	const lines = answer.trim().split("\n");
@@ -335,7 +347,7 @@ function splitAnswer(answer: string): { summary: string; struggle: string } {
 	return { summary: flat(summary), struggle: flat(struggleAt === -1 ? "" : lines[struggleAt].replace(/^struggle:\s*/i, "")) };
 }
 
-function pass2Prompt(blocks: AnalysisBlock[], reports: BlockReport[], failedCount: number, mergedCount: number): string {
+function doctorPrompt(blocks: AnalysisBlock[], reports: BlockReport[], failedCount: number, mergedCount: number, roleFile?: string, role?: string): string {
 	const byType = { text: 0, thinking: 0, toolCall: 0 };
 	const perTool = new Map<string, number>();
 	for (const block of blocks) {
@@ -348,7 +360,9 @@ function pass2Prompt(blocks: AnalysisBlock[], reports: BlockReport[], failedCoun
 	const toolErrors = blocks.filter((block) => block.type === "toolCall" && block.isError === true).length;
 	const tools = perTool.size === 0 ? "none" : [...perTool].map(([name, count]) => `${name} ${count}`).join(", ");
 	const stats = `Blocks: ${blocks.length} total (text ${byType.text}, thinking ${byType.thinking}, toolCall ${byType.toolCall}).\nTool calls per tool: ${tools}.\nMerged lead-in blocks: ${mergedCount} (short blocks folded into the next block as lead-in context).\nErrors: ${toolErrors + failedCount} (tool results with errors plus failed block analyses).`;
-	const instruction = "Produce a markdown analysis report of pain points (struggle, wasted time, inefficiency) with block number references.";
+	const instruction = roleFile
+		? `Produce a markdown analysis report of pain points (struggle, wasted time, inefficiency) with block number references. The analysed log is one run of the "${role}" role agent of a kanban pipeline. Identify what the agent lost most of its time on (pain points), then revise the role guidance file at ${roleFile} so future runs of that role go more smoothly. You have full rewrite authority over the role file: restructure or trim the whole file and remove stale guidance, and keep it valid markdown guidance for the role.`
+		: "Produce a markdown analysis report of pain points (struggle, wasted time, inefficiency) with block number references.";
 	// the prompt travels as one argv element. The kernel cap is 131072 bytes, so the prompt
 	// stays below it. An over-cap block summary list is truncated with a marker
 	const cap = 131_000;
@@ -370,10 +384,12 @@ function pass2Prompt(blocks: AnalysisBlock[], reports: BlockReport[], failedCoun
 	return head + list + tail;
 }
 
-// The default runner spawns the analyser and reads its JSONL stdout. The cwd is the
-// directory of the log. The analyser runs with no tools and reads no files, so any stable
-// cwd works, and the log directory keeps the child away from the caller's cwd.
-function spawnAnalyser(argv: string[], cwd: string): Promise<string | null> {
+// The default runner spawns the analyst and reads its JSONL stdout. The cwd is the
+// directory of the log. The analyst runs with no tools and reads no files, so any stable
+// cwd works, and the log directory keeps the child away from the caller's cwd. logPath
+// appends every stdout chunk there, so the doctor step's stream output persists next to
+// the run log; the analyst pass passes none and keeps its stdout in memory.
+function spawnAnalyst(argv: string[], cwd: string, logPath?: string): Promise<string | null> {
 	return new Promise((resolve) => {
 		let settled = false;
 		let spawnFailed = false;
@@ -385,16 +401,25 @@ function spawnAnalyser(argv: string[], cwd: string): Promise<string | null> {
 		};
 		const child = spawn(argv[0], argv.slice(1), { cwd, stdio: ["ignore", "pipe", "pipe"] });
 		child.stdout?.setEncoding("utf8");
-		child.stdout?.on("data", (chunk: string) => (stdout += chunk));
+		child.stdout?.on("data", (chunk: string) => {
+			stdout += chunk;
+			if (logPath) {
+				try {
+					appendFileSync(logPath, chunk);
+				} catch {
+					// best-effort: the doctor stream persistence never fails the pass
+				}
+			}
+		});
 		child.on("error", () => (spawnFailed = true));
-		child.on("close", () => done(spawnFailed ? null : analyserAnswer(stdout)));
+		child.on("close", () => done(spawnFailed ? null : analystAnswer(stdout)));
 	});
 }
 
-// The final answer in the analyser stdout: pi's last assistant message_end, or claude's
+// The final answer in the analyst stdout: pi's last assistant message_end, or claude's
 // result record (the result field) with the assistant records as a fallback. Non-JSON lines
 // are ignored.
-export function analyserAnswer(stdout: string): string | null {
+export function analystAnswer(stdout: string): string | null {
 	let answer: string | null = null;
 	for (const line of stdout.split("\n")) {
 		const trimmed = line.trim();
@@ -453,14 +478,14 @@ async function pool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>
 	return out;
 }
 
-// 3 attempts per analyser call, with this fixed wait before attempts 2 and 3.
+// 3 attempts per analyst call, with this fixed wait before attempts 2 and 3.
 const RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 5000;
 
-// One analyser call with 3 attempts and a fixed 5000 ms wait between attempts. The reason
+// One analyst call with 3 attempts and a fixed 5000 ms wait between attempts. The reason
 // feeds the failure notes.
 async function callWithRetry(run: (argv: string[]) => Promise<string | null>, argv: string[], delay: (ms: number) => Promise<void>): Promise<{ answer: string | null; reason: string }> {
-	let reason = "the analyser returned no answer";
+	let reason = "the analyst returned no answer";
 	for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt++) {
 		if (attempt > 0) await delay(RETRY_DELAY_MS);
 		try {
@@ -474,27 +499,33 @@ async function callWithRetry(run: (argv: string[]) => Promise<string | null>, ar
 }
 
 // Full pipeline: read the log, parse the blocks, merge short lead-in blocks forward, then
-// summarize each kept block in pass 1 with at most concurrency analysers in flight
-// (default 8), then produce the final analysis in pass 2. The report is written next to
-// the log as the name minus the .log or .log.gz suffix plus .analysis.md.
+// summarize each kept block in pass 1 with at most concurrency analysts in flight
+// (default 8), then produce the final analysis in pass 2 with the doctor, which with a
+// roleFile option also revises that file. The report is written next to the log as the
+// name minus the .log or .log.gz suffix plus .analysis.md.
 export async function analyseLog(logPath: string, opts: AnalyseOptions = {}): Promise<AnalyseResult> {
 	const agent = opts.agent ?? "pi";
 	const backend = opts.backend ?? "pi";
 	const llm = opts.llm ?? {};
+	const doctorLlm = opts.doctorLlm ?? llm;
 	const concurrency = opts.concurrency ?? 8;
 	const mergeThreshold = opts.mergeThreshold ?? DEFAULT_MERGE_THRESHOLD;
 	const delay = opts.delay ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-	const run = opts.runAnalyser ?? ((argv: string[]) => spawnAnalyser(argv, dirname(logPath)));
+	const run = opts.runAnalyst ?? ((argv: string[]) => spawnAnalyst(argv, dirname(logPath)));
+	const runDoctor = opts.runDoctor ?? ((argv: string[]) => spawnAnalyst(argv, dirname(logPath), opts.doctorLogPath));
 	// per-backend argv: claude swaps pi's isolation flags for --bare and stream-json output
 	const buildArgs = (prompt: string): string[] =>
-		backend === "claude" ? [agent, ...claudeAnalyserArgs(llm, prompt)] : buildAnalyserCommand(agent, piLlmFlags(llm), prompt);
+		backend === "claude" ? [agent, ...claudeAnalystArgs(llm, prompt)] : buildAnalystCommand(agent, piLlmFlags(llm), prompt);
+	// the doctor keeps the headless shape but drops the tool isolation, so it may edit files
+	const buildDoctorArgs = (prompt: string): string[] =>
+		backend === "claude" ? [agent, ...claudeDoctorArgs(doctorLlm, prompt)] : buildDoctorCommand(agent, piLlmFlags(doctorLlm), prompt);
 	const content = readLogFile(logPath);
 	const blocks = parseLogBlocks(content);
 	// merge pass: short text and thinking blocks fold into the next block as lead-in context
 	const { units, mergedCount } = mergeLeadIns(blocks, mergeThreshold);
-	// pass 1: one analyser per kept block, in log order
+	// pass 1: one analyst call per kept block, in log order
 	const outcomes = await pool(units, concurrency, async (unit): Promise<{ report: BlockReport; failed: boolean }> => {
-		const { answer, reason } = await callWithRetry(run, buildArgs(pass1Prompt(unit.block, unit.leadIns)), delay);
+		const { answer, reason } = await callWithRetry(run, buildArgs(analystPrompt(unit.block, unit.leadIns)), delay);
 		if (answer === null) {
 			return {
 				failed: true,
@@ -504,13 +535,16 @@ export async function analyseLog(logPath: string, opts: AnalyseOptions = {}): Pr
 		const { summary, struggle } = splitAnswer(answer);
 		return {
 			failed: false,
-			report: { index: unit.block.index, type: unit.block.type, toolName: unit.block.toolName, summary: summary || "the analyser returned no summary", struggle },
+			report: { index: unit.block.index, type: unit.block.type, toolName: unit.block.toolName, summary: summary || "the analyst returned no summary", struggle },
 		};
 	});
 	const reports = outcomes.map((outcome) => outcome.report);
 	const failedCount = outcomes.filter((outcome) => outcome.failed).length;
-	// pass 2: one analyser for the whole report
-	const second = await callWithRetry(run, buildArgs(pass2Prompt(units.map((unit) => unit.block), reports, failedCount, mergedCount)), delay);
+	// the doctor log exists from the first moment: its presence marks the run analysed, so a
+	// crash before the doctor pass never re-fires the orchestrator's spawn
+	if (opts.doctorLogPath) writeFileSync(opts.doctorLogPath, "");
+	// pass 2: one doctor call for the whole report, with a roleFile also revising it
+	const second = await callWithRetry(runDoctor, buildDoctorArgs(doctorPrompt(units.map((unit) => unit.block), reports, failedCount, mergedCount, opts.roleFile, opts.role)), delay);
 	const analysis = second.answer === null ? `Analysis failed after ${RETRY_ATTEMPTS} attempts: ${second.reason}` : second.answer.trim();
 	const reportPath = reportPathFor(logPath);
 	writeFileSync(reportPath, renderReport(logPath, reports, analysis));

@@ -54,6 +54,12 @@ export function claudeSpawnArgs(llm: LlmConfig, prompt: string, systemPromptFile
 // claude analyser argv: --bare skips the auto-discovery of hooks, skills, commands,
 // subagents, plugins, MCP servers and memory, the isolated-run equivalent of pi's --no-*
 // flags; --no-session-persistence keeps the one-shot call out of the session store
-export function claudeAnalyserArgs(llm: LlmConfig, prompt: string): string[] {
-	return ["--bare", "--no-session-persistence", "-p", prompt, "--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose", ...claudeLlmFlags(llm)];
+// claude analyst args: --bare isolates the analyst from the workspace, so it reads no files
+export function claudeAnalystArgs(llm: LlmConfig, prompt: string): string[] {
+	return ["--bare", ...claudeDoctorArgs(llm, prompt)];
+}
+
+// claude doctor args: the analyst args without --bare, so the doctor may edit the role file
+export function claudeDoctorArgs(llm: LlmConfig, prompt: string): string[] {
+	return ["--no-session-persistence", "-p", prompt, "--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose", ...claudeLlmFlags(llm)];
 }
