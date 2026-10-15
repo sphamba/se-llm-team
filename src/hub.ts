@@ -126,21 +126,25 @@ function writeRegistry(entries: HubEntry[]): void {
 }
 
 // election lock shared by every daemon in the neutral config dir: create-exclusive, stale-pid steal
-// (same pattern as the per-project orchestrator lock)
-function acquireHubLock(): boolean {
+// (same pattern as the per-project orchestrator lock). true = ours, "" = a rival holds it, any other
+// string = the lock cannot be written, naming the code and path so the log reports the real cause
+function acquireHubLock(): true | string {
 	const lock = hubLockPath();
-	mkdirSync(neutralHubDir(), { recursive: true });
 	try {
+		mkdirSync(neutralHubDir(), { recursive: true });
 		writeFileSync(lock, String(process.pid), { flag: "wx" });
 		return true;
-	} catch {
+	} catch (err: any) {
+		// 000220: EEXIST on the lock file itself is the rival race; any other failure (EROFS, EACCES,
+		// ENOSPC, ENOENT, the neutral dir blocked by a file) names the real code and path
+		if (err?.code !== "EEXIST" || err?.path !== lock) return `hub lock write failed at ${err?.path ?? lock} (${err?.code ?? err})`;
 		let other = 0;
 		try {
 			other = parseInt(readFileSync(lock, "utf8").trim(), 10);
 		} catch {
-			return false; // lock vanished since the wx attempt: a rival holds or released it, stand down
+			return ""; // lock vanished since the wx attempt: a rival holds or released it, stand down
 		}
-		if (pidAlive(other)) return false;
+		if (pidAlive(other)) return "";
 		rmSync(lock, { force: true }); // a rival stealing the same stale lock must not crash the election
 		return acquireHubLock();
 	}
@@ -384,34 +388,44 @@ export function joinHub(opts: HubOptions): void {
 		}
 	};
 
-	// one election attempt: win the lock and serve, or stand down (lock lost or bind failed)
+	// one election attempt: win the lock and serve, or stand down (lock lost or bind failed). The
+	// hub is optional, the pipeline is not: 000220 an unwritable neutral config dir must never kill
+	// the daemon, so every error is caught here, released and logged with its code and path
 	const becomeHub = async (): Promise<boolean> => {
-		// 000215: the lock is taken at the neutral path only; a legacy lock held by a live process
-		// means an old-code daemon may still serve the hub during the upgrade overlap
 		try {
-			const legacyPid = parseInt(readFileSync(join(legacyPiAgentDir(), LOCK_FILE), "utf8").trim(), 10);
-			if (pidAlive(legacyPid)) log(`legacy hub lock held by pid ${legacyPid}, an old-code daemon may still serve the hub`);
-		} catch {
-			/* no legacy lock */
-		}
-		if (!acquireHubLock()) {
-			log("hub lock held by another daemon, standing down");
+			// 000215: the lock is taken at the neutral path only; a legacy lock held by a live process
+			// means an old-code daemon may still serve the hub during the upgrade overlap
+			try {
+				const legacyPid = parseInt(readFileSync(join(legacyPiAgentDir(), LOCK_FILE), "utf8").trim(), 10);
+				if (pidAlive(legacyPid)) log(`legacy hub lock held by pid ${legacyPid}, an old-code daemon may still serve the hub`);
+			} catch {
+				/* no legacy lock */
+			}
+			const lock = acquireHubLock();
+			if (lock !== true) {
+				// only a rival lock reads as another daemon; a write failure names its own cause
+				log(lock ? `${lock}, running without the hub` : "hub lock held by another daemon, standing down");
+				return false;
+			}
+			const hub = await startHub(opts);
+			if (hub) {
+				bindFailures = 0;
+				log(`web ui on http://${opts.host}:${hub.port} (hub for ${opts.name})`);
+				process.on("exit", () => {
+					hub.close();
+					releaseHubLock();
+				});
+				return true;
+			}
+			releaseHubLock();
+			// a wedged foreign port holder would loop the election: the first failure logs, the rest stay silent
+			if (++bindFailures === 1) log(`web ui bind failed on ${opts.host}:${opts.port} (port taken), standing down`);
+			return false;
+		} catch (err: any) {
+			releaseHubLock(); // idempotent: a lock carrying another pid is left alone
+			log(`hub election failed (${err?.code ?? err}${err?.path ? ` at ${err.path}` : ""}), running without the hub`);
 			return false;
 		}
-		const hub = await startHub(opts);
-		if (hub) {
-			bindFailures = 0;
-			log(`web ui on http://${opts.host}:${hub.port} (hub for ${opts.name})`);
-			process.on("exit", () => {
-				hub.close();
-				releaseHubLock();
-			});
-			return true;
-		}
-		releaseHubLock();
-		// a wedged foreign port holder would loop the election: the first failure logs, the rest stay silent
-		if (++bindFailures === 1) log(`web ui bind failed on ${opts.host}:${opts.port} (port taken), standing down`);
-		return false;
 	};
 
 	const tick = async (): Promise<void> => {

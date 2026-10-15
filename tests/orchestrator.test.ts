@@ -1722,6 +1722,46 @@ try {
 }
 console.log("orchestrator.test.ts: ... + neutral shared paths smoke passed");
 
+// --- part Z2 (#220): an unwritable neutral config dir must not kill the daemon, and the
+// election log must name the write failure instead of a rival daemon. Two states of the same
+// failure: the dir cannot be created (mkdir EACCES) and the dir exists but cannot be written
+// (lock EACCES) ---
+const unwritableHubProbe = async (precreate: boolean) => {
+	const probeRoot = fixture();
+	const probeHome = mkdtempSync(join(tmpdir(), "orch-ro-home-"));
+	const probeXdg = mkdtempSync(join(tmpdir(), "orch-ro-xdg-"));
+	cleaned.push(probeRoot, probeHome, probeXdg);
+	const neutralDir = join(probeXdg, "se-llm-team");
+	const lockFile = join(neutralDir, "se-llm-team-hub.lock");
+	mkdirSync(join(probeHome, ".pi", "agent"), { recursive: true });
+	writeFileSync(join(probeHome, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: await freePort() } }));
+	if (precreate) mkdirSync(neutralDir);
+	chmodSync(precreate ? neutralDir : probeXdg, 0o555);
+	try {
+		const probe = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", probeRoot, "--rescan-seconds", "1", "--poll-minutes", "0.05"], {
+			stdio: ["ignore", "pipe", "pipe"],
+			env: { ...process.env, HOME: probeHome, XDG_CONFIG_HOME: probeXdg },
+		});
+		daemons.push({ daemon: probe, root: probeRoot });
+		let out = "";
+		probe.stdout.on("data", (d) => (out += d));
+		probe.stderr.on("data", (d) => (out += d));
+		await waitFor(() => out.includes("hub lock write failed"), 15000, "the election names the write failure", () => out);
+		assert.ok(out.includes("EACCES"), "the failure log names the error code");
+		assert.ok(out.includes(precreate ? lockFile : neutralDir), "the failure log names the failing path");
+		assert.ok(!out.includes("another daemon"), "a write failure is not misreported as a rival daemon");
+		await new Promise((r) => setTimeout(r, 1200)); // several hub ticks: the failure still never kills the daemon
+		assert.equal(probe.exitCode, null, "the daemon keeps running without the hub");
+		probe.kill("SIGTERM");
+		await new Promise((r) => probe.on("exit", r));
+	} finally {
+		chmodSync(precreate ? neutralDir : probeXdg, 0o755); // cleanup needs the dir writable again
+	}
+};
+await unwritableHubProbe(false);
+await unwritableHubProbe(true);
+console.log("orchestrator.test.ts: ... + unwritable hub config smoke passed");
+
 // --- part X: provider/model/thinking config flags, with per-role overrides ---
 // the llm flags sit between "--mode json" and "-p", in resolution order provider, model, thinking
 const llmArgs = (argv: string[]) => argv.slice(argv.indexOf("--mode") + 2, argv.indexOf("-p"));
