@@ -17,6 +17,10 @@ import { exitFilePath, readMergerSlug, renderPrompt, readExitCode, spawnAgent } 
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
+// 000215: the neutral config dir resolves to $HOME/.config/se-llm-team when XDG_CONFIG_HOME
+// is unset, so dropping it keeps every temp-HOME part off the real user config
+delete process.env.XDG_CONFIG_HOME;
+
 function fixture(): string {
 	const root = mkdtempSync(join(tmpdir(), "orch-smoke-"));
 	execSync("git init -q", { cwd: root });
@@ -1391,6 +1395,9 @@ mkdirSync(join(homeU, ".pi", "agent"), { recursive: true });
 writeFileSync(join(homeU, ".pi", "agent", "se-llm-team-hub.json"), JSON.stringify([{ name: "stale", root: rootU1, start: Date.now() - 60000, lastHeartbeat: Date.now() - 60000 }]));
 const hubU = await startHub({ name: "a", root: rootU1, host: "127.0.0.1", port: 0, staleMs: 400, healthMs: 150 });
 assert.ok(hubU, "hub starts and returns a port");
+// 000215: the legacy registry seeded above copied to the neutral path at hub start
+assert.ok(existsSync(join(homeU, ".config", "se-llm-team", "se-llm-team-hub.json")), "the hub registry lives at the neutral path");
+assert.ok(existsSync(join(homeU, ".pi", "agent", "se-llm-team-hub.json")), "the legacy registry file is never removed");
 const hubBase = `http://127.0.0.1:${hubU.port}`;
 assert.equal(await (await fetch(`${hubBase}/health`)).text(), "ok");
 const regRes = await fetch(`${hubBase}/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "b", root: rootU2, branch: "feat/x" }) });
@@ -1413,7 +1420,7 @@ const registryU = readHubRegistry();
 assert.deepEqual(registryU.map((e) => e.name).sort(), ["a", "b"], "stale seed entry dropped, one entry per project");
 assert.equal(registryU.find((e) => e.name === "a")!.root, rootU1);
 assert.equal(registryU.find((e) => e.name === "b")!.root, rootU2);
-assert.deepEqual(readdirSync(join(homeU, ".pi", "agent")).filter((f) => f.includes(".tmp")), [], "no atomic-rename temp litter");
+assert.deepEqual(readdirSync(join(homeU, ".config", "se-llm-team")).filter((f) => f.includes(".tmp")), [], "no atomic-rename temp litter in the neutral registry dir");
 const viaProject = await (await fetch(`${hubBase}/api/tasks?project=b`)).json();
 assert.equal(viaProject.length, 1);
 assert.equal(viaProject[0].file, taskU2.file);
@@ -1479,7 +1486,7 @@ assert.equal(tasksV.length, 1);
 assert.equal(tasksV[0].file, taskV2.file);
 assert.equal((await (await fetch(`${baseV}/api/tasks?project=${nameV1}`)).json()).length, 0);
 assert.equal((await fetch(`${baseV}/api/tasks?project=nope`)).status, 404);
-const registryV = JSON.parse(readFileSync(join(homeV, ".pi", "agent", "se-llm-team-hub.json"), "utf8"));
+const registryV = JSON.parse(readFileSync(join(homeV, ".config", "se-llm-team", "se-llm-team-hub.json"), "utf8"));
 assert.deepEqual(registryV.map((e: any) => e.name).sort(), [nameV1, nameV2].sort(), "registry file carries both entries");
 assert.ok(registryV.every((e: any) => typeof e.branch === "string" && e.branch.length > 0), "registry entries carry the root checkout's branch");
 dV1.kill("SIGTERM");
@@ -1529,7 +1536,8 @@ await waitForAsync(async () => {
 	}
 }, 15000, "new hub serves only the survivor (dead entry aged out)");
 assert.equal((await fetch(`http://127.0.0.1:${portW}/api/tasks?project=${deadName}`)).status, 404, "dead project rejected by the new hub");
-assert.equal(parseInt(readFileSync(join(homeW, ".pi", "agent", "se-llm-team-hub.lock"), "utf8").trim(), 10), survProc.pid, "the stale hub lock was stolen by the survivor");
+assert.equal(parseInt(readFileSync(join(homeW, ".config", "se-llm-team", "se-llm-team-hub.lock"), "utf8").trim(), 10), survProc.pid, "the stale hub lock was stolen by the survivor");
+assert.ok(!existsSync(join(homeW, ".pi", "agent", "se-llm-team-hub.lock")), "the hub lock is never taken at the legacy path");
 survProc.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + hub failover smoke passed");
 
@@ -1585,8 +1593,10 @@ dWt2.stderr.on("data", (d) => (outWt2 += d));
 const exitWt2 = new Promise<string>((r) => dWt2.on("exit", (code) => r(String(code))));
 assert.equal(await Promise.race([exitWt2, new Promise<string>((r) => setTimeout(() => r("timeout"), 15000))]), "0", "a worktree daemon whose task is gone reaps at startup");
 assert.ok(!existsSync(wtPath), "the startup reap ran before the dirs were recreated, no worktree shell left behind");
-process.env.HOME = realHomeWt;
+// close at the temp HOME: the close flush writes the registry, and after the restore it would
+// hit the real user config dir
 hubWt.close();
+process.env.HOME = realHomeWt;
 console.log("orchestrator.test.ts: ... + worktree hub candidacy smoke passed");
 
 // --- part Y2: 000168 hub candidacy is git topology: a linked worktree outside .worktrees
@@ -1620,12 +1630,97 @@ dT.stderr.on("data", (d) => (outT += d));
 const exitT = new Promise<string>((r) => dT.on("exit", (code) => r(String(code))));
 await waitFor(() => outT.includes("stands down"), 15000, "worktree-outside-.worktrees daemon stands down with no hub", () => outT);
 assert.ok(!outT.includes("web ui on"), "a worktree outside .worktrees never races for the port");
-assert.ok(!existsSync(join(homeT, ".pi", "agent", "se-llm-team-hub.lock")), "a worktree outside .worktrees never races for the hub lock");
+assert.ok(!existsSync(join(homeT, ".config", "se-llm-team", "se-llm-team-hub.lock")), "a worktree outside .worktrees never races for the hub lock");
 await new Promise((r) => setTimeout(r, 1200)); // several hub ticks: still never served
 assert.ok(!outT.includes("web ui on"), "a worktree outside .worktrees never serves the ui");
 assert.equal(await Promise.race([exitT, Promise.resolve("alive")]), "alive", "a daemon rooted outside .worktrees is not reaped as a task worktree");
 dT.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + worktree-outside-.worktrees hub candidacy smoke passed");
+
+// --- part Z: 000215 neutral shared paths: the XDG config dir, the legacy fallback, the
+// one-time registry migration, and the legacy-lock warning ---
+const nspRoot = fixture();
+const nspHome = mkdtempSync(join(tmpdir(), "orch-xdg-home-"));
+cleaned.push(nspRoot, nspHome);
+const nspXdg = join(nspHome, ".xdg-config");
+const nspNeutralDir = join(nspXdg, "se-llm-team");
+const nspLegacyDir = join(nspHome, ".pi", "agent");
+const nspSavedHome = process.env.HOME;
+const nspSavedXdg = process.env.XDG_CONFIG_HOME;
+process.env.HOME = nspHome;
+process.env.XDG_CONFIG_HOME = nspXdg;
+// assigning undefined would set the env to the string "undefined", so delete instead
+const nspRestoreEnv = () => {
+	if (nspSavedHome === undefined) delete process.env.HOME;
+	else process.env.HOME = nspSavedHome;
+	if (nspSavedXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+	else process.env.XDG_CONFIG_HOME = nspSavedXdg;
+};
+try {
+	// the neutral config is read when present
+	mkdirSync(nspNeutralDir, { recursive: true });
+	writeFileSync(join(nspNeutralDir, "se-llm-team.json"), JSON.stringify({ agent: "neutral-agent", pollMinutes: 7 }));
+	const nspCfg = loadConfig(nspRoot);
+	assert.equal(nspCfg.agent, "neutral-agent", "the neutral config is read when present");
+	assert.equal(nspCfg.pollMinutes, 7, "the neutral config's keys apply");
+
+	// the legacy config is read when the neutral file is absent, one log line names it
+	rmSync(join(nspNeutralDir, "se-llm-team.json"));
+	mkdirSync(nspLegacyDir, { recursive: true });
+	writeFileSync(join(nspLegacyDir, "se-llm-team.json"), JSON.stringify({ agent: "legacy-agent", pollMinutes: 3 }));
+	const nspLegacyCfg = loadConfig(nspRoot);
+	assert.equal(nspLegacyCfg.agent, "legacy-agent", "the legacy config is read when the neutral file is absent");
+	assert.ok(
+		readFileSync(join(kanbanDir(nspRoot), ".logs", "orchestrator.log"), "utf8").includes(`using the legacy config at ${join(nspLegacyDir, "se-llm-team.json")}`),
+		"one log line names the legacy config path",
+	);
+
+	// the project-local config overrides both globals
+	mkdirSync(kanbanDir(nspRoot), { recursive: true });
+	writeFileSync(join(nspRoot, ".kanban", "se-llm-team.json"), JSON.stringify({ agent: "project-agent" }));
+	assert.equal(loadConfig(nspRoot).agent, "project-agent", "the project-local config overrides the legacy global");
+	writeFileSync(join(nspNeutralDir, "se-llm-team.json"), JSON.stringify({ agent: "neutral-agent" }));
+	assert.equal(loadConfig(nspRoot).agent, "project-agent", "the project-local config overrides the neutral global too");
+
+	// the hub registry migrates once from the legacy path: a fresh legacy entry copies over and
+	// survives the seed
+	const nspLegacyProject = join(nspHome, "legacy-project");
+	writeFileSync(join(nspLegacyDir, "se-llm-team-hub.json"), JSON.stringify([{ name: "legacy", root: nspLegacyProject, start: Date.now(), lastHeartbeat: Date.now() }]));
+	const nspHub = await startHub({ name: "x", root: nspRoot, host: "127.0.0.1", port: 0 });
+	assert.ok(nspHub, "the hub starts for the migration check");
+	assert.ok(existsSync(join(nspNeutralDir, "se-llm-team-hub.json")), "the legacy registry migrated to the neutral path");
+	assert.deepEqual(readHubRegistry().map((e) => e.name).sort(), ["legacy", "x"], "the migrated legacy entry seeded the registry");
+	assert.ok(existsSync(join(nspLegacyDir, "se-llm-team-hub.json")), "the legacy registry file is never removed");
+	// copy once: the neutral file exists, so a second start never re-copies the legacy registry
+	nspHub.close();
+	writeFileSync(join(nspNeutralDir, "se-llm-team-hub.json"), "[]\n"); // the hub aged the migrated entry out
+	const nspHub2 = await startHub({ name: "x", root: nspRoot, host: "127.0.0.1", port: 0 });
+	assert.ok(nspHub2, "the second hub starts");
+	assert.deepEqual(readHubRegistry().map((e) => e.name), ["x"], "the legacy registry is not copied a second time");
+	nspHub2.close();
+
+	// a legacy lock held by a live process warns (an old-code daemon may still serve the hub),
+	// the election continues, and the lock is taken at the neutral path only
+	const nspPort = await freePort();
+	writeFileSync(join(nspNeutralDir, "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: nspPort } }));
+	writeFileSync(join(nspLegacyDir, "se-llm-team-hub.lock"), String(process.pid));
+	const nspDaemon = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", nspRoot, "--rescan-seconds", "1", "--poll-minutes", "0.05"], {
+		stdio: ["ignore", "pipe", "pipe"],
+		env: { ...process.env, HOME: nspHome, XDG_CONFIG_HOME: nspXdg },
+	});
+	daemons.push({ daemon: nspDaemon, root: nspRoot });
+	let nspOut = "";
+	nspDaemon.stdout.on("data", (d) => (nspOut += d));
+	nspDaemon.stderr.on("data", (d) => (nspOut += d));
+	await waitFor(() => nspOut.includes("web ui on"), 15000, "the daemon serves the hub despite the legacy lock", () => nspOut);
+	assert.ok(nspOut.includes("old-code daemon may still serve the hub"), "the legacy lock held by a live process warns");
+	assert.equal(readFileSync(join(nspNeutralDir, "se-llm-team-hub.lock"), "utf8").trim(), String(nspDaemon.pid), "the hub lock is taken at the neutral path");
+	assert.equal(readFileSync(join(nspLegacyDir, "se-llm-team-hub.lock"), "utf8").trim(), String(process.pid), "the legacy lock file is never written or removed");
+	nspDaemon.kill("SIGTERM");
+} finally {
+	nspRestoreEnv();
+}
+console.log("orchestrator.test.ts: ... + neutral shared paths smoke passed");
 
 // --- part X: provider/model/thinking config flags, with per-role overrides ---
 // the llm flags sit between "--mode json" and "-p", in resolution order provider, model, thinking
