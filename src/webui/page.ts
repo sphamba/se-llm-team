@@ -473,7 +473,7 @@ function attrsHtml(t) {
 		"<div><span>complexity</span><span class='chip cx cx-" + esc(t.complexity || "moderate") + "'>" + esc(t.complexity || "moderate") + "</span></div>" +
 		"<div><span>state</span>" + esc(t.state) + "</div>" +
 		"<div><span>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>" +
-		"<div><span>issuer</span>" + esc(t.issuer || "user") + "</div>" +
+		"<div><span>issuer</span>" + issuerCell(t) + "</div>" +
 		blockedRow(t);
 }
 // the body block, html-gated like syncBoard's cards: an unchanged body keeps its DOM node and
@@ -537,16 +537,26 @@ function closeModal() {
 	closeLog();
 	closeAnimated(modal);
 }
+// a stored "#<num>" ref resolved to its task on the active board: undefined when absent
+function taskByNum(ref) {
+	return activeBoard().tasks.find(x => parseInt(x.file, 10) === parseInt(ref.replace(/^#/, ""), 10));
+}
 // the blockedBy row: each stored ref links to its task's card when that task is on the board, and
 // the row is dropped when the attribute is absent or empty
 function blockedRow(t) {
 	const refs = String(t.blockedBy || "").split(",").map(s => s.trim()).filter(Boolean);
 	if (!refs.length) return "";
 	const items = refs.map(ref => {
-		const target = activeBoard().tasks.find(x => parseInt(x.file, 10) === parseInt(ref.replace(/^#/, ""), 10));
+		const target = taskByNum(ref);
 		return target ? numLinkHtml(target.file) : esc(ref);
 	});
 	return "<div><span>blockedBy</span>" + items.join(", ") + "</div>";
+}
+// the issuer row: a task-issued issuer ("#<num>") links to its card when that task is on the
+// active board; "user", an absent issuer, or an off-board number stays plain text
+function issuerCell(t) {
+	const target = t.issuer && t.issuer !== "user" ? taskByNum(t.issuer) : null;
+	return target ? numLinkHtml(target.file) : esc(t.issuer || "user");
 }
 // live agent log pane: each run card carries only its handle, the server resolves the real
 // path; each run's subagent transcripts load through the same endpoint with sub=list / sub=n

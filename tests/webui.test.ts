@@ -792,7 +792,8 @@ assert.equal(listed[0].agent, null);
 assert.deepEqual(listed[0].agents, [], "no role logs yet, empty agent history");
 assert.ok(page.includes('id="m-agent"'), "modal has the agent area");
 assert.ok(!page.includes("<div><span>name</span>"), "the detail card drops the name attribute row the title already shows");
-assert.ok(page.includes('"<div><span>issuer</span>" + esc(t.issuer || "user")'), "the detail card shows the issuer row");
+assert.ok(page.includes('"<div><span>issuer</span>" + issuerCell(t) + "</div>"'), "the detail card shows the issuer row");
+assert.ok(page.includes('return target ? numLinkHtml(target.file) : esc(t.issuer || "user")'), "a task-issued issuer links to its card, plain text for user or an off-board number");
 assert.ok(
 	page.includes("\"<div><span>complexity</span><span class='chip cx cx-\" + esc(t.complexity || \"moderate\") + \"'>\""),
 	"the detail card complexity row carries the value class",
