@@ -165,15 +165,24 @@ async function testFailedAnalyser() {
 	try {
 		const logPath = join(dir, "x.log");
 		writeFileSync(logPath, SYNTHETIC);
-		const result = await analyseLog(logPath, { runAnalyser: async () => null });
+		const delays: number[] = [];
+		const result = await analyseLog(logPath, {
+			runAnalyser: async () => null,
+			delay: async (ms) => {
+				delays.push(ms);
+			},
+		});
 		assert.ok(existsSync(result.reportPath));
 		for (const block of result.blocks) {
-			assert.ok(block.summary.startsWith("Block analysis failed after one retry"));
+			assert.ok(block.summary.startsWith("Block analysis failed after 3 attempts"));
 			assert.equal(block.struggle, "");
 		}
-		assert.ok(result.analysis.startsWith("Analysis failed after one retry"));
+		assert.ok(result.analysis.startsWith("Analysis failed after 3 attempts"));
 		const report = readFileSync(result.reportPath, "utf8");
-		assert.ok(report.includes("Block analysis failed after one retry"));
+		assert.ok(report.includes("Block analysis failed after 3 attempts"));
+		// 5 pass 1 calls plus pass 2, each exhausted call waits 5000 ms before attempts 2 and 3
+		assert.equal(delays.length, 12);
+		assert.ok(delays.every((ms) => ms === 5000), `expected 5000 ms waits, got ${delays.join(",")}`);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -185,15 +194,40 @@ async function testRetryRecovers() {
 		const logPath = join(dir, "x.log");
 		writeFileSync(logPath, '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}');
 		let calls = 0;
+		const delays: number[] = [];
 		const run = async () => {
 			calls++;
 			if (calls === 1) throw new Error("boom");
 			return "RECOVERED";
 		};
-		const result = await analyseLog(logPath, { runAnalyser: run });
-		// the thrown pass 1 call retries once and succeeds, then pass 2 runs once
+		const result = await analyseLog(logPath, { runAnalyser: run, delay: async (ms) => { delays.push(ms); } });
+		// the thrown pass 1 call waits 5000 ms, retries and succeeds, then pass 2 runs once
 		assert.equal(calls, 3);
+		assert.deepEqual(delays, [5000]);
 		assert.equal(result.blocks[0].summary, "RECOVERED");
+		assert.equal(result.analysis, "RECOVERED");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+async function testRetryExhaustion() {
+	const dir = fixtureDir("exhaustion");
+	try {
+		const logPath = join(dir, "x.log");
+		writeFileSync(logPath, '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}');
+		let calls = 0;
+		const delays: number[] = [];
+		const run = async () => {
+			calls++;
+			if (calls <= 3) return null;
+			return "RECOVERED";
+		};
+		const result = await analyseLog(logPath, { runAnalyser: run, delay: async (ms) => { delays.push(ms); } });
+		// pass 1 uses 3 attempts with two 5000 ms waits, then pass 2 succeeds first try
+		assert.equal(calls, 4);
+		assert.deepEqual(delays, [5000, 5000]);
+		assert.equal(result.blocks[0].summary, "Block analysis failed after 3 attempts: the analyser returned no answer");
 		assert.equal(result.analysis, "RECOVERED");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -209,19 +243,32 @@ async function testConcurrencyLimit() {
 		}
 		const logPath = join(dir, "many.log");
 		writeFileSync(logPath, lines.join("\n"));
-		let inFlight = 0;
-		let maxInFlight = 0;
-		const run = async () => {
-			inFlight++;
-			maxInFlight = Math.max(maxInFlight, inFlight);
-			await new Promise((resolve) => setTimeout(resolve, 5));
-			inFlight--;
-			return "ok";
+		const track = () => {
+			let inFlight = 0;
+			let maxInFlight = 0;
+			return {
+				max: () => maxInFlight,
+				run: async () => {
+					inFlight++;
+					maxInFlight = Math.max(maxInFlight, inFlight);
+					await new Promise((resolve) => setTimeout(resolve, 5));
+					inFlight--;
+					return "ok";
+				},
+			};
 		};
-		const result = await analyseLog(logPath, { runAnalyser: run });
+		// the default cap of 8 applies when no override is set
+		const def = track();
+		const result = await analyseLog(logPath, { runAnalyser: def.run });
 		assert.equal(result.blockCount, 20);
-		assert.ok(maxInFlight <= 8, `max in-flight was ${maxInFlight}, expected at most 8`);
-		assert.ok(maxInFlight > 1, "the block analysers did not run in parallel");
+		assert.ok(def.max() <= 8, `max in-flight was ${def.max()}, expected at most 8`);
+		assert.ok(def.max() > 1, "the block analysers did not run in parallel");
+		// a concurrency override tightens the cap
+		const capped = track();
+		const cappedResult = await analyseLog(logPath, { runAnalyser: capped.run, concurrency: 3 });
+		assert.equal(cappedResult.blockCount, 20);
+		assert.ok(capped.max() <= 3, `max in-flight was ${capped.max()}, expected at most 3`);
+		assert.ok(capped.max() > 1, "the capped block analysers did not run in parallel");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -237,6 +284,7 @@ try {
 	testCommandBuilder();
 	await testFailedAnalyser();
 	await testRetryRecovers();
+	await testRetryExhaustion();
 	await testConcurrencyLimit();
 	console.log("efficiency-analysis tests passed");
 } finally {

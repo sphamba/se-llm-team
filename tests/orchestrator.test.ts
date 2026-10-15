@@ -2508,12 +2508,22 @@ try {
 	assert.equal(loadConfig(rootAP).logStallMinutes, 10, "a non-number logStallMinutes keeps 10");
 	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ logStallMinutes: 0, backlogIdleMinutes: 0 }));
 	assert.equal(loadConfig(rootAP).logStallMinutes, 10, "logStallMinutes <= 0 keeps 10");
+	// roles.analyser.concurrency: a valid positive integer applies, an invalid value warns
+	// and stays unset, so the module default of 8 applies
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyser: { concurrency: 4 } } }));
+	assert.equal(loadConfig(rootAP).roles.analyser?.concurrency, 4, "a valid roles.analyser.concurrency applies");
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyser: { concurrency: 0 } } }));
+	assert.equal(loadConfig(rootAP).roles.analyser?.concurrency, undefined, "a non-positive roles.analyser.concurrency stays unset");
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyser: { concurrency: 2.5 } } }));
+	assert.equal(loadConfig(rootAP).roles.analyser?.concurrency, undefined, "a non-integer roles.analyser.concurrency stays unset");
 } finally {
 	process.env.HOME = savedHomeAP;
 }
 const orchLogAP = () => readFileSync(join(kanbanDir(rootAP), ".logs", "orchestrator.log"), "utf8");
 assert.ok(orchLogAP().includes('logStallMinutes "banana" ignored: must be a positive number of minutes'), "a non-number logStallMinutes warned about");
 assert.ok(orchLogAP().includes("logStallMinutes 0 ignored: must be a positive number of minutes"), "logStallMinutes <= 0 warned about");
+assert.ok(orchLogAP().includes('invalid roles.analyser.concurrency 0, ignored (expected a positive integer)'), "a non-positive roles.analyser.concurrency warned about");
+assert.ok(orchLogAP().includes('invalid roles.analyser.concurrency 2.5, ignored (expected a positive integer)'), "a non-integer roles.analyser.concurrency warned about");
 console.log("orchestrator.test.ts: ... + logStallMinutes config smoke passed");
 
 // --- part AQ: killing or restarting the daemon must not kill the spawned agents. The agent's
