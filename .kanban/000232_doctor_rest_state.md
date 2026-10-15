@@ -1,8 +1,8 @@
 ---
 name: "fix: doctor cards at rest look opened"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/232-doctor-rest-state"
 issuer: "user"
 complexity: "simple"
 shortName: "doctor-rest-state"

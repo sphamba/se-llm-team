@@ -1,8 +1,8 @@
 ---
 name: "feat: doctor cards in their analysed run's column"
 priority: "medium"
-state: "live-testing"
-worktree: "feat/230-doctor-cards-in-columns"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "doctor-cards-in-columns"
