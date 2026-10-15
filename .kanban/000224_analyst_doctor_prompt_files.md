@@ -1,8 +1,8 @@
 ---
 name: "refactor: analyst and doctor prompts as editable markdown files"
 priority: "medium"
-state: "live-testing"
-worktree: "refactor/224-analyst-doctor-prompt-files"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "analyst-doctor-prompt-files"
