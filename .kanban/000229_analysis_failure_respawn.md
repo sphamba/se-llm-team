@@ -1,8 +1,8 @@
 ---
 name: "fix: stop respawning a failed analysis on every to-merge sweep"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/229-analysis-failure-respawn"
+state: "done"
+worktree: ""
 issuer: "#224"
 complexity: "moderate"
 shortName: "analysis-failure-respawn"
@@ -46,4 +46,22 @@ Reviewed 2026-10-15 (reviewer): no fixes.
 - The janitor's split(".")[0] key is safe: slugs contain only a-z0-9 and hyphens (non-alphanumerics are separators, src/kanban.ts:235).
 - tests/orchestrator.test.ts ran in full (exit 0), part AT5 present ("one failed analysis attempt per run passed"): spawn-once, the logged skip, the marker surviving the janitor, the task staying in to-merge, and a fresh run (new index) firing despite the stale marker are all pinned.
 - The Open-questions assumptions are confirmed against the code and removed: a success is caught earlier by the report check, so the marker check only catches failures; the marker keys on the run index, so only a fresh run re-fires; markers accumulate one per run and are swept with the task.
+
+## Live test (2026-10-15, merged 7f1e1df)
+
+Merged code (worktree fix/229-analysis-failure-respawn, commit 7f1e1df) vs the pre-fix commit 2e6f617 as a differential control, each on its own board fixture (/tmp/lt229), a fake pi agent as the analysis backend, and a daemon (`--rescan-seconds 1 --poll-minutes 30 --no-webui`, isolated HOME + XDG_CONFIG_HOME). Trigger: a `to-merge` task with a finished run whose log is a corrupt `<slug>.developer.0.log.gz` (the documented early failure: the runner throws before the doctor-log write), plus the stale `<slug>.pid` (dead) and `<slug>.exit` (0) pair. The task file appears after the daemon's startup pass and the poll interval is 30 min, so the startup poll cannot clear the stale pair and every to-merge sweep re-takes the fire site.
+
+Verified on the merged code:
+- One failed attempt: the first sweep spawned the analysis once (`spawned analysis pid=... for ...developer.0.log.gz`). The runner exited 1 (`incorrect header check`) leaving `.pids/000229_probe.developer.0.analysis.exit` non-zero, no `.analysis.md`, no `.doctor.log`, and the analysis pid file self-removed.
+- No respawn: after 6 s of later sweeps the spawn count stayed 1 and the marker survived (the janitor kept it). The skip line "analysis of ...developer.0.log.gz already attempted, skipping respawn (exit marker)" appeared 8 times.
+- Pipeline unharmed: the task stayed in `to-merge`, no `.dead` marker, no `.dead.count`, and the daemon kept sweeping (12 more log lines in the 6 s window).
+- Fresh run: a new run (`reviewer.0.log`) fired its own analysis despite the stale `developer.0` marker and completed it (report + doctor log, one spawn, the fake recorded the analyst and doctor calls).
+- Manual run: `node src/analysis-run.ts <root> <log.gz> developer` on the failed base succeeded (exit 0, report + doctor log) while the stale marker was present and left it untouched. The daemon did not respawn that base afterwards.
+
+Verified on the pre-fix control (same fixture): the same failed analysis respawned 11 times in 9 s and logged no skip, so the fixture really exercises the reported loop.
+
+Assumptions and notes:
+- "Leaves and re-enters to-merge" is tested as the fresh-run case (new run index), per the user decision ("at most one failed attempt per run") and the pinned AT5 behavior: the marker is per run, so only a new run re-fires. A board state round trip with no new run stays capped by design.
+- In a default daemon the poll clears the stale `<slug>.pid`/`<slug>.exit` pair on its first pass for a to-merge task, so the sweep loop is bounded by the poll cadence. This fixture pins `--poll-minutes 30` to observe the sweep loop the fix targets. No product issue seen.
+- The suites are the developer/reviewer gate and were not run.
 

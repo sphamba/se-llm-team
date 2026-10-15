@@ -1,7 +1,7 @@
 ---
 name: "fix: doctor cards at rest look opened"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/232-doctor-rest-state"
 issuer: "user"
 complexity: "simple"
@@ -23,3 +23,7 @@ The .agent-doctor rest state always shows a strong blue border and tinted backgr
 - Grep check: the .agent-doctor rest rule sets only the text color, no hover override, the active rule keeps the blue pair, and --doctor-bg is gone from the theme blocks.
 
 # Notes
+- src/webui/page.ts: `.agent-doctor` rest rule is now `{ color: var(--doctor-fg); }`; the `:hover` override is gone (the plain `.agent-card` hover applies); `.agent-doctor.agent-card-active` keeps `border-color: var(--doctor-fg); background: var(--doctor-bg-strong);`; `--doctor-bg` is removed from the light, dark and prefers-dark theme blocks.
+- tests/webui.test.ts: the theme-var loop now checks only `--doctor-fg` and `--doctor-bg-strong`, plus an assertion that `--doctor-bg:` is absent; the rest rule literal and the hover-absence assertion are updated accordingly. `node tests/webui.test.ts` passes.
+- Live-UI check both themes (fixture `/tmp/doctor-rest`, daemon on 127.0.0.1:4321 with isolated HOME and XDG_CONFIG_HOME, Playwright): a resting doctor card's computed border and background equal a resting run card's (dark: border rgb(27, 31, 41), bg rgb(20, 24, 33); light: border rgba(107, 125, 143, 0.12), bg rgb(255, 255, 255)), its text and check mark are the doctor blue; the opened card's border is the doctor blue and its background is the strong tint (dark rgba(89, 167, 255, 0.28), light rgba(47, 111, 221, 0.24)). Daemon stopped after the check.
+- Commit 9eb72b7 on fix/232-doctor-rest-state.
