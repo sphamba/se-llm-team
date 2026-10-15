@@ -128,7 +128,7 @@ assert.equal(getTask(root, t1.file)?.summary, "after");
 
 // efficiency_analysis is registered as a deferred tool with only the path string
 // parameter. The validator pi runs before execute accepts a path call and rejects a
-// call without one. execute is not run here, it would spawn real analysers
+// call without one. execute is not run here, it would spawn real analysts
 const ea = tools["efficiency_analysis"];
 if (!ea) fail("efficiency_analysis not registered");
 assert.equal(ea.exposure, "deferred", "efficiency_analysis must be deferred");

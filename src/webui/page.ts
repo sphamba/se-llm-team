@@ -70,10 +70,11 @@ export function mergeBoards(boards, rows) {
 	for (const [name, tasks] of rows) if (tasks) boardOf(boards, name).tasks = tasks;
 }
 
-// the open detail card's poll cadence (000142): a live agent's tokens and duration advance with
-// the run log, so while the open task has one the poll ticks at 1 s; otherwise the 5 s board poll
+// the open detail card's poll cadence (000142): a live agent's or live doctor's tokens and
+// duration advance with the run log, so while the open task has one the poll ticks at 1 s;
+// otherwise the 5 s board poll
 export function refreshMs(t) {
-	return t && (t.agents || []).some((a) => a.alive) ? 1000 : 5000;
+	return t && ((t.agents || []).some((a) => a.alive) || (t.doctors || []).some((d) => d.alive)) ? 1000 : 5000;
 }
 
 // Ayu Dark palette (ayu-theme/ayu-colors), written once and applied twice: explicit choice via data-theme, browser default via media query

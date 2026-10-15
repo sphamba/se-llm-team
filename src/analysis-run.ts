@@ -19,9 +19,9 @@ if (!root || !logArg || !role) {
 	// the compactor may gzip the finished log between the spawn and the first read: fall
 	// back to the .gz replacement
 	const logPath = existsSync(logArg) ? logArg : `${logArg}.gz`;
-	// the doctor revises the role file, so it must exist even when no agent spawn created it
-	ensureRoleNotes(root, role);
 	try {
+		// the doctor revises the role file, so it must exist even when no agent spawn created it
+		ensureRoleNotes(root, role);
 		await analyseLog(logPath, {
 			agent: cfg.agent,
 			backend: cfg.backend,

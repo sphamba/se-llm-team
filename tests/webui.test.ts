@@ -1094,6 +1094,40 @@ assert.ok(syncAgentStats(bare, [{ role: "developer", run: null, alive: true, sta
 assert.equal(bare.children[0].children[0].children[1].textContent, "999 · 1s", "the span joins the card when stats arrive");
 assert.ok(syncAgentStats(bare, [{ role: "developer", run: null, alive: true, status: "live", handle: "t.developer", tokens: null, duration: null }], docStub), "the unchanged run set still updates in place");
 assert.equal(bare.children[0].children[0].children.length, 1, "the span drops when the stats vanish");
+// 000222 the doctor row's cards are bare .agent-card buttons in #m-doctor, no .agent-col wrapper:
+// the same keep pass must move the card's stats line, not append a stray span inside the mark span
+const doctorRow = (docs: any[]) => {
+	const row = new El("div");
+	for (const d of docs) {
+		const card = new El("button");
+		card.className = "agent-card " + (d.alive ? "agent-live" : "agent-past");
+		card.dataset.handle = d.handle;
+		const mark = new El("span");
+		mark.className = d.alive ? "spin" : "check";
+		card.appendChild(mark);
+		const stats = agentStatsText(d.tokens, d.duration);
+		if (stats) { const s = new El("span"); s.className = "agent-stats"; s.textContent = stats; card.appendChild(s); }
+		row.appendChild(card);
+	}
+	row.__sig = agentRowSig(docs);
+	return row;
+};
+const doctorCards = doctorRow([
+	{ role: "doctor", run: 0, alive: false, status: "ok", handle: "t.developer.0.doctor", tokens: 20, duration: 5000 },
+	{ role: "doctor", run: 1, alive: true, status: "live", handle: "t.developer.1.doctor", tokens: 30, duration: 60000 },
+]);
+const docSpin = doctorCards.children[1].children[0];
+assert.ok(docSpin.className === "spin", "the live doctor card carries its spinner");
+const doctorGrew = [
+	{ role: "doctor", run: 0, alive: false, status: "ok", handle: "t.developer.0.doctor", tokens: 30, duration: 9000 },
+	{ role: "doctor", run: 1, alive: true, status: "live", handle: "t.developer.1.doctor", tokens: 40, duration: 90000 },
+];
+assert.ok(syncAgentStats(doctorCards, doctorGrew, docStub), "an unchanged doctor set updates the row in place");
+assert.equal(doctorCards.children[1].children[0], docSpin, "the same .spin node keeps its animation running");
+assert.equal(doctorCards.children[1].children[1].textContent, "40 · 1m 30s", "the live doctor card's stats line moved");
+assert.equal(doctorCards.children[0].children[1].textContent, "30 · 9s", "the past doctor card's stats line moved too");
+assert.equal(doctorCards.children[1].children[0].children.length, 0, "no stray span lands inside the mark span");
+assert.equal(syncAgentStats(doctorCards, doctorGrew.slice(1), docStub), false, "a doctor card gone rebuilds");
 // the page wires the helpers: the rebuild seeds the signature, the keep pass syncs the stats
 assert.ok(ra.includes("if (keep && syncAgentStats(el, runs, document))"), "the keep pass updates an unchanged row's stats in place");
 assert.ok(ra.includes("el.__sig = agentRowSig(runs)"), "the rebuild seeds the structure signature the keep pass matches");
@@ -1101,6 +1135,8 @@ assert.ok(ra.includes('el.__sig = "";'), "an empty run set clears the signature"
 assert.ok(page.includes(String(agentRowSig)) && page.includes(String(syncAgentStats)), "the page runs the tested agent-row helpers");
 // the cadence: 1 s while the open task has a live agent, 5 s otherwise, log pane open or closed
 assert.equal(refreshMs({ agents: [{ alive: true }] }), 1000, "a live agent on the open card ticks the poll at 1 s");
+assert.equal(refreshMs({ agents: [{ alive: false }], doctors: [{ alive: true }] }), 1000, "a live doctor with no live agent also ticks the poll at 1 s");
+assert.equal(refreshMs({ agents: [{ alive: false }], doctors: [{ alive: false }] }), 5000, "no live agent and no live doctor keeps the 5 s cadence");
 assert.equal(refreshMs({ agents: [{ alive: false }] }), 5000, "no live agent keeps the 5 s cadence");
 assert.equal(refreshMs({ agents: [] }), 5000, "an empty agent history keeps the 5 s cadence");
 assert.equal(refreshMs({}), 5000, "a task without agents keeps the 5 s cadence");

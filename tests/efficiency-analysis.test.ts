@@ -497,7 +497,7 @@ async function testConcurrencyLimit() {
 		const cappedResult = await analyseLog(logPath, { runAnalyst: capped.run, runDoctor: async () => "ok", concurrency: 3, mergeThreshold: 1 });
 		assert.equal(cappedResult.blockCount, 20);
 		assert.ok(capped.max() <= 3, `max in-flight was ${capped.max()}, expected at most 3`);
-		assert.ok(capped.max() > 1, "the capped block analysers did not run in parallel");
+		assert.ok(capped.max() > 1, "the capped block analysts did not run in parallel");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -533,11 +533,11 @@ function argvRecorder(calls: string[][], answer: string): (argv: string[]) => Pr
 }
 
 // --- the lead-in merge pass: a short text or thinking block folds into the next block as
-// lead-in context. The folded block gets no analyser call and no report entry. ---
+// lead-in context. The folded block gets no analyst call and no report entry. ---
 
 async function testShortLeadInMerge() {
 	// a short text block before a tool call folds into the tool call block: the tool call
-	// prompt carries the lead-in, and the short block gets no analyser call of its own
+	// prompt carries the lead-in, and the short block gets no analyst call of its own
 	const dir = fixtureDir("merge");
 	try {
 		const logPath = join(dir, "merge.log");
@@ -600,7 +600,7 @@ async function testLeadInCap() {
 }
 
 async function testTrailingShortBlockStandalone() {
-	// a short block at the end of the log has no following block: it keeps its own analyser
+	// a short block at the end of the log has no following block: it keeps its own analyst
 	// call and report entry
 	const dir = fixtureDir("trailing");
 	try {

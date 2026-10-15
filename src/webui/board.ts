@@ -88,7 +88,9 @@ export function syncAgentStats(el, runs, doc) {
 	if (el.__sig !== agentRowSig(runs) || el.children.length !== runs.length) return false;
 	for (let i = 0; i < runs.length; i++) {
 		const stats = agentStatsText(runs[i].tokens, runs[i].duration);
-		const card = el.children[i].children[0];
+		// the run row's cards sit in .agent-col wrappers, the doctor row's are bare .agent-card buttons
+		const child = el.children[i];
+		const card = child.className.split(" ").includes("agent-card") ? child : child.children[0];
 		if (card.__stats === stats) continue;
 		card.__stats = stats;
 		const span = [...card.children].find((c) => c.className === "agent-stats");
