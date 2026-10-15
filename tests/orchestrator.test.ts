@@ -3393,6 +3393,75 @@ try {
 cleanupAll(rootAT4);
 console.log("orchestrator.test.ts: ... + sweep-side self-advanced analysis smoke passed");
 
+// --- part AT5: one failed analysis attempt per run (#229): the to-merge sweep re-fires
+// spawnRunAnalysis on every sweep while the task sits in to-merge, and a failed analysis
+// (an early throw: no report, no doctor log, pid self-removed) used to respawn forever.
+// The wrapper's exit marker caps it to one attempt, the janitor keeps the marker while the
+// task exists, the skip is logged, and a fresh run (new index) keys its own marker ---
+const rootAT5 = fixture();
+cleaned.push(rootAT5);
+const homeAT5 = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAT5);
+mkdirSync(kanbanDir(rootAT5), { recursive: true });
+const stubAT5 = join(rootAT5, "fast-analyst.cjs");
+writeFileSync(stubAT5, readFileSync(fastStubAT2, "utf8"));
+chmodSync(stubAT5, 0o755);
+writeFileSync(join(kanbanDir(rootAT5), "se-llm-team.json"), JSON.stringify({ agent: stubAT5 }));
+const logsAT5 = join(kanbanDir(rootAT5), ".logs");
+const pidsAT5 = join(kanbanDir(rootAT5), ".pids");
+mkdirSync(logsAT5, { recursive: true });
+mkdirSync(pidsAT5, { recursive: true });
+const taskAT5 = createTask(rootAT5, { name: "fix: failed analysis respawn", summary: "One failed attempt per run", specs: "n/a" });
+setState(rootAT5, taskAT5, "to-merge");
+const slugAT5 = taskSlug(taskAT5.file);
+setWorktree(rootAT5, taskAT5, "tmp-wt");
+execSync("git branch -q tmp-wt", { cwd: rootAT5, shell: "/bin/bash" });
+// a detached root keeps the task in to-merge (the sweep's PM-resolves-manually path), so
+// every sweep re-takes the analysis spawn, which is the reported loop
+execSync("git checkout -q --detach", { cwd: rootAT5, shell: "/bin/bash" });
+// the finished run: a corrupt .log.gz (the compactor pattern skips it, the runner's gunzip
+// throws) plus the stale wrapper pair (dead pid, exit 0) the sweep keys on
+const baseAT5 = `${slugAT5}.developer.0`;
+writeFileSync(join(logsAT5, `${baseAT5}.log.gz`), Buffer.from("not gzip"));
+writeFileSync(pidPath(rootAT5, slugAT5), "999999999\n");
+writeFileSync(exitFilePath(rootAT5, slugAT5), "0\n");
+const orchLogAT5 = () => readFileSync(join(logsAT5, "orchestrator.log"), "utf8");
+const spawnedCountAT5 = () => orchLogAT5().split("spawned analysis pid=").length - 1;
+const savedHomeAT5 = process.env.HOME;
+try {
+	process.env.HOME = homeAT5;
+	rescan(rootAT5, loadConfig(rootAT5));
+	// the sweep fired the failing analysis: the runner cannot gunzip the log, so the wrapper
+	// records a non-zero exit and the pid file self-removes, leaving only the marker
+	await waitFor(() => existsSync(join(pidsAT5, `${baseAT5}.analysis.exit`)), 20000, "the failing analysis left its exit marker", () => "");
+	assert.ok(!existsSync(join(logsAT5, `${baseAT5}.analysis.md`)), "the failed analysis wrote no report");
+	assert.ok(!existsSync(join(logsAT5, `${baseAT5}.doctor.log`)), "the failed analysis wrote no doctor log");
+	assert.notEqual(readFileSync(join(pidsAT5, `${baseAT5}.analysis.exit`), "utf8").trim(), "0", "the failing analysis exited non-zero");
+	assert.equal(spawnedCountAT5(), 1, "the first sweep spawned the analysis once");
+	// the exit marker caps the hook: later to-merge sweeps skip the respawn, the skip is
+	// logged, and the janitor keeps the marker while the task exists
+	rescan(rootAT5, loadConfig(rootAT5));
+	rescan(rootAT5, loadConfig(rootAT5));
+	assert.ok(existsSync(join(pidsAT5, `${baseAT5}.analysis.exit`)), "the exit marker survives the sweeps (the janitor keeps it)");
+	assert.equal(spawnedCountAT5(), 1, "later to-merge sweeps never respawned the failed analysis");
+	assert.ok(orchLogAT5().includes("skipping respawn"), "the skip is logged");
+	assert.equal(parseTask(rootAT5, taskAT5.file).state, "to-merge", "the task stays in to-merge, the pipeline unharmed");
+	// a fresh run (new index) keys its own marker: the stale marker never blocks it
+	const freshBaseAT5 = `${slugAT5}.reviewer.0`;
+	writeFileSync(
+		join(logsAT5, `${freshBaseAT5}.log`),
+		JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "did the work" }] } }) + "\n",
+	);
+	rescan(rootAT5, loadConfig(rootAT5));
+	assert.ok(existsSync(join(pidsAT5, `${freshBaseAT5}.analysis.pid`)), "the fresh run's analysis fires despite the stale marker");
+	await waitFor(() => existsSync(join(logsAT5, `${freshBaseAT5}.analysis.md`)), 20000, "the fresh run's analysis completed", () => "");
+	assert.equal(spawnedCountAT5(), 2, "exactly two analysis spawns in total");
+} finally {
+	process.env.HOME = savedHomeAT5;
+}
+cleanupAll(rootAT5, homeAT5);
+console.log("orchestrator.test.ts: ... + one failed analysis attempt per run passed");
+
 // --- part AU: 000189 two conflicted to-merge tasks, one merger at a time. The second
 // merger's spawn supersedes the first task's unconsumed merger exit (it clears the shared
 // exit file), so the poll must requeue the superseded task instead of false-bouncing it: no

@@ -204,8 +204,9 @@ function janitorPids(root: string, tasks: Task[]): void {
 		if (f.endsWith(".exit")) {
 			const name = f.slice(0, -".exit".length);
 			// "merger.exit" clears itself at the next merger spawn; a task slug with no board
-			// task is an orphan
-			if (name === "merger" || slugs.has(name)) continue;
+			// task is an orphan. Per-run analysis exit files (<slug>.<role>.<n>.analysis) key the
+			// one-failed-attempt guard (#229): keep them while their task exists, sweep with the task
+			if (name === "merger" || slugs.has(name) || slugs.has(name.split(".")[0])) continue;
 			try {
 				rmSync(join(kanbanDir(root), ".pids", f));
 			} catch {

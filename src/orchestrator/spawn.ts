@@ -231,11 +231,20 @@ export function spawnRunAnalysis(root: string, slug: string, role: string): void
 	// so either present means the run was already analysed or is
 	if (existsSync(join(logs, `${base}.analysis.md`)) || existsSync(join(logs, `${base}.doctor.log`))) return;
 	if (agentAlive(root, `${base}.analysis`)) return;
-	mkdirSync(join(kanbanDir(root), ".pids"), { recursive: true });
 	const name = `${base}.analysis`;
 	const exitPath = exitFilePath(root, name);
+	// one failed attempt per run (#229): a failed analysis leaves only the wrapper's exit
+	// file (no report, no doctor log, pid self-removed), so its presence caps the to-merge
+	// sweep's respawn loop. A fresh run (new index) keys its own marker, and a manual run
+	// bypasses this spawn entirely
+	if (existsSync(exitPath)) {
+		log(root, `analysis of ${raw} already attempted, skipping respawn (exit marker)`);
+		return;
+	}
+	mkdirSync(join(kanbanDir(root), ".pids"), { recursive: true });
 	// spawnAgent's wrapper extended: the analysis pid file self-removes at exit, so finished
-	// analyses leave only the transient exit file (swept as an orphan by the existing janitor)
+	// analyses leave only the exit file, which keys the one-failed-attempt guard above (the
+	// janitor keeps it while the task exists)
 	const child = spawn("sh", ["-c", `"$@" ; echo $? > "${exitPath}" ; rm -f "${pidPath(root, name)}"`, "sh", process.execPath, ANALYSIS_RUNNER, root, raw, role], {
 		cwd: logs, // the doctor's cwd stays the .logs dir: it edits the role file by absolute path
 		detached: true,
