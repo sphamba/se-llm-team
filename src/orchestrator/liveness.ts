@@ -4,7 +4,7 @@ import { getTask, kanbanDir, listAll, setState, taskSlug, type Task, type TaskSt
 import { clearPid, killTree, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP } from "./config.ts";
 import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, logPath, nextRunIndex, readCounter } from "./log.ts";
-import { clearContextSymlinks, clearExitFile, readExitCode, readMergerSlug } from "./spawn.ts";
+import { clearContextSymlinks, clearExitFile, readExitCode, readMergerSlug, spawnRunAnalysis } from "./spawn.ts";
 import { dropDoneBlockers, promoteBacklog } from "./pipeline.ts";
 
 // the working states with an agent out: next is the one-state-back bounce target when the
@@ -203,6 +203,10 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 					log(root, `${slug}: reviewer exited 0 with the task still in reviewing; left for the PM`);
 				}
 				clearDeadStreak(root, slug);
+				// every successful agent run gets its log analysed (analyst + doctor), detached so
+				// the poll never blocks on it; the spawn skips already-analysed runs itself, so the
+				// sticky reviewer exit file never re-fires it
+				spawnRunAnalysis(root, slug, working.role);
 				continue;
 			}
 			// non-zero or missing exit code: a crash, today's dead-pid bounce. The bounce is

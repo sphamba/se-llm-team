@@ -3,7 +3,7 @@ import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, re
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { kanbanDir, roleNotesPath, taskSlug, type Task } from "../kanban.ts";
-import { writePid } from "../pid.ts";
+import { agentAlive, writePid, pidPath } from "../pid.ts";
 import { claudeSpawnArgs, piSpawnArgs } from "./backends.ts";
 import { git } from "./board.ts";
 import { resolveLlm, type Config } from "./config.ts";
@@ -24,7 +24,7 @@ export function renderPrompt(root: string, role: string): string {
 // starter header; agents append their project's guidance (how to run, how to live-test) so
 // future agents of the role start faster. The AGENTS.md cwd symlink points here, so pi loads
 // the file from the session cwd at startup with no spawn flag
-function ensureRoleNotes(root: string, role: string): string {
+export function ensureRoleNotes(root: string, role: string): string {
 	const path = roleNotesPath(root, role);
 	if (!existsSync(path)) {
 		writeFileSync(path, `# ${role}: append project-specific guidance for this role below (e.g. how to run the project, how to live-test) so future agents of your kind start faster.\n`);
@@ -203,6 +203,51 @@ export function spawnAgent(root: string, cfg: Config, role: string, task: Task, 
 		// poll's kill reaches the whole group (killTree) when a stall or crash needs it
 		writePid(root, name, child.pid);
 		log(root, `spawned ${role} pid=${child.pid} for ${task.file} (cwd=${cwd})`);
+	}
+}
+
+// the detached post-run analysis runner: the orchestrator spawns this file through
+// process.execPath per finished agent run; it loads the project config itself, so the spawn
+// carries only the root, the run log and the role (a reloaded config could lose the daemon's
+// --default-agent override, such as a test's stub agent)
+const ANALYSIS_RUNNER = join(HERE, "..", "analysis-run.ts");
+
+// Spawn the analyst+doctor analysis on a finished run's log, detached with spawnAgent's sh
+// wrapper shape (the runner command as positional args, the exit code into <name>.exit) and
+// a pid file under .kanban/.pids/, so a daemon restart neither orphans nor re-triggers it.
+// Skips when there is no run log (plain or compacted), when an analysis for the run already
+// exists (report or doctor log present) or is in flight: exactly one analysis fires per run
+// and the sticky reviewer exit file never re-fires it. Best-effort: a failing analysis
+// never affects the pipeline. The run index is the newest log of the role; a negative one
+// (only a legacy unsuffixed log) is never analysed.
+export function spawnRunAnalysis(root: string, slug: string, role: string): void {
+	const n = nextRunIndex(root, slug, role) - 1;
+	if (n < 0) return;
+	const base = `${slug}.${role}.${n}`;
+	const raw = existsSync(logPath(root, base)) ? logPath(root, base) : `${logPath(root, base)}.gz`;
+	if (!existsSync(raw)) return;
+	const logs = join(kanbanDir(root), ".logs");
+	// the doctor log exists from the runner's first moment and the report lands at its end,
+	// so either present means the run was already analysed or is
+	if (existsSync(join(logs, `${base}.analysis.md`)) || existsSync(join(logs, `${base}.doctor.log`))) return;
+	if (agentAlive(root, `${base}.analysis`)) return;
+	mkdirSync(join(kanbanDir(root), ".pids"), { recursive: true });
+	const name = `${base}.analysis`;
+	const exitPath = exitFilePath(root, name);
+	// spawnAgent's wrapper extended: the analysis pid file self-removes at exit, so finished
+	// analyses leave only the transient exit file (swept as an orphan by the existing janitor)
+	const child = spawn("sh", ["-c", `"$@" ; echo $? > "${exitPath}" ; rm -f "${pidPath(root, name)}"`, "sh", process.execPath, ANALYSIS_RUNNER, root, raw, role], {
+		cwd: logs, // the doctor's cwd stays the .logs dir: it edits the role file by absolute path
+		detached: true,
+		stdio: ["ignore", "ignore", "ignore"],
+	});
+	child.on("error", (err) => {
+		log(root, `analysis of ${raw} failed to start: ${err.message}`);
+	});
+	child.unref();
+	if (child.pid) {
+		writePid(root, name, child.pid);
+		log(root, `spawned analysis pid=${child.pid} for ${raw}`);
 	}
 }
 // the slug the current merger was spawned for, next to its pid/exit files: the merger pid
