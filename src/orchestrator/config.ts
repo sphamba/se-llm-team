@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { COMPLEXITIES } from "../kanban.ts";
+import { BACKENDS, type Backend } from "./backends.ts";
 import { log } from "./log.ts";
 
 const DEFAULT_POLL_MINUTES = 1;
@@ -37,6 +38,7 @@ export interface RoleLlmConfig extends LlmConfig {
 
 export interface Config {
 	agent: string;
+	backend: Backend;
 	pollMinutes: number;
 	backlogIdleMinutes: number;
 	retryIdleMinutes: number;
@@ -75,7 +77,11 @@ const neutralConfigPath = () =>
 	join(process.env.XDG_CONFIG_HOME || join(process.env.HOME ?? "", ".config"), "se-llm-team", "se-llm-team.json");
 const legacyConfigPath = () => join(process.env.HOME ?? "", ".pi", "agent", "se-llm-team.json");
 
-export function loadConfig(root: string): Config {
+// Backend selection: a config agent value that names a backend wins, then the host-passed
+// default (--default-agent), then pi. Any other config agent value is an executable override
+// (stubs, custom wrappers) and leaves the backend to the host default, with the spawned
+// executable staying that override.
+export function loadConfig(root: string, defaultAgent?: string): Config {
 	let cfg: { agent?: string; pollMinutes?: number; backlogIdleMinutes?: unknown; retryIdleMinutes?: unknown; logStallMinutes?: unknown; provider?: unknown; model?: unknown; thinking?: unknown; roles?: unknown; reviewerCap?: unknown } = {};
 	// neutral global first, the legacy pi path is a read-only fallback, project .kanban/se-llm-team.json overrides both
 	const paths = [neutralConfigPath()];
@@ -144,8 +150,16 @@ export function loadConfig(root: string): Config {
 		if (typeof stall !== "number" || stall <= 0) log(root, `logStallMinutes ${JSON.stringify(stall)} ignored: must be a positive number of minutes`);
 		else logStallMinutes = stall;
 	}
+	const configured = typeof cfg.agent === "string" && cfg.agent ? cfg.agent : undefined;
+	const backend: Backend = configured && BACKENDS.includes(configured as Backend)
+		? (configured as Backend)
+		: defaultAgent && BACKENDS.includes(defaultAgent as Backend)
+			? (defaultAgent as Backend)
+			: "pi";
+	if (defaultAgent && !BACKENDS.includes(defaultAgent as Backend)) log(root, `unknown default agent ${JSON.stringify(defaultAgent)}, using pi`);
 	return {
-		agent: cfg.agent ?? "pi",
+		agent: configured ?? backend,
+		backend,
 		pollMinutes: cfg.pollMinutes ?? DEFAULT_POLL_MINUTES,
 		backlogIdleMinutes: idleMinutes(root, cfg.backlogIdleMinutes, "backlogIdleMinutes", DEFAULT_BACKLOG_IDLE_MINUTES),
 		retryIdleMinutes: idleMinutes(root, cfg.retryIdleMinutes, "retryIdleMinutes", DEFAULT_RETRY_IDLE_MINUTES),
@@ -156,31 +170,29 @@ export function loadConfig(root: string): Config {
 	};
 }
 
-// per-field precedence: the role's complexity entry wins over the role default, which wins
-// over the global default; an unset field adds no flag. --provider is only valid together
-// with --model, so a provider alone is ignored.
-export function llmFlags(root: string, cfg: Config, role: string, complexity: string): string[] {
+// The resolved provider/model/thinking triple for one spawn: per-field precedence, the
+// role's complexity entry wins over the role default, which wins over the global default.
+// A provider without a model is dropped with a warning (--provider is only valid together
+// with --model in pi; the claude backend ignores the provider entirely).
+export function resolveLlm(root: string, cfg: Config, role: string, complexity: string): LlmConfig {
 	const roleCfg = cfg.roles[role] ?? {};
 	const cxCfg = (roleCfg as Record<string, LlmConfig | undefined>)[complexity] ?? {};
 	const provider = cxCfg.provider ?? roleCfg.provider ?? cfg.llm.provider;
 	const model = cxCfg.model ?? roleCfg.model ?? cfg.llm.model;
 	const thinking = cxCfg.thinking ?? roleCfg.thinking ?? cfg.llm.thinking;
-	const flags: string[] = [];
 	if (provider && !model) log(root, `provider "${provider}" for role ${role} ignored: --provider requires --model`);
-	else if (provider) flags.push("--provider", provider);
-	if (model) flags.push("--model", model);
-	if (thinking) flags.push("--thinking", thinking);
-	return flags;
+	return provider && model ? { provider, model, thinking } : { model, thinking };
 }
 
-export function parseArgs(argv: string[]): { root?: string; rescanSeconds?: number; pollMinutes?: number; noWebui?: boolean; compactLogs?: boolean } {
-	const args: { root?: string; rescanSeconds?: number; pollMinutes?: number; noWebui?: boolean; compactLogs?: boolean } = {};
+export function parseArgs(argv: string[]): { root?: string; rescanSeconds?: number; pollMinutes?: number; noWebui?: boolean; compactLogs?: boolean; defaultAgent?: string } {
+	const args: { root?: string; rescanSeconds?: number; pollMinutes?: number; noWebui?: boolean; compactLogs?: boolean; defaultAgent?: string } = {};
 	for (let i = 0; i < argv.length; i++) {
 		if (argv[i] === "--root") args.root = resolve(argv[++i]);
 		else if (argv[i] === "--rescan-seconds") args.rescanSeconds = Number(argv[++i]);
 		else if (argv[i] === "--poll-minutes") args.pollMinutes = Number(argv[++i]);
 		else if (argv[i] === "--no-webui") args.noWebui = true;
 		else if (argv[i] === "--compact-logs") args.compactLogs = true;
+		else if (argv[i] === "--default-agent") args.defaultAgent = argv[++i];
 	}
 	return args;
 }

@@ -57,7 +57,7 @@ function worktreeTaskEnded([mainRoot, wtName]: [string, string]): boolean {
 export function main(argv: string[]): void {
 	const args = parseArgs(argv);
 	if (!args.root) {
-		process.stderr.write("usage: node orchestrator.ts --root <project-dir> [--rescan-seconds <s>] [--poll-minutes <m>] [--no-webui] [--compact-logs]\n");
+		process.stderr.write("usage: node orchestrator.ts --root <project-dir> [--rescan-seconds <s>] [--poll-minutes <m>] [--no-webui] [--compact-logs] [--default-agent <pi|claude>]\n");
 		process.exitCode = 1;
 		return;
 	}
@@ -79,7 +79,7 @@ export function main(argv: string[]): void {
 		process.exit(0);
 	};
 	reapIfTaskEnded();
-	const cfg = loadConfig(root);
+	const cfg = loadConfig(root, args.defaultAgent);
 	const pollMinutes = args.pollMinutes ?? cfg.pollMinutes;
 	const rescanSeconds = args.rescanSeconds ?? 10;
 	if (!acquireLock(root)) {
@@ -87,7 +87,7 @@ export function main(argv: string[]): void {
 		return;
 	}
 	for (const dir of [".logs", ".pids"]) mkdirSync(join(kanbanDir(root), dir), { recursive: true });
-	log(root, `orchestrator started (root=${root}, agent=${cfg.agent}, poll=${pollMinutes}min, rescan=${rescanSeconds}s)`);
+	log(root, `orchestrator started (root=${root}, agent=${cfg.agent}, backend=${cfg.backend}, poll=${pollMinutes}min, rescan=${rescanSeconds}s)`);
 	bootstrapBoard(root);
 
 	const sweep = () => {

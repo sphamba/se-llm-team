@@ -40,12 +40,12 @@ Optional config in the global config file `$XDG_CONFIG_HOME/se-llm-team/se-llm-t
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `agent` | `pi` | Executable the orchestrator spawns for agents. |
+| `agent` | `pi` | Agent backend the orchestrator spawns: `pi` or `claude`. Resolution: this key when it names a backend, then the daemon's `--default-agent` flag (the pi extension passes `pi`), then `pi`. Any other value overrides the spawned executable (stubs, custom wrappers). |
 | `pollMinutes` | `1` | Agent liveness poll interval. |
 | `logStallMinutes` | `10` | A working agent whose log size stays unchanged for this many minutes is assumed dead: the task bounces one state back, the agent process is killed, and the respawn machinery takes over. An invalid value (non-number or <= 0) warns and keeps the default. |
-| `provider` | unset | LLM provider to pass as `--provider`. Requires `model`; a provider without a model is ignored with a warning. |
+| `provider` | unset | LLM provider to pass as `--provider` (pi backend only; claude ignores it). Requires `model`; a provider without a model is ignored with a warning. |
 | `model` | unset | LLM model or pattern to pass as `--model`. A `:<thinking>` suffix in the pattern keeps working natively. |
-| `thinking` | unset | Reasoning level to pass as `--thinking`: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. An unknown value is ignored with a warning. |
+| `thinking` | unset | Reasoning level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. Passed as `--thinking` (pi) or `--effort` (claude); claude has no `off`/`minimal` effort, both map to `low`. An unknown value is ignored with a warning. |
 | `roles.<type>.<key>` | unset | Override `provider`, `model` or `thinking` for one agent type (`developer`, `reviewer`, `live-tester`, `merger`); per-field, so unset fields keep the global value. |
 | `roles.<type>.<complexity>.<key>` | unset | Same fields nested under `trivial`, `simple`, `moderate` or `complex` inside a roles entry. Applies to tasks whose `complexity` attribute matches; per-field, so unset fields keep the role default and unset role fields keep the global value. |
 | `reviewerCap.<complexity>` | `0`/`1`/`2`/`3` | Successful reviewer runs before a to-review task force-advances to to-merge, per task complexity: trivial `0`, simple `1`, moderate `2`, complex `3`. An invalid value (non-integer or < 0) warns and keeps the default. |

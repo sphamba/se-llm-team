@@ -54,7 +54,8 @@ const started = await tools.get("orchestrator_start").execute("id", {}, undefine
 assert.equal(calls().length, 1);
 assert.ok(calls()[0].args[0] === "--watch", "the daemon runs under node --watch");
 assert.ok(calls()[0].args[1].endsWith(join("src", "orchestrator.ts")));
-assert.deepEqual(calls()[0].args.slice(-2), ["--root", repo]);
+assert.deepEqual(calls()[0].args.slice(2, 4), ["--root", repo]);
+assert.deepEqual(calls()[0].args.slice(-2), ["--default-agent", "pi"], "the pi extension passes pi as the default agent");
 assert.match(started.content[0].text, /^Orchestrator starting \(pid 4242\)/);
 
 // a non-git directory refuses and spawns nothing

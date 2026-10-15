@@ -9,7 +9,7 @@ import { analyseLog } from "./src/efficiency-analysis.ts";
 import { createTask, getTask, isLinkedWorktree, kanbanDir, listAll, listTasks, resolveTaskFromCwd, setState, setWorktree, taskNum, updateTask, STATES, type TaskState } from "./src/kanban.ts";
 import { orchestratorWatched, pidAlive, procPgrp } from "./src/pid.ts";
 import { removeTask } from "./src/orchestrator.ts";
-import { loadConfig, llmFlags } from "./src/orchestrator/config.ts";
+import { loadConfig, resolveLlm } from "./src/orchestrator/config.ts";
 import { REPORT_MAX_AGE_MS, reportsDir } from "./src/orchestrator/report.ts";
 
 function text(s: string) {
@@ -203,7 +203,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			// node --watch restarts the daemon whenever its module graph changes, so a merge
 			// that changes the orchestrator takes effect without a manual stop and start (000192)
-			const child = spawn(process.execPath, ["--watch", join(extDir, "src", "orchestrator.ts"), "--root", root], {
+			const child = spawn(process.execPath, ["--watch", join(extDir, "src", "orchestrator.ts"), "--root", root, "--default-agent", "pi"], {
 				detached: true,
 				stdio: ["ignore", log, log],
 			});
@@ -290,10 +290,10 @@ export default function (pi: ExtensionAPI) {
 			const absolutePath = resolve(root, params.path);
 			const cfg = loadConfig(root);
 			// the role default applies, no complexity override. The in-flight cap and the merge
-			// threshold come from the role config, the module defaults apply when unset
-			const flags = llmFlags(root, cfg, "analyser", "");
+			// threshold come from the role config, the module defaults apply when unset. The
+			// analyser runs through the same backend as the spawned agents
 			try {
-				const result = await analyseLog(absolutePath, { agent: cfg.agent, llmFlags: flags, concurrency: cfg.roles.analyser?.concurrency, mergeThreshold: cfg.roles.analyser?.mergeThreshold });
+				const result = await analyseLog(absolutePath, { agent: cfg.agent, backend: cfg.backend, llm: resolveLlm(root, cfg, "analyser", ""), concurrency: cfg.roles.analyser?.concurrency, mergeThreshold: cfg.roles.analyser?.mergeThreshold });
 				return {
 					content: [{ type: "text", text: `${result.analysis}\n\nReport: ${result.reportPath}\nBlocks analysed: ${result.blockCount}` }],
 					details: result,

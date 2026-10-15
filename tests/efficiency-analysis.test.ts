@@ -162,6 +162,54 @@ function testCommandBuilder() {
 	);
 }
 
+async function testClaudeAnalyserPipeline() {
+	// the claude backend swaps pi's isolation flags for --bare, stream-json output and
+	// bypassPermissions; the model and thinking pass through as --model/--effort
+	const dir = fixtureDir("claude");
+	try {
+		const logPath = join(dir, "foo.developer.0.log");
+		writeFileSync(logPath, SYNTHETIC);
+		const calls: string[][] = [];
+		await analyseLog(logPath, {
+			agent: "claude",
+			backend: "claude",
+			llm: { model: "cc-model", thinking: "high" },
+			mergeThreshold: 10,
+			runAnalyser: async (argv) => {
+				calls.push(argv);
+				return "Summary: done.\nStruggle: none";
+			},
+		});
+		assert.equal(calls.length, 6);
+		const head = ["claude", "--bare", "--no-session-persistence", "-p"];
+		assert.deepEqual(calls[0].slice(0, 4), head);
+		assert.ok(calls[0][4].startsWith("Block 1 of type thinking"), "the prompt travels as the -p positional");
+		assert.deepEqual(calls[0].slice(5), ["--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose", "--model", "cc-model", "--effort", "high"]);
+		assert.deepEqual(calls[5].slice(0, 4), head, "pass 2 uses the claude argv too");
+		// no pi flags in the claude argv
+		for (const flag of ["--approve", "--mode", "--thinking", "--provider", "--no-tools"]) assert.equal(calls[0].indexOf(flag), -1, `${flag} stays out of the claude analyser argv`);
+		// no model and no thinking: no model/effort flags; off and minimal have no claude effort, both map to low
+		const seen: string[][] = [];
+		await analyseLog(logPath, { agent: "claude", backend: "claude", llm: {}, runAnalyser: async (argv) => (seen.push(argv), "S: x\nStruggle: none") });
+		assert.deepEqual(seen[0].slice(5), ["--permission-mode", "bypassPermissions", "--output-format", "stream-json", "--verbose"]);
+		const seenOff: string[][] = [];
+		await analyseLog(logPath, { agent: "claude", backend: "claude", llm: { thinking: "off" }, runAnalyser: async (argv) => (seenOff.push(argv), "S: x\nStruggle: none") });
+		assert.deepEqual(seenOff[0].slice(-2), ["--effort", "low"]);
+		const seenMin: string[][] = [];
+		await analyseLog(logPath, { agent: "claude", backend: "claude", llm: { thinking: "minimal" }, runAnalyser: async (argv) => (seenMin.push(argv), "S: x\nStruggle: none") });
+		assert.deepEqual(seenMin[0].slice(-2), ["--effort", "low"]);
+		const seenMax: string[][] = [];
+		await analyseLog(logPath, { agent: "claude", backend: "claude", llm: { thinking: "max" }, runAnalyser: async (argv) => (seenMax.push(argv), "S: x\nStruggle: none") });
+		assert.deepEqual(seenMax[0].slice(-2), ["--effort", "max"]);
+		// the pi backend stays the default: no backend and no llm gives the byte-identical pi argv
+		const piCalls: string[][] = [];
+		await analyseLog(logPath, { runAnalyser: async (argv) => (piCalls.push(argv), "S: x\nStruggle: none") });
+		assert.deepEqual(piCalls[0].slice(0, 9), ["pi", "--approve", "--no-session", "--no-extensions", "--no-skills", "--no-mcp", "--no-tools", "--mode", "json"]);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 function testAnalyserAnswerEmptyParts() {
 	// a message_end with an empty text part: the joined text is empty, so no answer
 	const emptyText = '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":""}]}}';
@@ -490,6 +538,7 @@ try {
 	testPlainOrderBeforeFallbackCall();
 	await testReportPipeline();
 	testCommandBuilder();
+	await testClaudeAnalyserPipeline();
 	testAnalyserAnswerEmptyParts();
 	await testFailedAnalyser();
 	await testRetryRecovers();

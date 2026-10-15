@@ -4,8 +4,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { kanbanDir, roleNotesPath, taskSlug, type Task } from "../kanban.ts";
 import { writePid } from "../pid.ts";
+import { claudeSpawnArgs, piSpawnArgs } from "./backends.ts";
 import { git } from "./board.ts";
-import { llmFlags, type Config } from "./config.ts";
+import { resolveLlm, type Config } from "./config.ts";
 import { log, logPath, nextRunIndex } from "./log.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -137,6 +138,24 @@ export function clearExitFile(root: string, name: string): void {
 	}
 }
 
+// claude system-prompt injection: the project AGENTS.md and the role notes concatenated
+// into one file next to the pid files, passed as --append-system-prompt-file. One file: the
+// claude flag does not repeat, and a file ref avoids the 131,000-byte argv cap that bounds
+// pi's inline injection, so the project part keeps the same cap policy as pi and skips with
+// a warning above it. Overwritten at every spawn, so stale content never survives
+function claudeSystemPromptFile(root: string, name: string, role: string, projectPrompt: string | null): string | null {
+	let notes = "";
+	try {
+		notes = readFileSync(roleNotesPath(root, role), "utf8");
+	} catch {
+		/* no role notes yet: the project part alone */
+	}
+	if (!projectPrompt && !notes.trim()) return null;
+	const path = join(kanbanDir(root), ".pids", `${name}.system-prompt.md`);
+	writeFileSync(path, [projectPrompt, notes].filter((part) => part && part.trim()).join("\n\n") + "\n");
+	return path;
+}
+
 export function spawnAgent(root: string, cfg: Config, role: string, task: Task, cwd: string, pidName?: string): void {
 	const slug = taskSlug(task.file);
 	const name = pidName ?? slug;
@@ -149,20 +168,26 @@ export function spawnAgent(root: string, cfg: Config, role: string, task: Task, 
 	const fd = openSync(logPath(root, `${slug}.${role}.${nextRunIndex(root, slug, role)}`), "a");
 	// one exit file per task at a time: a stale one from a previous run would read as this run's code
 	clearExitFile(root, name);
-	// --approve trusts the project-local files of the worktree, so the headless session never waits for a trust prompt;
-	// --mode json streams the full JSONL event log (thinking, tool calls, text) instead of print mode's final text only;
-	// the provider/model/thinking flags come from the config, resolved per role
 	ensureRoleNotes(root, role);
 	// the cwd symlinks give the session its task (SPECS.md) and role guidance (AGENTS.md) at startup
 	ensureContextSymlinks(root, cwd, task.file, role);
 	// the project's own AGENTS.md rides as an appended system prompt: the cwd AGENTS.md is the
 	// role-notes symlink, so the project's own instructions would otherwise never load
 	const projectPrompt = projectAgentsPrompt(root);
+	// per-backend argv from the resolved provider/model/thinking triple: pi keeps the
+	// byte-identical pre-backend construction (--approve, --mode json, the inline
+	// --append-system-prompt), claude swaps in bypassPermissions and stream-json and carries
+	// the system prompt as one file ref
+	const llm = resolveLlm(root, cfg, role, task.complexity ?? "moderate");
+	const prompt = renderPrompt(root, role);
+	const agentArgs = cfg.backend === "claude"
+		? claudeSpawnArgs(llm, prompt, claudeSystemPromptFile(root, name, role, projectPrompt))
+		: piSpawnArgs(llm, projectPrompt, prompt);
 	// the sh wrapper runs the agent and records its exit code into <name>.exit, so the poll can
 	// tell a successful finish (exit 0) from a crash even after a daemon restart. The agent
 	// command travels as positional args ($1..), so paths with spaces stay safe; $0 is a dummy
 	const exitPath = exitFilePath(root, name);
-	const child = spawn("sh", ["-c", `"$@" ; echo $? > "${exitPath}"`, "sh", cfg.agent, "--approve", "--mode", "json", ...llmFlags(root, cfg, role, task.complexity ?? "moderate"), ...(projectPrompt ? ["--append-system-prompt", projectPrompt] : []), "-p", renderPrompt(root, role)], {
+	const child = spawn("sh", ["-c", `"$@" ; echo $? > "${exitPath}"`, "sh", cfg.agent, ...agentArgs], {
 		cwd,
 		detached: true,
 		stdio: ["ignore", fd, fd],

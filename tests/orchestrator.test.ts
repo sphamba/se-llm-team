@@ -3233,3 +3233,119 @@ const orchLogAX = readFileSync(join(kanbanDir(rootAX), ".logs", "orchestrator.lo
 assert.ok(orchLogAX.includes("AGENTS.md") && orchLogAX.includes("131001"), "one warning line names the file and its size");
 cleanupAll(rootAX);
 console.log("orchestrator.test.ts: ... + agents.md injection smoke passed");
+
+// --- part AY: the claude backend. The spawn argv swaps pi's --approve/--mode json for
+// claude's bypassPermissions/stream-json flags with the system prompt as one
+// --append-system-prompt-file ref (project AGENTS.md + role notes concatenated: the claude
+// flag does not repeat). Backend resolution: the config agent key wins when it names a
+// backend, then the host-passed default (--default-agent), then pi; any other value stays
+// an executable override. loadConfig runs directly with a temp HOME, rescan drives the
+// spawns deterministically ---
+const rootAY = fixture();
+cleaned.push(rootAY);
+const homeAY = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAY);
+mkdirSync(kanbanDir(rootAY), { recursive: true });
+const savedHomeAY = process.env.HOME;
+process.env.HOME = homeAY;
+try {
+	// backend resolution: a config agent key that names a backend wins, then the host default, then pi
+	const cfgFile = join(kanbanDir(rootAY), "se-llm-team.json");
+	writeFileSync(cfgFile, JSON.stringify({ agent: "claude" }));
+	assert.equal(loadConfig(rootAY).backend, "claude", "a config agent key naming a backend selects that backend");
+	assert.equal(loadConfig(rootAY).agent, "claude", "the backend name is also the spawned executable");
+	writeFileSync(cfgFile, JSON.stringify({ agent: "pi" }));
+	assert.equal(loadConfig(rootAY, "claude").backend, "pi", "a config agent key naming pi wins over the host default");
+	writeFileSync(cfgFile, "{}");
+	const claudeCfg = loadConfig(rootAY, "claude");
+	assert.equal(claudeCfg.backend, "claude", "the host default applies when the config sets no agent key");
+	assert.equal(claudeCfg.agent, "claude", "an unset executable falls back to the backend CLI name");
+	assert.equal(loadConfig(rootAY).backend, "pi", "pi stays the fallback without a config key or host default");
+	// the claude spawn: config agent = an argv-recording stub, host default claude
+	const stubAY = join(rootAY, "ay-agent.cjs");
+	writeFileSync(
+		stubAY,
+		`#!/usr/bin/env node
+const { appendFileSync } = require("node:fs");
+appendFileSync(${JSON.stringify(join(rootAY, "argv.log"))}, JSON.stringify({ argv: process.argv }) + "\\n");
+`,
+	);
+	chmodSync(stubAY, 0o755);
+	writeFileSync(cfgFile, JSON.stringify({ agent: stubAY, model: "cc-model", thinking: "xhigh" }));
+	const cfgAY = loadConfig(rootAY, "claude");
+	assert.equal(cfgAY.backend, "claude", "a non-backend agent value stays an executable override");
+	assert.equal(cfgAY.agent, stubAY, "the executable override survives backend selection");
+	const projectPromptAY = "# project instructions: claude backend\n";
+	writeFileSync(join(rootAY, "AGENTS.md"), projectPromptAY);
+	const spawnAY = () => {
+		const task = createTask(rootAY, { name: "feat: claude spawn", summary: "Claude backend smoke", specs: "n/a" });
+		setState(rootAY, task, "to-do");
+		const before = argvAY().length;
+		rescan(rootAY, cfgAY);
+		return waitFor(() => argvAY().length > before, 10000, "the stub recorded its argv", () => "").then(() => argvAY().at(-1)!);
+	};
+	const argvAY = () =>
+		existsSync(join(rootAY, "argv.log"))
+			? readFileSync(join(rootAY, "argv.log"), "utf8")
+					.trim()
+					.split("\n")
+					.filter(Boolean)
+					.map((l) => JSON.parse(l) as { argv: string[] })
+			: [];
+	const aySpawn = await spawnAY();
+	// the stub runs as `node stub.cjs <agent args>`: argv[1] is the stub path, the agent argv starts at index 2
+	assert.equal(aySpawn.argv[1], stubAY, "the config executable is spawned");
+	const a = aySpawn.argv.slice(2);
+	assert.equal(a[0], "-p", "the prompt travels as the -p positional");
+	assert.ok(a[1].includes("Developer agent"), "the -p prompt is the role prompt");
+	for (const flag of ["--approve", "--mode", "--thinking", "--provider", "--append-system-prompt"]) assert.equal(a.indexOf(flag), -1, `${flag} stays out of the claude spawn argv`);
+	assert.deepEqual(a.slice(a.indexOf("--permission-mode"), a.indexOf("--permission-mode") + 2), ["--permission-mode", "bypassPermissions"]);
+	assert.deepEqual(a.slice(a.indexOf("--output-format"), a.indexOf("--output-format") + 2), ["--output-format", "stream-json"]);
+	assert.ok(a.includes("--verbose"), "stream-json output pairs with --verbose");
+	assert.deepEqual(a.slice(a.indexOf("--model"), a.indexOf("--model") + 2), ["--model", "cc-model"]);
+	assert.deepEqual(a.slice(a.indexOf("--effort"), a.indexOf("--effort") + 2), ["--effort", "xhigh"]);
+	const fileIdx = a.indexOf("--append-system-prompt-file");
+	assert.ok(fileIdx !== -1, "the claude spawn carries --append-system-prompt-file");
+	const spContent = readFileSync(a[fileIdx + 1], "utf8");
+	assert.ok(spContent.includes("project instructions"), "the project AGENTS.md rides in the concatenated system-prompt file");
+	assert.ok(spContent.includes("# developer:"), "the role notes ride in the concatenated system-prompt file");
+	// effort mapping: off and minimal have no claude effort, both map to low; max passes through; unset adds no flag
+	for (const [thinking, effort] of [["off", "low"], ["minimal", "low"], ["max", "max"], [undefined, null]] as const) {
+		writeFileSync(cfgFile, JSON.stringify({ agent: stubAY, thinking }));
+		const cfgCase = loadConfig(rootAY, "claude");
+		const spawnCase = await (async () => {
+			const task = createTask(rootAY, { name: `feat: claude effort ${thinking}`, summary: "Effort mapping smoke", specs: "n/a" });
+			setState(rootAY, task, "to-do");
+			const before = argvAY().length;
+			rescan(rootAY, cfgCase);
+			await waitFor(() => argvAY().length > before, 10000, "the effort stub recorded its argv", () => "");
+			return argvAY().at(-1)!;
+		})();
+		if (effort) assert.deepEqual(spawnCase.argv.slice(spawnCase.argv.indexOf("--effort"), spawnCase.argv.indexOf("--effort") + 2), ["--effort", effort], `thinking ${thinking} maps to --effort ${effort}`);
+		else assert.equal(spawnCase.argv.indexOf("--effort"), -1, "an unset thinking adds no --effort");
+	}
+	// over the 131,000-byte cap the project part skips with a warning; the role notes still ride
+	writeFileSync(join(rootAY, "AGENTS.md"), "x".repeat(131_001));
+	const capSpawn = await (async () => {
+		const task = createTask(rootAY, { name: "feat: claude cap", summary: "Cap smoke", specs: "n/a" });
+		setState(rootAY, task, "to-do");
+		const before = argvAY().length;
+		rescan(rootAY, cfgAY);
+		await waitFor(() => argvAY().length > before, 10000, "the capped stub recorded its argv", () => "");
+		return argvAY().at(-1)!;
+	})();
+	const capIdx = capSpawn.argv.indexOf("--append-system-prompt-file");
+	assert.ok(capIdx !== -1, "the capped spawn still carries the file ref");
+	const capContent = readFileSync(capSpawn.argv[capIdx + 1], "utf8");
+	assert.ok(!capContent.includes("project instructions"), "the project part skipped above the cap");
+	assert.ok(capContent.includes("# developer:"), "the role notes still ride above the cap");
+	assert.ok(readFileSync(join(kanbanDir(rootAY), ".logs", "orchestrator.log"), "utf8").includes("131001"), "one warning line names the file and its size");
+	// an invalid host default warns and falls back to pi
+	writeFileSync(cfgFile, "{}");
+	loadConfig(rootAY, "banana");
+	assert.ok(readFileSync(join(kanbanDir(rootAY), ".logs", "orchestrator.log"), "utf8").includes("unknown default agent"), "an invalid default agent warns");
+} finally {
+	process.env.HOME = savedHomeAY;
+}
+cleanupAll(rootAY);
+console.log("orchestrator.test.ts: ... + claude backend spawn smoke passed");

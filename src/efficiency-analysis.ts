@@ -6,6 +6,8 @@ import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { gunzipSync } from "node:zlib";
+import { claudeAnalyserArgs, piLlmFlags, type Backend } from "./orchestrator/backends.ts";
+import type { LlmConfig } from "./orchestrator/config.ts";
 
 // One ordered assistant block from the log.
 export interface AnalysisBlock {
@@ -27,7 +29,8 @@ export interface BlockReport {
 
 export interface AnalyseOptions {
 	agent?: string; // default "pi"
-	llmFlags?: string[]; // default []
+	backend?: Backend; // default "pi"
+	llm?: LlmConfig; // resolved provider/model/thinking for the backend llm flags, default {}
 	concurrency?: number; // max in-flight block analysers, default 8
 	mergeThreshold?: number; // chars: a text or thinking block shorter than this folds into the next block as lead-in context, default 250
 	delay?: (ms: number) => Promise<void>; // wait before a retry attempt, default a real setTimeout, tests pass a no-op
@@ -425,18 +428,22 @@ async function callWithRetry(run: (argv: string[]) => Promise<string | null>, ar
 // the log as the name minus the .log or .log.gz suffix plus .analysis.md.
 export async function analyseLog(logPath: string, opts: AnalyseOptions = {}): Promise<AnalyseResult> {
 	const agent = opts.agent ?? "pi";
-	const flags = opts.llmFlags ?? [];
+	const backend = opts.backend ?? "pi";
+	const llm = opts.llm ?? {};
 	const concurrency = opts.concurrency ?? 8;
 	const mergeThreshold = opts.mergeThreshold ?? DEFAULT_MERGE_THRESHOLD;
 	const delay = opts.delay ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 	const run = opts.runAnalyser ?? ((argv: string[]) => spawnAnalyser(argv, dirname(logPath)));
+	// per-backend argv: claude swaps pi's isolation flags for --bare and stream-json output
+	const buildArgs = (prompt: string): string[] =>
+		backend === "claude" ? [agent, ...claudeAnalyserArgs(llm, prompt)] : buildAnalyserCommand(agent, piLlmFlags(llm), prompt);
 	const content = readLogFile(logPath);
 	const blocks = parseLogBlocks(content);
 	// merge pass: short text and thinking blocks fold into the next block as lead-in context
 	const { units, mergedCount } = mergeLeadIns(blocks, mergeThreshold);
 	// pass 1: one analyser per kept block, in log order
 	const outcomes = await pool(units, concurrency, async (unit): Promise<{ report: BlockReport; failed: boolean }> => {
-		const { answer, reason } = await callWithRetry(run, buildAnalyserCommand(agent, flags, pass1Prompt(unit.block, unit.leadIns)), delay);
+		const { answer, reason } = await callWithRetry(run, buildArgs(pass1Prompt(unit.block, unit.leadIns)), delay);
 		if (answer === null) {
 			return {
 				failed: true,
@@ -452,7 +459,7 @@ export async function analyseLog(logPath: string, opts: AnalyseOptions = {}): Pr
 	const reports = outcomes.map((outcome) => outcome.report);
 	const failedCount = outcomes.filter((outcome) => outcome.failed).length;
 	// pass 2: one analyser for the whole report
-	const second = await callWithRetry(run, buildAnalyserCommand(agent, flags, pass2Prompt(units.map((unit) => unit.block), reports, failedCount, mergedCount)), delay);
+	const second = await callWithRetry(run, buildArgs(pass2Prompt(units.map((unit) => unit.block), reports, failedCount, mergedCount)), delay);
 	const analysis = second.answer === null ? `Analysis failed after ${RETRY_ATTEMPTS} attempts: ${second.reason}` : second.answer.trim();
 	const reportPath = reportPathFor(logPath);
 	writeFileSync(reportPath, renderReport(logPath, reports, analysis));
