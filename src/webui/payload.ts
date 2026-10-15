@@ -202,9 +202,13 @@ function tsMs(v: unknown): number | null {
 // per-file usage stats, memoized by size like subsCache: tokens sums the provider-reported
 // message.usage input + output over the usage-bearing records (turn_end in a run log, assistant
 // in a subagent transcript; reasoning is a subset of output so it counts once, cacheRead/cacheWrite
-// excluded) (000177), duration is the last record timestamp minus the
+// excluded) (000177); claude stream-json carries the same sum as input_tokens/output_tokens, one
+// API turn can emit several assistant records sharing message.id with the same usage, so each
+// message counts once. Duration is the last record timestamp minus the
 // first, first is that first record timestamp in epoch ms (000139: the agent history sort's
-// primary key), model and thinkingLevel come off the latest usage-bearing record (000146: the log
+// primary key); claude records carry an optional top-level timestamp (newer emitters only), so a
+// finished claude run prefers its result record's wall-clock duration_ms over the timestamp span
+// and a timestamp-less live one reads null. Model and thinkingLevel come off the latest usage-bearing record (000146: the log
 // pane's meta line; null when no such record exists or the latest one lacks them (000151)). A plain log only ever grows, so a size match
 // means the parse is current; a live log re-parses per poll. A .gz log is immutable, so its
 // compressed size keys the same cache.
@@ -227,8 +231,11 @@ function logStats(path: string): { tokens: number | null; duration: number | nul
 	let last: number | null = null;
 	let model: string | null = null;
 	let thinkingLevel: string | null = null;
+	let resultMs: number | null = null; // the claude result record's wall-clock duration_ms
+	const idTokens = new Map<string, number>(); // claude message.id -> the usage counted for it
+	const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 	for (const line of text.split("\n")) {
-		if (!line.includes('"timestamp"') && !line.includes('"usage"')) continue; // cheap filter before JSON.parse
+		if (!line.includes('"timestamp"') && !line.includes('"usage"') && !line.includes('"duration_ms"')) continue; // cheap filter before JSON.parse
 		let rec: any;
 		try {
 			rec = JSON.parse(line);
@@ -236,22 +243,34 @@ function logStats(path: string): { tokens: number | null; duration: number | nul
 			continue;
 		}
 		const usage = rec?.message?.usage;
-		const input = typeof usage?.input === "number" && Number.isFinite(usage.input) ? usage.input : null;
-		const output = typeof usage?.output === "number" && Number.isFinite(usage.output) ? usage.output : null;
+		// pi usage carries input/output; claude stream-json carries input_tokens/output_tokens
+		const input = num(usage?.input) ?? num(usage?.input_tokens);
+		const output = num(usage?.output) ?? num(usage?.output_tokens);
+		const claude = usage != null && (usage.input_tokens !== undefined || usage.output_tokens !== undefined);
 		if ((rec?.type === "turn_end" || rec?.type === "assistant") && input != null && output != null) {
-			tokens = (tokens ?? 0) + input + output;
+			const add = input + output;
+			const id = claude && typeof rec.message.id === "string" && rec.message.id ? rec.message.id : null;
+			if (id) {
+				// one claude API turn can emit several assistant records sharing message.id with the
+				// same usage: a re-read record replaces the usage counted for its message
+				tokens = (tokens ?? 0) + add - (idTokens.get(id) ?? 0);
+				idTokens.set(id, add);
+			} else {
+				tokens = (tokens ?? 0) + add;
+			}
 			// the loop reads top to bottom, so the latest usage-bearing record wins; a record without the
 			// fields clears them rather than carrying an older record's value forward (000151)
 			model = typeof rec.message.model === "string" && rec.message.model ? rec.message.model : null;
 			thinkingLevel = typeof rec.message.thinkingLevel === "string" && rec.message.thinkingLevel ? rec.message.thinkingLevel : null;
 		}
+		if (rec?.type === "result" && num(rec.duration_ms) != null) resultMs = rec.duration_ms;
 		const ts = tsMs(rec?.timestamp) ?? tsMs(rec?.message?.timestamp);
 		if (ts != null) {
 			first ??= ts;
 			last = ts;
 		}
 	}
-	const stats = { tokens, duration: first != null && last != null ? Math.max(0, last - first) : null, first, model, thinkingLevel };
+	const stats = { tokens, duration: resultMs ?? (first != null && last != null ? Math.max(0, last - first) : null), first, model, thinkingLevel };
 	statsCache.set(path, { size, ...stats });
 	return stats;
 }
@@ -298,17 +317,20 @@ function lastBoundary(full: Buffer | null, target: string, size: number): number
 // 000158: the byte offset that starts `count` collapsed lines before a record-boundary tail: a
 // thinking block (thinking_start..thinking_end records) and a tool call block
 // (tool_execution_start..tool_execution_end) each count as ONE line, every other record its own,
-// so init and back-fill windows always start between blocks and no block is ever broken;
-// 000166: a thinking block still open at the tail (no thinking_end below it) counts as ONE line
+// so init and back-fill windows always start between blocks and no block is ever broken; 000166:
+// a thinking block still open at the tail (no thinking_end below it) counts as ONE line
 // too, head landing at its thinking_start, so a live phase loads as one unbroken open block and a
-// back-fill from that head never re-serves it; returns 0 when the file starts first. Ceiling: a
-// record outgrowing the scan window doubles it per step
+// back-fill from that head never re-serves it; a claude stream_event block
+// (content_block_start..content_block_stop, deltas between) counts as ONE line by index pairing,
+// an open one at the tail likewise from its content_block_start; returns 0 when the file starts
+// first. Ceiling: a record outgrowing the scan window doubles it per step
 function linesBack(full: Buffer | null, target: string, tail: number, count: number): number {
 	let pos = tail; // walks record boundaries backward
 	let head = tail;
 	let inThink = false; // consuming a thinking block backward, back to its thinking_start
 	let openThink = false; // consuming a still-open thinking block backward (000166): its thinking_end lies below the tail
 	let openTool: string | null = null; // consuming a tool block backward, back to its matching start
+	let clBlock: number | null = null; // consuming a claude stream_event block backward, back to its content_block_start
 	let wlo = Math.max(0, tail - SCAN_WINDOW); // the scan window held in memory, grows backward
 	let win = readBytes(full, target, wlo, tail);
 	while (pos > 0 && count > 0) {
@@ -326,7 +348,7 @@ function linesBack(full: Buffer | null, target: string, tail: number, count: num
 		// only records carrying block markers can move the state; the rest are their own line
 		const raw = win.subarray(rstart - wlo, pos - wlo).toString("utf8");
 		let rec: any = null;
-		if (raw.includes('"thinking_') || raw.includes('"tool_execution_') || raw.includes('"toolcall_end"')) {
+		if (raw.includes('"thinking_') || raw.includes('"tool_execution_') || raw.includes('"toolcall_end"') || raw.includes('"stream_event"')) {
 			try {
 				rec = JSON.parse(raw);
 			} catch {
@@ -334,7 +356,7 @@ function linesBack(full: Buffer | null, target: string, tail: number, count: num
 			}
 		}
 		pos = rstart;
-		const ev = rec?.type === "message_update" ? rec.assistantMessageEvent : null;
+		const ev = rec?.type === "message_update" ? rec.assistantMessageEvent : rec?.type === "stream_event" ? rec.event : null;
 		if (inThink) {
 			if (ev?.type === "thinking_start") {
 				inThink = false;
@@ -344,6 +366,13 @@ function linesBack(full: Buffer | null, target: string, tail: number, count: num
 		} else if (openTool !== null) {
 			if ((rec?.type === "tool_execution_start" && rec.toolCallId === openTool) || (ev?.type === "toolcall_end" && ev.toolCall?.id === openTool)) {
 				openTool = null;
+				count--;
+				head = pos;
+			}
+		} else if (clBlock !== null) {
+			// claude stream block: the deltas between its stop and start records belong to it
+			if (ev?.type === "content_block_start" && ev.index === clBlock) {
+				clBlock = null;
 				count--;
 				head = pos;
 			}
@@ -360,6 +389,10 @@ function linesBack(full: Buffer | null, target: string, tail: number, count: num
 			}
 		} else if (ev?.type === "thinking_delta") {
 			openThink = true; // no thinking_end below the tail: the block is still open at the live tail
+		} else if (ev?.type === "content_block_stop" && typeof ev.index === "number") {
+			clBlock = ev.index;
+		} else if (ev?.type === "content_block_delta" && typeof ev.index === "number") {
+			clBlock = ev.index; // no content_block_stop below the tail: the block is still open
 		} else if (rec?.type === "tool_execution_end" && typeof rec.toolCallId === "string" && rec.toolCallId) {
 			openTool = rec.toolCallId;
 		} else {

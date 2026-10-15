@@ -57,6 +57,9 @@ export function nextRunIndex(root: string, slug: string, role: string): number {
 // the read path renders survives byte-for-byte: message_update deltas, tool calls, full tool
 // results (the subagent-log matching needs them), turn replays, and non-system message_end
 // records (the user prompt's qualifies).
+// claude stream-json records follow the same policy: the stream_event wrappers (only written
+// with --include-partial-messages) duplicate what the authoritative assistant/user records
+// carry, so they drop; system init, assistant, user and result keep verbatim.
 export function compactLogLine(line: string): string | null {
 	if (!line.startsWith("{")) return line; // non-JSON stderr passes through unchanged
 	let rec: any;
@@ -81,6 +84,8 @@ export function compactLogLine(line: string): string | null {
 				return JSON.stringify(rec);
 			}
 			return JSON.stringify({ type: "message_update", assistantMessageEvent: rec.assistantMessageEvent });
+		case "stream_event":
+			return null; // claude deltas: the assistant/user records that follow repeat the content
 		default:
 			return line; // kept verbatim, byte-for-byte
 	}

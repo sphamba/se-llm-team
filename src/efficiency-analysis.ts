@@ -56,14 +56,19 @@ interface ToolResultInfo {
 }
 
 // The joined text of one tool result payload. A .content array joins the .text strings of
-// its entries with newlines. A plain string is used as it is. Anything else is JSON text.
+// its entries with newlines. A plain string content (claude tool_result) or a plain string
+// payload is used as it is. Anything else is JSON text.
 function resultText(payload: unknown): string {
-	if (payload && typeof payload === "object" && Array.isArray((payload as { content?: unknown }).content)) {
-		const texts: string[] = [];
-		for (const part of (payload as { content: unknown[] }).content) {
-			if (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string") texts.push((part as { text: string }).text);
+	if (payload && typeof payload === "object") {
+		const content = (payload as { content?: unknown }).content;
+		if (typeof content === "string") return content;
+		if (Array.isArray(content)) {
+			const texts: string[] = [];
+			for (const part of content) {
+				if (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string") texts.push((part as { text: string }).text);
+			}
+			return texts.join("\n");
 		}
-		return texts.join("\n");
 	}
 	if (typeof payload === "string") return payload;
 	if (payload === undefined || payload === null) return "";
@@ -77,9 +82,11 @@ function argsText(args: unknown): string {
 }
 
 // Parse JSONL log content into ordered assistant blocks. message_end records are
-// authoritative. tool_execution_start records are a fallback for tool calls with no
-// message_end block. Deltas are a fallback for a message with no message_end at all.
-// Non-JSON lines group into one text block.
+// authoritative, and so are claude assistant records (stream-json). tool_execution_start
+// records are a fallback for tool calls with no message_end block. Deltas are a fallback
+// for a message with no message_end at all. Non-JSON lines group into one text block.
+// claude records: parent_tool_use_id set marks subagent activity and skips like pi's
+// isSidechain; stream_event deltas and the result record duplicate the assistant records.
 export function parseLogBlocks(content: string): AnalysisBlock[] {
 	const blocks: AnalysisBlock[] = [];
 	const results = new Map<string, ToolResultInfo>();
@@ -139,6 +146,7 @@ export function parseLogBlocks(content: string): AnalysisBlock[] {
 			continue;
 		}
 		if (rec.isSidechain === true) continue; // nested subagent runs are not analysed
+		if (rec.parent_tool_use_id != null) continue; // claude subagent activity in a parent log
 		if (rec.type === "message_end") {
 			const msg = rec.message;
 			if (!msg || typeof msg !== "object") continue;
@@ -178,6 +186,32 @@ export function parseLogBlocks(content: string): AnalysisBlock[] {
 			if (open && ev && typeof ev === "object") {
 				if (ev.type === "thinking_delta" && typeof ev.delta === "string") open.thinking += ev.delta;
 				else if (ev.type === "text_delta" && typeof ev.delta === "string") open.text += ev.delta;
+			}
+		} else if (rec.type === "assistant") {
+			// claude stream-json: the authoritative content blocks, one record per content slice
+			const msg = rec.message;
+			if (!msg || typeof msg !== "object" || msg.role !== "assistant") continue;
+			open = null;
+			pushPlain();
+			const parts = Array.isArray(msg.content) ? msg.content : [];
+			for (const part of parts) {
+				if (!part || typeof part !== "object") continue;
+				if (part.type === "thinking" && typeof part.thinking === "string" && part.thinking.trim()) {
+					blocks.push({ index: 0, type: "thinking", text: part.thinking });
+				} else if (part.type === "tool_use" && part.id) {
+					addCall(part.id, typeof part.name === "string" ? part.name : undefined, argsText(part.input));
+				} else if (part.type === "text" && typeof part.text === "string" && part.text.trim()) {
+					blocks.push({ index: 0, type: "text", text: part.text });
+				}
+			}
+		} else if (rec.type === "user") {
+			// claude tool results; prompt echoes contribute no blocks
+			const msg = rec.message;
+			const parts = Array.isArray(msg?.content) ? msg.content : [];
+			for (const part of parts) {
+				if (part && typeof part === "object" && part.type === "tool_result" && part.tool_use_id && !results.has(part.tool_use_id)) {
+					results.set(part.tool_use_id, { text: resultText(part), isError: part.is_error === true });
+				}
 			}
 		} else if (rec.type === "message_start") {
 			flushPending();
@@ -357,7 +391,9 @@ function spawnAnalyser(argv: string[], cwd: string): Promise<string | null> {
 	});
 }
 
-// The last assistant message_end in the analyser stdout. Non-JSON lines are ignored.
+// The final answer in the analyser stdout: pi's last assistant message_end, or claude's
+// result record (the result field) with the assistant records as a fallback. Non-JSON lines
+// are ignored.
 export function analyserAnswer(stdout: string): string | null {
 	let answer: string | null = null;
 	for (const line of stdout.split("\n")) {
@@ -369,7 +405,22 @@ export function analyserAnswer(stdout: string): string | null {
 		} catch {
 			continue;
 		}
-		if (!rec || typeof rec !== "object" || Array.isArray(rec) || rec.type !== "message_end") continue;
+		if (!rec || typeof rec !== "object" || Array.isArray(rec)) continue;
+		if (rec.type !== "message_end") {
+			// claude stream-json stdout: the result record carries the final answer, an error run
+			// has none; assistant records with no result record still carry the text
+			if (rec.type === "result") {
+				answer = rec.is_error === true || typeof rec.result !== "string" || !rec.result.trim() ? null : rec.result;
+			} else if (rec.type === "assistant" && rec.message?.role === "assistant") {
+				const parts = Array.isArray(rec.message.content) ? rec.message.content : [];
+				const text = parts
+					.filter((part) => part && typeof part === "object" && part.type === "text" && typeof part.text === "string")
+					.map((part) => (part as { text: string }).text)
+					.join("\n");
+				answer = text.trim() ? text : answer;
+			}
+			continue;
+		}
 		const msg = rec.message;
 		if (!msg || typeof msg !== "object" || msg.role !== "assistant") continue;
 		const parts = Array.isArray(msg.content) ? msg.content : [];

@@ -27,6 +27,10 @@ export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", 
 // message) renders from message_end. A subagent .output transcript is sidechain session records
 // (user/assistant/toolResult): prompt and text render as lines, thinking and tool calls join the
 // same blocks and dedupe.
+// claude stream-json records render from the authoritative assistant/user records: message
+// content blocks (text, thinking, tool_use) and tool_result blocks join the same UI. The
+// stream_event deltas duplicate those records, so they skip; upgrade path: prefer the deltas
+// when a claude spawn adds --include-partial-messages.
 const ARG_KEYS = ["command", "path", "file_path", "pattern", "url", "query"];
 const cap = (s: string, max = 160) => (s.length > max ? s.slice(0, max - 3) + "..." : s);
 
@@ -53,7 +57,8 @@ function oneLiner(args: unknown): string {
 }
 
 function textOf(result: unknown, max = 200): string {
-	const content = (result as { content?: { type?: string; text?: string }[] } | undefined)?.content;
+	const content = (result as { content?: { type?: string; text?: string }[] | string } | undefined)?.content;
+	if (typeof content === "string") return cap(content.replace(/\s+/g, " ").trim(), max);
 	const text = Array.isArray(content) ? content.find((c) => c?.type === "text")?.text : undefined;
 	return typeof text === "string" ? cap(text.replace(/\s+/g, " ").trim(), max) : "";
 }
@@ -235,6 +240,7 @@ export function renderLogChunk(text: string): string {
 				out.push("[prompt] " + esc(cap(msg.content.replace(/\s+/g, " ").trim())) + "\n");
 			}
 		} else if (rec.isSidechain === true && rec.message && typeof rec.message === "object") {
+			// pi sidechain records key on isSidechain, so they check before the claude branches
 			const msg = rec.message;
 			if (msg.role === "user") {
 				const text = typeof msg.content === "string" ? msg.content : "";
@@ -257,6 +263,36 @@ export function renderLogChunk(text: string): string {
 			} else if (msg.role === "toolResult") {
 				joinTool(msg.toolCallId, msg.toolName, msg.isError === true, msg);
 			}
+		} else if (rec.type === "assistant") {
+			// claude stream-json: the authoritative message content blocks (no deltas needed)
+			const blocks = Array.isArray(rec.message?.content) ? rec.message.content : [];
+			for (const block of blocks) {
+				if (block?.type === "tool_use") {
+					openTool(block.id, block.name, block.input);
+				} else if (block?.type === "thinking" && typeof block.thinking === "string" && block.thinking) {
+					flush();
+					out.push('<details class="lg-think"><summary>Thinking</summary><pre>' + md(block.thinking) + "</pre></details>");
+				} else if (block?.type === "text" && typeof block.text === "string" && block.text) {
+					pending += block.text;
+				}
+			}
+		} else if (rec.type === "user") {
+			const msg = rec.message;
+			if (typeof msg?.content === "string" && msg.content.trim()) {
+				flush();
+				out.push("[prompt] " + esc(cap(msg.content.replace(/\s+/g, " ").trim())) + "\n");
+			}
+			const blocks = Array.isArray(msg?.content) ? msg.content : [];
+			for (const block of blocks) {
+				if (block?.type === "tool_result") {
+					joinTool(block.tool_use_id, block.toolName, block.is_error === true, block);
+				} else if (block?.type === "text" && typeof block.text === "string" && block.text.trim()) {
+					flush();
+					out.push("[prompt] " + esc(cap(block.text.replace(/\s+/g, " ").trim())) + "\n");
+				}
+			}
+		} else if (rec.type === "stream_event") {
+			// claude partial-message deltas duplicate the assistant/user records that follow
 		}
 	}
 	flush();
