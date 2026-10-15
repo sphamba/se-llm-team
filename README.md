@@ -19,7 +19,7 @@ The https URL form works too: `pi install https://github.com/sphamba/se-llm-team
 Add the repo as a plugin marketplace and install the plugin:
 
 ```sh
-claude plugin marketplace add github.com/sphamba/se-llm-team
+claude plugin marketplace add sphamba/se-llm-team
 claude plugin install se-llm-team@se-llm-team
 ```
 
