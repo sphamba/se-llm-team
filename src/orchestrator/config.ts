@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { COMPLEXITIES } from "../kanban.ts";
 import { log } from "./log.ts";
@@ -69,10 +69,25 @@ function idleMinutes(root: string, value: unknown, key: string, fallback: number
 	return value;
 }
 
+// 000215: the global config lives in the agent-neutral config dir (XDG when set, else
+// ~/.config/se-llm-team); the legacy pi path is a read-only fallback for old setups
+const neutralConfigPath = () =>
+	join(process.env.XDG_CONFIG_HOME || join(process.env.HOME ?? "", ".config"), "se-llm-team", "se-llm-team.json");
+const legacyConfigPath = () => join(process.env.HOME ?? "", ".pi", "agent", "se-llm-team.json");
+
 export function loadConfig(root: string): Config {
 	let cfg: { agent?: string; pollMinutes?: number; backlogIdleMinutes?: unknown; retryIdleMinutes?: unknown; logStallMinutes?: unknown; provider?: unknown; model?: unknown; thinking?: unknown; roles?: unknown; reviewerCap?: unknown } = {};
-	// user-level first, project .kanban/se-llm-team.json overrides it
-	for (const path of [join(process.env.HOME ?? "", ".pi", "agent", "se-llm-team.json"), join(root, ".kanban", "se-llm-team.json")]) {
+	// neutral global first, the legacy pi path is a read-only fallback, project .kanban/se-llm-team.json overrides both
+	const paths = [neutralConfigPath()];
+	if (!existsSync(paths[0])) {
+		const legacy = legacyConfigPath();
+		if (existsSync(legacy)) {
+			log(root, `using the legacy config at ${legacy} (${paths[0]} not found)`);
+			paths.push(legacy);
+		}
+	}
+	paths.push(join(root, ".kanban", "se-llm-team.json"));
+	for (const path of paths) {
 		try {
 			cfg = { ...cfg, ...JSON.parse(readFileSync(path, "utf8")) };
 		} catch {

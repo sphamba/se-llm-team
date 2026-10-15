@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PRIORITY_RANK } from "../kanban.ts";
 import { esc, inline, logFixups, md } from "./logpane.ts";
@@ -15,10 +15,13 @@ export interface WebUiConfig {
 	port: number;
 }
 
-// se-llm-team.json: user level first, project .kanban/se-llm-team.json overrides it;
-// a missing file, invalid JSON or absent keys mean off
+// se-llm-team.json: the neutral config dir first (XDG when set, else ~/.config/se-llm-team),
+// the legacy pi path is a read-only fallback when the neutral file is absent; project
+// .kanban/se-llm-team.json overrides both; a missing file, invalid JSON or absent keys mean off
 export function loadWebUiConfig(root?: string): WebUiConfig {
-	const paths = [join(process.env.HOME ?? "", ".pi", "agent", "se-llm-team.json")];
+	const home = process.env.HOME ?? "";
+	const neutral = join(process.env.XDG_CONFIG_HOME || join(home, ".config"), "se-llm-team", "se-llm-team.json");
+	const paths = [existsSync(neutral) ? neutral : join(home, ".pi", "agent", "se-llm-team.json")];
 	if (root) paths.push(join(root, ".kanban", "se-llm-team.json"));
 	let webUi: { enabled?: boolean; host?: string; port?: number } | undefined;
 	for (const path of paths) {

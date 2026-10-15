@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -66,9 +66,27 @@ export function currentCommit(root: string): string {
 	}
 }
 
-const piAgentDir = () => join(process.env.HOME || homedir(), ".pi", "agent");
-const hubRegistryPath = () => join(piAgentDir(), REGISTRY_FILE);
-const hubLockPath = () => join(piAgentDir(), LOCK_FILE);
+// 000215: the registry and lock live in the agent-neutral config dir (XDG when set, else
+// ~/.config/se-llm-team); the legacy ~/.pi/agent paths are read-only: the registry copies
+// from there once at hub start, the legacy lock is only read for the old-code-daemon warning
+const neutralHubDir = () => join(process.env.XDG_CONFIG_HOME || join(process.env.HOME || homedir(), ".config"), "se-llm-team");
+const legacyPiAgentDir = () => join(process.env.HOME || homedir(), ".pi", "agent");
+const hubRegistryPath = () => join(neutralHubDir(), REGISTRY_FILE);
+const hubLockPath = () => join(neutralHubDir(), LOCK_FILE);
+
+// one-time best-effort migration: a registry left under ~/.pi/agent by old code copies to the
+// neutral path when the neutral file is absent, so an upgraded setup keeps its hub list
+function migrateLegacyRegistry(): void {
+	try {
+		if (existsSync(hubRegistryPath())) return;
+		const legacy = join(legacyPiAgentDir(), REGISTRY_FILE);
+		if (!existsSync(legacy)) return;
+		mkdirSync(neutralHubDir(), { recursive: true });
+		copyFileSync(legacy, hubRegistryPath());
+	} catch {
+		/* best effort */
+	}
+}
 
 // env knobs let smoke runs shrink the cadences without touching the config schema
 const envMs = (key: string, fallback: number): number => {
@@ -101,17 +119,17 @@ export function readHubRegistry(): HubEntry[] {
 // registry publish, hub only: sibling temp file + rename, so readers never see a partial file
 function writeRegistry(entries: HubEntry[]): void {
 	const path = hubRegistryPath();
-	mkdirSync(piAgentDir(), { recursive: true });
+	mkdirSync(neutralHubDir(), { recursive: true });
 	const tmp = `${path}.${process.pid}.tmp`;
 	writeFileSync(tmp, JSON.stringify(entries, null, "\t") + "\n");
 	renameSync(tmp, path);
 }
 
-// election lock shared by every daemon in ~/.pi/agent: create-exclusive, stale-pid steal
+// election lock shared by every daemon in the neutral config dir: create-exclusive, stale-pid steal
 // (same pattern as the per-project orchestrator lock)
 function acquireHubLock(): boolean {
 	const lock = hubLockPath();
-	mkdirSync(piAgentDir(), { recursive: true });
+	mkdirSync(neutralHubDir(), { recursive: true });
 	try {
 		writeFileSync(lock, String(process.pid), { flag: "wx" });
 		return true;
@@ -258,6 +276,7 @@ async function route(
 // at seed), serve the ui and every API on the webUi host/port, and register this daemon's
 // project. Resolves null when the port cannot be bound, so the caller stands down.
 export async function startHub(opts: HubOptions): Promise<{ port: number; close: () => void } | null> {
+	migrateLegacyRegistry(); // one-time: a legacy ~/.pi/agent registry seeds the neutral path
 	const staleMs = opts.staleMs ?? envMs("SE_LLM_TEAM_HUB_STALE_MS", DEFAULT_STALE_MS);
 	const tickMs = opts.healthMs ?? envMs("SE_LLM_TEAM_HUB_HEALTH_MS", DEFAULT_HEALTH_MS);
 	const now = Date.now();
@@ -367,6 +386,14 @@ export function joinHub(opts: HubOptions): void {
 
 	// one election attempt: win the lock and serve, or stand down (lock lost or bind failed)
 	const becomeHub = async (): Promise<boolean> => {
+		// 000215: the lock is taken at the neutral path only; a legacy lock held by a live process
+		// means an old-code daemon may still serve the hub during the upgrade overlap
+		try {
+			const legacyPid = parseInt(readFileSync(join(legacyPiAgentDir(), LOCK_FILE), "utf8").trim(), 10);
+			if (pidAlive(legacyPid)) log(`legacy hub lock held by pid ${legacyPid}, an old-code daemon may still serve the hub`);
+		} catch {
+			/* no legacy lock */
+		}
 		if (!acquireHubLock()) {
 			log("hub lock held by another daemon, standing down");
 			return false;
