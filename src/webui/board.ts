@@ -17,9 +17,10 @@ export function flipDiff(oldPos, newPos) {
 }
 
 // a run label on the detail card: the role capitalized, 1-based when the role has several runs
-// (payload run 0 reads "1"), unnumbered for a solo run or a legacy unsuffixed log (a.run == null)
+// (payload run 0 reads "1"), unnumbered for a solo run, a legacy unsuffixed log (a.run == null) or
+// a doctor entry (the run index is the analysed run's, so it never numbers a doctor card)
 export function agentLabel(a, count) {
-	return a.role[0].toUpperCase() + a.role.slice(1) + (count[a.role] > 1 && a.run != null ? " " + (a.run + 1) : "");
+	return a.role[0].toUpperCase() + a.role.slice(1) + (a.role !== "doctor" && count[a.role] > 1 && a.run != null ? " " + (a.run + 1) : "");
 }
 
 // tokens on an agent card: raw below 1000, kilo (42k), mega with one decimal from a million (2.3M);

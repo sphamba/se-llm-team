@@ -1540,6 +1540,8 @@ assert.equal(agentLabel(devRuns[1], { developer: 3 }), "Developer 1", "run index
 assert.equal(agentLabel(devRuns[2], { developer: 3 }), "Developer 2", "run index 1 labels 2");
 assert.equal(agentLabel(devRuns[0], { developer: 3 }), "Developer", "a legacy unsuffixed run keeps its unnumbered label");
 assert.equal(agentLabel({ role: "reviewer", run: 0 }, { reviewer: 1 }), "Reviewer", "a solo run keeps its unnumbered label");
+assert.equal(agentLabel({ role: "doctor", run: 0 }, { doctor: 2 }), "Doctor", "a doctor entry stays unnumbered with several doctor cards");
+assert.equal(agentLabel({ role: "doctor", run: 1 }, { doctor: 3 }), "Doctor", "a doctor entry stays unnumbered whatever run index it carries");
 assert.ok(page.includes(String(agentLabel)), "the page ships the tested agentLabel source");
 
 // 000120 card stats: tokens render raw below 1000, kilo (42k), mega from a million (2.3M); duration
