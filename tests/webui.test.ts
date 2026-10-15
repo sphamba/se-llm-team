@@ -12,6 +12,10 @@ import { gzipSync } from "node:zlib";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-merge", "merging", "to-live-test", "live-testing", "done"];
 
+// 000215: the neutral config dir resolves to $HOME/.config/se-llm-team when XDG_CONFIG_HOME
+// is unset, so dropping it keeps every temp-HOME section off the real user config
+delete process.env.XDG_CONFIG_HOME;
+
 const root = mkdtempSync(join(tmpdir(), "webui-test-"));
 const home = mkdtempSync(join(tmpdir(), "webui-home-"));
 let daemon: ChildProcess | undefined;
@@ -1648,6 +1652,17 @@ assert.equal(overridden.port, 4243);
 // a project file without webUi falls back to the user file
 writeFileSync(join(root, ".kanban", "se-llm-team.json"), JSON.stringify({ pollMinutes: 5 }));
 assert.equal(loadWebUiConfig(root).enabled, true);
+// 000215: the neutral config dir wins over the legacy pi path; the project file overrides both
+const neutralHome = join(home, ".config", "se-llm-team");
+mkdirSync(neutralHome, { recursive: true });
+writeFileSync(join(neutralHome, "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "neutral-host" } }));
+assert.equal(loadWebUiConfig(root).host, "neutral-host", "the neutral config is read when present");
+rmSync(join(neutralHome, "se-llm-team.json"));
+assert.equal(loadWebUiConfig(root).enabled, true, "the legacy config is read when the neutral file is absent");
+writeFileSync(join(root, ".kanban", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "project-host" } }));
+assert.equal(loadWebUiConfig(root).host, "project-host", "the project file overrides the legacy global");
+writeFileSync(join(neutralHome, "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "neutral-host" } }));
+assert.equal(loadWebUiConfig(root).host, "project-host", "the project file overrides the neutral global too");
 process.env.HOME = realHome;
 
 cleanup();
