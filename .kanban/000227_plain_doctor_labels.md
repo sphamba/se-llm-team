@@ -1,7 +1,7 @@
 ---
 name: "fix: unnumbered Doctor card labels in the web UI"
 priority: "medium"
-state: "live-testing"
+state: "done"
 worktree: "fix/227-plain-doctor-labels"
 issuer: "user"
 complexity: "simple"

@@ -1,8 +1,8 @@
 ---
 name: "feat: blue doctor agent cards in the web UI"
 priority: "medium"
-state: "live-testing"
-worktree: "feat/226-blue-doctor-cards"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "blue-doctor-cards"
@@ -41,7 +41,7 @@ Implemented in 2b331fb in the worktree feat/226-blue-doctor-cards:
 - Reviewed (worktree feat/226-blue-doctor-cards): diff verified against all four requirements (blue vars in all three theme blocks, #m-doctor-scoped text/border/background/hover/active rules that cover agent-live and agent-past alike, unscoped .agent-card rules untouched, renderDoctor markup unchanged) and `node tests/webui.test.ts` passes (exit 0, "all assertions passed"); the recorded Playwright numbers match the diff's literals exactly. The .check keeps its own green rule and the .spin uses --border/--fg, so neither glyph picks up the blue. No fixes.
 - The four assumptions the developer parked under Open questions are each answered by the Specs (requirement 1 delegates the blue pair to developer's judgment, requirement 2 states the at-rest highlight and the hover/active variants and enumerates only text/border/background/hover/active, the Current state section names the run buttons and .agent-subs), so they were settled, not user questions; removed from the section.
 
-# Live test (merged 753477e, real hub on a temp root + Playwright, 26/26 checks passed, no findings)
+## Live test (merged 753477e, real hub on a temp root + Playwright, 26/26 checks passed, no findings)
 - Fixture: a done probe task with a past doctor log, a live doctor log (live sleep pid in `.pids/000226_probe.reviewer.0.analysis.pid`), one developer run log and a named `/tmp/pi-subagents-1000/*.output` sub transcript, so both doctor variants and the run/sub comparison cards rendered. Hubs served the merged page (4321) and the pre-change page from `git archive 43cdb72` (4322) over the same fixture.
 - Light (both `colorScheme: light` and explicit `data-theme="light"` over a dark media query): past and live doctor cards read text and border rgb(47, 111, 221) on highlight rgba(47, 111, 221, 0.12); hover and `.agent-card-active` give rgba(47, 111, 221, 0.24) with the blue border and the active class on the clicked card. The doctor log pane opened with its report on click.
 - Dark (both the `prefers-color-scheme` fallback and the real `#theme` toggle path): doctor text and border rgb(89, 167, 255) on rgba(89, 167, 255, 0.15); hover and active rgba(89, 167, 255, 0.28). Toggling back in a dark context gave the light literals, so explicit choice beats the media query.
