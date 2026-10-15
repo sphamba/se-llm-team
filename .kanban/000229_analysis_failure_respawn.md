@@ -31,5 +31,19 @@ Cap the hook to at most one failed attempt per run: skip the spawn when <base>.a
 
 # Notes
 
+Implemented 2026-10-15 (worktree fix/229-analysis-failure-respawn, commit 6989371):
+
+- Root cause: a failed analysis (an early throw before the doctor-log write, e.g. a corrupt or unreadable log) leaves only the wrapper's exit file: no report, no doctor log, pid self-removed. The to-merge sweep re-fires spawnRunAnalysis on every sweep while the task sits in to-merge, and the janitor swept per-run analysis exit files on every sweep too, so no marker survived.
+- Guard (the user decision above): spawnRunAnalysis skips the spawn when <base>.analysis.exit exists, with the log line "analysis of <raw> already attempted, skipping respawn (exit marker)". One guard at the single spawn point covers all three fire sites: the to-merge sweep, the poll's run-end pass and the poll's self-advanced pass.
+- Janitor fix: janitorPids keeps per-run analysis exit files (<slug>.<role>.<n>.analysis.exit) while their task exists, keyed by the leading slug, and sweeps them with the task. Without this the marker would not survive one sweep and the guard would never fire.
+- Test: new part AT5 in tests/orchestrator.test.ts, end to end: a to-merge task with a finished run whose log is a corrupt .log.gz; the first sweep spawns the failing analysis once (non-zero exit marker, no report, no doctor log); two later sweeps keep spawned-count at 1 with the skip logged and the marker surviving the janitor; the task stays in to-merge (detached root, the PM-resolves path); a fresh reviewer run (new index) still fires and completes its analysis. Confirmed failing before the fix (the marker did not survive the janitor), passing after; tests/orchestrator.test.ts passes in full (exit 0, 53 parts).
+- Manual runs are unaffected: the guard lives in spawnRunAnalysis, not in analysis-run.ts, and a manual run writes no marker, so a manual analysis run is never blocked.
+
 # Open questions
+
+No open user questions; the decision was recorded above. Assumptions to confirm:
+
+- Any exit code counts as attempted: a successful analysis is already skipped silently by the report check, so the marker check only ever catches failures in practice.
+- A task re-entering to-merge with the same last run is not re-analysed (one attempt per run); only a fresh run (a new run index) re-fires the analysis.
+- Exit markers accumulate one per run in .kanban/.pids while the task exists; bounded by run count, swept when the task is removed from the board.
 

@@ -1,8 +1,8 @@
 ---
 name: "fix: reconcile agents/doctor.md wording with the pre-change doctor prompt builder"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/228-doctor-prompt-wording"
+state: "done"
+worktree: ""
 issuer: "#224"
 complexity: "simple"
 shortName: "doctor-prompt-wording"
