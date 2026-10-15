@@ -87,6 +87,19 @@ function testPlainTextFallback() {
 	assert.equal(sessionBlocks[0].text, onlySession);
 }
 
+function testPlainOrderBeforeFallbackCall() {
+	// plain text before a fallback tool start keeps its log position: the text block
+	// precedes the toolCall block
+	const log = [
+		"a stderr noise line",
+		'{"type":"tool_execution_start","toolCallId":"tc9","toolName":"read","args":{"path":"/x"}}',
+	].join("\n");
+	const blocks = parseLogBlocks(log);
+	assert.deepEqual(blocks.map((b) => b.type), ["text", "toolCall"]);
+	assert.equal(blocks[0].text, "a stderr noise line");
+	assert.equal(blocks[1].toolName, "read");
+}
+
 async function testReportPipeline() {
 	const dir = fixtureDir("report");
 	try {
@@ -213,6 +226,7 @@ try {
 	testDeltaFallback();
 	testGzipHandling();
 	testPlainTextFallback();
+	testPlainOrderBeforeFallbackCall();
 	await testReportPipeline();
 	testCommandBuilder();
 	await testFailedAnalyser();

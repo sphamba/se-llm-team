@@ -109,6 +109,8 @@ export function parseLogBlocks(content: string): AnalysisBlock[] {
 			if (toolName) existing.toolName = toolName;
 			return;
 		}
+		// plain text seen before this record flushes first, so the block order matches the log order
+		pushPlain();
 		const block: AnalysisBlock = { index: 0, type: "toolCall", toolName, text };
 		blocks.push(block);
 		calls.set(id, block);
