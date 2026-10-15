@@ -1,8 +1,8 @@
 ---
 name: "fix: reconcile agents/doctor.md wording with the pre-change doctor prompt builder"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/228-doctor-prompt-wording"
 issuer: "#224"
 complexity: "simple"
 shortName: "doctor-prompt-wording"
@@ -13,23 +13,23 @@ agents/doctor.md is not byte-identical to the pre-change doctorPrompt builder, d
 
 # Specs
 # Background
-Live-test finding 1 of #224 (state live-testing), task file .kanban/000224_analyst_doctor_prompt_files.md under "# Notes extra: live test (2026-10-15)".
+Live-test finding 1 of #224 (done), task file .kanban/000224_analyst_doctor_prompt_files.md under "# Notes extra: live test (2026-10-15)".
 
-# Evidence
-- Differential phase 4 in /tmp/lt224/evidence-final.txt: the analyst prompts and both analyst/doctor spawn argvs are byte-identical to the pre-change code; only the doctor prompt text differs. The direct comparison was against the pre-change builder archived from commit e424cd3~1.
-- agents/doctor.md line 8 carries the none-parenthetical unconditionally; #224 Notes (implementation note "The doctor template is one combined scaffold, not two variants") already record this as a deliberate deviation, and assumption 2 ("One combined doctor template is acceptable...") says confirm or correct.
+# Decision (2026-10-15, user)
+Accept the one combined agents/doctor.md wording as-is: the none-parenthetical stays unconditionally present, and the no-roleFile revision paragraph stays as shipped. Byte-parity with the pre-change builder is not required: one editable file is the point of #224, and the deviation is already recorded as deliberate in #224's Notes. #224's requirement 1 ("Behavior is otherwise unchanged: same prompts") is corrected to mean: same prompts except the deliberate combined doctor scaffold.
 
 # Work
-1. Get the answer to the open question: accept the combined template as-is (and update #224's Specs/Notes wording to record the accepted deviation, since the shipped behavior then contradicts requirement 1 as written), or restore the roleFile-present prompt byte-for-byte as requirement 1 says (e.g. a second template or a conditional clause the engine drops when a role file is given).
-2. Implement the chosen option and keep the no-roleFile path working ({{roleFile}}/{{role}} = "none", doctor writes no file).
-3. Update tests/efficiency-analysis.test.ts (testDoctorPromptWithoutRoleFile and the hook/roleFile path) to pin the chosen bytes, and update agents/doctor.md only if the accept option is chosen in narrative form.
+1. Update #224's task body so requirement 1 records the accepted deviation (the combined doctor scaffold: none-parenthetical always present; the no-roleFile revision paragraph as shipped). agents/doctor.md itself stays unchanged: it already carries the accepted wording.
+2. Keep the no-roleFile path working ({{roleFile}}/{{role}} = "none", doctor writes no file).
+3. Update tests/efficiency-analysis.test.ts (testDoctorPromptWithoutRoleFile and the hook/roleFile path) to pin the shipped bytes, so the suite matches the accepted wording.
 
 # Acceptance
-- agents/doctor.md renders byte-identical to the pre-change doctorPrompt builder for the roleFile path, or the accepted combined wording is recorded in #224's task body as the corrected requirement 1 interpretation.
+- tests/efficiency-analysis.test.ts pins the shipped agents/doctor.md bytes for both the roleFile and no-roleFile paths.
 - The no-roleFile path still tells the doctor not to write any file and produces the report.
-- The affected suite (node tests/efficiency-analysis.test.ts) passes.
+- #224's task body records the accepted deviation as the corrected requirement 1 interpretation.
+- node tests/efficiency-analysis.test.ts passes.
 
 # Notes
 
 # Open questions
-Accept the one combined agents/doctor.md wording (none-parenthetical always present; no-roleFile revision paragraph longer than the old report-only one-liner), or restore the roleFile variant byte-for-byte as #224 requirement 1 ("same prompts") says?
+
