@@ -1,8 +1,8 @@
 ---
 name: "chore: split-test-suite-webui hub"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "chore/259-split-test-suite-webui-hub"
 issuer: "#256"
 complexity: "simple"
 shortName: "split-test-suite-webui-hub"

@@ -1,8 +1,8 @@
 ---
 name: "chore: split-test-suite-webui board"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "chore/260-split-test-suite-webui-board"
 issuer: "#256"
 complexity: "simple"
 shortName: "split-test-suite-webui-board"

@@ -1,8 +1,8 @@
 ---
 name: "chore: split-test-suite-webui logpane"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "chore/258-split-test-suite-webui-logpane"
 issuer: "#256"
 complexity: "simple"
 shortName: "split-test-suite-webui-logpane"

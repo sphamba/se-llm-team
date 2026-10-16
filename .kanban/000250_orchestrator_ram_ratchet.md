@@ -1,7 +1,7 @@
 ---
 name: "fix: orchestrator RAM ratchet (whole-log parse churn and never-evicting caches)"
 priority: "critical"
-state: "doing"
+state: "reviewing"
 worktree: "fix/250-orchestrator-ram-ratchet"
 issuer: "user"
 complexity: "moderate"
