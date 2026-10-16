@@ -271,6 +271,10 @@ containing block, so #m-box drops its top padding and #m-head carries it (else t
 down and scrolled text peeks above it); its own bottom padding keeps 10px clearance under the title
 while content scrolls */
 #m-box { background: var(--panel); border-radius: 10px; padding: 0 18px 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
+/* 000246: the detail arrival grows the modal from the loading height pinned by openTask to the
+content height; the class drops at the transition end, and reduced motion keeps the instant resize */
+#m-box.grow { transition: height var(--enter) ease-out; }
+@media (prefers-reduced-motion: reduce) { #m-box.grow { transition: none; } }
 #m-head { display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; margin-bottom: 0; padding: 18px 0 10px; background: var(--panel); z-index: 1; }
 #m-head h2 { font-size: 1.0625rem; margin: 0; }
 #m-close { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 0.875rem; }
@@ -516,7 +520,7 @@ function openTask(file) {
 	renderAgent(t);
 	renderDoctor(t);
 	// the loading placeholder: the heavy blocks fill on the detail's arrival
-	const loading = '<div class="empty">Loading task details…</div>';
+	const loading = '<div class="empty"><span class="spin"></span>Loading task details…</div>';
 	const el = document.getElementById("m-body");
 	el.innerHTML = loading;
 	el.__html = loading;
@@ -529,6 +533,18 @@ function openTask(file) {
 	// when the entrance settles, since the boxIn transform skews the first measure
 	const box = document.getElementById("m-box");
 	box.scrollTop = 0;
+	// 000246: pin the loading height so the detail arrival can grow the box to the content height;
+	// mobile keeps its full-screen sheet (an inline height would beat the media query), and
+	// reduced motion still pins but the media query turns the transition off
+	clearTimeout(box.__growTimer);
+	const grow = !matchMedia("(max-width: 600px)").matches;
+	if (grow) {
+		box.classList.add("grow");
+		box.style.height = box.offsetHeight + "px";
+	} else {
+		box.classList.remove("grow");
+		box.style.height = "";
+	}
 	box.onanimationend = e => { if (e && e.target === box) { box.onanimationend = null; drawAgentRelations(); } };
 	drawAgentRelations();
 	const gen = ++detailGen;
@@ -537,6 +553,9 @@ function openTask(file) {
 		if (gen !== detailGen || modalFile !== file) return;
 		if (document.getElementById("modal").classList.contains("hidden")) return;
 		if (!d) {
+			// 000246: no grow on failure, the box returns to its natural height under the error
+			box.classList.remove("grow");
+			box.style.height = "";
 			const html = '<div class="empty">Task details failed to load</div>';
 			el.innerHTML = html;
 			el.__html = html;
@@ -549,6 +568,13 @@ function openTask(file) {
 		setBody(d);
 		markLiveLine();
 		drawAgentRelations();
+		if (grow) {
+			// 000246: the measured content height is the transition target; the fixed timeout
+			// mirrors closeAnimated's fallback and restores auto height once the grow settles
+			box.style.height = box.scrollHeight + "px";
+			clearTimeout(box.__growTimer);
+			box.__growTimer = setTimeout(() => { box.style.height = ""; box.classList.remove("grow"); }, 400);
+		}
 	});
 }
 // the 5 s refresh of the open detail card: every block re-derives from the fresh payload with no

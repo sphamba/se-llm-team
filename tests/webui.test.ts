@@ -1105,6 +1105,16 @@ const openTaskSrc = page.match(/function openTask\(file\) \{[\s\S]*?\n\}/)![0];
 assert.ok(openTaskSrc.indexOf('classList.remove("hidden")') < openTaskSrc.indexOf("scrollTop = 0"), "openTask resets the scroll after the un-hide, so every open (same-task reopen included) shows the top");
 assert.ok(openTaskSrc.includes("fetch(detailUrl(file))"), "000242: openTask fetches the per-task detail");
 assert.ok(openTaskSrc.includes("Loading task details"), "000242: openTask shows a loading placeholder while the detail fetch runs");
+// 000246: the loading state pairs the existing spinner with the label, the arrival grows the
+// modal from the pinned loading height to the content height, and the failure path stays static
+assert.ok(openTaskSrc.includes('<div class="empty"><span class="spin"></span>Loading task details…</div>'), "000246: the loading placeholder pairs the spinner with the label");
+assert.ok(page.includes("#m-box.grow { transition: height var(--enter) ease-out; }"), "000246: the grow is a CSS height transition, no library");
+assert.ok(page.includes("@media (prefers-reduced-motion: reduce) { #m-box.grow { transition: none; } }"), "000246: reduced motion turns the grow off");
+assert.ok(openTaskSrc.includes('box.classList.add("grow")') && openTaskSrc.includes('box.style.height = box.offsetHeight + "px"'), "000246: openTask pins the loading height");
+assert.ok(openTaskSrc.indexOf('classList.remove("hidden")') < openTaskSrc.indexOf("box.offsetHeight"), "000246: the pin runs after the un-hide, a hidden box measures zero");
+assert.ok(openTaskSrc.includes('box.style.height = box.scrollHeight + "px";'), "000246: the arrival transitions to the measured content height");
+assert.ok(openTaskSrc.includes('box.style.height = "";'), "000246: the pinned height returns to auto after the grow");
+assert.ok(/if \(!d\) \{[\s\S]*?box\.style\.height = ""[\s\S]*?Task details failed to load/.test(openTaskSrc), "000246: a failed fetch unpins the modal before the error shows, so it never grows");
 assert.match(page, /function openLog\(handle, sub\) \{[\s\S]*?p\.classList\.remove\("closing"\);/, "openLog drops a pending close before reopening");
 // 000243: opening a log clears the previous agent's content at once and shows the loading state
 // until the init payload replaces it; a failed init fetch leaves that loading state in place,
