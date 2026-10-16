@@ -26,4 +26,4 @@ export {
 	taskStatsText,
 } from "./board.ts";
 export { agentLogPayload, taskDetail, taskPayload } from "./payload.ts";
-export { boardOf, loadWebUiConfig, mergeBoards, PAGE, refreshMs, tabNames, tabsHtml, type WebUiConfig } from "./page.ts";
+export { boardOf, loadWebUiConfig, mergeBoards, PAGE, refreshMs, stateChanges, tabNames, tabsHtml, type WebUiConfig } from "./page.ts";

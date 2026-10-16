@@ -13,6 +13,7 @@ export interface WebUiConfig {
 	enabled: boolean;
 	host: string;
 	port: number;
+	notifications: boolean;
 }
 
 // se-llm-team.json: the neutral config dir first (XDG when set, else ~/.config/se-llm-team),
@@ -23,7 +24,7 @@ export function loadWebUiConfig(root?: string): WebUiConfig {
 	const neutral = join(process.env.XDG_CONFIG_HOME || join(home, ".config"), "se-llm-team", "se-llm-team.json");
 	const paths = [existsSync(neutral) ? neutral : join(home, ".pi", "agent", "se-llm-team.json")];
 	if (root) paths.push(join(root, ".kanban", "se-llm-team.json"));
-	let webUi: { enabled?: boolean; host?: string; port?: number } | undefined;
+	let webUi: { enabled?: boolean; host?: string; port?: number; notifications?: boolean } | undefined;
 	for (const path of paths) {
 		try {
 			webUi = JSON.parse(readFileSync(path, "utf8")).webUi ?? webUi;
@@ -31,7 +32,7 @@ export function loadWebUiConfig(root?: string): WebUiConfig {
 			// missing file or invalid JSON
 		}
 	}
-	return { enabled: webUi?.enabled === true, host: webUi?.host ?? DEFAULT_HOST, port: webUi?.port ?? DEFAULT_PORT };
+	return { enabled: webUi?.enabled === true, host: webUi?.host ?? DEFAULT_HOST, port: webUi?.port ?? DEFAULT_PORT, notifications: webUi?.notifications === true };
 }
 
 // tab descriptors from the hub's /api/projects entries: one tab per registered project, and none for a
@@ -68,6 +69,15 @@ export function boardOf(boards, name) {
 // null payload (project vanished or its fetch failed) keeps that tab's previous data
 export function mergeBoards(boards, rows) {
 	for (const [name, tasks] of rows) if (tasks) boardOf(boards, name).tasks = tasks;
+}
+
+// 000244: the state moves a browser notification reports: a known task whose state moved between
+// two polls, keyed by file; a task absent from the previous payload is new (no notification) and a
+// null payload (project vanished or its fetch failed) reports nothing
+export function stateChanges(before, after) {
+	if (!before || !after) return [];
+	const prev = new Map(before.map((t) => [t.file, t.state]));
+	return after.filter((t) => prev.has(t.file) && prev.get(t.file) !== t.state);
 }
 
 // the open detail card's poll cadence (000142): a live agent's or live doctor's tokens and
@@ -119,8 +129,9 @@ body { display: flex; flex-direction: column; margin: 0; background: var(--bg); 
 button { font-family: inherit; }
 header { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 6px; background: var(--code-bg); }
 h1 { font-size: 1.125rem; margin: 0; }
-#theme { margin-left: auto; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.875rem; }
-#theme:hover { background: var(--hover); }
+#theme, #notify { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.875rem; }
+#theme { margin-left: auto; }
+#theme:hover, #notify:hover { background: var(--hover); }
 #updated { font-size: 0.875rem; color: var(--muted); }
 /* 000165: the serving hub's identity, hidden until the first /api/hub answer fills it */
 #hub { padding: 2px 18px 8px; font-size: 0.8125rem; color: var(--muted); }
@@ -310,7 +321,7 @@ line is the fallback for the dvh line (older mobile browsers), max-height none l
 </style>
 </head>
 <body>
-<header><h1>Software Engineering LLM Team</h1><span id="updated"></span><button id="theme" onclick="toggleTheme()">Dark</button></header>
+<header><h1>Software Engineering LLM Team</h1><span id="updated"></span><button id="theme" onclick="toggleTheme()">Dark</button><button id="notify" onclick="toggleNotify()"></button></header>
 <nav id="tabs"></nav>
 <main id="board"></main>
 <footer id="hub"></footer>
@@ -338,6 +349,34 @@ function toggleTheme() {
 }
 try { const stored = localStorage.getItem("theme"); if (stored === "dark" || stored === "light") rootEl.dataset.theme = stored; } catch {}
 syncThemeBtn();
+// 000244: browser notifications, opt-in via the header control and persisted in the browser like
+// the theme; a denied permission is silent and never prompts again, and an unsupported browser
+// hides the control
+const notifBtn = document.getElementById("notify");
+const notifSupported = typeof Notification !== "undefined";
+let notifOn = false;
+try { notifOn = localStorage.getItem("notifications") === "on"; } catch {}
+const storeNotif = () => { try { localStorage.setItem("notifications", notifOn ? "on" : "off"); } catch {} };
+function syncNotifBtn() {
+	if (!notifSupported) { notifBtn.hidden = true; return; }
+	const denied = Notification.permission === "denied";
+	const txt = denied ? "Notifications: denied" : notifOn && Notification.permission === "granted" ? "Notifications: on" : "Notifications: off";
+	if (notifBtn.textContent !== txt) notifBtn.textContent = txt;
+}
+function toggleNotify() {
+	if (!notifSupported || Notification.permission === "denied") return; // denied: silent, never re-prompt
+	if (notifOn) { notifOn = false; storeNotif(); syncNotifBtn(); return; }
+	Notification.requestPermission().then(p => { notifOn = p === "granted"; storeNotif(); syncNotifBtn(); });
+}
+// the notification for one moved task: the project tab's label in the title with the task number
+// and name, the new state in the body; fires only while the tab is hidden
+function notifyChange(name, t) {
+	if (!notifSupported || Notification.permission !== "granted" || !notifOn || !document.hidden) return;
+	const tab = projects.find(p => p.id === name);
+	const label = tab ? tab.label : "";
+	try { new Notification((label ? label + ": " : "") + "#" + t.num + " " + t.name, { body: "New state: " + t.state }); } catch {}
+}
+syncNotifBtn();
 const inline = ${inline};
 ${md}
 // FLIP across a refresh: measure old positions, sync the cards, invert, play. Every card whose
@@ -361,6 +400,7 @@ ${tabNames}
 ${tabsHtml}
 ${boardOf}
 ${mergeBoards}
+${stateChanges}
 ${agentLabel}
 ${fmtTokens}
 ${fmtDur}
@@ -1009,7 +1049,8 @@ function refresh() {
 		// tabs: only a real projects list replaces them
 		if (Array.isArray(list)) {
 			const tabs = tabNames(list);
-			projects = tabs.length ? tabs : [{ id: "", label: "" }]; // single project: the old ui, one board, no tabs
+			// single project: the old ui, one board, no tabs; the notification still names it
+			projects = tabs.length ? tabs : [{ id: "", label: list[0] ? list[0].name : "" }];
 		}
 		// a project that vanished from the registry closes the modal its task lived in
 		if (!projects.some(t => t.id === active)) { active = projects[0].id; closeModal(); }
@@ -1017,6 +1058,12 @@ function refresh() {
 		// every tab polls every cycle, only the active one renders
 		return Promise.all(projects.map(t => fetch(url(t)).then(r => r.ok ? r.json() : null).catch(() => null).then(tasks => [t.id, tasks])));
 	}).then(rows => {
+		// 000244: every known task whose state moved notifies, before the merge overwrites the
+		// previous states; all projects report, not only the active tab
+		for (const [name, tasks] of rows) {
+			const board = boards[name];
+			for (const t of stateChanges(board ? board.tasks : null, tasks)) notifyChange(name, t);
+		}
 		mergeBoards(boards, rows);
 		render();
 		// the open card's task still on the board, else the card closes (000242: the light rows
