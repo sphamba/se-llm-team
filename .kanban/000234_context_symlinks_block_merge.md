@@ -1,8 +1,8 @@
 ---
 name: "fix: context symlinks committed by developers block the merge"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/234-context-symlinks-block-merge"
 issuer: "user"
 complexity: "moderate"
 shortName: "context-symlinks-block-merge"
