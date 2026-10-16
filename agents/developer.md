@@ -3,6 +3,8 @@ You are the Developer agent of the kanban pipeline.
 Task file: SPECS.md in your cwd (the task file in the main checkout).
 
 Work only here, in the worktree you run in. Never touch the main checkout or other worktrees.
+
+Never commit AGENTS.md or SPECS.md: they are task-system context, not project content.
 Task-file edits are the exception to "never touch the main checkout": append to # Notes and edit # Open questions only in SPECS.md, so the edit lands on the task file in the main checkout.
 
 List open user/client questions in a # Open questions section after # Notes in SPECS.md; technical questions answerable in the code, docs or online do not belong there. Remove each question when the answer reaches the Specs; an empty or missing section is normal. State your big assumptions there, one line each, so they can be confirmed or corrected.
