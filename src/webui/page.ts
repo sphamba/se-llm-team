@@ -106,7 +106,7 @@ export const PAGE = `<!doctype html>
 <style>
 * { box-sizing: border-box; }
 /* Ayu Light palette (ayu-theme/ayu-colors); 000129: medium moved to a deeper yellow so the priority chips read apart */
-:root { --bg: #fcfcfc; --fg: #5c6166; --panel: #ffffff; --border: rgba(107, 125, 143, .12); --heading: #5c6166; --muted: #adaeb1; --faint: #adaeb1; --soft: #5c6166; --hover: rgba(130, 142, 159, .1); --overlay: rgba(15, 23, 42, .45); --code-bg: #ebeef0; --link: #f29718;
+:root { --bg: #fcfcfc; --fg: #5c6166; --panel: #ffffff; --border: rgba(107, 125, 143, .12); --heading: #5c6166; --muted: #adaeb1; --faint: #adaeb1; --soft: #5c6166; --hover: rgba(130, 142, 159, .95); --overlay: rgba(15, 23, 42, .45); --code-bg: #ebeef0; --link: #f29718;
 --low-bg: rgba(134, 179, 0, .15); --low-fg: #86b300; --medium-bg: rgba(201, 151, 0, .15); --medium-fg: #c99700; --high-bg: rgba(250, 133, 50, .15); --high-fg: #fa8532; --critical-bg: rgba(230, 80, 80, .15); --critical-fg: #e65050;
 /* 000191: motion knobs, one place to retune the entrances, the chunk fade and the pulse loop; 000194: --exit runs the closes, --shine is the whiter band mix */
 --enter: 200ms; --exit: 180ms; --fade: 150ms; --pulse: 2s; --shine: 45%;

@@ -933,6 +933,13 @@ for (const [theme, block] of [["light", lightVars], ["dark", darkVars], ["prefer
 	for (const v of ["--doctor-fg:", "--doctor-bg-strong:"]) assert.ok(block.includes(v), `the ${theme} theme block defines ${v}`);
 }
 assert.ok(!page.includes("--doctor-bg:"), "the unused --doctor-bg variable is gone from the theme blocks");
+// 000239: the light hover is near-opaque, so a hovered card stays readable against the white
+// panel; the dark hover keeps its opaque #1b1f29
+const lightHoverAlpha = Number(lightVars.match(/--hover: rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)/)?.[1]);
+assert.ok(lightHoverAlpha >= 0.9, `the light hover is near-opaque (alpha ${lightHoverAlpha}), so a hovered card stays readable against the white panel`);
+for (const [theme, block] of [["dark", darkVars], ["prefers-dark", mediaVars]] as const) {
+	assert.ok(block.includes("--hover: #1b1f29;"), `the ${theme} hover stays the opaque #1b1f29`);
+}
 assert.equal(lightVars.match(/--doctor-fg: (#[0-9a-f]{6})/)![1], "#2f6fdd", "the light doctor blue is the deeper #2f6fdd");
 assert.equal(darkVars.match(/--doctor-fg: (#[0-9a-f]{6})/)![1], "#59a7ff", "the dark doctor blue is the lighter #59a7ff");
 assert.ok(page.includes(".agent-doctor { color: var(--doctor-fg); }"), "the .agent-doctor rest state sets only the blue text, so the plain card outline and panel background show through, in their run's column and in the residual row alike");
