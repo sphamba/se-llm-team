@@ -1,7 +1,7 @@
 ---
 name: "fix: stable task detail cards, no appear/disappear/reappear flicker"
 priority: "critical"
-state: "doing"
+state: "reviewing"
 worktree: "fix/251-stable-detail-cards"
 issuer: "user"
 complexity: "complex"
@@ -42,3 +42,11 @@ Acceptance:
 - Every subtask would add assertions to tests/webui.test.ts (one shared 2350-line file; payload/doctorHistory tests live there too). Any split pays a merge-conflict cost in that file.
 - The only clean seam is the server-side doctor aliveness (payload.ts:157, src/pid.ts), and it is small: pid.ts already stores <pid> <disc> discriminators and the analysis wrapper self-removes its pid file, so the remaining fix is narrow and shares the same feel-based live test. Split overhead (one more review, merge and live test) exceeds the saved time.
 - Keep as one complex task: one developer reads the flow once, makes five targeted edits, one review, one merge, one live test.
+- Developer, 2026-10-16: fixed in a582b65. openTask no longer renders the agent/doctor rows from the light row: the row clears once only on a task switch, a same-task reopen keeps the mounted cards, the history render passes keep mode, and the detailGen counter is gone (the modalFile and modal-state checks gate the writes, so a poll cycle never discards a just-opened task's response). fetchSubs gates on the sub index set only; an unchanged set moves the stats lines in place and only a new sub animates. renderAgent lifts the slotted doctor cards out before the innerHTML write and re-slots them after, and the keep tail fetches a run whose sub box carried over nothing. closeModal drops the heavy log text at close; the small cards stay mounted for the reopen. Path 4 needed no code change: with the pidEntry + disc pid.ts the stale/recycled analysis pid read dead consistently (pinned with new stale and recycled pid tests). Proof: one red run (the new gate pin failed first), one green run (node tests/webui.test.ts, all assertions passed), and the live check (run, sub and doctor cards marked in the DOM stayed mounted across open, 1 s pane polls, transcript growth, two 5 s detail cycles, close and reopen; the doctor stats line moved in place across a 5 s poll; the log text was released at close).
+- Developer, 2026-10-16: for a task in state done the run card reads alive=false by design (AGENT_ROLE keys the live role off the task state, not the pid file), so the live check sampled the doctor card (alive, duration ticks) for the in-place stats move. The sub card's in-place stats path for a done task only fetches on an empty box or a rebuild, so the live check proved its mount persistence, the suite pins the in-place gate.
+
+# Open questions
+
+- Assumption: run, sub and doctor cards stay mounted across close (labels and stats only); the heavy log text is the discarded part, since requirements 1 and 5 read together.
+- Assumption: a switch to a different task genuinely clears the agent row once (stale content must not show through the loading state).
+- Assumption: no freshness ordering between a just-opened fetch and a same-URL poll response: the later-arriving response writes, the next poll cycle corrects the stats (needs a >5 s response to observe).
