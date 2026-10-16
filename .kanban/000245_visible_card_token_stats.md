@@ -1,7 +1,7 @@
 ---
 name: "feat: token stats on visible board cards with done-task caching"
 priority: "medium"
-state: "to-live-test"
+state: "live-testing"
 worktree: "feat/245-visible-card-token-stats"
 issuer: "user"
 complexity: "moderate"
