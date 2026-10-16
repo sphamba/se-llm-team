@@ -1,8 +1,8 @@
 ---
 name: "fix: serve task detail text before heavy history"
 priority: "critical"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/248-detail-text-first"
 issuer: "user"
 complexity: "moderate"
 shortName: "detail-text-first"
@@ -26,3 +26,4 @@ Acceptance:
 - Live test: opening a task shows its text fast on every open, including the first open after a daemon restart and while a live run polls; the heavy history appears after without blocking the text.
 
 # Notes
+- Splitter pass 2026-10-16: no split. The two requirement groups do not parallelize. Req 1+2 (light detail read, follow-up history fetch) and req 3 (hub yielding) both edit src/webui/payload.ts and src/hub.ts, and both add tests to the one shared tests/webui.test.ts; a synchronous parse cannot be preempted from outside, so the req 3 yield points must land inside the same heavy-parse functions req 1+2 restructure (agentHistory/doctorHistory/logStats and their handlers). Run in parallel, the hub piece would wrap code the payload piece deletes, then redo itself after merge. Two subtasks cost two review passes, two merges and two live tests of one integrated user flow (text fast, history follows, poll not stalled) for no saved time. One vertical slice, one payload contract: keep it with one developer at moderate complexity.

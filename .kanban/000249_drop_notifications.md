@@ -1,8 +1,8 @@
 ---
 name: "chore: drop the browser notifications feature"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "chore/249-drop-notifications"
 issuer: "user"
 complexity: "simple"
 shortName: "drop-notifications"
