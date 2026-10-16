@@ -2,21 +2,19 @@
 
 ## Shape (in order)
 1. Read cwd SPECS.md (symlink; see Files): body, Notes, Open questions.
-2. Recon: exactly two bash calls (see Recon), then leave recon.
-3. Checks: one command per spec requirement (see Checks); related commands batched in one block, one-line lead-in each.
-4. Tests: the suites the diff touches, once (see Tests).
-5. Findings edit: one edit to SPECS.md (see Findings).
+2. Recon: exactly two bash calls (see Recon); the scope is decided there, once.
+3. Checks: one command per requirement the diff in context does not already settle; related commands share one block, one-line lead-in each (see Checks).
+4. Tests: the suites the diff touches, once (see Tests); the suite may share the last check's block.
+5. Findings: one edit to SPECS.md (see Findings).
 6. State transition: tool_search → kanban_get → kanban_set_state; final text is one sentence (see State transition).
 
-## Thinking (largest measured waste: last two runs, thinking carried ~90% of streamed output; one run had a 15k-char block, 47% of the whole run, re-walking the diff against the Specs; the verdict was composed three times)
-- A thinking block only reads the last tool result and names the next command this file fixes, in one or two lines. If the next action is fixed above, act without a thinking block.
-- Never walk the Specs point by point in thinking, compare field lists by hand, quote spec or diff code, trace data flow, races, or counter interleavings, restate the Shape as a plan, or compose the findings text. That walk is the Checks commands: run the command, then reason from its output. No hand-computed values, no re-derived answers.
-- The full verdict exists exactly once, inside the findings edit's newText. Never state a spec-by-spec verdict in a thinking block, and never after the state transition.
-- Hard boundaries: no thinking before Recon call 1 or before tool_search. After the last suite passes: at most one doubt-closing command, then the findings edit itself. The findings edit is built from the per-check pass/fail lines already made, not re-derived.
-- One narration per fact, in the findings edit. Outside it: one-line tool lead-ins and the final state sentence.
-- A settled check never reopens: output in context is evidence, in a fresh pass or a re-review. One doubt, one command, executed now.
-- Scope: spec requirements plus the tests the diff touches. No what-if traces, no web or project-memory search. An unrun full `pnpm test` is never a finding and never a deliberation. No mapped area (Coverage map) → say so once in the findings edit, skip.
-- Budget: at most 3 thinking blocks and ~1k chars per review. This run: 6 blocks, ~29k chars.
+## Thinking (largest measured waste)
+- A thinking block only reads the last tool result and names the next command, in one or two lines. It never restates the previous result ("settled", "pass") or the Shape. If the next action is fixed above, act with no thinking block.
+- Hard boundaries: no thinking before Recon call 1 or before tool_search.
+- Never in thinking: restate the Shape as a plan, walk the Specs point by point or map requirement→command (that mapping is the one-line lead-ins of the check commands), quote spec or diff code, trace data flow, races, or counter interleavings, compose the findings text, or state the verdict anywhere but the findings edit's newText. Run the command, then reason from its output.
+- One narration per fact: it appears once, in a lead-in or in the findings edit, never in thinking plus text.
+- A settled check never reopens: output in context is evidence, in a fresh pass or a re-review. One doubt, one command, executed now. No hand-computed values, no re-derived answers, no range or ancestry deliberation.
+- Budget: at most 2 thinking blocks, ~300 chars total, target 0-1. This run: 7 blocks, ~11k chars, 96% of streamed output; the spec-mapping walk alone was 7.7k chars and 51% of the wall time.
 
 ## Re-reviews
 - A task in reviewing with review bullets in Notes is a second pass: a normal cycle. Never deliberate fresh-vs-continued session state or prior-evidence staleness; verify each prior claim with the usual one command per requirement.
@@ -25,12 +23,13 @@
 ## Recon (exactly two bash calls)
 - Call 1, state + diff stat: `b=$(git -C /home/phamba/repos/se-llm-team branch --show-current) && echo "base=$b" && git log --oneline -5 && git status --short && git diff "$b"...HEAD --stat`. The `-C` lookup reads the main checkout; the task worktree sits on the task branch, so no root-vs-worktree question exists.
 - Call 2, full diff: `git diff <name-from-base=...>...HEAD`, a mechanical substitution of the printed name. Substitute even when the name looks like `main`: branches stack, and a branch typed from memory silently reviews the wrong base.
-- The base diff carries other tasks' commits. When Notes name the implemented commit(s), those commits are the review scope: one `git show <sha>` each, the rest out of scope, no range deliberation.
+- Commit scope, decided once, no ancestry derivation: Notes name the implemented commit(s) → those commits are the review scope, one `git show <sha>` each; Notes name none → the range diff is the scope.
+- Review scope is the spec requirements plus the suites the diff touches. No what-if traces, no web or project-memory search. An unrun full `pnpm test` is never a finding and never a deliberation. No mapped area (Coverage map) → say so once in the findings edit, skip.
 
 ## Checks
-- One requirement, one command, one recorded pass/fail. If your note and the file disagree, the file wins, recorded once.
+- One requirement, one command, one recorded pass/fail. A requirement the diff already settles needs no command: record the pass in the findings edit. If your note and the file disagree, the file wins, recorded once.
 - Ordering spec points end at one read of the producing site; the call sites around it answer the coverage question. No caller traces, no spawn-path re-derivation.
-- A consumer class (undefined-field defaults like `t.agents || []`, `t.body || ""`) is proven by one grep of the consuming functions, once. Never re-prove it per field in a later turn.
+- A consumer class (undefined-field defaults like `t.agents || []`, `t.body || ""`) is proven by one grep of the consuming functions, once, batched with its neighboring checks. Never re-prove it per field or in a later turn.
 - Materiality: a discrepancy blocks only if it changes the verdict or hides a defect. A minor Notes inaccuracy is one line in findings, never a blocked merge.
 
 ## Tests
@@ -49,7 +48,7 @@
 - tests/*.ts → the touched suite.
 
 ## Findings (one edit to cwd SPECS.md, appended to # Notes)
-- The spec-by-spec pass/fail verdict is written exactly once, in this edit's newText, assembled from the recorded per-check results.
+- The spec-by-spec pass/fail verdict is written exactly once, in this edit's newText, assembled from the recorded per-check results and the diff evidence already in context. Do not re-walk the diff or re-derive the verdict to compose it.
 - Never edit the task body, another task's file, or AGENTS.*.md.
 - Open questions are decided on first read of the Specs and never revisited; the ladder is mechanical: the specs already answer it → delete it in the findings edit, never move it to Notes; the answer changes direction → finding in Notes; a genuine user question → keep. An empty section → delete the header.
 
@@ -73,5 +72,5 @@
 
 ## Situational checks (only when the diff touches the area)
 - webui PAGE parity: PAGE (src/webui/page.ts, re-exported by src/webui/index.ts) interpolates function source, so a webui refactor must keep it byte-identical. Copy the old page inside src/webui/ so its relative imports resolve (`git show <base>:src/webui/page.ts > src/webui/page_old_review.ts`), render both PAGEs with a 3-line mjs script, diff, delete; compare runtime exports with a name + `String()` diff of the two module objects.
-- Poll path (src/orchestrator/liveness.ts): WORKING_STATES holds only doing, reviewing, live-testing, merging; the !working path clears stale files, never moves a task. poll(root, stallMinutes, now) takes an injectable stall window; a dead pid like "999999999" reads dead. A merging fixture writes .pids/merger.slug, or the task requeues to to-merge. The reviewer exception is sticky by design: exit 0 in reviewing keeps the exit file; a fresh spawn or a poll-observed transition clears it. newestRunRole parses .logs names matching `.log(?:\.gz)?$` and returns the role capture, not the slug. compactFinishedLogs must survive unresolvable entries: a broken-symlink read throws, and an unguarded read kills the daemon loop. Poll changes need a poll-driven self-advanced check (AT3 shape).
+- Poll path (src/orchestrator/liveness.ts): WORKING_STATES holds only doing, reviewing, live-testing, merging; the !working path clears stale files, never moves a task. poll(root, stallMinutes, now, backlogIdleMinutes) takes injectable windows; a dead pid like "999999999" reads dead. A merging fixture writes .pids/merger.slug, or the task requeues to to-merge. The reviewer exception is sticky by design: exit 0 in reviewing keeps the exit file; a fresh spawn or a poll-observed transition clears it. newestRunRole parses .logs names matching `.log(?:\.gz)?$` and returns the role capture, not the slug. compactFinishedLogs must survive unresolvable entries: a broken-symlink read throws, and an unguarded read kills the daemon loop. Poll changes need a poll-driven self-advanced check (AT3 shape).
 - Merge flow: the orchestrator rebases the task branch onto the base at merge time, then ff-merges, one rebase per sweep in a serialized lane. A rebase conflict is the spawned Merger's job (`--ours` = base side), not yours. The rebase block in pipeline.ts shows the full order, and the Merger spawn sits after a hygiene pass in the same sweep, so every conflict-round rebase starts clean. One read answers ordering and Merger coverage; no spawn.ts trace, no rebase --continue speculation.

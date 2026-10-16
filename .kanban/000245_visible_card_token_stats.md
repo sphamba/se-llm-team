@@ -1,12 +1,12 @@
 ---
 name: "feat: token stats on visible board cards with done-task caching"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "feat/245-visible-card-token-stats"
 issuer: "user"
 complexity: "moderate"
 shortName: "visible-card-token-stats"
-blockedBy: "#244"
+blockedBy: ""
 ---
 
 # Summary
@@ -44,3 +44,10 @@ Restore the token stat line on the board cards, as decided after #242 shipped. #
 - `pnpm test:changed` passes for the touched files.
 
 # Notes
+- Splitter (no split, 2026-02-05): kept as one task. The server change (light-row stats + done cache) and the client change (stat line rendering) are not parallel: the client binds to the field names the server emits, and both add tests to tests/webui.test.ts, the shared hub file. Splitting visible-subset stats from the done cache does not help either, since both touch the same logStats/statsCache region of src/webui/payload.ts. Same cross-cutting contract as 000242: one developer, one review pass.
+- Developer (2026-02-05, commit 11c2e45): tests first, then the server change. Red run: "a visible card's row carries the agent stat data" failed with undefined !== []. Implementation in src/webui/payload.ts only: a doneAgents per-root cache with cardAgents (delete on sight when the state is not done, so a re-done task re-caches fresh), and visibleCards (first five rows per column, the same sort syncBoard runs) feeding agents into taskPayload's served rows; tasks removed from the board have their cache entries swept per poll. No board.ts change: the card renderer (cardHtml/taskStatsText/taskStats) was intact, the stat line was empty only because the rows carried no agents. The row's agents are the same AgentEntry[] shape the detail serves, so taskStats renders unchanged. First green run failed on a fixture bug: the log rewrite 300 -> 500 was byte-identical in length, so the size-keyed logStats cache never re-parsed; retokened the fixture (300/1500/20000). Scoped suite: node tests/webui.test.ts and pnpm test:changed (maps to tests/webui.test.ts) pass. The full suite was not run per policy.
+
+# Open questions
+- The visible subset's five-per-column cap is the server constant VISIBLE_CARDS in payload.ts, mirroring the client's VISIBLE = 5 in page.ts; a future change to one must update the other.
+- The visible rows carry the full agent history shape (role, run, alive, status, handle, tokens, duration), the same the detail serves; openTask's shell render therefore now shows the run cards pre-detail for visible tasks (a side effect, no fetch-behavior change).
+- The done cache holds only run-log stats; a done task's logs are treated as immutable per the decided direction, so a log that changes while a task stays done stays stale until it leaves done.
