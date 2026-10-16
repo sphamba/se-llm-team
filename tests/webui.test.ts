@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, PRIORITY_RANK, setState } from "../src/kanban.ts";
 import { startHub } from "../src/hub.ts";
-import { agentLabel, agentRowSig, agentStatsText, agentLogPayload, boardOf, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, tabNames, tabsHtml, taskDetail, taskPayload, taskStats } from "../src/webui.ts";
+import { agentLabel, agentRowSig, agentStatsText, agentLogPayload, boardOf, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, tabNames, tabsHtml, taskHistory, taskPayload, taskStats } from "../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the logpane module
 import { esc, LOG_ROLES } from "../src/webui/logpane.ts";
 import { gzipSync } from "node:zlib";
@@ -350,14 +350,23 @@ assert.equal(detail.specs, "Render the board");
 assert.equal(detail.notes, "");
 assert.equal(detail.openQuestions, "");
 assert.match(detail.body, /# Summary\nDashboard smoke/);
-assert.deepEqual(detail.agents, [], "the detail carries the agent history, empty without role logs");
-assert.equal(detail.agent, null);
-assert.deepEqual(detail.doctors, []);
-// unknown num: 404 with a JSON error body
+// 000248: the light detail reads no logs, body, sections and attributes only; no agent data on
+// the text payload, the heavy history loads in the follow-up fetch
+for (const k of ["agents", "agent", "doctors"])
+	assert.ok(!(k in detail), `the light detail carries no ${k}`);
+// 000248: the follow-up history fetch carries the agent data the detail used to
+const histPayload = await (await fetch(`${base}/api/task-history?num=${parseInt(task.file, 10)}`)).json();
+assert.deepEqual(histPayload.agents, [], "the history carries the agent history, empty without role logs");
+assert.equal(histPayload.agent, null);
+assert.deepEqual(histPayload.doctors, []);
+// unknown num: 404 with a JSON error body, on both endpoints
 assert.equal((await fetch(`${base}/api/task-detail?num=999999`)).status, 404, "an unknown num is rejected");
 assert.equal((await fetch(`${base}/api/task-detail?num=x`)).status, 404, "a non-numeric num is rejected");
 assert.equal((await fetch(`${base}/api/task-detail`)).status, 404, "a missing num is rejected too");
 assert.ok((await (await fetch(`${base}/api/task-detail?num=999999`)).json()).error, "the 404 carries a JSON error body");
+for (const q of ["999999", "x", ""])
+	assert.equal((await fetch(`${base}/api/task-history?num=${q}`)).status, 404, "an unknown task's history is rejected");
+assert.ok((await (await fetch(`${base}/api/task-history?num=999999`)).json()).error, "the history 404 carries a JSON error body");
 
 // issuer flows to /api/tasks: the creation value for task-issued tasks
 const issued = createTask(root, { name: "feat: issued by 42", summary: "s", issuer: "#42" });
@@ -394,6 +403,7 @@ assert.ok(page.includes('id="theme"'), "page has the theme toggle");
 assert.ok(!page.includes('id="notify"'), "the header has no browser-notification control (000249)");
 assert.ok(!page.includes("Notification"), "the served client never touches the Notification API (000249)");
 assert.ok(page.includes('id="hub"'), "page has the hub identity footer (000165)");
+assert.ok(page.includes("/api/task-history"), "the client fetches the heavy history in a follow-up fetch (000248)");
 // 000165: /api/hub reports the serving hub's identity (pid, code checkout, commit), so a
 // stale-code hub or a failover is visible at a glance
 const hubRes = await fetch(`${base}/api/hub`);
@@ -837,9 +847,10 @@ assert.ok(
 	"the single-project fallback polls /api/tasks bare",
 );
 
-// agent info: null for a backlog task; populated for a working task with a live pid
-assert.equal(detail.agent, null);
-assert.deepEqual(detail.agents, [], "no role logs yet, empty agent history");
+// agent info: null for a backlog task; populated for a working task with a live pid (000248:
+// the agent data lives on the follow-up history fetch, the light detail carries none)
+assert.equal(histPayload.agent, null);
+assert.deepEqual(histPayload.agents, [], "no role logs yet, empty agent history");
 assert.ok(page.includes('id="m-agent"'), "modal has the agent area");
 assert.ok(!page.includes("<div><span>name</span>"), "the detail card drops the name attribute row the title already shows");
 assert.ok(page.includes('"<div><span>issuer</span>" + issuerCell(t) + "</div>"'), "the detail card shows the issuer row");
@@ -1480,8 +1491,12 @@ mkdirSync(join(root, ".kanban", ".logs"), { recursive: true });
 const logFile = join(root, ".kanban", ".logs", `${slug}.developer.log`);
 const logText = Array.from({ length: 350 }, () => "H".repeat(63) + "\n").join(""); // 64-byte lines: far under the old byte chunk, so the collapsed-line cap is what pages
 writeFileSync(logFile, logText);
-// 000242: the agent history lives on the per-task detail, never the light /api/tasks rows
-const detailOf = async (f: string) => (await (await fetch(`${base}/api/task-detail?num=${parseInt(f, 10)}`)).json());
+// 000242: the agent history lives on the per-task detail, never the light /api/tasks rows.
+// 000248: the history is the follow-up fetch, detailOf merges both halves like the client does
+const detailOf = async (f: string) => ({
+	...(await (await fetch(`${base}/api/task-detail?num=${parseInt(f, 10)}`)).json()),
+	...(await (await fetch(`${base}/api/task-history?num=${parseInt(f, 10)}`)).json()),
+});
 const working = await detailOf(task.file);
 assert.deepEqual(working.agent, { role: "developer", alive: true, log: `${slug}.developer` });
 assert.deepEqual(working.agents, [{ role: "developer", run: null, alive: true, status: "live", handle: `${slug}.developer`, tokens: null, duration: null }], "legacy role log, live agent only, no stats in a non-JSON log");
@@ -2076,6 +2091,96 @@ rmSync(logFile, { force: true });
 rmSync(`${dev0}.gz`, { force: true });
 rmSync(`${dev1}.gz`, { force: true });
 
+// 000248 the light detail reads no logs: a probe child patches the fs module and counts every
+// read under .logs while taskDetail answers; a corrupt run log that would fail the parse stays
+// unread, the text shows on the light read alone and the heavy history loads in the follow-up
+const probeRoot = mkdtempSync(join(tmpdir(), "webui-probe-"));
+const probeTask = createTask(probeRoot, { name: "feat: probe detail", summary: "s", specs: "s" });
+const probeSlug = probeTask.file.replace(/\.md$/, "");
+mkdirSync(join(probeRoot, ".kanban", ".logs"), { recursive: true });
+writeFileSync(join(probeRoot, ".kanban", ".logs", `${probeSlug}.developer.0.log.gz`), Buffer.from("not gzip"));
+writeFileSync(join(probeRoot, ".kanban", ".logs", `${probeSlug}.developer.0.doctor.log`), JSON.stringify({ type: "session", id: "s", timestamp: "2026-10-12T07:34:03.000Z" }) + "\n");
+writeFileSync(join(probeRoot, ".kanban", ".logs", `${probeSlug}.developer.log`), "plain legacy run log\n");
+const probePreload = join(tmpdir(), `webui-probe-preload-${process.pid}.cjs`);
+writeFileSync(probePreload, `
+const fs = require("node:fs");
+globalThis.__logReads = [];
+for (const name of ["readFileSync", "readdirSync", "statSync", "openSync", "existsSync"]) {
+	const orig = fs[name];
+	fs[name] = function (p, ...rest) {
+		if (String(p).includes(".logs")) globalThis.__logReads.push(name + " " + p);
+		return orig.apply(this, [p, ...rest]);
+	};
+}
+const zlib = require("node:zlib");
+const gz = zlib.gunzipSync;
+zlib.gunzipSync = function (...a) { globalThis.__logReads.push("gunzipSync"); return gz.apply(this, a); };
+`);
+const probeCode = `
+import { pathToFileURL } from "node:url";
+const payload = await import(pathToFileURL(process.env.HERE + "/../src/webui/payload.ts").href);
+const d = payload.taskDetail(process.env.ROOT, Number(process.env.NUM));
+console.log(JSON.stringify({ body: !!(d && typeof d.body === "string" && d.body.length), hasAgents: !!d && "agents" in d, logReads: globalThis.__logReads.length }));
+`;
+const probeOut = spawnSync(process.execPath, ["--require", probePreload, "--input-type=module", "-e", probeCode], {
+	env: { ...process.env, HERE, ROOT: probeRoot, NUM: String(parseInt(probeTask.file, 10)) },
+	encoding: "utf8",
+});
+const probe = JSON.parse(probeOut.stdout);
+assert.ok(probe.body, "the light detail serves the body text");
+assert.ok(!probe.hasAgents, "the light detail carries no agent data");
+assert.equal(probe.logReads, 0, "the light detail parses no logs (probe counted .logs reads)");
+
+// 000248 the hub never lets a heavy parse stall another client: a probe hub patches readFileSync
+// with a 100 ms block per doctor log, the history fetch parses two doctor logs and the concurrent
+// /api/tasks poll must land between the two parses, not queue behind both
+const orderRoot = mkdtempSync(join(tmpdir(), "webui-order-"));
+const orderHome = mkdtempSync(join(tmpdir(), "webui-order-home-"));
+const orderTask = createTask(orderRoot, { name: "feat: parse order", summary: "s", specs: "s" });
+const orderSlug = orderTask.file.replace(/\.md$/, "");
+mkdirSync(join(orderRoot, ".kanban", ".logs"), { recursive: true });
+writeFileSync(join(orderRoot, ".kanban", ".logs", `${orderSlug}.developer.log`), JSON.stringify({ type: "session", id: "s", timestamp: "2026-10-12T07:34:03.000Z" }) + "\n");
+writeFileSync(join(orderRoot, ".kanban", ".logs", `${orderSlug}.developer.0.doctor.log`), JSON.stringify({ type: "session", id: "s", timestamp: "2026-10-12T07:35:03.000Z" }) + "\n");
+writeFileSync(join(orderRoot, ".kanban", ".logs", `${orderSlug}.developer.1.doctor.log`), JSON.stringify({ type: "session", id: "s", timestamp: "2026-10-12T07:36:03.000Z" }) + "\n");
+const orderPreload = join(tmpdir(), `webui-order-preload-${process.pid}.cjs`);
+writeFileSync(orderPreload, `
+const fs = require("node:fs");
+const orig = fs.readFileSync;
+fs.readFileSync = function (p, ...rest) {
+	if (String(p).includes(".doctor")) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+	return orig.apply(this, [p, ...rest]);
+};
+`);
+const orderCode = `
+import { pathToFileURL } from "node:url";
+const hub = (await import(pathToFileURL(process.env.HERE + "/../src/hub.ts").href)).startHub;
+const ui = await hub({ name: "order-test", root: process.env.ROOT, host: "127.0.0.1", port: 0 });
+console.log("PORT " + ui.port);
+setInterval(() => {}, 10_000);
+`;
+const orderChild = spawn(process.execPath, ["--require", orderPreload, "--input-type=module", "-e", orderCode], {
+	env: { ...process.env, HERE, ROOT: orderRoot, HOME: orderHome },
+	cwd: HERE,
+	stdio: ["ignore", "pipe", "pipe"],
+});
+let orderPort = "";
+orderChild.stdout.setEncoding("utf8");
+orderChild.stdout.on("data", (c: string) => { const m = c.match(/PORT (\d+)/); if (m) orderPort = m[1]; });
+for (let i = 0; i < 100 && !orderPort; i++) await new Promise((r) => setTimeout(r, 50));
+assert.ok(orderPort, "the order-test hub started");
+const orderBase = `http://127.0.0.1:${orderPort}`;
+const started = Date.now();
+const histAt = fetch(`${orderBase}/api/task-history?num=${parseInt(orderTask.file, 10)}`)
+	.then((r) => r.json())
+	.then((j: any) => { assert.ok(j.agents, "the history endpoint serves the agent history"); return Date.now(); });
+await new Promise((r) => setTimeout(r, 10));
+const tasksAt = fetch(`${orderBase}/api/tasks`).then((r) => r.json()).then(() => Date.now());
+const [hist, tasks] = await Promise.all([histAt, tasksAt]);
+assert.ok(tasks < hist, `a heavy parse never stalls a concurrent poll (tasks ${tasks - started}ms, history ${hist - started}ms)`);
+orderChild.kill("SIGKILL");
+rmSync(orderRoot, { recursive: true, force: true });
+rmSync(orderHome, { recursive: true, force: true });
+
 // 000222 the Doctor card payload: one doctors entry per existing
 // `.logs/<slug>.<analysed role>.<n>.doctor.log` (the slug must match the task), tokens and
 // duration parsed off the same JSONL stream the agent logs carry, alive = the analysed run's
@@ -2083,10 +2188,10 @@ rmSync(`${dev1}.gz`, { force: true });
 const docRoot = mkdtempSync(join(tmpdir(), "webui-doctor-"));
 const docTask = createTask(docRoot, { name: "feat: doctor payload", summary: "s", specs: "s" });
 const docSlug = docTask.file.replace(/\.md$/, "");
-const docDetail = (t: { file: string }) => taskDetail(docRoot, parseInt(t.file, 10))!;
+const docDetail = (t: { file: string }) => taskHistory(docRoot, parseInt(t.file, 10))!;
 const docLogs = join(docRoot, ".kanban", ".logs");
 mkdirSync(docLogs, { recursive: true });
-assert.deepEqual(docDetail(docTask).doctors, [], "no doctor logs yet, empty doctor history");
+assert.deepEqual((await docDetail(docTask)).doctors, [], "no doctor logs yet, empty doctor history");
 // finished doctor logs with relative timestamps: the in-log first record timestamp is the sort
 // key, so the entries read oldest first regardless of file mtimes
 const docBase = Date.now() - 600000;
@@ -2104,7 +2209,7 @@ const otherTask = createTask(docRoot, { name: "fix: other doctor task", summary:
 const otherSlug = otherTask.file.replace(/\.md$/, "");
 writeFileSync(join(docLogs, `${otherSlug}.developer.0.doctor.log`), "OTHER TASK DOCTOR\n");
 assert.deepEqual(
-	docDetail(docTask).doctors,
+	(await docDetail(docTask)).doctors,
 	[
 		{ role: "doctor", run: 0, alive: false, status: "ok", handle: `${docSlug}.developer.0.doctor`, tokens: 20, duration: 5000 },
 		{ role: "doctor", run: 1, alive: false, status: "ok", handle: `${docSlug}.developer.1.doctor`, tokens: 30, duration: 3000 },
@@ -2112,7 +2217,7 @@ assert.deepEqual(
 	"one doctor entry per doctor log, tokens sum input + output (cache excluded), duration is last - first record timestamp, sorted oldest first",
 );
 assert.deepEqual(
-	docDetail(otherTask).doctors,
+	(await docDetail(otherTask)).doctors,
 	[{ role: "doctor", run: 0, alive: false, status: "ok", handle: `${otherSlug}.developer.0.doctor`, tokens: null, duration: null }],
 	"a doctor log belongs to its own task's payload, another task's slug is excluded",
 );
@@ -2120,7 +2225,7 @@ assert.deepEqual(
 // a live analysed run: the analysis pid file keeps the doctor entry live and its duration ticks
 mkdirSync(join(docRoot, ".kanban", ".pids"), { recursive: true });
 writeFileSync(join(docRoot, ".kanban", ".pids", `${docSlug}.developer.0.analysis.pid`), String(process.pid));
-const docLive = docDetail(docTask).doctors[0];
+const docLive = (await docDetail(docTask)).doctors[0];
 assert.equal(docLive.alive, true, "a live analysis pid marks the analysed run's doctor entry alive");
 assert.equal(docLive.status, "live", "a live doctor entry reads live, so its card spins");
 assert.ok(docLive.duration! >= 600000, "a live doctor's duration ticks with now - first, not the frozen parsed last - first");
@@ -2128,12 +2233,12 @@ rmSync(join(docRoot, ".kanban", ".pids", `${docSlug}.developer.0.analysis.pid`))
 
 // the doctor handle serves the doctor log through the same chunked payload; the handle needs the
 // analysed run's task on the board and its run index, like any agent handle
-const docServed = JSON.parse(agentLogPayload(docRoot, new URLSearchParams("file=" + encodeURIComponent(`${docSlug}.developer.0.doctor`)))!);
+const docServed = JSON.parse((await agentLogPayload(docRoot, new URLSearchParams("file=" + encodeURIComponent(`${docSlug}.developer.0.doctor`))))!);
 assert.ok(docServed.text.includes("DOCTOR RUN ZERO\n"), "the doctor handle serves the doctor log's text");
 assert.equal(docServed.atStart, true, "a short doctor log serves whole from its start");
-assert.equal(agentLogPayload(docRoot, new URLSearchParams("file=" + encodeURIComponent(`${docSlug}.developer.doctor`))), null, "a doctor handle without the analysed run index is rejected");
-assert.equal(agentLogPayload(docRoot, new URLSearchParams("file=" + encodeURIComponent(`${docSlug}.auditor.0.doctor`))), null, "a doctor handle over an unknown analysed role is rejected");
-assert.equal(agentLogPayload(docRoot, new URLSearchParams("file=" + encodeURIComponent(`nope.developer.0.doctor`))), null, "a doctor handle needs its task on the board");
+assert.equal(await agentLogPayload(docRoot, new URLSearchParams("file=" + encodeURIComponent(`${docSlug}.developer.doctor`))), null, "a doctor handle without the analysed run index is rejected");
+assert.equal(await agentLogPayload(docRoot, new URLSearchParams("file=" + encodeURIComponent(`${docSlug}.auditor.0.doctor`))), null, "a doctor handle over an unknown analysed role is rejected");
+assert.equal(await agentLogPayload(docRoot, new URLSearchParams("file=" + encodeURIComponent(`nope.developer.0.doctor`))), null, "a doctor handle needs its task on the board");
 
 // LOG_ROLES: the doctor analysis writes no per-task run log, its role is enumerated last
 assert.equal(LOG_ROLES[LOG_ROLES.length - 1], "doctor", "doctor is the last LOG_ROLES entry, after the merger");
@@ -2206,7 +2311,7 @@ const statsTasks = Array.from({ length: 6 }, (_, i) => createTask(statsRoot, { n
 statsTasks.forEach((t) => setState(statsRoot, t, "reviewing"));
 const statsBase = Date.now() / 1000;
 statsTasks.forEach((t, i) => utimesSync(join(statsRoot, ".kanban", t.file), statsBase + i, statsBase + i));
-const statsRows = taskPayload(statsRoot).filter((r: any) => r.name.startsWith("feat: stats"));
+const statsRows = (await taskPayload(statsRoot)).filter((r: any) => r.name.startsWith("feat: stats"));
 assert.equal(statsRows.length, 6);
 for (const r of statsRows)
 	assert.equal("agents" in r, r.num !== parseInt(statsTasks[0].file, 10), "the five visible rows carry the stat data, a card behind show more carries none");
@@ -2215,9 +2320,9 @@ writeFileSync(join(statsRoot, ".kanban", ".logs", `${loggedSlug}.developer.log`)
 	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 200, output: 100 } }, timestamp: Date.now() - 2000 }),
 	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 300, output: 200 } }, timestamp: Date.now() - 1000 }),
 ].join("\n") + "\n");
-const loggedRow = taskPayload(statsRoot).find((r: any) => r.file === statsTasks[1].file)!;
+const loggedRow = (await taskPayload(statsRoot)).find((r: any) => r.file === statsTasks[1].file)!;
 assert.equal(loggedRow.agents[0].tokens, 800, "a visible card's row sums the run's usage like the detail's history");
-assert.deepEqual(loggedRow.agents, taskDetail(statsRoot, loggedRow.num)!.agents, "the row carries the same agent history the detail serves");
+assert.deepEqual(loggedRow.agents, (await taskHistory(statsRoot, loggedRow.num))!.agents, "the row carries the same agent history the detail's history serves");
 
 // the done cache: a done task's stats serve from the cache (a rewritten plain log stays stale) and
 // leaving done invalidates it, so a re-done task re-caches fresh
@@ -2228,18 +2333,18 @@ const doneSlug = doneTask.file.replace(/\.md$/, "");
 const doneLog = join(doneRoot, ".kanban", ".logs", `${doneSlug}.developer.log`);
 const writeDoneLog = (tokens: number) =>
 	writeFileSync(doneLog, JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: tokens, output: 0 } }, timestamp: new Date().toISOString() }) + "\n");
-const doneRow = () => taskPayload(doneRoot).find((r: any) => r.file === doneTask.file)!;
+const doneRow = () => taskPayload(doneRoot).then((rows: any[]) => rows.find((r: any) => r.file === doneTask.file)!);
 setState(doneRoot, doneTask, "done");
 writeDoneLog(300);
-assert.equal(doneRow().agents[0].tokens, 300, "a done card's row carries the run's stats");
+assert.equal((await doneRow()).agents[0].tokens, 300, "a done card's row carries the run's stats");
 writeDoneLog(1500);
-assert.equal(doneRow().agents[0].tokens, 300, "a done card's stats come from the cache, a rewritten plain log stays stale");
+assert.equal((await doneRow()).agents[0].tokens, 300, "a done card's stats come from the cache, a rewritten plain log stays stale");
 setState(doneRoot, doneTask, "to-do");
-assert.equal(doneRow().agents[0].tokens, 1500, "leaving done invalidates the cache, the fresh stats serve");
+assert.equal((await doneRow()).agents[0].tokens, 1500, "leaving done invalidates the cache, the fresh stats serve");
 setState(doneRoot, doneTask, "done");
-assert.equal(doneRow().agents[0].tokens, 1500, "a re-done task re-caches fresh, the pre-done entry never returns");
+assert.equal((await doneRow()).agents[0].tokens, 1500, "a re-done task re-caches fresh, the pre-done entry never returns");
 writeDoneLog(20000);
-assert.equal(doneRow().agents[0].tokens, 1500, "the re-cached entry is stale again until the next leave-done");
+assert.equal((await doneRow()).agents[0].tokens, 1500, "the re-cached entry is stale again until the next leave-done");
 
 cleanup();
 console.log("webui.test.ts: all assertions passed");

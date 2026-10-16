@@ -23,6 +23,13 @@ interface AgentEntry {
 	duration: number | null;
 }
 
+// one yield (000248) crosses one poll phase: a single setImmediate resumes its awaiter as a
+// microtask in the same check phase, before the loop ever reaches the queued requests' poll
+// phase, so the heavy per-line loops yield between slices and other clients' responses land
+// between them instead of queueing behind the parse
+const PARSE_CHUNK = 4000; // lines per synchronous slice in the heavy per-line loops
+const yieldNow = () => new Promise<void>((r) => setImmediate(() => setImmediate(r)));
+
 function taskBody(root: string, file: string): string {
 	try {
 		const raw = readFileSync(join(kanbanDir(root), file), "utf8");
@@ -95,7 +102,7 @@ function indexRuns(files: string[], base: string): number[] {
 // unsuffixed log carries none) falls back to its mtime, equal keys keep the enumeration order
 // (role order, legacy first, index ascending). Only the newest run of the state-mapped role is the
 // live agent
-function agentHistory(root: string, t: Task, files: string[]): AgentEntry[] {
+async function agentHistory(root: string, t: Task, files: string[]): Promise<AgentEntry[]> {
 	const slug = taskSlug(t.file);
 	const dir = join(kanbanDir(root), ".logs");
 	const liveRole = AGENT_ROLE[t.state];
@@ -117,7 +124,7 @@ function agentHistory(root: string, t: Task, files: string[]): AgentEntry[] {
 			} catch {
 				/* raced away between readdir and stat */
 			}
-			const stats = logStats(path);
+			const stats = await logStats(path);
 			const alive = live && role === liveRole && r.handle === newest;
 			// no marker means the run advanced the state itself, the same signal the poll's
 			// completed-run counter clear reads; a marker can never name the live run, indexes
@@ -127,6 +134,7 @@ function agentHistory(root: string, t: Task, files: string[]): AgentEntry[] {
 			// now - first per request; finished runs keep the parsed last - first (000169)
 			const duration = alive && stats.first != null ? Math.max(0, now - stats.first) : stats.duration;
 			entries.push({ role, run: r.run, alive, status, handle: r.handle, tokens: stats.tokens, duration, mtime, start: stats.first });
+			await yieldNow(); // one turn per log: a cached parse is instant, a cold one yields between logs
 		}
 	}
 	// stable sort: the enumeration order (role order, legacy first, index ascending) breaks the ties
@@ -140,7 +148,7 @@ function agentHistory(root: string, t: Task, files: string[]): AgentEntry[] {
 // the run history; alive = the run's analysis pid is still alive (spawnRunAnalysis's pid file),
 // so a running doctor's card spins and its log keeps polling; tokens and duration parse off the
 // same JSONL stream the agent logs carry
-function doctorHistory(root: string, t: Task, files: string[]): AgentEntry[] {
+async function doctorHistory(root: string, t: Task, files: string[]): Promise<AgentEntry[]> {
 	const slug = taskSlug(t.file);
 	const dir = join(kanbanDir(root), ".logs");
 	const now = Date.now();
@@ -155,10 +163,11 @@ function doctorHistory(root: string, t: Task, files: string[]): AgentEntry[] {
 		} catch {
 			/* raced away between readdir and stat */
 		}
-		const stats = logStats(path);
+		const stats = await logStats(path);
 		const alive = agentAlive(root, `${slug}.${m[2]}.${m[3]}.analysis`);
 		const duration = alive && stats.first != null ? Math.max(0, now - stats.first) : stats.duration;
 		entries.push({ role: "doctor", run: Number(m[3]), alive, status: alive ? "live" : "ok", handle: `${slug}.${m[2]}.${m[3]}.doctor`, tokens: stats.tokens, duration, mtime, start: stats.first });
+		await yieldNow(); // one turn per log: a cached parse is instant, a cold one yields between logs
 	}
 	// stable sort: the readdir order breaks the ties
 	return entries
@@ -196,7 +205,7 @@ const SUB_ROOT = "/tmp/pi-subagents-1000/";
 // for the list: memoize per path until the file size changes. A plain log only ever grows; a .gz
 // log is the sweep's finished-run output and never changes, so its compressed size keys the cache
 const subsCache = new Map<string, { size: number; subs: { id: string; path: string }[] }>();
-function subagentLogs(log: string): { id: string; path: string }[] {
+async function subagentLogs(log: string): Promise<{ id: string; path: string }[]> {
 	let size = 0;
 	try {
 		size = statSync(log).size;
@@ -208,7 +217,14 @@ function subagentLogs(log: string): { id: string; path: string }[] {
 	const text = logText(log);
 	if (text === null) return []; // unreadable: a corrupt .gz parses as no subs
 	const subs: { id: string; path: string }[] = [];
-	for (const line of text.split("\n")) {
+	let n = 0;
+	let pos = 0;
+	while (pos < text.length) {
+		let end = text.indexOf("\n", pos);
+		if (end === -1) end = text.length;
+		const line = text.slice(pos, end);
+		pos = end + 1;
+		if (++n % PARSE_CHUNK === 0) await yieldNow();
 		if (!line.includes('"tool_execution_end"')) continue; // cheap filter before JSON.parse
 		let rec: any;
 		try {
@@ -256,7 +272,7 @@ function tsMs(v: unknown): number | null {
 // Ceiling: a full re-read per growth, split-line the incremental scan when a live log passes
 // tens of MB
 const statsCache = new Map<string, { size: number; tokens: number | null; duration: number | null; first: number | null; model: string | null; thinkingLevel: string | null }>();
-function logStats(path: string): { tokens: number | null; duration: number | null; first: number | null; model: string | null; thinkingLevel: string | null } {
+async function logStats(path: string): Promise<{ tokens: number | null; duration: number | null; first: number | null; model: string | null; thinkingLevel: string | null }> {
 	let size = 0;
 	try {
 		size = statSync(path).size;
@@ -275,7 +291,14 @@ function logStats(path: string): { tokens: number | null; duration: number | nul
 	let resultMs: number | null = null; // the claude result record's wall-clock duration_ms
 	const idTokens = new Map<string, number>(); // claude message.id -> the usage counted for it
 	const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
-	for (const line of text.split("\n")) {
+	let n = 0;
+	let pos = 0;
+	while (pos < text.length) {
+		let end = text.indexOf("\n", pos);
+		if (end === -1) end = text.length;
+		const line = text.slice(pos, end);
+		pos = end + 1;
+		if (++n % PARSE_CHUNK === 0) await yieldNow();
 		if (!line.includes('"timestamp"') && !line.includes('"usage"') && !line.includes('"duration_ms"')) continue; // cheap filter before JSON.parse
 		let rec: any;
 		try {
@@ -447,7 +470,7 @@ function linesBack(full: Buffer | null, target: string, tail: number, count: num
 // done tasks' run logs never change, so a done card's stat data memoizes per task until the state
 // leaves done; the delete on sight invalidates a left-done task, so a re-done task re-caches fresh
 const doneAgents = new Map<string, Map<string, AgentEntry[]>>();
-function cardAgents(root: string, t: Task, files: string[]): AgentEntry[] {
+async function cardAgents(root: string, t: Task, files: string[]): Promise<AgentEntry[]> {
 	if (t.state !== "done") {
 		doneAgents.get(root)?.delete(t.file);
 		return agentHistory(root, t, files);
@@ -455,7 +478,7 @@ function cardAgents(root: string, t: Task, files: string[]): AgentEntry[] {
 	let byFile = doneAgents.get(root);
 	if (!byFile) doneAgents.set(root, (byFile = new Map()));
 	let agents = byFile.get(t.file);
-	if (!agents) byFile.set(t.file, (agents = agentHistory(root, t, files)));
+	if (!agents) byFile.set(t.file, (agents = await agentHistory(root, t, files)));
 	return agents;
 }
 
@@ -496,12 +519,16 @@ function visibleCards(rows: ReturnType<typeof lightRow>[]): Set<string> {
 // one light row per task (000242 light, 000245 stats): no body, no doctor entries, no log parsing
 // except the visible subset's (the cards each column renders before "show more"), so a large board
 // opens fast and the 5 s poll stays cheap; the heavy data loads per task through taskDetail
-export function taskPayload(root: string) {
+export async function taskPayload(root: string) {
 	const tasks = listAll(root);
 	const files = logDirFiles(root);
 	const rows = tasks.map((t) => lightRow(root, t));
 	const visible = visibleCards(rows);
-	const served = rows.map((row, i) => (visible.has(row.file) ? { ...row, agents: cardAgents(root, tasks[i], files) } : row));
+	const served: (ReturnType<typeof lightRow> & { agents?: AgentEntry[] })[] = [];
+	for (let i = 0; i < rows.length; i++) {
+		if (visible.has(rows[i].file)) served.push({ ...rows[i], agents: await cardAgents(root, tasks[i], files) });
+		else served.push(rows[i]);
+	}
 	// drop the cache entries for tasks gone from the board
 	const onBoard = new Set(rows.map((r) => r.file));
 	const byFile = doneAgents.get(root);
@@ -509,44 +536,55 @@ export function taskPayload(root: string) {
 	return served;
 }
 
-// the per-task detail (000242): the light row plus the heavy data the detail card renders; built
-// on open for ONE task, so only that task's logs parse; unknown num = null, the route answers 404
+// the per-task detail text (000242 light, 000248): the light row plus the body, sections and
+// attributes, built on open for ONE task with no log parsing, so the text shows as soon as it
+// lands; the agent/doctor history loads through taskHistory in a follow-up fetch; unknown num =
+// null, the route answers 404
 export function taskDetail(root: string, num: number) {
 	const file = taskFiles(root).find((f) => taskNum(f) === num);
 	const t = file ? getTask(root, file) : undefined;
 	if (!t) return null;
-	const files = logDirFiles(root);
-	const agents = agentHistory(root, t, files);
 	return {
 		...lightRow(root, t),
 		body: taskBody(root, t.file),
 		specs: t.specs,
 		notes: t.notes,
 		openQuestions: t.openQuestions,
-		agents,
-		agent: agentInfo(root, t, agents),
-		doctors: doctorHistory(root, t, files),
 	};
+}
+
+// the per-task agent/doctor history (000248): the heavy log-parsing half of the detail, served in
+// a follow-up fetch so the text never queues behind a parse; the async builders yield between
+// logs, so a concurrent /api/tasks poll never waits on it; unknown num = null, the route answers 404
+export async function taskHistory(root: string, num: number) {
+	const file = taskFiles(root).find((f) => taskNum(f) === num);
+	const t = file ? getTask(root, file) : undefined;
+	if (!t) return null;
+	const files = logDirFiles(root);
+	const agents = await agentHistory(root, t, files);
+	return { agents, agent: agentInfo(root, t, agents), doctors: await doctorHistory(root, t, files) };
 }
 
 // {status, body} for /api/agent-log against one project root; null = unknown file or handle
 // `sub=list` lists the handle's subagent transcripts, `sub=<n>` serves the n-th of them through
 // the same chunked payload; no matching record is an empty list, not an error
-export function agentLogPayload(root: string, q: URLSearchParams): string | null {
+export async function agentLogPayload(root: string, q: URLSearchParams): Promise<string | null> {
 	const log = agentLogPath(root, q.get("file") ?? "");
 	if (!log) return null;
 	const sub = q.get("sub");
-	if (sub === "list")
-		return JSON.stringify(
-			subagentLogs(log).map((s, index) => {
-				const { tokens, duration } = logStats(s.path);
-				return { id: s.id, index, tokens, duration }; // first stays internal to the history sort
-			}),
-		);
+	if (sub === "list") {
+		const subs = await subagentLogs(log);
+		const rows = [];
+		for (let index = 0; index < subs.length; index++) {
+			const { tokens, duration } = await logStats(subs[index].path);
+			rows.push({ id: subs[index].id, index, tokens, duration }); // first stays internal to the history sort
+		}
+		return JSON.stringify(rows);
+	}
 	let target = log;
 	if (sub !== null) {
 		const subIndex = /^\d+$/.test(sub) ? parseInt(sub, 10) : -1;
-		const found = subIndex >= 0 ? subagentLogs(log)[subIndex] : undefined;
+		const found = subIndex >= 0 ? (await subagentLogs(log))[subIndex] : undefined;
 		if (!found) return null; // no such subagent in this run
 		target = found.path;
 	}
@@ -554,7 +592,7 @@ export function agentLogPayload(root: string, q: URLSearchParams): string | null
 	const off = Number.isInteger(n) && n >= 0 ? n : null;
 	// 000146: the meta line's model and thinking level, computed per request so the 1 s poll
 	// refreshes them live (logStats re-parses when the log grew); nulls keep the line hidden
-	const { model, thinkingLevel } = logStats(target);
+	const { model, thinkingLevel } = await logStats(target);
 	// a .gz log is a finished, immutable run: decompressed whole and the walk slices the
 	// decompressed bytes, so offsets stay byte-based like the plain path (byte offsets cannot
 	// seek into a gzip stream, and a string index would misread a plain log's byte offset);

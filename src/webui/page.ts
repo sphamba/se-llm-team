@@ -511,6 +511,8 @@ function setBody(t) {
 }
 // 000242: the detail url, the num off the file name and the active tab's project for the hub
 const detailUrl = file => "/api/task-detail?num=" + parseInt(file.slice(0, 6), 10) + projectParam();
+// 000248: the heavy history url, fetched after the detail's text shows
+const historyUrl = file => "/api/task-history?num=" + parseInt(file.slice(0, 6), 10) + projectParam();
 // 000242: the light rows carry no body or agent data, so openTask renders the shell from the row
 // and loads the heavy detail per task; every open re-fetches (no client-side cache, the 5 s poll
 // is the documented upgrade path), a superseded open's response is discarded by generation
@@ -567,8 +569,6 @@ function openTask(file) {
 		}
 		openDetail = d;
 		writeHead(d);
-		renderAgent(d);
-		renderDoctor(d);
 		setBody(d);
 		markLiveLine();
 		drawAgentRelations();
@@ -579,6 +579,19 @@ function openTask(file) {
 			clearTimeout(box.__growTimer);
 			box.__growTimer = setTimeout(() => { box.style.height = ""; box.classList.remove("grow"); }, 400);
 		}
+		// 000248: the text is up, the heavy agent/doctor history loads in a follow-up fetch and
+		// renders when it arrives (loading state per the run cards' own lifecycle)
+		return fetch(historyUrl(file)).then(r => r.ok ? r.json() : null).catch(() => null).then(h => {
+			// a superseded open must not write into the new modal
+			if (gen !== detailGen || modalFile !== file) return;
+			if (document.getElementById("modal").classList.contains("hidden")) return;
+			if (!h) return;
+			openDetail = Object.assign({}, openDetail, h);
+			renderAgent(h);
+			renderDoctor(h);
+			markLiveLine();
+			drawAgentRelations();
+		});
 	});
 }
 // the 5 s refresh of the open detail card: every block re-derives from the fresh payload with no
@@ -1048,14 +1061,22 @@ function refresh() {
 	}).catch(() => setTimeout(refresh, 5000)).then(t => { pollTimer = t; }); // a failed cycle retries at the board cadence
 }
 // 000242: the poll's detail re-fetch for the open card; a failed fetch keeps the last detail, a
-// loading modal keeps the placeholder until a cycle succeeds
+// loading modal keeps the placeholder until a cycle succeeds. 000248: the heavy history re-fetch
+// chains after the detail, the poll paces on the merged card
 function pollDetail() {
 	const gen = ++detailGen;
 	return fetch(detailUrl(modalFile)).then(r => r.ok ? r.json() : null).catch(() => null).then(d => {
 		if (gen !== detailGen || !d || modalFile !== d.file) return;
 		if (document.getElementById("modal").classList.contains("hidden")) return;
-		openDetail = d;
-		updateOpenTask(d);
+		openDetail = Object.assign({}, openDetail, d);
+		writeHead(d);
+		setBody(d);
+		return fetch(historyUrl(modalFile)).then(r => r.ok ? r.json() : null).catch(() => null).then(h => {
+			if (gen !== detailGen || !h || modalFile !== d.file) return;
+			if (document.getElementById("modal").classList.contains("hidden")) return;
+			openDetail = Object.assign({}, openDetail, h);
+			updateOpenTask(openDetail);
+		});
 	});
 }
 refresh();
