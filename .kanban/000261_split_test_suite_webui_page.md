@@ -1,0 +1,31 @@
+---
+name: "chore: split-test-suite-webui page"
+priority: "medium"
+state: "backlog"
+worktree: ""
+issuer: "#256"
+complexity: "moderate"
+shortName: "split-test-suite-webui-page"
+---
+
+# Summary
+Extract the served-page/client scenario group (old tests/webui.test.ts lines 798-1513, 270 assertions) into a standalone tests/webui/page.test.ts. The old file is not edited: it is deleted later by parent task #256.
+
+# Specs
+Facts: tests/webui.test.ts is a 2,379-line / 739-assertion plain top-level node script (node:assert/strict, top-level awaits, no framework). It stays untouched while you work; parent task #256 deletes it after all five group files land. Your range: lines 798-1513 (270 assertions), the served page/client group: z-index layering, tab poll cadence and throttle, log autoscroll, fetchSubs/updateOpenTask/renderDoctor/renderAgent/pollLog/markLiveLine/closeAnimated extracted from the served source via new Function, theme vars, fonts, aliveness/pulse, close paths. The range starts at "const modalZ = page.match(...)" and ends right before "// 000242: the agent history lives on the per-task detail". The five subtask ranges are disjoint and sum to all 739 assertions.
+
+Requirements:
+1. Create tests/webui/page.test.ts holding this range's scenarios, moved verbatim: scenario code and 000NNN comments unchanged, only imports, paths and boot adapted. This is one continuous run over the served page source: keep the scenario order.
+2. Self-contained: boot your own hub (delete XDG_CONFIG_HOME first per 000215, mkdtemp HOME/root, process.on cleanup), const page = await (await fetch(`${base}/`)).text(). Copy needed stubs inline. Do NOT create tests/webui/helpers.ts, do NOT import from tests/webui.test.ts or root tests/helpers.ts.
+3. Imports become ../../src/*.ts from tests/webui/: import only what your range uses (e.g. refreshMs, syncStatsLine, LOG_LINES from ../../src/webui.ts, startHub from ../../src/hub.ts).
+4. Standalone runnable: node:assert/strict, top-level awaits, node tests/webui/page.test.ts passes; close your hub and clean your temp dirs.
+5. No assertion dropped: your file carries exactly 270 assertions (grep -c "assert\."); the move is verbatim, not rewritten.
+6. Ownership: this task owns tests/webui/page.test.ts only. Do not touch tests/webui.test.ts, package.json, scripts/test-changed.mjs, tests/helpers.ts or any sibling test file. pnpm test still runs the old file until task #255 lands the glob; that is expected.
+7. State the big assumptions affecting the feature.
+
+Acceptance:
+- node tests/webui/page.test.ts passes standalone.
+- The file carries exactly 270 assertions and its scenario text matches the old range (imports/paths/boot apart).
+- git status shows only tests/webui/page.test.ts as new.
+
+# Notes

@@ -30,3 +30,39 @@ Acceptance:
 - Live test (feel-based): after sweeps and detail opens the daemon RSS returns to a stable baseline and stops ratcheting; doctor logs land as .log.gz and stay readable in the web UI.
 
 # Notes
+
+- 000250 implemented (commit e1633e4). payload.ts: logStats and subagentLogs parse
+  incrementally from a byte offset past the last complete line (windowed scanner, 1 MB windows,
+  byte-precise offset via lastIndexOf on raw window bytes, partial tail lines re-parsed whole on
+  the next growth); a head fingerprint (first 4 KB) detects in-place log rewrites and re-parses
+  whole, keeping the old size-keyed contract; no module-level raw or decompressed log text
+  remains. The .gz cold parse gunzips whole once per size state (compressed size keys the cache,
+  full re-parse when size < offset), a per-request transient. statsCache and subsCache are
+  bounded (MAX_LOG_CACHES 512, orphaned plain-path entries dropped first, oldest evicted past the
+  cap); doneAgents is bounded per root (16) and per task (512) with the delete-on-sight semantics
+  kept. New exports: logStats, subagentLogs, statsCache, subsCache, evictLogCaches,
+  MAX_LOG_CACHES.
+- The gzip sweep (compactFinishedLogs) now also compacts <slug>.<role>.<n>.doctor.log, guarded by
+  the <slug>.<role>.<n>.analysis pid file (a live analysis keeps its plain log), and calls
+  evictLogCaches after each .log to .log.gz rename. doctorHistory resolves swept doctor handles to
+  the .gz path, so the UI reads them transparently. spawnRunAnalysis skips re-analysis when
+  .doctor.log.gz exists.
+- Tests: orchestrator part AC's doctor pin flipped (the doctor log compacts like a role log; a
+  live analysis pid keeps its plain log), AT2's second poll now asserts the sweep gzipped the
+  finished analysis's doctor log with content intact and a third poll leaves the .gz, and a new
+  webui part 000250 covers the offset bookkeeping (cold parse, growth, unterminated tail,
+  shrink reset), incremental subagent growth, sweep-rename eviction, a swept doctor log served by
+  taskHistory, and the map bound. Both suites green (55 orchestrator parts).
+- Live check (fixture daemon, port 4399): the run log and doctor log landed as .log.gz at the
+  daemon's first sweep; /api/task-history served the doctors from the .gz (tokens 10, duration
+  2000 ms); RSS 118964 KB at baseline, 119100 KB after 3 history fetches, no ratchet.
+
+# Open questions
+
+- Assumption: the head fingerprint reads the first 4 KB; a rewrite that preserves those bytes
+  byte-for-byte re-parses only from the old offset. No real writer does this; upgrade path is a
+  full hash if one appears.
+- Assumption: the cache bounds (512 log entries, 16 roots, 512 done tasks per root) are judgment
+  calls, not config knobs.
+- Assumption: doneAgents' bounds are untested (the suite pins the statsCache bound only); the
+  shape mirrors boundLogCache.

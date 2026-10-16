@@ -1,7 +1,7 @@
 ---
 name: "chore: split-test-suite orchestrator area and shared test infra"
 priority: "medium"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "#254"
 complexity: "moderate"

@@ -1,35 +1,36 @@
 ---
 name: "chore: split the test suite into area subdirs"
 priority: "medium"
-state: "to-do"
-worktree: ""
+state: "backlog"
+worktree: "chore/254-split-test-suite"
 issuer: "user"
-complexity: "moderate"
+complexity: "simple"
 shortName: "split-test-suite"
+blockedBy: "#255, #256, #257"
 ---
 
 # Summary
-Split the four non-trivial test files (orchestrator 3,973 lines, webui 2,350, efficiency-analysis 987, kanban 510) into subdir-per-area suites, move shared helpers into tests/helpers.ts, and make npm test a glob loop so future splits never touch package.json.
+Verify the three area splits of the test suite landed: npm test runs the glob loop over tests/**/*.test.ts and passes, every split file works standalone, assertion counts match the pre-split baseline, helpers live in tests/helpers.ts without copy-pasted blocks, and the docs suite listing matches the new layout.
 
 # Specs
-Facts (measured by the PM on 2026-10-16): tests/orchestrator.test.ts is 3,973 lines / 261 KB, tests/webui.test.ts 2,350 / 196 KB, tests/efficiency-analysis.test.ts 987, tests/kanban.test.ts 510; small files plugin (70), mcp (170), extension (201) and context-symlinks (239) stay as they are. All files are plain top-level scripts (node:assert/strict, top-level awaits, no test framework) that run with node tests/<file>.ts. Shared helpers are defined inline: orchestrator.test.ts has fixture() (line 24), runDaemon() (line 180) and per-scenario constants; each file mixes many scenario groups (hub lock, singleton, promote gates, blockers, merge, sweep, pid and spawn management, worktree linking for orchestrator; payload, board, page and hub for webui).
+Facts (baseline, pre-split): orchestrator.test.ts 558 assertions, webui.test.ts 739, efficiency-analysis.test.ts 203, kanban.test.ts 179 (grep -c "assert\.").
 
-Decisions (user, 2026-10-16): split all four non-trivial files; subdir per area; shared helpers in tests/helpers.ts; npm test becomes a glob loop over tests/**/*.test.ts.
-
-Requirements:
-1. Split tests/orchestrator.test.ts into tests/orchestrator/*.test.ts files by scenario group (for example spawn, promote, merge, log, hub, singleton); the seams are the developer's judgment.
-2. Split tests/webui.test.ts into tests/webui/*.test.ts files (for example payload, board, page, hub).
-3. Split tests/efficiency-analysis.test.ts and tests/kanban.test.ts into area subdirs the same way.
-4. Shared helpers (fixture, runDaemon, temp-dir setup and the daemon-run helpers) move to tests/helpers.ts and are imported by the split files; no copy-pasted helper blocks.
-5. plugin.test.ts, mcp.test.ts, extension.test.ts and context-symlinks.test.ts stay at tests/ root, unchanged except import paths.
-6. package.json's test script becomes a glob loop over tests/**/*.test.ts (a bash loop or find), so future splits never touch it.
-7. Each split file stays a standalone node script: node:assert/strict, top-level awaits, runnable with node tests/<area>/<file>.test.ts.
-8. No test skipped or dropped: every assertion from the old files lands in a split file; scenario comments with 000NNN task references move with their scenarios.
-9. State the big assumptions affecting the feature.
+Verification steps:
+1. pnpm test passes: the glob loop over tests/**/*.test.ts picks up the orchestrator/, webui/, efficiency-analysis/ and kanban/ area dirs plus the root files (plugin, mcp, extension, context-symlinks, index).
+2. node tests/<area>/<file>.test.ts works standalone for each split file (spot-check at least one per area).
+3. No assertion count regression: compare the old files from git history (git show main:tests/orchestrator.test.ts etc) with the new area dirs, per-file grep -c "assert\." old vs sum over the area dir.
+4. The four old files are gone from tests/ root and the 000NNN scenario comments moved with their scenarios into the split files.
+5. Shared helpers (fixture, runDaemon, temp-dir setup, daemon-run helpers) live in tests/helpers.ts with no copy-pasted helper blocks in the split files; per-area helpers stay in their area subdirs.
+6. docs/development.md's suite listing still names the old single files: update it to the new layout once the areas have landed.
 
 Acceptance:
-- npm test runs the glob loop over every split file and passes.
-- node tests/<area>/<file>.test.ts works standalone for each split file.
-- No assertion count regression: the PM compares the pre/post test output.
+- pnpm test passes end to end.
+- Assertion counts match the baseline exactly.
+- docs/development.md matches the new layout.
 
 # Notes
+- Blocked, verification cannot run. The three prerequisite splits have not landed at branch base a582b65 (= main): tests/ still holds kanban.test.ts, orchestrator.test.ts, webui.test.ts and efficiency-analysis.test.ts. tests/orchestrator/, tests/webui/, tests/efficiency-analysis/, tests/kanban/ and tests/helpers.ts do not exist. package.json "test" is still an explicit file list, not the tests/**/*.test.ts glob loop. docs/development.md still lists the old single files. Task #255 is to-do, #256 is to-do, #257 is doing on a branch with no commits.
+- No code change and no commit in this worktree. Re-run this task after #255, #256 and #257 merge.
+
+# Open questions
+- Assumption: this verification checks the merged result of #255, #256 and #257 on main. Should the pipeline keep #254 blocked until those three are done?
