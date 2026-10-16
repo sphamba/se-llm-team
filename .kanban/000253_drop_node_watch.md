@@ -1,8 +1,8 @@
 ---
 name: "fix: remove node --watch from the orchestrator start path"
 priority: "high"
-state: "live-testing"
-worktree: "fix/253-drop-node-watch"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "drop-node-watch"
@@ -35,5 +35,17 @@ Acceptance:
 - Live check (temp root, isolated HOME and XDG_CONFIG_HOME, git repo, done task): the tool start spawned one process (lock pid 1823885, cmdline without --watch, ppid 1, no supervisor pair); the tool stop left no process and cleared the lock; kill -9 stayed dead across a .kanban board write; a manual start brought the daemon back.
 - Four --watch supervisors from earlier sessions (se-llm-team x2, akantu-rs x2) still run in the main checkout. This change stops new ones only.
 - Review at 38dad90: specs 1-2 settled by the diff (spawn args plain, warn branch gone); spec 3 settled by grep (no orchestratorWatched or procPpid consumers left); spec 4 settled by the diff (hub registration, singleton lock, poll cadences untouched). Ran index.test.ts, mcp.test.ts, orchestrator.test.ts, webui.test.ts: all exit 0. The first orchestrator run flaked at the per-role notes mirror check (a part the diff does not touch); the second run passed clean. Fixed the garbled index.test.ts comment (duplicate fragment plus a stale warning reference) in 38dad90.
+
+## Live test (2026-10-16)
+- Interface: five real `pi -p --mode json` sessions ran each start and stop through the shipped `orchestrator_start` and `orchestrator_stop` tools. The fixture was a scratch git root with an empty board and `SE_LLM_TEAM_NO_WEBUI=1`.
+- Harness: `/tmp/lt253/check.mjs` sampled `ps -eo pid,ppid,args` around each step. Output: 23 checks, 0 failed.
+- Start: the result was `Orchestrator starting (pid N)`, the lock held N, the process was alive, and its argv had no `--watch`. Exactly one process existed for the root and its ppid was 1. No `--watch` process existed for the root, so there was no supervisor pair.
+- Second start while running: `Orchestrator already running (pid N)`. The message has no watch or self-restart wording.
+- Stop: `Sent SIGTERM to orchestrator pid N`. The process and the lock were gone within 10 s.
+- SIGKILL: the daemon died and no supervisor remained. A write to the `.kanban` board plus a 3 s wait did not revive it.
+- Manual start after SIGKILL: `Orchestrator starting (pid N3)`. The daemon came back alive and single, and it took the stale lock over. The final stop left no process and no lock.
+- Not live-tested: spec 3 (dead helper removal) is code-only and the diff settles it, no `orchestratorWatched` or `procPpid` remains. The src-touch restart check was skipped because the fixture daemon loads src from the main checkout, and a touch there can restart the four legacy `--watch` supervisors that still run. Spec 5 (state the big assumptions) has no runnable surface.
+- Assumptions: the acceptance text is the contract, so the old resurrection path was not re-run. `pi -p` is the real user interface of the tools. The empty board spawns no agents, so the daemon process itself was the test target.
+- Harness note: a pi child spawned from a node driver hangs with an open stdin pipe because pi waits for EOF. `stdio: ["ignore","pipe","pipe"]` fixes it.
 
 
