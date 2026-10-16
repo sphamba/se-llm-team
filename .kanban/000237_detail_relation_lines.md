@@ -2,7 +2,7 @@
 name: "feat: agent and subagent link lines in the task detail view"
 priority: "medium"
 state: "done"
-worktree: "feat/237-detail-relation-lines"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "detail-relation-lines"
