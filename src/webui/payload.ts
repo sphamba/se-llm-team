@@ -73,14 +73,84 @@ function runLogPath(dir: string, base: string): string {
 	return existsSync(plain) ? plain : `${plain}.gz`;
 }
 
-// the full text of a log path: a .gz log is a finished, immutable run, decompressed whole per
-// read; plain logs read as utf8 (the chunked payload streams a live tail by byte range)
-function logText(path: string): string | null {
+// 000250 the bounded log caches: stats and paths metadata only, but never unbounded. Orphans
+// drop first (a plain .log key whose file the sweep renamed away), then the oldest entries
+export const MAX_LOG_CACHES = 512;
+function boundLogCache(map: Map<string, unknown>): void {
+	if (map.size < MAX_LOG_CACHES) return;
+	for (const k of [...map.keys()]) {
+		if (map.size < MAX_LOG_CACHES) break;
+		if (k.endsWith(".log") && !existsSync(k)) map.delete(k);
+	}
+	while (map.size >= MAX_LOG_CACHES) map.delete(map.keys().next().value as string);
+}
+
+// the gzip sweep's rename orphans the plain-path entries: the .log.gz replacement keys fresh,
+// the old .log key would never be looked up again
+export function evictLogCaches(paths: string[]): void {
+	for (const p of paths) {
+		statsCache.delete(p);
+		subsCache.delete(p);
+	}
+}
+
+// the incremental parse windows: bytes per synchronous read, so a cold parse never holds the
+// whole file and a live log's re-poll reads only the growth
+const SCAN_BYTES = 1 << 20;
+
+// a rewritten log (same path, new content, size at or past the old) must re-parse whole: the
+// head fingerprint catches it, a live log's append keeps its head (000250)
+const HEAD_BYTES = 4096;
+function logHead(path: string): string | null {
 	try {
-		return path.endsWith(".gz") ? gunzipSync(readFileSync(path)).toString("utf8") : readFileSync(path, "utf8");
+		return readBytes(null, path, 0, HEAD_BYTES).toString("utf8");
 	} catch {
 		return null;
 	}
+}
+
+// complete lines of [from, to), yielded between windows and PARSE_CHUNK-line slices; the
+// returned offset is the byte position past the last complete line, so a partial tail record
+// re-parses whole on the next growth. The decompressed .gz buffer arrives whole (a finished
+// log's one-time transient); a plain path reads by byte range
+async function scanLogLines(target: string, from: number, to: number, gz: Buffer | null, onLine: (line: string) => void): Promise<number> {
+	let n = 0;
+	let offset = from;
+	let pos = from;
+	let carry = "";
+	while (pos < to) {
+		const end = Math.min(pos + SCAN_BYTES, to);
+		let buf: Buffer;
+		if (gz !== null) buf = gz.subarray(pos, end);
+		else {
+			try {
+				buf = readBytes(null, target, pos, end);
+			} catch {
+				return offset; // vanished mid-scan
+			}
+		}
+		if (!buf.length) return offset;
+		const win = pos;
+		pos = win + buf.length;
+		const nlByte = buf.lastIndexOf(0x0a);
+		if (nlByte === -1) {
+			carry += buf.toString("utf8");
+			continue;
+		}
+		offset = win + nlByte + 1;
+		const text = carry + buf.toString("utf8");
+		const nl = text.lastIndexOf("\n");
+		carry = text.slice(nl + 1);
+		let lineStart = 0;
+		while (lineStart <= nl) {
+			const lineEnd = text.indexOf("\n", lineStart);
+			const line = text.slice(lineStart, lineEnd);
+			lineStart = lineEnd + 1;
+			if (++n % PARSE_CHUNK === 0) await yieldNow();
+			onLine(line);
+		}
+	}
+	return offset;
 }
 
 // the indexed run numbers of one role log, ascending: `<slug>.<role>.<n>.log` and the sweep's
@@ -154,9 +224,10 @@ async function doctorHistory(root: string, t: Task, files: string[]): Promise<Ag
 	const now = Date.now();
 	const entries: (AgentEntry & { mtime: number; start: number | null })[] = [];
 	for (const f of files) {
-		const m = f.match(/^(.+)\.([a-z-]+)\.(\d+)\.doctor\.log$/);
+		const m = f.match(/^(.+)\.([a-z-]+)\.(\d+)\.doctor\.log(?:\.gz)?$/);
 		if (!m || m[1] !== slug) continue;
-		const path = join(dir, f);
+		// the swept doctor log: the plain .log while it exists, else the sweep's .log.gz
+		const path = f.endsWith(".log") ? runLogPath(dir, f.slice(0, -4)) : join(dir, f);
 		let mtime = 0;
 		try {
 			mtime = statSync(path).mtimeMs;
@@ -201,48 +272,56 @@ const SUB_ROOT = "/tmp/pi-subagents-1000/";
 // the Agent tool's tool result names the background agent and its .output transcript; ids are in
 // log order, so a subagent's number is its index here. Paths come from the log, never the client:
 // resolve first, then only pi's own subagent dir and .output transcripts pass
-// parsing a parent log is not free (a live-tester log can pass 50 MB), and every panel open asks
-// for the list: memoize per path until the file size changes. A plain log only ever grows; a .gz
-// log is the sweep's finished-run output and never changes, so its compressed size keys the cache
-const subsCache = new Map<string, { size: number; subs: { id: string; path: string }[] }>();
-async function subagentLogs(log: string): Promise<{ id: string; path: string }[]> {
+// the parse is incremental (000250): offset is the byte position past the last complete line, so
+// a live parent log's re-poll reads only the new bytes; a .gz parent is immutable, its compressed
+// size keys the cache
+export const subsCache = new Map<string, { size: number; offset: number; head: string | null; subs: { id: string; path: string }[] }>();
+export async function subagentLogs(log: string): Promise<{ id: string; path: string }[]> {
 	let size = 0;
+	let entry = subsCache.get(log);
 	try {
 		size = statSync(log).size;
-		const hit = subsCache.get(log);
-		if (hit && hit.size === size) return hit.subs;
+		if (entry && entry.size === size) return entry.subs;
 	} catch {
 		return []; // parent log gone or not written yet
 	}
-	const text = logText(log);
-	if (text === null) return []; // unreadable: a corrupt .gz parses as no subs
-	const subs: { id: string; path: string }[] = [];
-	let n = 0;
-	let pos = 0;
-	while (pos < text.length) {
-		let end = text.indexOf("\n", pos);
-		if (end === -1) end = text.length;
-		const line = text.slice(pos, end);
-		pos = end + 1;
-		if (++n % PARSE_CHUNK === 0) await yieldNow();
-		if (!line.includes('"tool_execution_end"')) continue; // cheap filter before JSON.parse
+	let head: string | null = null;
+	if (!log.endsWith(".gz")) head = logHead(log); // .gz is immutable: no fingerprint
+	if (entry && size < entry.size) entry = undefined; // replaced by a shorter log: parse fresh
+	else if (entry && head !== entry.head) entry = undefined; // rewritten in place: parse fresh
+	const e = entry ?? { size: 0, offset: 0, head: null, subs: [] as { id: string; path: string }[] };
+	let gz: Buffer | null = null;
+	let scanTo = size;
+	if (log.endsWith(".gz")) {
+		try {
+			gz = gunzipSync(readFileSync(log)); // one-time transient: a .gz is immutable, its compressed size keys the cache
+		} catch {
+			return []; // corrupt .gz parses as no subs
+		}
+		scanTo = gz.length;
+	}
+	e.offset = await scanLogLines(log, e.offset, scanTo, gz, (line) => {
+		if (!line.includes('"tool_execution_end"')) return; // cheap filter before JSON.parse
 		let rec: any;
 		try {
 			rec = JSON.parse(line);
 		} catch {
-			continue;
+			return;
 		}
-		if (rec?.type !== "tool_execution_end") continue;
+		if (rec?.type !== "tool_execution_end") return;
 		const content = rec.result?.content;
 		const result: string = Array.isArray(content) ? (content.find((c: any) => c?.type === "text")?.text ?? "") : "";
 		const id = result.match(/Agent ID: (\S+)/)?.[1];
 		const path = result.match(/Output file: (\S+)/)?.[1];
 		const resolved = path ? resolve(path) : "";
-		if (!id || !resolved.startsWith(SUB_ROOT) || !resolved.endsWith(".output")) continue;
-		subs.push({ id, path: resolved });
-	}
-	subsCache.set(log, { size, subs });
-	return subs;
+		if (!id || !resolved.startsWith(SUB_ROOT) || !resolved.endsWith(".output")) return;
+		e.subs.push({ id, path: resolved });
+	});
+	e.size = size;
+	e.head = head;
+	boundLogCache(subsCache);
+	subsCache.set(log, e);
+	return e.subs;
 }
 
 // record timestamps arrive as ISO strings (session, subagent user/assistant) or epoch-ms numbers
@@ -256,55 +335,68 @@ function tsMs(v: unknown): number | null {
 	return null;
 }
 
-// per-file usage stats, memoized by size like subsCache: tokens sums the provider-reported
+// per-file usage stats, incremental (000250): offset is the byte position past the last complete
+// parsed line, so a live log's re-poll reads only the new bytes and a finished log parses once
+// per size state; lastId/lastAdd dedupe the consecutive claude assistant records that share
+// message.id (000177) without holding any log content. tokens sums the provider-reported
 // message.usage input + output over the usage-bearing records (turn_end in a run log, assistant
 // in a subagent transcript; reasoning is a subset of output so it counts once, cacheRead/cacheWrite
-// excluded) (000177); claude stream-json carries the same sum as input_tokens/output_tokens, one
-// API turn can emit several assistant records sharing message.id with the same usage, so each
-// message counts once. Duration is the last record timestamp minus the
-// first, first is that first record timestamp in epoch ms (000139: the agent history sort's
-// primary key); claude records carry an optional top-level timestamp (newer emitters only), so a
-// finished claude run prefers its result record's wall-clock duration_ms over the timestamp span
-// and a timestamp-less live one reads null. Model and thinkingLevel come off the latest usage-bearing record (000146: the log
-// pane's meta line; null when no such record exists or the latest one lacks them (000151)). A plain log only ever grows, so a size match
-// means the parse is current; a live log re-parses per poll. A .gz log is immutable, so its
-// compressed size keys the same cache.
-// Ceiling: a full re-read per growth, split-line the incremental scan when a live log passes
-// tens of MB
-const statsCache = new Map<string, { size: number; tokens: number | null; duration: number | null; first: number | null; model: string | null; thinkingLevel: string | null }>();
-async function logStats(path: string): Promise<{ tokens: number | null; duration: number | null; first: number | null; model: string | null; thinkingLevel: string | null }> {
+// excluded) (000177); claude stream-json carries the same sum as input_tokens/output_tokens.
+// Duration is the last record timestamp minus the first, first is that first record timestamp in
+// epoch ms (000139: the agent history sort's primary key); claude records carry an optional
+// top-level timestamp (newer emitters only), so a finished claude run prefers its result record's
+// wall-clock duration_ms over the timestamp span and a timestamp-less live one reads null. Model
+// and thinkingLevel come off the latest usage-bearing record (000146: the log pane's meta line;
+// null when no such record exists or the latest one lacks them (000151)). A plain log only ever
+// grows; a .gz log is immutable, its compressed size keys the same cache.
+const EMPTY_STATS = { tokens: null, duration: null, first: null, model: null, thinkingLevel: null };
+type LogStats = { tokens: number | null; duration: number | null; first: number | null; model: string | null; thinkingLevel: string | null };
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+// the served shape: duration recomputes per call from the bookkeeping (a live log's tick uses
+// first at the caller, a finished log's last - first or the claude result's duration_ms)
+function statsReturn(e: { tokens: number | null; first: number | null; last: number | null; resultMs: number | null; model: string | null; thinkingLevel: string | null }): LogStats {
+	return {
+		tokens: e.tokens,
+		duration: e.resultMs ?? (e.first != null && e.last != null ? Math.max(0, e.last - e.first) : null),
+		first: e.first,
+		model: e.model,
+		thinkingLevel: e.thinkingLevel,
+	};
+}
+
+export const statsCache = new Map<string, { size: number; offset: number; head: string | null; tokens: number | null; first: number | null; last: number | null; resultMs: number | null; model: string | null; thinkingLevel: string | null; lastId: string | null; lastAdd: number | null }>();
+export async function logStats(path: string): Promise<LogStats> {
 	let size = 0;
+	let entry = statsCache.get(path);
 	try {
 		size = statSync(path).size;
-		const hit = statsCache.get(path);
-		if (hit && hit.size === size) return hit;
+		if (entry && entry.size === size) return statsReturn(entry);
 	} catch {
-		return { tokens: null, duration: null, first: null, model: null, thinkingLevel: null }; // log gone or not written yet
+		return { ...EMPTY_STATS }; // log gone or not written yet
 	}
-	const text = logText(path);
-	if (text === null) return { tokens: null, duration: null, first: null, model: null, thinkingLevel: null }; // unreadable: a corrupt .gz
-	let tokens: number | null = null;
-	let first: number | null = null;
-	let last: number | null = null;
-	let model: string | null = null;
-	let thinkingLevel: string | null = null;
-	let resultMs: number | null = null; // the claude result record's wall-clock duration_ms
-	const idTokens = new Map<string, number>(); // claude message.id -> the usage counted for it
-	const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
-	let n = 0;
-	let pos = 0;
-	while (pos < text.length) {
-		let end = text.indexOf("\n", pos);
-		if (end === -1) end = text.length;
-		const line = text.slice(pos, end);
-		pos = end + 1;
-		if (++n % PARSE_CHUNK === 0) await yieldNow();
-		if (!line.includes('"timestamp"') && !line.includes('"usage"') && !line.includes('"duration_ms"')) continue; // cheap filter before JSON.parse
+	let head: string | null = null;
+	if (!path.endsWith(".gz")) head = logHead(path); // .gz is immutable: no fingerprint
+	if (entry && size < entry.size) entry = undefined; // replaced by a shorter log: parse fresh
+	else if (entry && head !== entry.head) entry = undefined; // rewritten in place: parse fresh
+	const e = entry ?? { size: 0, offset: 0, head: null, tokens: null, first: null, last: null, resultMs: null, model: null, thinkingLevel: null, lastId: null, lastAdd: null };
+	let gz: Buffer | null = null;
+	let scanTo = size;
+	if (path.endsWith(".gz")) {
+		try {
+			gz = gunzipSync(readFileSync(path)); // one-time transient: a .gz is immutable, its compressed size keys the cache
+		} catch {
+			return { ...EMPTY_STATS }; // unreadable: a corrupt .gz
+		}
+		scanTo = gz.length;
+	}
+	e.offset = await scanLogLines(path, e.offset, scanTo, gz, (line) => {
+		if (!line.includes('"timestamp"') && !line.includes('"usage"') && !line.includes('"duration_ms"')) return; // cheap filter before JSON.parse
 		let rec: any;
 		try {
 			rec = JSON.parse(line);
 		} catch {
-			continue;
+			return;
 		}
 		const usage = rec?.message?.usage;
 		// pi usage carries input/output; claude stream-json carries input_tokens/output_tokens
@@ -315,28 +407,32 @@ async function logStats(path: string): Promise<{ tokens: number | null; duration
 			const add = input + output;
 			const id = claude && typeof rec.message.id === "string" && rec.message.id ? rec.message.id : null;
 			if (id) {
-				// one claude API turn can emit several assistant records sharing message.id with the
-				// same usage: a re-read record replaces the usage counted for its message
-				tokens = (tokens ?? 0) + add - (idTokens.get(id) ?? 0);
-				idTokens.set(id, add);
+				// consecutive claude records sharing message.id replace the usage counted for it
+				e.tokens = (e.tokens ?? 0) + add - (e.lastId === id ? e.lastAdd ?? 0 : 0);
+				e.lastId = id;
+				e.lastAdd = add;
 			} else {
-				tokens = (tokens ?? 0) + add;
+				e.tokens = (e.tokens ?? 0) + add;
+				e.lastId = null;
+				e.lastAdd = null;
 			}
-			// the loop reads top to bottom, so the latest usage-bearing record wins; a record without the
-			// fields clears them rather than carrying an older record's value forward (000151)
-			model = typeof rec.message.model === "string" && rec.message.model ? rec.message.model : null;
-			thinkingLevel = typeof rec.message.thinkingLevel === "string" && rec.message.thinkingLevel ? rec.message.thinkingLevel : null;
+			// the latest usage-bearing record wins; a record without the fields clears them rather
+			// than carrying an older record's value forward (000151)
+			e.model = typeof rec.message.model === "string" && rec.message.model ? rec.message.model : null;
+			e.thinkingLevel = typeof rec.message.thinkingLevel === "string" && rec.message.thinkingLevel ? rec.message.thinkingLevel : null;
 		}
-		if (rec?.type === "result" && num(rec.duration_ms) != null) resultMs = rec.duration_ms;
+		if (rec?.type === "result" && num(rec.duration_ms) != null) e.resultMs = rec.duration_ms;
 		const ts = tsMs(rec?.timestamp) ?? tsMs(rec?.message?.timestamp);
 		if (ts != null) {
-			first ??= ts;
-			last = ts;
+			e.first ??= ts;
+			e.last = ts;
 		}
-	}
-	const stats = { tokens, duration: resultMs ?? (first != null && last != null ? Math.max(0, last - first) : null), first, model, thinkingLevel };
-	statsCache.set(path, { size, ...stats });
-	return stats;
+	});
+	e.size = size;
+	e.head = head;
+	boundLogCache(statsCache);
+	statsCache.set(path, e);
+	return statsReturn(e);
 }
 
 const SCAN_WINDOW = 81920; // bytes per backward read in the collapsed-line scan
@@ -468,7 +564,11 @@ function linesBack(full: Buffer | null, target: string, tail: number, count: num
 }
 
 // done tasks' run logs never change, so a done card's stat data memoizes per task until the state
-// leaves done; the delete on sight invalidates a left-done task, so a re-done task re-caches fresh
+// leaves done; the delete on sight invalidates a left-done task, so a re-done task re-caches fresh.
+// Bounded (000250): one entry per done task per root, the board-gone cleanup drops the rest, and
+// the oldest root or task entry evicts past the cap
+const MAX_DONE_CACHES = 512;
+const MAX_ROOTS = 16;
 const doneAgents = new Map<string, Map<string, AgentEntry[]>>();
 async function cardAgents(root: string, t: Task, files: string[]): Promise<AgentEntry[]> {
 	if (t.state !== "done") {
@@ -476,9 +576,15 @@ async function cardAgents(root: string, t: Task, files: string[]): Promise<Agent
 		return agentHistory(root, t, files);
 	}
 	let byFile = doneAgents.get(root);
-	if (!byFile) doneAgents.set(root, (byFile = new Map()));
+	if (!byFile) {
+		while (doneAgents.size >= MAX_ROOTS) doneAgents.delete(doneAgents.keys().next().value as string);
+		doneAgents.set(root, (byFile = new Map()));
+	}
 	let agents = byFile.get(t.file);
-	if (!agents) byFile.set(t.file, (agents = await agentHistory(root, t, files)));
+	if (!agents) {
+		while (byFile.size >= MAX_DONE_CACHES) byFile.delete(byFile.keys().next().value as string);
+		byFile.set(t.file, (agents = await agentHistory(root, t, files)));
+	}
 	return agents;
 }
 

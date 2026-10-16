@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { kanbanDir } from "../kanban.ts";
 import { agentAlive } from "../pid.ts";
+import { evictLogCaches } from "../webui/payload.ts";
 
 export const logPath = (root: string, name: string) => join(kanbanDir(root), ".logs", `${name}.log`);
 export const counterPath = (root: string, name: string) => join(kanbanDir(root), ".logs", `${name}.count`);
@@ -137,7 +138,9 @@ export function compactLogLine(line: string): string | null {
 // writer may still be alive is skipped: the liveness of the pid each guard file names, so a
 // finished run's stale pidfile no longer blocks the pass. Non role-log names
 // (orchestrator.log, counters, armed markers) and already-gzipped logs never match the
-// pattern, so the pass is idempotent. The .gz is renamed into place before the plain file is
+// pattern, so the pass is idempotent. A doctor log (000250) joins the role logs once its
+// analysis is no longer alive: the guard is its <slug>.<role>.<n>.analysis pid file. The .gz
+// is renamed into place before the plain file is
 // removed: a crash between the two leaves both, and the next pass re-gzips the plain file
 // over the old .gz
 export function compactFinishedLogs(root: string): { files: number; before: number; after: number } {
@@ -149,10 +152,15 @@ export function compactFinishedLogs(root: string): { files: number; before: numb
 		return result;
 	}
 	for (const name of names) {
-		// role-log name pattern: <slug>.<role>.<n>.log and the legacy unsuffixed <slug>.<role>.log
-		const m = name.match(/^(.+)\.(developer|reviewer|live-tester|merger)(\.\d+)?\.log$/);
+		// role-log name pattern: <slug>.<role>[.<n>].log, plus the analysis pass logs
+		// <slug>.<analysed role>[.<n>].doctor.log (000250: doctor logs gzip like role logs)
+		const m = name.match(/^(.+)\.(developer|reviewer|live-tester|merger)(\.\d+)?\.log$/) ?? name.match(/^(.+)\.([a-z-]+)\.(\d+)\.doctor\.log$/);
 		if (!m) continue;
-		const guards = m[2] === "merger" ? ["merger", `${m[1]}.merger`] : [m[1]];
+		const guards = m[0].endsWith(".doctor.log")
+			? [`${m[1]}.${m[2]}.${m[3]}.analysis`]
+			: m[2] === "merger"
+				? ["merger", `${m[1]}.merger`]
+				: [m[1]];
 		if (guards.some((g) => agentAlive(root, g))) continue;
 		const path = join(kanbanDir(root), ".logs", name);
 		let before: string;
@@ -168,6 +176,7 @@ export function compactFinishedLogs(root: string): { files: number; before: numb
 			writeFileSync(tmp, gz);
 			renameSync(tmp, `${path}.gz`);
 			rmSync(path);
+			evictLogCaches([path]);
 			result.files++;
 			result.before += Buffer.byteLength(before);
 			result.after += gz.length;

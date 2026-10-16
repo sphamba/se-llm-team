@@ -270,9 +270,10 @@ export function spawnRunAnalysis(root: string, slug: string, role: string): void
 	const raw = existsSync(logPath(root, base)) ? logPath(root, base) : `${logPath(root, base)}.gz`;
 	if (!existsSync(raw)) return;
 	const logs = join(kanbanDir(root), ".logs");
-	// the doctor log exists from the runner's first moment and the report lands at its end,
-	// so either present means the run was already analysed or is
-	if (existsSync(join(logs, `${base}.analysis.md`)) || existsSync(join(logs, `${base}.doctor.log`))) return;
+	// the doctor log exists from the runner's first moment (plain until the sweep gzips it,
+	// 000250) and the report lands at its end, so either present means the run was already
+	// analysed or is
+	if (existsSync(join(logs, `${base}.analysis.md`)) || existsSync(join(logs, `${base}.doctor.log`)) || existsSync(join(logs, `${base}.doctor.log.gz`))) return;
 	if (agentAlive(root, `${base}.analysis`)) return;
 	const name = `${base}.analysis`;
 	const exitPath = exitFilePath(root, name);

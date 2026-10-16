@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,9 @@ import { startHub } from "../src/hub.ts";
 import { agentLabel, agentRowSig, agentStatsText, agentLogPayload, boardOf, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, tabNames, tabsHtml, taskHistory, taskPayload, taskStats } from "../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the logpane module
 import { esc, LOG_ROLES } from "../src/webui/logpane.ts";
+// not re-exported by the webui barrel: import directly from the payload module
+import { logStats, MAX_LOG_CACHES, statsCache, subagentLogs, subsCache } from "../src/webui/payload.ts";
+import { compactFinishedLogs } from "../src/orchestrator.ts";
 import { gzipSync } from "node:zlib";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -2163,10 +2166,12 @@ writeFileSync(join(orderRoot, ".kanban", ".logs", `${orderSlug}.developer.log`),
 writeFileSync(join(orderRoot, ".kanban", ".logs", `${orderSlug}.developer.0.doctor.log`), JSON.stringify({ type: "session", id: "s", timestamp: "2026-10-12T07:35:03.000Z" }) + "\n");
 writeFileSync(join(orderRoot, ".kanban", ".logs", `${orderSlug}.developer.1.doctor.log`), JSON.stringify({ type: "session", id: "s", timestamp: "2026-10-12T07:36:03.000Z" }) + "\n");
 const orderPreload = join(tmpdir(), `webui-order-preload-${process.pid}.cjs`);
+// 000250: the incremental parse reads plain logs by openSync/readSync windows, so the heavy
+// cold parse hangs on openSync (readFileSync never sees a plain log's window)
 writeFileSync(orderPreload, `
 const fs = require("node:fs");
-const orig = fs.readFileSync;
-fs.readFileSync = function (p, ...rest) {
+const orig = fs.openSync;
+fs.openSync = function (p, ...rest) {
 	if (String(p).includes(".doctor")) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
 	return orig.apply(this, [p, ...rest]);
 };
@@ -2374,6 +2379,82 @@ setState(doneRoot, doneTask, "done");
 assert.equal((await doneRow()).agents[0].tokens, 1500, "a re-done task re-caches fresh, the pre-done entry never returns");
 writeDoneLog(20000);
 assert.equal((await doneRow()).agents[0].tokens, 1500, "the re-cached entry is stale again until the next leave-done");
+
+// 000250 the RAM ratchet: the stats and subs parses are incremental (byte-offset bookkeeping,
+// a live log's re-poll reads only the new bytes), the sweep's rename evicts the plain-path
+// cache entries, and the caches stay bounded
+const incRoot = mkdtempSync(join(tmpdir(), "webui-inc-"));
+mkdirSync(join(incRoot, ".kanban", ".logs"), { recursive: true });
+const incLog = join(incRoot, ".kanban", ".logs", "inc.developer.0.log");
+const incRec = (input: number, ts: number) =>
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input, output: 0 } }, timestamp: ts });
+writeFileSync(incLog, [incRec(10, 1000), incRec(20, 2000)].join("\n") + "\n");
+const inc1 = await logStats(incLog);
+assert.equal(inc1.tokens, 30, "the cold parse sums the whole log");
+assert.equal(statsCache.get(incLog)?.offset, statSync(incLog).size, "the bookkeeping sits past the last complete line, so the next poll reads only the new bytes");
+appendFileSync(incLog, incRec(30, 3000) + "\n" + incRec(40, 4000) + "\n");
+const inc2 = await logStats(incLog);
+assert.equal(inc2.tokens, 100, "the growth parses only the new records and the sum is whole-log correct");
+assert.equal(inc2.duration, 3000, "the duration spans first to last across the incremental scans");
+assert.equal(statsCache.get(incLog)?.offset, statSync(incLog).size, "the bookkeeping advanced with the growth, it never restarts from zero");
+appendFileSync(incLog, incRec(50, 5000));
+const inc3 = await logStats(incLog);
+assert.equal(inc3.tokens, 100, "an unterminated tail record is not a line yet, it stays unparsed");
+assert.equal(statsCache.get(incLog)?.offset, statSync(incLog).size - incRec(50, 5000).length, "the bookkeeping stops before the partial line");
+appendFileSync(incLog, "\n");
+assert.equal((await logStats(incLog)).tokens, 150, "the completed tail record parses once");
+writeFileSync(incLog, incRec(5, 500) + "\n");
+assert.equal((await logStats(incLog)).tokens, 5, "a replaced shorter log resets the bookkeeping and parses fresh");
+
+const incParent = join(incRoot, ".kanban", ".logs", "inc.reviewer.0.log");
+const incSubRec = (id: string, file: string) =>
+	JSON.stringify({ type: "tool_execution_end", toolCallId: id, result: { content: [{ type: "text", text: `Agent ID: ${id}\nOutput file: ${file}` }] } });
+writeFileSync(incParent, incSubRec("s1", "/tmp/pi-subagents-1000/inc-one.output") + "\n");
+assert.deepEqual((await subagentLogs(incParent)).map((s) => s.id), ["s1"], "the parent parse enumerates its subs");
+assert.equal(subsCache.get(incParent)?.offset, statSync(incParent).size, "the parent bookkeeping sits past the last complete line");
+appendFileSync(incParent, incSubRec("s2", "/tmp/pi-subagents-1000/inc-two.output") + "\n");
+assert.deepEqual((await subagentLogs(incParent)).map((s) => s.id), ["s1", "s2"], "the parent growth appends only the new sub");
+
+// the sweep's rename evicts the plain-path cache entries
+const evRoot = mkdtempSync(join(tmpdir(), "webui-evict-"));
+mkdirSync(join(evRoot, ".kanban", ".logs"), { recursive: true });
+const evPlain = join(evRoot, ".kanban", ".logs", "ev.developer.0.log");
+writeFileSync(evPlain, incRec(10, 1000) + "\n");
+await logStats(evPlain);
+assert.ok(statsCache.has(evPlain), "the plain log's entry caches");
+compactFinishedLogs(evRoot);
+assert.ok(!existsSync(evPlain), "the sweep gzipped the plain log");
+assert.ok(!statsCache.has(evPlain), "the sweep's rename evicted the orphaned plain-path entry");
+
+// a swept doctor log stays in the doctor history: the read path decompresses transparently
+const gzDocRoot = mkdtempSync(join(tmpdir(), "webui-docgz-"));
+const gzDocTask = createTask(gzDocRoot, { name: "feat: docgz", summary: "s", specs: "s" });
+const gzDocSlug = gzDocTask.file.replace(/\.md$/, "");
+mkdirSync(join(gzDocRoot, ".kanban", ".logs"), { recursive: true });
+const gzDocLog = join(gzDocRoot, ".kanban", ".logs", `${gzDocSlug}.developer.0.doctor.log`);
+writeFileSync(gzDocLog, [
+	JSON.stringify({ type: "session", id: "s", timestamp: "2026-10-16T10:00:00.000Z" }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 7, output: 3 } }, timestamp: "2026-10-16T10:00:02.000Z" }),
+].join("\n") + "\n");
+writeFileSync(`${gzDocLog}.gz`, gzipSync(readFileSync(gzDocLog)));
+rmSync(gzDocLog);
+const gzDoc = (await taskHistory(gzDocRoot, parseInt(gzDocTask.file, 10)))!.doctors;
+assert.equal(gzDoc.length, 1, "a swept doctor log stays in the doctor history");
+assert.equal(gzDoc[0].tokens, 10, "its stats parse from the decompressed stream");
+
+// the caches stay bounded: one entry past the cap evicts the oldest
+const bndRoot = mkdtempSync(join(tmpdir(), "webui-bnd-"));
+mkdirSync(join(bndRoot, ".kanban", ".logs"), { recursive: true });
+for (let b = 0; b <= MAX_LOG_CACHES; b++) {
+	const p = join(bndRoot, ".kanban", ".logs", `bnd.${b}.log`);
+	writeFileSync(p, incRec(1, 1000) + "\n");
+	await logStats(p);
+}
+assert.ok(statsCache.size <= MAX_LOG_CACHES, "one entry past the cap evicts the oldest, the map never grows unbounded");
+rmSync(incRoot, { recursive: true, force: true });
+rmSync(evRoot, { recursive: true, force: true });
+rmSync(gzDocRoot, { recursive: true, force: true });
+rmSync(bndRoot, { recursive: true, force: true });
 
 cleanup();
 console.log("webui.test.ts: all assertions passed");

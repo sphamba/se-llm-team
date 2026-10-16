@@ -2181,13 +2181,18 @@ assert.equal(readFileSync(logAC(`${slugDoneAC}.reviewer-armed`), "utf8"), "123",
 assert.equal(readFileSync(logAC("push-failures.count"), "utf8"), "3", "counter skipped");
 assert.equal(compactFinishedLogs(rootAC).files, 0, "already-gzipped logs never match: a second pass is a no-op");
 assert.equal(nextRunIndex(rootAC, slugDoneAC, "developer"), 1, "a gzipped run still counts, so a fresh spawn never reuses the index");
-// a .doctor.log sibling of an analysed run never matches the compactor's role-log pattern:
-// never gzipped, never consumed, and it never advances the per-run index
+// 000250 a .doctor.log of a finished run joins the sweep: gzipped like a role log, its
+// content passes through the compactor, and it never advances the per-run index
 writeFileSync(logAC(`${slugDoneAC}.developer.0.doctor.log`), "doctor stream\n");
-assert.equal(compactFinishedLogs(rootAC).files, 0, "a .doctor.log sibling is never gzipped or consumed");
-assert.ok(existsSync(logAC(`${slugDoneAC}.developer.0.doctor.log`)) && !existsSync(logAC(`${slugDoneAC}.developer.0.doctor.log.gz`)), "the doctor.log stays plain");
-assert.equal(readFileSync(logAC(`${slugDoneAC}.developer.0.doctor.log`), "utf8"), "doctor stream\n", "the doctor.log content is untouched");
+assert.equal(compactFinishedLogs(rootAC).files, 1, "the doctor log compacts+gzips like a role log");
+assert.ok(existsSync(logAC(`${slugDoneAC}.developer.0.doctor.log.gz`)) && !existsSync(logAC(`${slugDoneAC}.developer.0.doctor.log`)), "the plain doctor.log is replaced by the .log.gz");
+assert.equal(gunzipSync(readFileSync(logAC(`${slugDoneAC}.developer.0.doctor.log.gz`))).toString(), "doctor stream\n", "the doctor.log content passes through the compactor");
 assert.equal(nextRunIndex(rootAC, slugDoneAC, "developer"), 1, "a .doctor.log never advances the per-run index");
+// a live analysis pid keeps its doctor log plain: the guard is the analysis pid file
+writeFileSync(logAC(`${slugRunAC}.developer.0.doctor.log`), "doctor live\n");
+writeFileSync(join(kanbanDir(rootAC), ".pids", `${slugRunAC}.developer.0.analysis.pid`), String(process.pid));
+assert.equal(compactFinishedLogs(rootAC).files, 0, "a live analysis's doctor log stays plain");
+assert.equal(readFileSync(logAC(`${slugRunAC}.developer.0.doctor.log`), "utf8"), "doctor live\n", "the live analysis's doctor.log is untouched");
 console.log("orchestrator.test.ts: ... + retro sweep smoke passed");
 
 // --- part AF: a live agent pid defers the sweep spawn, so a to-do rewrite cannot twin it ---
@@ -3249,13 +3254,19 @@ try {
 		assert.ok(report.includes("## Analysis") && report.includes("S: x"), `the ${role} report carries the doctor answer`);
 	}
 	// exactly once: the sticky reviewer exit file makes the second poll re-take the exception
-	// path, but the finished analysis is never re-fired (no new pid file, doctor log untouched)
+	// path, but the finished analysis is never re-fired (no new pid file). The second poll's
+	// sweep gzips the finished analysis's doctor log like any role log, content intact (000250)
 	const reviewerFilesAT2 = analysisFilesAT2(`${slugsAT2.reviewer}.reviewer.0`);
 	const doctorMtimeAT2 = statSync(reviewerFilesAT2.doctor).mtimeMs;
 	poll(rootAT2, 5, Date.now(), 0);
 	assert.equal(parseTask(rootAT2, taskFilesAT2.reviewer).state, "reviewing", "the reviewer task still waits for the PM on the second poll");
 	assert.ok(!existsSync(reviewerFilesAT2.pid), "the second poll spawned no new analysis for the reviewer run");
-	assert.equal(statSync(reviewerFilesAT2.doctor).mtimeMs, doctorMtimeAT2, "the finished analysis was not re-fired or rewritten");
+	assert.ok(existsSync(`${reviewerFilesAT2.doctor}.gz`) && !existsSync(reviewerFilesAT2.doctor), "the second poll's sweep gzipped the finished analysis's doctor log");
+	assert.ok(gunzipSync(readFileSync(`${reviewerFilesAT2.doctor}.gz`)).toString().includes("Struggle: none"), "the gzipped doctor log keeps the stub's output");
+	// a third poll leaves the .gz: the finished analysis is never re-fired or rewritten
+	const doctorGzMtimeAT2 = statSync(`${reviewerFilesAT2.doctor}.gz`).mtimeMs;
+	poll(rootAT2, 5, Date.now(), 0);
+	assert.equal(statSync(`${reviewerFilesAT2.doctor}.gz`).mtimeMs, doctorGzMtimeAT2, "the finished analysis was not re-fired or rewritten");
 
 	// skip paths: direct spawnRunAnalysis calls on a quiet root, nothing spawns
 	// nothing indexed at all: n < 0, silent return
