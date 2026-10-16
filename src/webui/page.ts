@@ -844,6 +844,9 @@ function renderHub(info) {
 	const text = info.old ? "hub: old hub code (restart needed)" : "hub pid " + info.pid + " \u00b7 " + info.root + (info.commit ? " \u00b7 " + info.commit.slice(0, 7) : "");
 	if (el.textContent !== text) el.textContent = text;
 }
+// 000235: poll bookkeeping for the wake check: the stamp of the last served board, the delay of
+// the pending tick, and its handle (cleared before a forced wake cycle)
+let pollTimer = null, lastReload = Date.now(), lastDelay = 5000;
 function refresh() {
 	// the serving hub's identity in the footer (000165): a stale-code hub or a failover shows
 	// at a glance; a 404 means old hub code that predates the endpoint (a webui hot reload mix)
@@ -872,13 +875,24 @@ function refresh() {
 		}
 		// stamp only a served board: during a hub outage the old stamp stays visible
 		const current = rows.find(([id]) => id === active);
-		if (current && current[1]) document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
+		if (current && current[1]) {
+			document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
+			lastReload = Date.now();
+		}
 		// the next tick keys on the fresh open card (000142): while it shows a live agent the stats
 		// advance at log speed, so the cadence is 1 s; no live agent keeps the 5 s board poll
-		setTimeout(refresh, refreshMs(open));
-	}).catch(() => setTimeout(refresh, 5000)); // a failed cycle retries at the board cadence
+		lastDelay = refreshMs(open);
+		return setTimeout(refresh, refreshMs(open));
+	}).catch(() => setTimeout(refresh, 5000)).then(t => { pollTimer = t; }); // a failed cycle retries at the board cadence
 }
 refresh();
+// 000235: a wake past twice the last scheduled cadence means the tab slept; cancel the delayed
+// tick and refresh at once, so the "updated" line catches up within a second of the wake
+addEventListener("visibilitychange", () => {
+	if (document.visibilityState !== "visible" || Date.now() - lastReload <= 2 * lastDelay) return;
+	clearTimeout(pollTimer);
+	refresh();
+});
 </script>
 </body>
 </html>

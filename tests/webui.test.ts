@@ -753,6 +753,14 @@ assert.ok(page.includes("render(true); // no FLIP across boards"), "a tab switch
 assert.ok(page.includes("Promise.all(projects.map(t => fetch(url(t))"), "every tab polls each cycle");
 assert.ok(page.includes("setTimeout(refresh, refreshMs(open))"), "the poll chains, the next tick keyed on the fresh open card's cadence");
 assert.ok(page.includes(".catch(() => setTimeout(refresh, 5000))"), "a failed cycle retries at the board cadence");
+// 000235: a throttled tab's delayed tick would land a full cadence after the wake; the client
+// cancels it and refreshes at once when the gap exceeds twice the last scheduled cadence
+assert.ok(page.includes("let pollTimer = null"), "the client tracks the pending poll timer");
+assert.ok(page.includes("lastReload = Date.now()"), "a served board stamps the reload time");
+assert.match(page, /if \(current && current\[1\]\) \{\s*document\.getElementById\("updated"\)\.textContent[\s\S]*?lastReload = Date\.now\(\);/, "the reload stamp lands with the updated line, only for a served board");
+assert.ok(page.includes("lastDelay = refreshMs(open)"), "the tick's cadence is kept as lastDelay");
+assert.ok(page.includes(".catch(() => setTimeout(refresh, 5000)).then(t => { pollTimer = t; })"), "the failed-cycle retry timer is tracked too, so a wake cancels it");
+assert.match(page, /addEventListener\("visibilitychange", \(\) => \{[\s\S]*?document\.visibilityState !== "visible"[\s\S]*?Date\.now\(\) - lastReload <= 2 \* lastDelay[\s\S]*?clearTimeout\(pollTimer\);[\s\S]*?refresh\(\);/, "a wake past twice the last cadence cancels the pending tick and refreshes at once");
 assert.ok(page.includes('(active ? "&project=" + encodeURIComponent(active) : "")'), "agent-log polls carry the active tab's project");
 // 000122: the live auto-scroll glides smoothly, reduced motion falls back to an instant auto;
 // the client post-processes every insert, joining cross-chunk tool results and thinking deltas
