@@ -1,7 +1,7 @@
 ---
 name: "feat: Splitter card and logs on the task details view"
 priority: "medium"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "#241"
 complexity: "moderate"
