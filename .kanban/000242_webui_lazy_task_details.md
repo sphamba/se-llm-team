@@ -1,7 +1,7 @@
 ---
 name: "perf: defer webui task details to a per-task detail endpoint"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "perf/242-webui-lazy-task-details"
 issuer: "user"
 complexity: "complex"
@@ -42,3 +42,11 @@ Lazy loading for ALL tasks: /api/tasks returns only light rows; full details loa
 # Notes
 - Splitter pass, no split (#242): the work is one contract slice across src/webui/payload.ts, src/hub.ts, src/webui/page.ts and tests/webui.test.ts. The light rows, the detail endpoint and the client fetch must agree, so one developer pass costs less than two review, merge and live-test cycles.
 - Open point for the developer: the board cards and the poll cadence read t.agents and t.doctors (src/webui/board.ts:56,74, src/webui/page.ts:77) for the card stats lines, the spinners and the 1 s/5 s cadence. But the light-row contract excludes agent history and per-task doctor data. The clause "any field the board renderer or row click needs to open" decides. Keep the fields the cards and the cadence read, drop the rest, and make payload and renderer agree in the same pass. The new tests must cover the shape you settle on.
+- Implemented (bd4b9ae): GET /api/tasks serves light rows only: file, num, name, shortName, state, priority, complexity, issuer, blockedBy, worktree, updated, summary. No body, no agent history, no log parsing. New GET /api/task-detail?num=N (route in src/hub.ts, builder taskDetail in src/webui/payload.ts) returns the light row plus body, specs, notes, openQuestions, the agent history and the doctor entries. An unknown or non-integer num answers 404 with a JSON {"error":"unknown task"} body. /api/agent-log and the log panel are untouched.
+- Client (src/webui/page.ts): openTask renders the shell from the light row, shows a "Loading task details…" placeholder in the body, fetches the detail on every open with no client-side cache, and shows "Task details failed to load" on failure. A generation counter discards a superseded open's response. The 5 s poll keeps re-fetching only the light rows. While a card is open, the tick re-fetches that task's detail and paces the 1 s/5 s cadence on the fresh detail (refreshMs(openDetail)).
+- Tests: tests/webui.test.ts asserts the light shape (no body, specs, notes, openQuestions, agents, agent or doctors keys), the detail endpoint's full body and sections, the 404 with a JSON error body, and repointed every agent-history, token and doctor assertion at the detail. Client pins cover the openTask fetch, the placeholder, pollDetail and the refreshMs(openDetail) cadence. The red run was confirmed first: the suite failed at import on the missing taskDetail export. pnpm test:changed passed (tests/orchestrator.test.ts plus tests/webui.test.ts, 2 suites). One orchestrator part AS failure ("the board mirror carries the developer notes file") was a timing flake in a real-daemon run: it passed on rerun and at HEAD, and it reads the git mirror branch, which this change never touches.
+- Performance: listAll still reads and parses every task file per poll (the task-file format must not change, no task-file cache in scope). The board payload win is the dropped body transfer and the dropped logStats parsing. Opening one detail parses only that task's logs, so the first open after a daemon restart stays cheap.
+
+# Open questions
+- Assumption: the light rows carry no agent or doctor data at all, so the board cards' token stat line renders empty and the 1 s/5 s cadence keys on the open card's detail. The poll re-fetches the open task's detail each cycle, one detail fetch per cycle only while a modal is open. This keeps the measured log parsing (429 MB) out of the board payload. Confirm or correct if the cards should keep their stats line.
+- Assumption: the per-task doctor entries moved to /api/task-detail together with the agent history. Nothing doctor-level stays on /api/tasks.

@@ -1,32 +1,29 @@
 # Reviewer guidance (se-llm-team)
 
-## Run shape (in order)
-1. Read cwd SPECS.md (symlink to the task file): body, Notes, Open questions.
-2. Recon: exactly two bash calls (Recon). Never re-run, never split further.
-3. Checks: one command per spec requirement (Checks), related checks batched in one block, one-line lead-in each.
-4. Tests: the suites the diff touches, once (Tests).
-5. Findings edit: append to # Notes and close Open questions, one edit (Findings). The block after the last suite passes is this edit.
-6. State transition, always last: tool_search → kanban_get → kanban_set_state, then one sentence naming the state (State transition).
+## Shape (in order)
+1. Read cwd SPECS.md (symlink; see Files): body, Notes, Open questions.
+2. Recon: exactly two bash calls (see Recon), then leave recon.
+3. Checks: one command per spec requirement (see Checks); related commands batched in one block, one-line lead-in each.
+4. Tests: the suites the diff touches, once (see Tests).
+5. Findings edit: one edit to SPECS.md (see Findings).
+6. State transition: tool_search → kanban_get → kanban_set_state, then one sentence naming the state (see State transition).
 
-No thinking block at a phase boundary: none before Recon call 1, none after checks, none after the last suite (that block is the findings edit), none before tool_search.
-
-## Thinking discipline (largest measured waste: 7 of 9 thinking blocks in the last run were plan or recap, 3 more blocks burned on a test-log count reconciliation)
-- Thinking interprets tool output only. Never plan, rehearse the shape, recap the diff or results, or weigh a policy the shape already fixes (findings target, test scope, diff range). If the next action is fixed above, act without a thinking block.
-- One narration per fact, in the findings edit. The only text outside it is one-line tool lead-ins and the final state sentence. Never emit a rehearsal, recap, or verification-summary block at any point.
-- Reason per command: grep answers a location, a test asserts a value, so run it and reason from its output. Cut hand-computed values, prose re-reads of diff code, and re-derived answers.
-- A settled check never reopens: output in context is evidence. Never re-grep, re-read, re-diff, or re-verify a confirmed site. One doubt, one command, executed now.
-- Scope: spec requirements plus the tests the diff touches. No potential-issue branch, no what-if trace, no web or project-memory search. An unrun full `pnpm test` is never a finding and never a deliberation. No mapped area (Coverage map) → say so once in the findings edit, skip.
+## Thinking (largest measured waste: last run 4 of 5 thinking blocks were plan, recap, rehearsal, or policy re-weighing)
+- A thinking block only interprets the previous tool result and picks the next action this file fixes. Never plan, rehearse the shape, recap the diff or results, or weigh a policy the shape settles (findings target, test scope, diff range, open-question disposition). If the next action is fixed above, act without a thinking block.
+- Reason per command from its output: no hand-computed values, no prose re-reads of diff code, no re-derived answers.
+- Hard boundaries: no thinking before Recon call 1, none before tool_search, and the block after the last suite passes is the findings edit itself, not a rehearsal of it.
+- One narration per fact, in the findings edit. Outside it: one-line tool lead-ins and the final state sentence. Never emit a rehearsal, recap, or verification-summary block at any point.
+- A settled check never reopens: output in context is evidence, in a fresh pass or a re-review. One doubt, one command, executed now.
+- Scope: spec requirements plus the tests the diff touches. No what-if traces, no web or project-memory search. An unrun full `pnpm test` is never a finding and never a deliberation. No mapped area (Coverage map) → say so once in the findings edit, skip.
 
 ## Re-reviews
-- A task already in reviewing with review bullets in Notes is a second pass: normal cycle, not a puzzle. Never deliberate session state (fresh vs continued) or whether prior evidence is stale; the transcript is not evidence, the repo is.
-- Verify each prior claim against the code with the usual one command per requirement, recorded once. Claims that check out: one findings line ("re-review at <sha>, no new findings"). Claims that fail: findings in Notes.
+- A task in reviewing with review bullets in Notes is a second pass: a normal cycle. Never deliberate fresh-vs-continued session state or prior-evidence staleness; verify each prior claim with the usual one command per requirement.
+- Claims that hold: one findings line ("re-review at <sha>", no fixes). Claims that fail: findings in Notes.
 
 ## Recon (exactly two bash calls)
-- Call 1, state and stat (prints `base=<name>`, the only branch name call 2 needs):
-  `b=$(git -C /home/phamba/repos/se-llm-team branch --show-current) && echo "base=$b" && git log --oneline -5 && git status --short && git diff "$b"...HEAD --stat`
+- Call 1, state + diff stat: `b=$(git -C /home/phamba/repos/se-llm-team branch --show-current) && echo "base=$b" && git log --oneline -5 && git status --short && git diff "$b"...HEAD --stat`. The `-C` lookup reads the main checkout; the task worktree sits on the task branch, so no root-vs-worktree question exists.
 - Call 2, full diff: `git diff <name-from-base=...>...HEAD`, a mechanical substitution of the printed name. Substitute even when the name looks like `main`: branches stack, and a branch typed from memory silently reviews the wrong base.
-- The `-C` lookup reads the main checkout; the task worktree sits on the task branch. No root-vs-worktree question exists.
-- The base diff carries other tasks' commits. When Notes name the implemented commit(s), those commit(s) are the review scope: one `git show <sha>` each, treat the rest as out of scope, no range deliberation.
+- The base diff carries other tasks' commits. When Notes name the implemented commit(s), those commits are the review scope: one `git show <sha>` each, the rest out of scope, no range deliberation.
 
 ## Checks
 - One requirement, one command, one recorded pass/fail. If your note and the file disagree, the file wins, recorded once.
@@ -34,8 +31,8 @@ No thinking block at a phase boundary: none before Recon call 1, none after chec
 - Materiality: a discrepancy blocks only if it changes the verdict or hides a defect. A minor Notes inaccuracy is one line in findings, never a blocked merge.
 
 ## Tests
-- One command, once: `node tests/<suite>.test.ts > /tmp/s.log 2>&1; echo exit=$?; tail -3 /tmp/s.log`. /tmp/s.log is scratch: leave it in place.
-- Tasks add smoke-style `part X` console sections to these plain node scripts; a diff that adds one closes its check right after the run with one `grep -n "part X" /tmp/s.log`. Part names come from the diff, never from memory or a task note: notes go stale, and a mismatch with a remembered total is never a recount loop. A count that looks off: one corrective grep against the log, then move to the next suite.
+- One command, once: `node tests/<suite>.test.ts > /tmp/s.log 2>&1; echo exit=$?; tail -3 /tmp/s.log`; /tmp/s.log is scratch, leave it.
+- A diff that adds a smoke-style `part X` console section: close the check with one `grep -n "part X" /tmp/s.log` after the run. Part names come from the diff, never from memory or a task note; a count that looks off gets one corrective grep against the log, then the next suite, never a recount loop.
 - Policy: fix → a test for the bug; feature → tests for the new behavior; refactor → tests pass; trivial → exempt. A diff that edits a test: one grep of tests/ for the old assertion closes the "other tests pin the old behavior" question.
 - Long suites (orchestrator, webui) spawn real daemons: one at a time, allow 10 min. Never pipe a suite to `tail` (hides the exit code, forces a ~3.5 min re-run).
 - kanban.test.ts concurrency tests are load-sensitive: when the diff touches createTask or the allocation path, run it 3+ times; a single pass can hide a race.
@@ -50,7 +47,7 @@ No thinking block at a phase boundary: none before Recon call 1, none after chec
 
 ## Findings and Open questions
 - One edit to cwd SPECS.md, appended to # Notes (check counts and section structure inside it). Never edit the task body, another task's file, or AGENTS.*.md.
-- Open questions, decided on first read, never revisited: an assumption the specs already answer → delete it in the findings edit, never move it to Notes. Empty section → delete the header. Assumptions that change direction are findings in Notes; Open questions hold user questions only.
+- Open questions are decided on first read and never revisited; the ladder is mechanical: the specs already answer it → delete it in the findings edit, never move it to Notes; the answer changes direction → finding in Notes; a genuine user question → keep. An empty section → delete the header.
 
 ## State transition (always last, three steps)
 1. tool_search("kanban") loads the MCP tools.
@@ -72,4 +69,4 @@ No thinking block at a phase boundary: none before Recon call 1, none after chec
 ## Situational checks (only when the diff touches the area)
 - webui PAGE parity: PAGE (src/webui/page.ts, re-exported by src/webui/index.ts) interpolates function source, so a webui refactor must keep it byte-identical. Copy the old page inside src/webui/ so its relative imports resolve (`git show <base>:src/webui/page.ts > src/webui/page_old_review.ts`), render both PAGEs with a 3-line mjs script, diff, delete; compare runtime exports with a name + `String()` diff of the two module objects.
 - Poll path (src/orchestrator/liveness.ts): WORKING_STATES holds only doing, reviewing, live-testing, merging; the !working path clears stale files, never moves a task. poll(root, stallMinutes, now) takes an injectable stall window; a dead pid like "999999999" reads dead. A merging fixture writes .pids/merger.slug, or the task requeues to to-merge. The reviewer exception is sticky by design: exit 0 in reviewing keeps the exit file; a fresh spawn or a poll-observed transition clears it. newestRunRole parses .logs names matching `.log(?:\.gz)?$` and returns the role capture, not the slug. compactFinishedLogs must survive unresolvable entries: a broken-symlink read throws, and an unguarded read kills the daemon loop. Poll changes need a poll-driven self-advanced check (AT3 shape).
-- Merge flow (#199, #234): the orchestrator rebases the task branch onto the base at merge time, then ff-merges, one rebase per sweep in a serialized lane. A rebase conflict is the spawned Merger's job (`--ours` = base side), not yours. Hygiene specs: the rebase block in pipeline.ts shows the full order, and the Merger spawn sits after a hygiene pass in the same sweep, so every conflict-round rebase starts clean. One read answers ordering and Merger coverage; no spawn.ts trace, no rebase --continue speculation.
+- Merge flow: the orchestrator rebases the task branch onto the base at merge time, then ff-merges, one rebase per sweep in a serialized lane. A rebase conflict is the spawned Merger's job (`--ours` = base side), not yours. The rebase block in pipeline.ts shows the full order, and the Merger spawn sits after a hygiene pass in the same sweep, so every conflict-round rebase starts clean. One read answers ordering and Merger coverage; no spawn.ts trace, no rebase --continue speculation.

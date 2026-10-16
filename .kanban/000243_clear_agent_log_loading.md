@@ -1,8 +1,8 @@
 ---
 name: "fix: clear agent log panel while the new log loads"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/243-clear-agent-log-loading"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "clear-agent-log-loading"
@@ -42,3 +42,11 @@ Clear text + loading state: on open, the text is cleared and a loading indicator
 - Live check: fixture `/tmp/clear-log/root` served on port 4399, one probe task with `developer.0` and `developer.1` logs, Playwright with delayed then aborted `/api/agent-log` routes. Run 0 showed `Loading...` then ALPHA. Run 1 showed `Loading...` with no ALPHA, then BETA. The aborted fetch kept `Loading...` and never showed BETA. All checks passed.
 - Port 4321 was held by a leftover live-check daemon of an earlier session, so the check used port 4399.
 - Review at 8040f84: all three required changes verified against the code. openLog clears `#m-log-text` to `Loading...` before `pullLog(logUrl(""), "init")`; `pullLog`'s catch still does nothing, so a failed init fetch leaves the loading text; the diff touches only src/webui/page.ts and tests/webui.test.ts, no endpoint or supersede-guard change. `node tests/webui.test.ts` passes (exit 0). Open question resolved against the code: `ingest(html, "poll")` appends beforeend, so a late successful poll appends its chunk below the `Loading...` text and the text stays, which matches the decided direction ("it stays if the fetch fails"); no requirement makes the poll clear it, so no change.
+
+## Live test (2026-10-16, hub-only, port 4350)
+- Fixture `/tmp/243/root`: one done probe task `000243_probe.md` plus run logs `developer.0` (ALPHAMARK), `developer.1` (BETAMARK), `developer.2` (GAMMAMARK); hub launched from the worktree with an isolated HOME. Fixture pre-checked through `/api/tasks` and `/api/agent-log` with curl.
+- 12 Playwright checks (`/tmp/243/check.mjs`), 12 passed, 0 failed, no page errors.
+- Sequence check: opened run 0, its log rendered; held run 1's init `?file=...developer.1` request (no `offset`, no `sub`). At 120 ms `#m-log-text` read exactly `Loading...`, held no ALPHAMARK, the pane stayed visible and the meta line stayed hidden. Releasing the request rendered BETAMARK with no ALPHAMARK left.
+- Failure check: aborted every `/api/agent-log` request for run 2. After 1.3 s (one poll cycle) the text was still exactly `Loading...`, BETAMARK was not shown, and the pane stayed visible.
+- The `pnpm test` acceptance line is the developer gate, not part of the live test; the browser acceptance bullet is covered above.
+- Assumptions: real user flow (task card then in-modal agent cards); `Loading...` asserted as exact text because the Specs names that text; fetch failure simulated with Playwright `route.abort("failed")`. No observed behavior contradicts the task's stated assumptions.
