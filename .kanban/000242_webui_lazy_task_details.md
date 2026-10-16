@@ -1,8 +1,8 @@
 ---
 name: "perf: defer webui task details to a per-task detail endpoint"
 priority: "medium"
-state: "live-testing"
-worktree: "perf/242-webui-lazy-task-details"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "complex"
 shortName: "webui-lazy-task-details"
