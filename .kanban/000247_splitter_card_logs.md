@@ -1,8 +1,8 @@
 ---
 name: "feat: Splitter card and logs on the task details view"
 priority: "medium"
-state: "to-do"
-worktree: ""
+state: "doing"
+worktree: "feat/247-splitter-card-logs"
 issuer: "#241"
 complexity: "moderate"
 shortName: "splitter-card-logs"
@@ -41,3 +41,4 @@ The task details view shows agent run cards (Developer) and Doctor cards, but Sp
 - Manual check (live test): open a task that went through a Splitter pass; the Splitter card shows before the Developer card in the Doctor's blue palette with token/duration stats, and clicking it opens the splitter log in the log pane.
 
 # Notes
+- Splitter pass (#247): no split. The work is one tight chain, not parallel pieces: the role validation (LOG_ROLES + agentLogPath regex) feeds agentHistory, which feeds the detail payload's t.agents, which renderAgent, taskStats, and openLog all read. Backend and frontend pieces would both add tests to the shared 2000-line tests/webui.test.ts hub, and two review/merge/live-test cycles outweigh two ~20-line coupled diffs. Run as one moderate task.
