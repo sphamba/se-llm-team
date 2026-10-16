@@ -135,7 +135,8 @@ const cleanupAll = (...roots: string[]) =>
 // --- part CS1: the spawn hides the context paths in the shared info/exclude ---
 const root1 = freshFixture();
 projectConfig(root1, plainStub(root1));
-const task1 = createTask(root1, { name: "feat: hide context paths", summary: "Exclude smoke", specs: "n/a" });
+// simple: a missing complexity parses as moderate and the Splitter would intercept, and these parts assert the developer spawn in one sweep
+const task1 = createTask(root1, { name: "feat: hide context paths", summary: "Exclude smoke", specs: "n/a", complexity: "simple" });
 setState(root1, task1, "to-do");
 rescan(root1, loadConfig(root1));
 const slug1 = taskSlug(task1.file);
@@ -148,7 +149,7 @@ assert.ok(exclude1.includes("SPECS.md"), "SPECS.md is in info/exclude after the 
 assert.ok(ignored(wt1, "AGENTS.md") && ignored(wt1, "SPECS.md"), "check-ignore reports both context paths in the worktree");
 assert.equal(contextNoise(wt1), "", "no untracked context symlinks in the worktree status");
 // idempotent: a second spawn appends no duplicate lines
-const task1b = createTask(root1, { name: "feat: hide context paths again", summary: "Exclude smoke two", specs: "n/a" });
+const task1b = createTask(root1, { name: "feat: hide context paths again", summary: "Exclude smoke two", specs: "n/a", complexity: "simple" });
 setState(root1, task1b, "to-do");
 rescan(root1, loadConfig(root1));
 const exclude1b = readFileSync(join(root1, ".git", "info", "exclude"), "utf8").split("\n");
@@ -159,7 +160,7 @@ console.log("context-symlinks.test.ts: part CS1 passed (info/exclude at spawn)")
 // --- part CS2: an unwritable info dir never fails the spawn ---
 const root2 = freshFixture();
 projectConfig(root2, plainStub(root2));
-const task2 = createTask(root2, { name: "fix: unwritable exclude", summary: "Exclude failure smoke", specs: "n/a" });
+const task2 = createTask(root2, { name: "fix: unwritable exclude", summary: "Exclude failure smoke", specs: "n/a", complexity: "simple" });
 setState(root2, task2, "to-do");
 const info2 = join(root2, ".git", "info");
 try {
@@ -205,7 +206,7 @@ const root4 = freshFixture();
 writeFileSync(join(root4, "AGENTS.md"), "# project rules\n");
 execSync("git add -A && git commit -qm rules", { cwd: root4, shell: "/bin/bash" });
 projectConfig(root4, committingStub(root4));
-const task4 = createTask(root4, { name: "fix: keep real agents md", summary: "Real file survives", specs: "n/a" });
+const task4 = createTask(root4, { name: "fix: keep real agents md", summary: "Real file survives", specs: "n/a", complexity: "simple" });
 const ensured4 = ensureWorktree(root4, task4);
 assert.ok(ensured4, "precondition: the worktree exists");
 const wt4 = ensured4.wtDir;
