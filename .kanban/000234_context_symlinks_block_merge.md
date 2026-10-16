@@ -1,7 +1,7 @@
 ---
 name: "fix: context symlinks committed by developers block the merge"
 priority: "high"
-state: "doing"
+state: "live-testing"
 worktree: "fix/234-context-symlinks-block-merge"
 issuer: "user"
 complexity: "moderate"
@@ -39,3 +39,13 @@ On a fresh project the Developer agents commit the task context symlinks (AGENTS
 - The tests the developer ships (per the role test policy) pass.
 
 # Notes
+- Added ensureInfoExclude (src/orchestrator/spawn.ts, called from spawnAgent beside ensureContextSymlinks): every spawn hides AGENTS.md and SPECS.md in the repo's common info/exclude, resolved via `git rev-parse --git-common-dir` so one call covers the main checkout and all linked worktrees. Idempotent (appends only missing names) and best-effort (an unwritable info/exclude logs and never fails the spawn).
+- Added cleanContextPaths and stripContextSymlinks (src/orchestrator/pipeline.ts): before every rebase attempt (each Merger retry included) the hygiene unsets any skip-worktree bit then restores each of the two paths to HEAD, per path, both steps ignored; after the fast-forward, symlink-mode (120000) entries of the two paths are removed with one follow-up commit "chore: remove task context symlinks committed by mistake" (run with commit.gpgsign disabled so the housekeeping never wedges on a signing setup), which keeps the worktree branch an ancestor of HEAD so doneCleanup's `git branch -d` still works.
+- agents/developer.md gained one line: never commit AGENTS.md or SPECS.md (task-system context, not project content).
+- New tests/context-symlinks.test.ts, five parts (spawn exclude + idempotency, unwritable exclude never fails the spawn, committed-then-deleted symlinks self-heal through the merge lane, a tracked real AGENTS.md survives with mode 100644 and no strip commit, the developer prompt pins). Red first: the exclude assert failed pre-fix. All five pass, and tests/orchestrator.test.ts passes with the changes.
+- Test lesson: the sh wrapper that records a spawned stub's exit stays a live pid until node's event loop reaps it, and a busy wait loop blocks the SIGCHLD reaper, leaving a zombie that pidAlive reads as alive; wait loops must sleep between checks.
+- Review (this run, base main @ 011bd6b): diff verified against the Specs point by point, pass. ensureInfoExclude resolves `--git-common-dir`, appends only missing names, best-effort (CS2 covers the unwritable case). cleanContextPaths runs before every sweep rebase; each Merger spawn follows a hygiene pass in the same sweep, so a conflict round's `rebase --continue` starts with clean context paths, and even a blocked continue converges (retry cleans, respawns the Merger). stripContextSymlinks gates on mode 120000 only (CS4: tracked real 100644 AGENTS.md survives, no strip commit).
+- Checked the pathspec-less strip commit for folded content: commitKanban builds trees via hash-object/mktree and never stages into the index, so the root index holds only the strip's own `git rm`; no board content can ride the strip commit.
+- Suites (this run): tests/context-symlinks.test.ts all 5 parts pass, tests/plugin.test.ts pass, tests/orchestrator.test.ts exit 0.
+- No fixes made; no Open questions section was present, none raised.
+- Merger rebase (this run, base main @ 889b0d3): the stopped rebase held both picks already staged (resolution from the prior run) but rescheduled by the GPG-sign failure; committed each staged pick manually with the original message, author, date and --no-gpg-sign (8a5682e fix, 839d83f docs); no content conflicts, the rescheduled picks dropped as "patch contents already upstream". Full suite `npm test` exit 0; note the npm test chain does not include tests/context-symlinks.test.ts, so it was run directly: all 5 parts pass.

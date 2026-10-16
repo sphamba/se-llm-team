@@ -1,8 +1,8 @@
 ---
 name: "feat: stale-tab wake forces a board reload"
 priority: "medium"
-state: "merging"
-worktree: "feat/235-stale-tab-wake-reload"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "stale-tab-wake-reload"
@@ -41,3 +41,15 @@ The threshold is twice the last scheduled cadence: a live 1 s cadence forces on 
 - Live check (Playwright against a temp hub on 127.0.0.1:4321, isolated HOME and XDG_CONFIG_HOME): with `lastReload` aged past twice the 5 s cadence, the forced refresh fired 25 ms after the simulated wake and exactly one /api/tasks request followed in the next second, so the pending tick was cancelled; a fresh wake forced no cycle.
 - `lastReload` starts at script load time, so a wake before the first board lands does not add a second initial cycle.
 - Review: the diff matches the Fix section on every point (stamp inside the served-board condition, `lastDelay = refreshMs(open)`, wake listener forcing on a gap strictly over `2 * lastDelay`, `clearTimeout(pollTimer)` before the forced cycle, the handle captured on both the success and retry paths). Both pinned expressions and the :754/:755 assertions are unchanged. Diff touches only src/webui/page.ts and tests/webui.test.ts; ran tests/webui.test.ts once (exit=0, "webui.test.ts: all assertions passed"). No fixes; no open questions.
+- Rebase: the stopped rebase carried no conflict markers; the resolved changes were already staged and matched the Fix section, but the replayed pick was uncommitted because a prior continue could not sign the commit (commit.gpgsign=true while ~/.gnupg is read-only, so gpg cannot reach the agent) and git rescheduled the pick onto the todo. Committed the staged changes as 89f2c76 with the original message, author identity and date plus --no-gpg-sign (the base HEAD 889b0d3 is unsigned for the same reason), then continued; the rescheduled pick d392275 dropped as "patch contents already upstream" and the rebase finished on 889b0d3.
+- Full suite after the rebase: npm test exit 0 (kanban, orchestrator, webui, extension, efficiency-analysis, index, mcp, plugin all passed).
+
+## Live test (000235, 2026-10-16T06:37Z)
+- Setup: hub-only fixture /tmp/lt235/repo (task `000001_fixture_live.md`, state doing, one live developer run with a live pid and a 300-token log). Two hubs serve the same board: the new code 89f2c76 on 127.0.0.1:4351 and the pre-fix control 889b0d3 on 4352, each with an isolated HOME and XDG_CONFIG_HOME. Playwright 1.58.2, headless Chromium.
+- Assumption (environment): headless Chromium on this machine does not flip `document.visibilityState`. `Page.setWebLifecycleState` frozen/active and `page.bringToFront()` leave it "visible", and `Emulation.setPageVisibilityOverride` is unsupported. The sleeping tab is simulated with two real mechanisms: the page `Date.now` jumps forward by the gap while the pending poll timer stays real and pending, then a `visibilitychange` event is dispatched with the document visible. The production listener and its guard run unchanged.
+- 5 s board cadence, wake gap 11 s: the forced cycle fires 11 ms after the wake, the `updated` line advances, the stale pending tick is cancelled (exactly 1 `/api/tasks` request in the first 4.9 s), and the chain continues at the cadence (next request at +5026 ms).
+- 1 s cadence (modal open on the live task, measured request gaps 1015 and 1014 ms), wake gap 3 s: the forced cycle fires 11 ms after the wake, exactly one cycle runs, and the `updated` line advances.
+- Threshold: a fresh wake with a gap of 1.5 s (below 2 x 5 s) forces no cycle, the `updated` line stays, and the natural tick still lands at +5014 ms.
+- Hub outage: the forced cycle still attempts a fetch, and the `updated` line keeps the old stamp (mutation count unchanged).
+- Differential control (pre-fix 889b0d3, same fixture and wake event): no request within 1.2 s of the wake, and the delayed tick lands 4621 ms after the wake. This confirms that the immediate refresh comes from the wake check.
+- Result: 17 new-code checks and 5 control checks, 0 failures, no page errors. The first run had 2 false FAILs from the check script (windows evaluated before their end time), fixed in the script. The acceptance bullet that names the shipped test suite is not part of this live run, because the role policy keeps unit suites out of live tests. No findings, no open questions.

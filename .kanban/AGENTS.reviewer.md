@@ -2,15 +2,16 @@
 
 ## Run shape (in order)
 1. Read cwd SPECS.md (symlink to the task file): body, Notes, Open questions.
-2. Recon: exactly two bash calls (below). Never re-run, never split further.
-3. Verify each spec requirement: one command, record pass/fail in the finding, move on.
-4. Run the suites the diff touches (Coverage map), once.
-5. Append findings to # Notes in one edit; close Open questions in the same edit.
-6. State transition (below), always last: tool_search → kanban_get → kanban_set_state. The run ends there.
+2. Recon: exactly two bash calls (Recon). Never re-run, never split further.
+3. Verify each spec requirement (Checks): one command each, record pass/fail in the finding, move on.
+4. Run the suites the diff touches (Tests, Coverage map), once.
+5. Append findings to # Notes in one edit; close Open questions in the same edit (Findings).
+6. State transition (State transition), always last: tool_search → kanban_get → kanban_set_state. The run ends there.
 
 ## Zero-waste rules (apply everywhere)
-- One doubt, one command, executed now. Never spend a block choosing between commands: pick the one that matches a template in this file (or the obvious grep), run it, read the output. A deliberation that ends with no command is wasted work.
-- Output already in context is evidence: never re-grep, re-read, or re-diff a site you just confirmed. A settled check never reopens.
+- Scope: the review covers the spec requirements plus the tests the diff touches. A code path, event, or mapping the spec does not name is out of scope: no Potential-issue branch, no what-if trace.
+- One doubt, one command, executed now. Pick the command that matches a template in this file (or the obvious grep), run it, read the output. A deliberation that ends with no command is wasted work, and prose that only plans a command is the same waste: never produce a block whose only product is a planned command. A thinking block that restarts a point ("wait", "let me re-examine") is the same waste: cut it, run the closing command, write the verdict.
+- Output already in context is evidence: never re-grep, re-read, or re-diff a site you just confirmed, and never re-argue in a later block a doubt a command settled. A verdict cites a command output or the diff already in context, never a fresh re-walk of the diff in prose. A settled check never reopens.
 - No prose between checks: one-line tool lead-ins only. The findings edit is the only written verdict; no lead-in text, no recap block, no closing summary restates it. If you catch yourself recapping a passed check, start the findings edit.
 - Recorded runs in Notes are facts: never re-run them, never debate them. Your only run is the scoped suite below.
 
@@ -24,9 +25,10 @@
 
 ## Checks
 - One requirement, one command, one recorded pass/fail. Each verdict is written once, in the findings edit.
-- Shape and type doubts end at one grep of the producing site. No cross-file traces, no hypothetical variants the compiler or the diff already rejects.
+- Ordering spec points ("X runs before every Y, including Z") end at one read of the producing site: the call sites around the ordering call answer the coverage question (what runs before, after, and per round). No caller traces, no spawn-path re-derivation, no git-semantics speculation.
+- Shape, type, and escaping doubts end at one look at the producing line (a regex inside a template literal, shell quoting). JS semantics there are settled fact: no re-derivation, no cross-file traces, no hypothetical variants the compiler or the diff already rejects.
 - A claim that names a commit: one `git show <sha>`, stop. No `git show <base>:<file>` extraction, no running old code.
-- Stop a check at the first agreement between two readings. Never write a finding with an open "let me check": run the closing command first.
+- Stop a check at the first agreement between two readings. Never write a finding with an open "let me check": run the closing command first, then write the verdict.
 - Findings state observed facts from output in hand. If your note and the file disagree, the file wins; record the file's state once.
 - Materiality: a discrepancy blocks only if it changes the verdict or hides a defect. A minor Notes inaccuracy is one line in findings, never a blocked merge.
 
@@ -55,7 +57,7 @@
 ## State transition (always last, three steps)
 1. tool_search("kanban") loads the MCP tools (kanban_get, kanban_set_state, kanban_list).
 2. kanban_get({}) before set_state: the spawn prompt mandates the re-read, so make it and move on. Abort when the state no longer matches what you saw at start.
-3. kanban_set_state({ state }) and end the run: no commands, no cleanup, no text after it. The findings in SPECS.md are the verdict; a closing block only restates them.
+3. kanban_set_state({ state }) is the run's last action. The run ends there: no commands, no cleanup after it. If the turn needs a final line, it names the state in one sentence and never restates findings.
 - Pass → to-merge. A task parked per its own specs (no runnable precondition) → backlog, never to-merge: to-merge closes it as done without the run, and promoteBacklog never promotes a task with unanswered open questions (src/orchestrator/pipeline.ts), so backlog holds it for the user with no respawn loop. to-do re-spawns a developer at once.
 
 ## Files
@@ -66,9 +68,10 @@
 ## Facts that bite
 - src/tools.ts schemas are plain JSON Schema, not typebox builders (typebox is a peer dep; a bare clone has no node_modules). tests/extension.test.ts compiles them with the real typebox to guard pi validation.
 - src/mcp.ts calls checkEnums before dispatch: pi validates before execute, an MCP client does not. Removing that guard re-opens silent board corruption (state, priority, complexity, scope).
+- commitKanban (src/orchestrator/board.ts) builds trees with git hash-object/mktree and never stages to the index, so a pathspec-less commit elsewhere cannot fold board content into a mirror commit. A "what rides this commit?" doubt ends at one grep of the committing function.
 - Never pass extracted code through nested shell quoting (`node -e` with escaped quotes, backticks inside double quotes): the quoting layers mangle it and the command dies on a syntax error. Write it to a temp file, run it, delete it.
 
 ## Situational checks (only when the diff touches the area)
 - webui PAGE parity: PAGE (src/webui/page.ts, re-exported by src/webui/index.ts) interpolates function source, so a webui refactor must keep it byte-identical. Copy the old page inside src/webui/ so its relative imports resolve (`git show <base>:src/webui/page.ts > src/webui/page_old_review.ts`), render both PAGEs with a 3-line mjs script, diff, delete. Compare runtime exports with a name + `String()` diff of the two module objects.
 - Poll path (src/orchestrator/liveness.ts): WORKING_STATES holds only doing, reviewing, live-testing, merging; queue states (to-do, to-review, to-merge, to-live-test) are not working states, and the !working path clears stale files, never moves a task. poll(root, stallMinutes, now) takes an injectable stall window; a dead pid like "999999999" reads dead. A merging fixture also writes .pids/merger.slug or the task requeues to to-merge. The reviewer exception is sticky by design: exit 0 in reviewing keeps the exit file; a fresh spawn or a poll-observed transition clears it. newestRunRole parses .logs names matching `.log(?:\.gz)?$` and returns the role capture, not the slug. compactFinishedLogs must survive unresolvable entries: a broken symlink read throws, and an unguarded read kills the daemon loop. Poll changes need a poll-driven self-advanced check (AT3 shape).
-- Merge flow (#199): the orchestrator rebases the task branch onto the base at merge time, then ff-merges. A rebase conflict is the spawned Merger's job (`--ours` = base side), not yours.
+- Merge flow (#199, #234): the orchestrator rebases the task branch onto the base at merge time, then ff-merges, one rebase per sweep in a serialized lane. A rebase conflict is the spawned Merger's job (`--ours` = base side), not yours. Hygiene specs (#234 shape: context paths restored before the rebase, a follow-up strip commit after the fast-forward): the rebase block in pipeline.ts shows the full order, and the Merger spawn sits after a hygiene pass in the same sweep, so every conflict-round rebase starts clean. One read answers ordering and Merger coverage; no spawn.ts trace, no speculation about what rebase --continue does with unstaged changes.

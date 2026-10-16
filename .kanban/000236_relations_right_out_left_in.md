@@ -1,7 +1,7 @@
 ---
 name: "feat: relation lines always run right out, left in"
 priority: "medium"
-state: "doing"
+state: "live-testing"
 worktree: "feat/236-relations-right-out-left-in"
 issuer: "user"
 complexity: "simple"
@@ -36,3 +36,9 @@ The #relations SVG sits behind the cards (board.insertBefore first child, z-inde
 - The tests the developer ships (per the role test policy) pass, including the updated geometry assertions.
 
 # Notes
+- Collapsed curve() (src/webui/board.ts) to one right-out/left-in branch; relationPaths no longer computes same-columnness and calls curve(from, to). Both doc comments updated.
+- Same-row clamp: d = Math.min(d, (x2 - x1) / 2), the signed half-span, so a same-row blocker left of the blocked card gets a negative offset and the collinear cubic stays monotone (the controls land on the midpoint). A magnitude clamp would leave that pair retracing the line.
+- tests/webui.test.ts geometry assertions updated: same-column, stacked-pair and blocker-left endpoints now start at from.x + from.w and end at to.x; the same-row 30 px fixture pins the halved offset (c1x = c2x = midpoint, c1x <= x2, c2x >= x1); the 000127 S-scaling fixtures moved to different rows so the span-scaled S still applies.
+- Checked: `node tests/webui.test.ts` passes (red first: the new same-column, left-edge assertion failed against the old branch).
+- Review: verified against the specs (one right-out/left-in branch, sBend kept with the 480 cap, signed same-row clamp, same and side-pair branches plus same-columnness removed, both doc comments updated, endpoint and within-span assertions per the constraints, no page.ts or CSS change, hover wiring and skip rules unchanged). Scoped suite re-run: `node tests/webui.test.ts` exit 0.
+- Closed the same-row clamp question: the spec's purpose clause (never overshoot the entry point, double back, or self-overlap) and the Summary's "keeps the S monotone" rule out the magnitude reading, which would retrace the line; the signed clamp is the spec-consistent reading.
