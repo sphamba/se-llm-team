@@ -214,6 +214,10 @@ the opened card keeps the blue outline and highlight via .agent-card-active */
 .agent-doctor { color: var(--doctor-fg); }
 .agent-doctor.agent-card-active { border-color: var(--doctor-fg); background: var(--doctor-bg-strong); }
 .agent-doctor .check { color: var(--doctor-fg); }
+/* 000247: the splitter cards read the same blue as the doctor cards */
+.agent-splitter { color: var(--doctor-fg); }
+.agent-splitter.agent-card-active { border-color: var(--doctor-fg); background: var(--doctor-bg-strong); }
+.agent-splitter .check { color: var(--doctor-fg); }
 .check { color: var(--low-fg); margin-right: 5px; }
 .cross { color: var(--critical-fg); margin-right: 5px; }
 #m-agent { position: relative; z-index: 0; margin-bottom: 12px; }
@@ -823,7 +827,7 @@ function renderAgent(t, keep) {
 	for (const a of runs) count[a.role] = (count[a.role] || 0) + 1;
 	el.innerHTML = runs.map(a =>
 		'<div class="agent-col">' +
-		agentCardHtml(a.alive ? "agent-live" : a.status === "dead" ? "agent-dead" : "agent-past", 'data-handle="' + esc(a.handle) + '"', agentLabel(a, count), a.tokens, a.duration, a.alive ? '<span class="spin"></span>' : a.status === "dead" ? '<span class="cross">✗</span>' : '<span class="check">✓</span>') +
+		agentCardHtml((a.role === "splitter" ? "agent-splitter " : "") + (a.alive ? "agent-live" : a.status === "dead" ? "agent-dead" : "agent-past"), 'data-handle="' + esc(a.handle) + '"', agentLabel(a, count), a.tokens, a.duration, a.alive ? '<span class="spin"></span>' : a.status === "dead" ? '<span class="cross">✗</span>' : '<span class="check">✓</span>') +
 		'<div class="agent-subs"></div></div>').join("");
 	// bind by dataset: a hand-written task file name can hold quotes or backslashes, which no
 	// amount of HTML escaping makes safe inside inline JS; 000191: only a genuinely new run's

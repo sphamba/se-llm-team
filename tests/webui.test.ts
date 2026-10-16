@@ -958,6 +958,7 @@ const setBodySrc = page.match(/function setBody\(t\) \{[\s\S]*?\n\}/)![0];
 assert.ok(setBodySrc.includes("if (el.__html === html) return;"), "the body rewrite is html-gated: an unchanged body keeps its node and the reader's scroll");
 const ra = page.match(/function renderAgent\(t, keep\) \{[\s\S]*?\n\}/)![0];
 assert.ok(ra.includes('.agent-subs").replaceWith(box)'), "a refresh carries the fetched sub boxes over by handle");
+assert.ok(ra.includes('a.role === "splitter" ? "agent-splitter " : ""'), "the splitter run's card carries the agent-splitter marker class");
 // 000130: the keep refresh re-fetches only the live run's sub list, so a sub spawned after the
 // card was opened gets its button without re-opening the run; past runs' lists are never re-fetched
 assert.ok(ra.includes('if (live) fetchSubs(agentGen, live,') && ra.includes('.agent-col:last-child > .agent-subs'), "the keep refresh re-fetches only the live run's (last column's) sub list");
@@ -994,6 +995,9 @@ assert.ok(page.includes(".agent-doctor { color: var(--doctor-fg); }"), "the .age
 assert.ok(!page.includes(".agent-doctor:hover"), "the doctor card inherits the plain .agent-card hover, with no blue rest highlight");
 assert.ok(page.includes(".agent-doctor.agent-card-active { border-color: var(--doctor-fg); background: var(--doctor-bg-strong); }"), "the active doctor card keeps the blue outline and highlight, never the base link/medium-bg pair");
 assert.ok(page.includes(".agent-doctor .check { color: var(--doctor-fg); }"), "the doctor card's checkmark reads the same blue as the card text");
+assert.ok(page.includes(".agent-splitter { color: var(--doctor-fg); }"), "the splitter card reads the doctor blue at rest");
+assert.ok(page.includes(".agent-splitter.agent-card-active { border-color: var(--doctor-fg); background: var(--doctor-bg-strong); }"), "the active splitter card keeps the blue outline and highlight");
+assert.ok(page.includes(".agent-splitter .check { color: var(--doctor-fg); }"), "the splitter card's checkmark reads the same blue");
 assert.ok(page.includes(".check { color: var(--low-fg); margin-right: 5px; }"), "the unscoped .check keeps var(--low-fg) for the run cards' and sub cards' checkmarks");
 assert.ok(page.includes('agentCardHtml("agent-doctor " + (d.alive ? "agent-live" : "agent-past")'), "doctor cards keep their agent-live/agent-past classes under the agent-doctor marker, so no unscoped per-variant rule sets a color on them");
 assert.ok(agentCardCss.includes("color: var(--link)") && agentCardCss.includes("border: 1px solid var(--border)") && agentCardCss.includes("background: color-mix(in srgb, var(--panel) 85%, transparent)"), "the unscoped .agent-card keeps gold text, grey outline and the main view's semi-transparent rest background for the run and sub cards");
@@ -1574,6 +1578,29 @@ rmSync(join(root, ".kanban", ".pids", `${slug}.pid`));
 rmSync(join(root, ".kanban", ".logs", `${slug}.reviewer.log`));
 setState(root, getTask(root, task.file)!, "backlog");
 
+// #247: splitter runs render like the other roles: the agent history includes the Splitter run
+// before the Developer (the Splitter runs first in pipeline order, so the start/mtime sort reads
+// it first), its handle resolves, sub=list answers 200 and the chunked read streams
+const splLog = join(root, ".kanban", ".logs", `${slug}.splitter.0.log`);
+writeFileSync(splLog, "SPLIT\n");
+utimesSync(splLog, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+const withSplitter = await detailOf(task.file);
+assert.deepEqual(
+	withSplitter.agents.map((a) => [a.role, a.run, a.status]),
+	[["splitter", 0, "ok"], ["developer", null, "ok"]],
+	"the splitter run precedes the developer run, chronological order",
+);
+assert.equal(taskStats({ agents: [{ role: "splitter", tokens: 1200, duration: 30_000 }, { role: "developer", tokens: 800, duration: 10_000 }] }), "2k · 40s", "the board footer sums the splitter run like any role");
+const encSpl = encodeURIComponent(`${slug}.splitter.0`);
+const splList = await (await fetch(`${base}/api/agent-log?file=${encSpl}&sub=list`)).json();
+assert.deepEqual(splList, [], "a splitter handle's sub list answers 200 (the Splitter spawned no subagents)");
+const splTail = await (await fetch(`${base}/api/agent-log?file=${encSpl}`)).json();
+assert.equal(splTail.text, "SPLIT\n", "a splitter log tail reads like any agent log");
+writeFileSync(splLog, "SPLIT\nMORE\n");
+const splPoll = await (await fetch(`${base}/api/agent-log?file=${encSpl}&offset=${splTail.tail}`)).json();
+assert.equal(splPoll.text, "MORE\n", "a splitter log poll streams the appended content");
+rmSync(splLog);
+
 // /api/agent-log renders a JSONL event log into readable lines
 const jsonlLog = [
 	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "Checking the board." } }),
@@ -2120,6 +2147,7 @@ assert.equal(agentLogPayload(docRoot, new URLSearchParams("file=" + encodeURICom
 
 // LOG_ROLES: the doctor analysis writes no per-task run log, its role is enumerated last
 assert.equal(LOG_ROLES[LOG_ROLES.length - 1], "doctor", "doctor is the last LOG_ROLES entry, after the merger");
+assert.ok(LOG_ROLES.includes("splitter"), "the splitter role is enumerated, its run logs resolve");
 rmSync(docRoot, { recursive: true, force: true });
 
 // a second hub on the taken port reports failure instead of throwing

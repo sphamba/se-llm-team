@@ -171,7 +171,7 @@ function doctorHistory(root: string, t: Task, files: string[]): AgentEntry[] {
 // log handle `<slug>.<role>.<n>.doctor` for the analysed run, so a raw client-supplied path can
 // never reach the fs
 function agentLogPath(root: string, handle: string): string | null {
-	const m = handle.match(/^(.+)\.(developer|reviewer|live-tester|merger|doctor)(?:\.(\d+))?$/);
+	const m = handle.match(/^(.+)\.(splitter|developer|reviewer|live-tester|merger|doctor)(?:\.(\d+))?$/);
 	if (!m) return null;
 	let slug = m[1];
 	if (m[2] === "doctor") {
