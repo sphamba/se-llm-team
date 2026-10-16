@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, PRIORITY_RANK, setState } from "../src/kanban.ts";
 import { startHub } from "../src/hub.ts";
-import { agentLabel, agentRowSig, agentStatsText, agentLogPayload, boardOf, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, stateChanges, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, tabNames, tabsHtml, taskDetail, taskPayload, taskStats } from "../src/webui.ts";
+import { agentLabel, agentRowSig, agentStatsText, agentLogPayload, boardOf, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, tabNames, tabsHtml, taskDetail, taskPayload, taskStats } from "../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the logpane module
 import { esc, LOG_ROLES } from "../src/webui/logpane.ts";
 import { gzipSync } from "node:zlib";
@@ -38,7 +38,6 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 const realHome = process.env.HOME;
 process.env.HOME = home;
 assert.equal(loadWebUiConfig(root).enabled, false);
-assert.equal(loadWebUiConfig(root).notifications, false, "absent config leaves browser notifications off (000244)");
 process.env.HOME = realHome;
 
 // minimal element stub for the log-pane fixups: only the DOM surface logFixups touches
@@ -392,9 +391,8 @@ const page = await pageRes.text();
 assert.doesNotThrow(() => new Function(page.match(/<script>([\s\S]*?)<\/script>/)![1]), "the served client script parses");
 assert.ok(page.includes("Software Engineering LLM Team"), "page shows the new title");
 assert.ok(page.includes('id="theme"'), "page has the theme toggle");
-assert.ok(page.includes('id="notify"'), "page has the browser-notification opt-in control (000244)");
-assert.ok(page.includes("Notification.requestPermission()"), "the control asks for permission on click");
-assert.ok(page.includes("document.hidden"), "notifications fire only while the tab is hidden");
+assert.ok(!page.includes('id="notify"'), "the header has no browser-notification control (000249)");
+assert.ok(!page.includes("Notification"), "the served client never touches the Notification API (000249)");
 assert.ok(page.includes('id="hub"'), "page has the hub identity footer (000165)");
 // 000165: /api/hub reports the serving hub's identity (pid, code checkout, commit), so a
 // stale-code hub or a failover is visible at a glance
@@ -829,19 +827,11 @@ assert.deepEqual(boardOf(boards, "gamma").tasks, [], "an unvisited tab starts as
 assert.deepEqual(boardOf(Object.create(null), "__proto__").tasks, [], "a project named like an object key gets its own board");
 assert.ok(page.includes("Object.create(null)"), "the page keys per-project state without inherited keys");
 
-// 000244: the browser-notification diff: known tasks only, keyed by file; a task absent from the
-// previous poll is new (no notification) and a failed fetch reports nothing
-const beforeRows = [{ file: "000001_a.md", state: "to-do" }, { file: "000002_b.md", state: "doing" }];
-const afterRows = [{ file: "000001_a.md", state: "reviewing" }, { file: "000002_b.md", state: "doing" }, { file: "000003_c.md", state: "to-do" }];
-assert.deepEqual(stateChanges(beforeRows, afterRows), [{ file: "000001_a.md", state: "reviewing" }], "only the known task whose state moved reports a change");
-assert.deepEqual(stateChanges(null, afterRows), [], "the first poll reports nothing");
-assert.deepEqual(stateChanges(beforeRows, null), [], "a failed project fetch reports nothing");
-
 // the hub registry answers /api/projects with its own entry
 const projects = await (await fetch(`${base}/api/projects`)).json();
 assert.equal(projects.length, 1, "the hub registry lists its own entry");
 assert.equal(projects[0].root, root);
-assert.ok(page.includes('projects = tabs.length ? tabs : [{ id: "", label: list[0] ? list[0].name : "" }]'), "the single-project fallback names the board after the registered project (000244)");
+assert.ok(page.includes('projects = tabs.length ? tabs : [{ id: "", label: "" }]'), "the page falls back to one unnamed tab");
 assert.ok(
 	page.includes('t.id ? "/api/tasks?project=" + encodeURIComponent(t.id) : "/api/tasks"'),
 	"the single-project fallback polls /api/tasks bare",
@@ -2187,15 +2177,13 @@ await Promise.race([exited, new Promise((r) => setTimeout(r, 5000))]);
 
 // project .kanban/se-llm-team.json overrides the user file for webUi
 process.env.HOME = home;
-writeFileSync(join(root, ".kanban", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: 4243, notifications: true } }));
+writeFileSync(join(root, ".kanban", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: 4243 } }));
 const overridden = loadWebUiConfig(root);
 assert.equal(overridden.host, "127.0.0.1");
 assert.equal(overridden.port, 4243);
-assert.equal(overridden.notifications, true, "webUi.notifications loads from the project config (000244)");
 // a project file without webUi falls back to the user file
 writeFileSync(join(root, ".kanban", "se-llm-team.json"), JSON.stringify({ pollMinutes: 5 }));
 assert.equal(loadWebUiConfig(root).enabled, true);
-assert.equal(loadWebUiConfig(root).notifications, false, "a config without webUi.notifications defaults it off");
 // 000215: the neutral config dir wins over the legacy pi path; the project file overrides both
 const neutralHome = join(home, ".config", "se-llm-team");
 mkdirSync(neutralHome, { recursive: true });
