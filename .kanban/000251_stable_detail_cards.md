@@ -1,7 +1,7 @@
 ---
 name: "fix: stable task detail cards, no appear/disappear/reappear flicker"
 priority: "critical"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/251-stable-detail-cards"
 issuer: "user"
 complexity: "complex"
@@ -30,6 +30,11 @@ Requirements:
 5. Loaded log content lives in frontend memory only for the opened agent cards of the currently open task detail; closing the card discards it.
 6. State the big assumptions affecting the feature.
 
+Assumptions (confirmed by the user, 2026-10-16):
+- On close, run, sub and doctor cards stay mounted with labels and stats; only the heavy log text is discarded and reloads on the next open.
+- A switch to a different task clears the agent row once immediately, so stale content never shows through the loading state.
+- No strict freshness ordering between a just-opened fetch and a same-URL poll response: the later-arriving one writes and the next poll cycle corrects the stats.
+
 Acceptance:
 - node tests/webui.test.ts passes.
 - Live test (feel-based): run, subagent and doctor cards stay mounted across open, close, 5 s polls and live transcript growth; no reappear flicker; closing the detail card releases its log memory.
@@ -44,9 +49,8 @@ Acceptance:
 - Keep as one complex task: one developer reads the flow once, makes five targeted edits, one review, one merge, one live test.
 - Developer, 2026-10-16: fixed in a582b65. openTask no longer renders the agent/doctor rows from the light row: the row clears once only on a task switch, a same-task reopen keeps the mounted cards, the history render passes keep mode, and the detailGen counter is gone (the modalFile and modal-state checks gate the writes, so a poll cycle never discards a just-opened task's response). fetchSubs gates on the sub index set only; an unchanged set moves the stats lines in place and only a new sub animates. renderAgent lifts the slotted doctor cards out before the innerHTML write and re-slots them after, and the keep tail fetches a run whose sub box carried over nothing. closeModal drops the heavy log text at close; the small cards stay mounted for the reopen. Path 4 needed no code change: with the pidEntry + disc pid.ts the stale/recycled analysis pid read dead consistently (pinned with new stale and recycled pid tests). Proof: one red run (the new gate pin failed first), one green run (node tests/webui.test.ts, all assertions passed), and the live check (run, sub and doctor cards marked in the DOM stayed mounted across open, 1 s pane polls, transcript growth, two 5 s detail cycles, close and reopen; the doctor stats line moved in place across a 5 s poll; the log text was released at close).
 - Developer, 2026-10-16: for a task in state done the run card reads alive=false by design (AGENT_ROLE keys the live role off the task state, not the pid file), so the live check sampled the doctor card (alive, duration ticks) for the in-place stats move. The sub card's in-place stats path for a done task only fetches on an empty box or a rebuild, so the live check proved its mount persistence, the suite pins the in-place gate.
+- Reviewer, 2026-10-16 (a582b65): all six requirements verified, no fixes. Req 1: the diff drops the light-row agent render (renderAgent({})/renderDoctor({}) on a switch only, keepCards same-task reopen, history render keep mode) and detailGen is gone, writes gate on modalFile plus the hidden/closing state; the switch path nets to a cleared row because renderDoctor({}) removes all cards and resets #m-doctor.__cards. Req 2: the lift/re-slot verified against doctorCol (board.ts:118) and syncDoctorCards' parentElement check, which holds on re-slotted cards. Req 3: the gate keys on the sub index set; syncStatsLine(card, tokens, duration, doc) (board.ts:87) matches the new call, tokens/duration move in place. Req 4: no code change needed — agentAlive (pid.ts:94) reads pidEntry and pidAlive(pid, disc), the discriminator decides, so stale and recycled analysis pids read dead; two new payload tests pin both. Req 5: #m-log-text is the only transcript holder, closeLog already clears the log state, the close wipe drops the DOM text. Req 6: the three assumptions were voiced (they restated requirements 1/5 and the code's freshness behavior, so the Open questions section is now deleted). Tests: node tests/webui.test.ts exit=0, all assertions passed.
+
 
 # Open questions
 
-- Assumption: run, sub and doctor cards stay mounted across close (labels and stats only); the heavy log text is the discarded part, since requirements 1 and 5 read together.
-- Assumption: a switch to a different task genuinely clears the agent row once (stale content must not show through the loading state).
-- Assumption: no freshness ordering between a just-opened fetch and a same-URL poll response: the later-arriving response writes, the next poll cycle corrects the stats (needs a >5 s response to observe).

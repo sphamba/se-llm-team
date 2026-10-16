@@ -1,7 +1,7 @@
 ---
 name: "chore: split the test suite into area subdirs"
 priority: "medium"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "user"
 complexity: "moderate"
