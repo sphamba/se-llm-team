@@ -1,7 +1,7 @@
 ---
 name: "fix: remove node --watch from the orchestrator start path"
 priority: "high"
-state: "doing"
+state: "live-testing"
 worktree: "fix/253-drop-node-watch"
 issuer: "user"
 complexity: "simple"
@@ -28,3 +28,12 @@ Acceptance:
 - Live test: starting the orchestrator spawns ONE process (no supervisor pair); stopping it leaves no process behind; a killed daemon stays dead until a manual start.
 
 # Notes
+- Dropped "--watch" from orchestrator_start's spawn args (src/tools.ts): the daemon is a plain detached node process. An exit or crash is final, only a manual start brings it back. UI and src changes apply on the next manual start.
+- Removed the "already running without a node --watch supervisor" message branch and the now-dead orchestratorWatched helper with its only helper procPpid (src/pid.ts).
+- orchestrator_stop keeps the process-group signal (unchanged behavior, comment updated): a hand-set lock pid can still name a detached group leader.
+- Tests: mcp.test.ts and index.test.ts pin the new spawn args; orchestrator.test.ts part AV now asserts that a src touch restarts nothing and that one SIGTERM clears the lock; a webui.test.ts comment lost the watch clause. Ran node tests/mcp.test.ts, node index.test.ts, node tests/orchestrator.test.ts (55 smokes) and node tests/webui.test.ts: all pass.
+- Live check (temp root, isolated HOME and XDG_CONFIG_HOME, git repo, done task): the tool start spawned one process (lock pid 1823885, cmdline without --watch, ppid 1, no supervisor pair); the tool stop left no process and cleared the lock; kill -9 stayed dead across a .kanban board write; a manual start brought the daemon back.
+- Four --watch supervisors from earlier sessions (se-llm-team x2, akantu-rs x2) still run in the main checkout. This change stops new ones only.
+- Review at 38dad90: specs 1-2 settled by the diff (spawn args plain, warn branch gone); spec 3 settled by grep (no orchestratorWatched or procPpid consumers left); spec 4 settled by the diff (hub registration, singleton lock, poll cadences untouched). Ran index.test.ts, mcp.test.ts, orchestrator.test.ts, webui.test.ts: all exit 0. The first orchestrator run flaked at the per-role notes mirror check (a part the diff does not touch); the second run passed clean. Fixed the garbled index.test.ts comment (duplicate fragment plus a stale warning reference) in 38dad90.
+
+
