@@ -941,7 +941,7 @@ assert.ok(page.includes(".agent-doctor.agent-card-active { border-color: var(--d
 assert.ok(page.includes(".agent-doctor .check { color: var(--doctor-fg); }"), "the doctor card's checkmark reads the same blue as the card text");
 assert.ok(page.includes(".check { color: var(--low-fg); margin-right: 5px; }"), "the unscoped .check keeps var(--low-fg) for the run cards' and sub cards' checkmarks");
 assert.ok(page.includes('agentCardHtml("agent-doctor " + (d.alive ? "agent-live" : "agent-past")'), "doctor cards keep their agent-live/agent-past classes under the agent-doctor marker, so no unscoped per-variant rule sets a color on them");
-assert.ok(agentCardCss.includes("color: var(--link)") && agentCardCss.includes("border: 1px solid var(--border)") && agentCardCss.includes("background: var(--panel)"), "the unscoped .agent-card keeps gold text, grey outline and panel background for the run and sub cards");
+assert.ok(agentCardCss.includes("color: var(--link)") && agentCardCss.includes("border: 1px solid var(--border)") && agentCardCss.includes("background: color-mix(in srgb, var(--panel) 85%, transparent)"), "the unscoped .agent-card keeps gold text, grey outline and the main view's semi-transparent rest background for the run and sub cards");
 assert.ok(page.includes(".agent-card:hover { background: var(--hover); }") && page.includes(".agent-card-active { border-color: var(--link); background: var(--medium-bg); }"), "the unscoped hover and active rules keep today's colors");
 // 000194: the live pulse follows the viewed run's aliveness, the same signal the poll timer
 // reads, refreshed from pullLog after every payload and dropped on close
@@ -1223,15 +1223,18 @@ assert.ok(page.includes("markActiveAgent();\n\t\tdrawAgentRelations();"), "sub f
 assert.ok(page.includes('window.addEventListener("resize", drawAgentRelations);'), "a window resize redraws the lines");
 assert.equal([...page.matchAll(/b\.onmouseenter = \(\) => hotAgentRelations\(b\.dataset\.handle, true\);/g)].length, 3, "run, sub and doctor cards all bind the hover raise, mouseleave reverts");
 assert.ok(page.includes('for (const path of document.querySelectorAll("#agent-relations path"))'), "markActiveAgent also toggles the selection highlight on the connected lines");
-// 000237 run against the served source: the drop leaves the run card's bottom edge heading down
-// and enters the sub or doctor card's left side heading right, over any span
+// 000237/000238 run against the served source: the drop leaves the run card's bottom edge heading
+// down and enters the sub or doctor card's left side heading right; the horizontal run-in scales
+// with the span and clamps to the space left of the card, so a flush card keeps the short hook
 const relDrop = new Function(page.match(/function dropCurve\(from, to\) \{[\s\S]*?\n\}/)![0] + "; return dropCurve;")();
 const dropPath = relDrop({ x: 0, y: 0, w: 200, h: 40 }, { x: 0, y: 44, w: 200, h: 30 });
 assert.ok(dropPath.startsWith("M 100 40 C"), "the drop leaves the run card's bottom edge at its center");
 assert.ok(dropPath.endsWith(", 0 59"), "the drop enters the sub card's left side at its vertical middle");
 const dropSeg = dropPath.match(/C (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+)$/)!;
 assert.ok(Number(dropSeg[1]) === 100 && Number(dropSeg[2]) > 40, "the departure control sits below the bottom edge, so the line heads down");
-assert.ok(Number(dropSeg[3]) < 0 && Number(dropSeg[4]) === 59, "the arrival control sits left of the left edge, so the line heads right into the card");
+assert.ok(Number(dropSeg[3]) < 0 && Number(dropSeg[4]) === 59, "the arrival control sits left of the left edge at the same y, so the line heads right into the card; a flush card keeps the short 8px hook");
+assert.equal(relDrop({ x: 0, y: 0, w: 200, h: 40 }, { x: 300, y: 44, w: 200, h: 30 }), "M 100 40 C 100 49.5, 240 59, 300 59", "a card with space to its left gets a run-in scaled from the span, capped at 60px");
+assert.equal(relDrop({ x: 0, y: 0, w: 200, h: 40 }, { x: 20, y: 44, w: 200, h: 30 }), "M 100 40 C 100 49.5, 0 59, 20 59", "the run-in clamps to the space left of the card, so no length hides past the canvas edge");
 // 000237 run the served draw against a stub agent area: two run columns with run 2 wrapped below
 // run 1, two subs under run 1, one doctor card in the residual #m-doctor row. The wrap must not
 // break the chain: curve spans any x/y pair, so the line still connects the wrapped pair

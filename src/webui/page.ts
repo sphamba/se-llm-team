@@ -179,8 +179,10 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .empty { font-size: 0.875rem; color: var(--faint); }
 .toggle { display: block; width: 100%; margin-top: 2px; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.875rem; }
 .toggle:hover { background: var(--hover); }
-/* 000120: each run as a card, its subagent cards stacked below it in the same column */
-.agent-card { display: block; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 0.875rem; text-align: left; position: relative; z-index: 2; }
+/* 000120: each run as a card, its subagent cards stacked below it in the same column;
+   000238: the main view card's translucent rest background lets the relation lines show through
+   faintly, hover and active keep their own looks */
+.agent-card { display: block; border: 1px solid var(--border); background: color-mix(in srgb, var(--panel) 85%, transparent); color: var(--link); border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 0.875rem; text-align: left; position: relative; z-index: 2; }
 .agent-card:hover { background: var(--hover); }
 /* 000191: a genuinely new run card rises in with the board cards' entrance */
 .agent-card.enter { animation: cardIn var(--enter) ease-out; }
@@ -611,15 +613,17 @@ function hotAgentRelations(handle, on) {
 		if (p.dataset.from === handle || p.dataset.to === handle) p.classList.toggle("relations-hot", on);
 }
 // the vertical connector: out of the run card's bottom edge heading down, into the sub or doctor
-// card's left side heading right; the horizontal hook stays short so a card flush with the area's
-// left edge (every sub and column doctor) loses no visible length to the canvas clip
+// card's left side heading right; the horizontal run-in scales with the span (the board sBend
+// pattern) and clamps to the space left of the card, so the approach reads perpendicular; a card
+// flush with the area's left edge keeps the short hook and loses no visible length to the clip
 function dropCurve(from, to) {
 	const x1 = from.x + from.w / 2;
 	const y1 = from.y + from.h;
 	const x2 = to.x;
 	const y2 = to.y + to.h / 2;
 	const v = Math.max(8, Math.min((y2 - y1) * 0.5, 60));
-	return "M " + x1 + " " + y1 + " C " + x1 + " " + (y1 + v) + ", " + (x2 - 8) + " " + y2 + ", " + x2 + " " + y2;
+	const d = Math.max(8, Math.min(Math.abs(x1 - x2) * 0.35, 60, x2));
+	return "M " + x1 + " " + y1 + " C " + x1 + " " + (y1 + v) + ", " + (x2 - d) + " " + y2 + ", " + x2 + " " + y2;
 }
 // 000237 the detail card's relation lines, behind the cards in #m-agent: one dashed connector per
 // drawn pair; run cards chain right-out/left-in with the board curve (any x/y pair, so a
