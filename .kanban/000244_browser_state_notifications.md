@@ -1,12 +1,12 @@
 ---
 name: "feat: browser notifications on task state changes"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/244-browser-state-notifications"
 issuer: "user"
 complexity: "simple"
 shortName: "browser-state-notifications"
-blockedBy: "#242"
+blockedBy: ""
 ---
 
 # Summary

@@ -6,15 +6,17 @@
 3. Checks: one command per spec requirement (see Checks); related commands batched in one block, one-line lead-in each.
 4. Tests: the suites the diff touches, once (see Tests).
 5. Findings edit: one edit to SPECS.md (see Findings).
-6. State transition: tool_search → kanban_get → kanban_set_state, then one sentence naming the state (see State transition).
+6. State transition: tool_search → kanban_get → kanban_set_state; final text is one sentence (see State transition).
 
-## Thinking (largest measured waste: last run 4 of 5 thinking blocks were plan, recap, rehearsal, or policy re-weighing)
-- A thinking block only interprets the previous tool result and picks the next action this file fixes. Never plan, rehearse the shape, recap the diff or results, or weigh a policy the shape settles (findings target, test scope, diff range, open-question disposition). If the next action is fixed above, act without a thinking block.
-- Reason per command from its output: no hand-computed values, no prose re-reads of diff code, no re-derived answers.
-- Hard boundaries: no thinking before Recon call 1, none before tool_search, and the block after the last suite passes is the findings edit itself, not a rehearsal of it.
-- One narration per fact, in the findings edit. Outside it: one-line tool lead-ins and the final state sentence. Never emit a rehearsal, recap, or verification-summary block at any point.
+## Thinking (largest measured waste: last two runs, thinking carried ~90% of streamed output; one run had a 15k-char block, 47% of the whole run, re-walking the diff against the Specs; the verdict was composed three times)
+- A thinking block only reads the last tool result and names the next command this file fixes, in one or two lines. If the next action is fixed above, act without a thinking block.
+- Never walk the Specs point by point in thinking, compare field lists by hand, quote spec or diff code, trace data flow, races, or counter interleavings, restate the Shape as a plan, or compose the findings text. That walk is the Checks commands: run the command, then reason from its output. No hand-computed values, no re-derived answers.
+- The full verdict exists exactly once, inside the findings edit's newText. Never state a spec-by-spec verdict in a thinking block, and never after the state transition.
+- Hard boundaries: no thinking before Recon call 1 or before tool_search. After the last suite passes: at most one doubt-closing command, then the findings edit itself. The findings edit is built from the per-check pass/fail lines already made, not re-derived.
+- One narration per fact, in the findings edit. Outside it: one-line tool lead-ins and the final state sentence.
 - A settled check never reopens: output in context is evidence, in a fresh pass or a re-review. One doubt, one command, executed now.
 - Scope: spec requirements plus the tests the diff touches. No what-if traces, no web or project-memory search. An unrun full `pnpm test` is never a finding and never a deliberation. No mapped area (Coverage map) → say so once in the findings edit, skip.
+- Budget: at most 3 thinking blocks and ~1k chars per review. This run: 6 blocks, ~29k chars.
 
 ## Re-reviews
 - A task in reviewing with review bullets in Notes is a second pass: a normal cycle. Never deliberate fresh-vs-continued session state or prior-evidence staleness; verify each prior claim with the usual one command per requirement.
@@ -28,6 +30,7 @@
 ## Checks
 - One requirement, one command, one recorded pass/fail. If your note and the file disagree, the file wins, recorded once.
 - Ordering spec points end at one read of the producing site; the call sites around it answer the coverage question. No caller traces, no spawn-path re-derivation.
+- A consumer class (undefined-field defaults like `t.agents || []`, `t.body || ""`) is proven by one grep of the consuming functions, once. Never re-prove it per field in a later turn.
 - Materiality: a discrepancy blocks only if it changes the verdict or hides a defect. A minor Notes inaccuracy is one line in findings, never a blocked merge.
 
 ## Tests
@@ -45,15 +48,17 @@
 - agents/*.md, skills/se-llm-team/SKILL.md → tests/plugin.test.ts (reads the real SKILL.md), the only suite to run; no test reads real role prompts.
 - tests/*.ts → the touched suite.
 
-## Findings and Open questions
-- One edit to cwd SPECS.md, appended to # Notes (check counts and section structure inside it). Never edit the task body, another task's file, or AGENTS.*.md.
-- Open questions are decided on first read and never revisited; the ladder is mechanical: the specs already answer it → delete it in the findings edit, never move it to Notes; the answer changes direction → finding in Notes; a genuine user question → keep. An empty section → delete the header.
+## Findings (one edit to cwd SPECS.md, appended to # Notes)
+- The spec-by-spec pass/fail verdict is written exactly once, in this edit's newText, assembled from the recorded per-check results.
+- Never edit the task body, another task's file, or AGENTS.*.md.
+- Open questions are decided on first read of the Specs and never revisited; the ladder is mechanical: the specs already answer it → delete it in the findings edit, never move it to Notes; the answer changes direction → finding in Notes; a genuine user question → keep. An empty section → delete the header.
 
 ## State transition (always last, three steps)
 1. tool_search("kanban") loads the MCP tools.
 2. kanban_get({}): the spawn prompt mandates the re-read; make it and move on. Abort when the state no longer matches the start.
 3. kanban_set_state({ state }) is the run's last action; nothing follows it.
 - Pass → to-merge. A task parked per its own specs (no runnable precondition) → backlog, never to-merge: to-merge closes it as done without the run, and promoteBacklog never promotes a task with unanswered open questions (src/orchestrator/pipeline.ts), so backlog holds it for the user with no respawn loop. to-do re-spawns a developer at once.
+- Final text: one sentence naming the state, nothing else. A checks recap after kanban_set_state duplicates the findings edit verbatim; the spawn prompt asks for no summary.
 
 ## Files
 - read tool, one file per call; a bash command that prints two or more files hits the 50KB cap, hides the echo headers, and forces grep salvage from a log file.
