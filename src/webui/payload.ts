@@ -1,7 +1,7 @@
 import { closeSync, existsSync, openSync, readFileSync, readdirSync, readSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
-import { getTask, kanbanDir, listAll, splitFrontmatter, taskFiles, taskNum, taskSlug, type Task } from "../kanban.ts";
+import { getTask, kanbanDir, listAll, PRIORITY_RANK, splitFrontmatter, STATES, taskFiles, taskNum, taskSlug, type Task } from "../kanban.ts";
 import { agentAlive } from "../pid.ts";
 import { AGENT_ROLE, LOG_LINES, LOG_ROLES, renderLogChunk } from "./logpane.ts";
 
@@ -444,6 +444,21 @@ function linesBack(full: Buffer | null, target: string, tail: number, count: num
 	return count > 0 ? 0 : head;
 }
 
+// done tasks' run logs never change, so a done card's stat data memoizes per task until the state
+// leaves done; the delete on sight invalidates a left-done task, so a re-done task re-caches fresh
+const doneAgents = new Map<string, Map<string, AgentEntry[]>>();
+function cardAgents(root: string, t: Task, files: string[]): AgentEntry[] {
+	if (t.state !== "done") {
+		doneAgents.get(root)?.delete(t.file);
+		return agentHistory(root, t, files);
+	}
+	let byFile = doneAgents.get(root);
+	if (!byFile) doneAgents.set(root, (byFile = new Map()));
+	let agents = byFile.get(t.file);
+	if (!agents) byFile.set(t.file, (agents = agentHistory(root, t, files)));
+	return agents;
+}
+
 // the light board row (000242): identity + summary only, what the board renderer and the row
 // click need; the heavy body, sections and agent history load per task through taskDetail
 function lightRow(root: string, t: Task) {
@@ -463,10 +478,35 @@ function lightRow(root: string, t: Task) {
 	};
 }
 
-// one light row per task (000242): no body, no agent history, no log parsing, so a large board
+const VISIBLE_CARDS = 5; // the cards each column renders before "show more" (the client's VISIBLE)
+
+// the files the board renders before "show more": the first five per column, the same sort
+// syncBoard runs (backlog priority-first, every other column newest-first)
+function visibleCards(rows: ReturnType<typeof lightRow>[]): Set<string> {
+	const visible = new Set<string>();
+	for (const st of STATES) {
+		const inState = rows
+			.filter((r) => r.state === st)
+			.sort((a, b) => (st === "backlog" ? (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) : 0) || b.updated - a.updated);
+		for (const r of inState.slice(0, VISIBLE_CARDS)) visible.add(r.file);
+	}
+	return visible;
+}
+
+// one light row per task (000242 light, 000245 stats): no body, no doctor entries, no log parsing
+// except the visible subset's (the cards each column renders before "show more"), so a large board
 // opens fast and the 5 s poll stays cheap; the heavy data loads per task through taskDetail
 export function taskPayload(root: string) {
-	return listAll(root).map((t) => lightRow(root, t));
+	const tasks = listAll(root);
+	const files = logDirFiles(root);
+	const rows = tasks.map((t) => lightRow(root, t));
+	const visible = visibleCards(rows);
+	const served = rows.map((row, i) => (visible.has(row.file) ? { ...row, agents: cardAgents(root, tasks[i], files) } : row));
+	// drop the cache entries for tasks gone from the board
+	const onBoard = new Set(rows.map((r) => r.file));
+	const byFile = doneAgents.get(root);
+	if (byFile) for (const f of byFile.keys()) if (!onBoard.has(f)) byFile.delete(f);
+	return served;
 }
 
 // the per-task detail (000242): the light row plus the heavy data the detail card renders; built

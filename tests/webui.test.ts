@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, PRIORITY_RANK, setState } from "../src/kanban.ts";
 import { startHub } from "../src/hub.ts";
-import { agentLabel, agentRowSig, agentStatsText, agentLogPayload, boardOf, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, stateChanges, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, tabNames, tabsHtml, taskDetail, taskStats } from "../src/webui.ts";
+import { agentLabel, agentRowSig, agentStatsText, agentLogPayload, boardOf, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, stateChanges, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, tabNames, tabsHtml, taskDetail, taskPayload, taskStats } from "../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the logpane module
 import { esc, LOG_ROLES } from "../src/webui/logpane.ts";
 import { gzipSync } from "node:zlib";
@@ -335,9 +335,12 @@ assert.equal(listed[0].blockedBy, "", "absent blockedBy reads as an empty string
 assert.equal(listed[0].complexity, "moderate");
 assert.equal(listed[0].updated, statSync(join(root, ".kanban", task.file)).mtimeMs);
 // 000242 the light list: rows carry identity + summary only, what the board renderer and the row
-// click need; the heavy body, sections and agent history load per task through /api/task-detail
-for (const k of ["body", "specs", "notes", "openQuestions", "agents", "agent", "doctors"])
+// click need; the heavy body, sections and agent history load per task through /api/task-detail.
+// 000245: the visible cards' rows carry the agent stat data (this row is the column's first card),
+// doctors stay detail-only
+for (const k of ["body", "specs", "notes", "openQuestions", "agent", "doctors"])
 	assert.ok(!(k in listed[0]), `light rows carry no ${k}`);
+assert.deepEqual(listed[0].agents, [], "a visible card's row carries the agent stat data, empty without role logs");
 assert.equal(listed[0].num, parseInt(task.file, 10), "light rows carry the task num");
 assert.equal(listed[0].summary, "Dashboard smoke");
 const detail = await (await fetch(`${base}/api/task-detail?num=${parseInt(task.file, 10)}`)).json();
@@ -369,6 +372,18 @@ const held = createTask(root, { name: "fix: held by 1", summary: "s", blockedBy:
 const heldRow = (await (await fetch(`${base}/api/tasks`)).json()).find((t) => t.file === held.file);
 assert.equal(heldRow.blockedBy, `#${parseInt(task.file, 10)}`, "the blockedBy attribute serves with the payload");
 rmSync(join(root, ".kanban", held.file)); // the daemon section below expects a one-task board
+
+// 000245 the visible subset: the five cards each column renders before "show more" carry the stat
+// data, a card behind it carries none; backlog sorts priority-first then newest-first, so with
+// equal priorities the five newest are visible and the oldest sits behind the fold
+const bulk = Array.from({ length: 6 }, (_, i) => createTask(root, { name: `feat: bulk ${i}`, summary: "s" }));
+const bulkBase = Date.now() / 1000;
+bulk.forEach((t, i) => utimesSync(join(root, ".kanban", t.file), bulkBase + i, bulkBase + i));
+const bulkRows = (await (await fetch(`${base}/api/tasks`)).json()).filter((r: any) => r.name.startsWith("feat: bulk"));
+assert.equal(bulkRows.length, 6);
+for (const r of bulkRows)
+	assert.equal("agents" in r, r.num !== parseInt(bulk[0].file, 10), "the five visible rows carry the stat data, a card behind show more carries none");
+for (const t of bulk) rmSync(join(root, ".kanban", t.file)); // restore the one-task board
 
 // GET / mentions all 10 state names; other paths and methods are 404
 const pageRes = await fetch(`${base}/`);
@@ -2165,6 +2180,50 @@ assert.equal(loadWebUiConfig(root).host, "project-host", "the project file overr
 writeFileSync(join(neutralHome, "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "neutral-host" } }));
 assert.equal(loadWebUiConfig(root).host, "project-host", "the project file overrides the neutral global too");
 process.env.HOME = realHome;
+
+// 000245 the visible subset and the done cache, in-process over taskPayload: the five cards each
+// column renders before "show more" carry the same agent history the detail serves, a card behind
+// it carries none; done tasks' stats come from the cache and invalidate when the state leaves done
+const statsRoot = mkdtempSync(join(tmpdir(), "webui-stats-"));
+mkdirSync(join(statsRoot, ".kanban", ".logs"), { recursive: true });
+const statsTasks = Array.from({ length: 6 }, (_, i) => createTask(statsRoot, { name: `feat: stats ${i}`, summary: "s" }));
+statsTasks.forEach((t) => setState(statsRoot, t, "reviewing"));
+const statsBase = Date.now() / 1000;
+statsTasks.forEach((t, i) => utimesSync(join(statsRoot, ".kanban", t.file), statsBase + i, statsBase + i));
+const statsRows = taskPayload(statsRoot).filter((r: any) => r.name.startsWith("feat: stats"));
+assert.equal(statsRows.length, 6);
+for (const r of statsRows)
+	assert.equal("agents" in r, r.num !== parseInt(statsTasks[0].file, 10), "the five visible rows carry the stat data, a card behind show more carries none");
+const loggedSlug = statsTasks[1].file.replace(/\.md$/, "");
+writeFileSync(join(statsRoot, ".kanban", ".logs", `${loggedSlug}.developer.log`), [
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 200, output: 100 } }, timestamp: Date.now() - 2000 }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 300, output: 200 } }, timestamp: Date.now() - 1000 }),
+].join("\n") + "\n");
+const loggedRow = taskPayload(statsRoot).find((r: any) => r.file === statsTasks[1].file)!;
+assert.equal(loggedRow.agents[0].tokens, 800, "a visible card's row sums the run's usage like the detail's history");
+assert.deepEqual(loggedRow.agents, taskDetail(statsRoot, loggedRow.num)!.agents, "the row carries the same agent history the detail serves");
+
+// the done cache: a done task's stats serve from the cache (a rewritten plain log stays stale) and
+// leaving done invalidates it, so a re-done task re-caches fresh
+const doneRoot = mkdtempSync(join(tmpdir(), "webui-done-"));
+mkdirSync(join(doneRoot, ".kanban", ".logs"), { recursive: true });
+const doneTask = createTask(doneRoot, { name: "feat: done stats", summary: "s" });
+const doneSlug = doneTask.file.replace(/\.md$/, "");
+const doneLog = join(doneRoot, ".kanban", ".logs", `${doneSlug}.developer.log`);
+const writeDoneLog = (tokens: number) =>
+	writeFileSync(doneLog, JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: tokens, output: 0 } }, timestamp: new Date().toISOString() }) + "\n");
+const doneRow = () => taskPayload(doneRoot).find((r: any) => r.file === doneTask.file)!;
+setState(doneRoot, doneTask, "done");
+writeDoneLog(300);
+assert.equal(doneRow().agents[0].tokens, 300, "a done card's row carries the run's stats");
+writeDoneLog(1500);
+assert.equal(doneRow().agents[0].tokens, 300, "a done card's stats come from the cache, a rewritten plain log stays stale");
+setState(doneRoot, doneTask, "to-do");
+assert.equal(doneRow().agents[0].tokens, 1500, "leaving done invalidates the cache, the fresh stats serve");
+setState(doneRoot, doneTask, "done");
+assert.equal(doneRow().agents[0].tokens, 1500, "a re-done task re-caches fresh, the pre-done entry never returns");
+writeDoneLog(20000);
+assert.equal(doneRow().agents[0].tokens, 1500, "the re-cached entry is stale again until the next leave-done");
 
 cleanup();
 console.log("webui.test.ts: all assertions passed");
