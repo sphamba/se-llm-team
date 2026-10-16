@@ -1,8 +1,8 @@
 ---
 name: "fix: context symlinks committed by developers block the merge"
 priority: "high"
-state: "live-testing"
-worktree: "fix/234-context-symlinks-block-merge"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "context-symlinks-block-merge"
@@ -49,3 +49,17 @@ On a fresh project the Developer agents commit the task context symlinks (AGENTS
 - Suites (this run): tests/context-symlinks.test.ts all 5 parts pass, tests/plugin.test.ts pass, tests/orchestrator.test.ts exit 0.
 - No fixes made; no Open questions section was present, none raised.
 - Merger rebase (this run, base main @ 889b0d3): the stopped rebase held both picks already staged (resolution from the prior run) but rescheduled by the GPG-sign failure; committed each staged pick manually with the original message, author, date and --no-gpg-sign (8a5682e fix, 839d83f docs); no content conflicts, the rescheduled picks dropped as "patch contents already upstream". Full suite `npm test` exit 0; note the npm test chain does not include tests/context-symlinks.test.ts, so it was run directly: all 5 parts pass.
+
+## Live test (this run, merged 7ef2e35)
+- Interface: the merged daemon (src/orchestrator.ts from this worktree), a fresh-project clone, a sleeping fake pi as the config `agent`, an isolated HOME, `--rescan-seconds 1 --poll-minutes 30`, no webui. Script and fixture: /tmp/lt234/run.sh (fixture kept). 35 checks, 0 failed.
+- Spawn (acceptance 1, first half): after the developer spawn, `git check-ignore -v AGENTS.md SPECS.md` in the worktree names `.git/info/exclude` for both paths, `git status --porcelain` shows no untracked context symlink, a blanket `git add -A` stages neither path, and both cwd symlinks still point at the task file and the role notes. A second spawn does not append the names again (each name appears once in the exclude).
+- Merge lane (acceptance 1, second half): a to-merge worktree whose branch committed the two symlinks plus a real file, then deleted them (unstaged ` D`), with the base moved on: the sweep repaired the two paths, the rebase and the fast-forward completed, and the merged branch carries neither path. HEAD is the follow-up commit "chore: remove task context symlinks committed by mistake" and the genuine task file is on the branch. No `rebase failed` line and no strip failure line.
+- Differential control: the parent commit 048f5ae^ on the same stuck fixture logs `error: cannot rebase: You have unstaged changes.` then `000235_lt_merge.md: rebase failed, left in to-merge for the retry`. The task stays to-merge, the deletions stay unstaged, and nothing merges. This is the exact stuck state from the task.
+- Tracked real AGENTS.md (acceptance 2): with AGENTS.md tracked as mode 100644 on the base and modified by the task branch, the merge keeps the branch content and mode 100644 and runs no strip commit.
+- Developer prompt: the prompt the spawned developer received contains "Never commit AGENTS.md or SPECS.md".
+- Unwritable exclude (constraint): with info/exclude read-only and SPECS.md missing from it, the spawn continues and the daemon logs `could not add AGENTS.md and SPECS.md to info/exclude`.
+- Downstream: after the strip commit `git merge-base --is-ancestor wt-merge HEAD` holds, so doneCleanup's `git branch -d` still works.
+- Test assumptions: the fixture removes the AGENTS.md and SPECS.md lines from .gitignore, because the source repo itself ignores both paths and that would hide the bug (pre-spawn `git check-ignore` fails on both paths). The real-AGENTS case tracks the file on the base before the branch. A new untracked AGENTS.md can no longer be added by a blanket `git add -A` (info/exclude hides it), so it needs a force-add. This is the intended hiding and does not contradict the Specs.
+- Skipped: the Merger conflict round ("before every rebase attempt ... each Merger conflict round"). No acceptance bullet names it and tests/context-symlinks.test.ts covers it, so the live test did not build a conflicting branch plus a fake merger.
+- Two first-run assertion errors were test-script bugs, not product findings: the merge log says "set to-live-test" while the settled board state is `live-testing` (to-live-test is transient, the sweep spawns the live-tester at once), and the first fixture's real AGENTS.md was skipped by `git add -A` because the new exclude hides untracked context paths. With the file tracked on the base, all 35 checks pass.
+- No Open questions.
