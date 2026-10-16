@@ -1,7 +1,7 @@
 # Reviewer guidance (se-llm-team)
 
 ## Shape (in order)
-1. Read cwd SPECS.md (symlink; see Files): body, Notes, Open questions. No thinking around it: Recon call 1 is the next block.
+1. Block 1 of the run is the read of cwd SPECS.md (symlink; see Files): body, Notes, Open questions. No thinking block before it, ever: act, do not announce.
 2. Recon: exactly two bash calls (see Recon); the scope is decided there, once.
 3. Checks: one command per requirement the diff in context does not already settle; related commands share one block, one-line lead-in each (see Checks).
 4. Tests: the suites the diff touches, once (see Tests); the suite may share the last check's block. A test-run lead-in names only the suite.
@@ -9,10 +9,10 @@
 6. State transition: tool_search → kanban_get → kanban_set_state; final text is the one-line template (see State transition).
 
 ## Thinking (largest measured waste)
-- A thinking block only reads the last tool result and names the next command, in one or two lines. It never restates the previous result, the Shape, or the budget. If the next action is fixed above, act with no thinking block (the read → Recon call 1 adjacency is fixed in the Shape). Hard boundary: no thinking before tool_search.
+- A thinking block only reads the last tool result and names the next command, in one or two lines. It never restates the previous result, the Shape, or the budget, and never opens a run. If the next action is fixed above, act with no thinking block. Hard boundary: no thinking before tool_search.
 - Never in thinking: restate the Shape as a plan, walk the Specs point by point, or map requirement→command (that mapping is the one-line lead-ins of the check commands; after the diff, thinking at most names the first requirement the diff does not settle), quote spec or diff code, trace data flow, races, counter interleavings, or import/export chains, compose the findings text, state the verdict anywhere but the findings edit's newText, or narrate a check result twice (a result is stated once, in the findings edit; a lead-in names the requirement, never the result). Run the command, then reason from its output.
-- A settled check never reopens: output in context is evidence, in a fresh pass or a re-review. One doubt, one command, executed now. No hand-computed values, no re-derived answers, no range or ancestry deliberation, no re-weighing of a settled Open-question (see Findings).
-- Budget: at most 2 thinking blocks, ~300 chars total, target 0-1. This run: 5 thinking blocks, 4 carried waste (a Shape plan, a command choice, an Open-question weighed twice, check results narrated twice); top loss was the Open-question loop.
+- A doubt never closes a thinking block: name a doubt and the next block is the one command that answers it, executed now. No hand-computed values, no re-derived answers, no reachability walks, no history digs, no range or ancestry deliberation. A settled check never reopens: output in context is evidence, in a fresh pass or a re-review.
+- Budget: at most 2 thinking blocks, ~300 chars total, target 0-1.
 
 ## Re-reviews
 - A task in reviewing with review bullets in Notes is a second pass: a normal cycle. Never deliberate fresh-vs-continued session state or prior-evidence staleness; verify each prior claim with the usual one command per requirement.
@@ -22,11 +22,12 @@
 - Call 1, state + diff stat: `b=$(git -C /home/phamba/repos/se-llm-team branch --show-current) && echo "base=$b" && git log --oneline -5 && git status --short && git diff "$b"...HEAD --stat`. The `-C` lookup reads the main checkout; the task worktree sits on the task branch, so no root-vs-worktree question exists.
 - Call 2, full diff: `git diff <name-from-base=...>...HEAD`, a mechanical substitution of the printed name. Substitute even when the name looks like `main`: branches stack, and a branch typed from memory silently reviews the wrong base.
 - Commit scope, decided once, no ancestry derivation: Notes name the implemented commit(s) → those commits are the review scope, one `git show <sha>` each; Notes name none → the range diff is the scope. One commit in a one-commit range → the range diff and `git show` print the same output; run the range diff, never deliberate the equivalence.
-- Review scope is the spec requirements plus the suites the diff touches. No what-if traces, no web or project-memory search. An unrun full `pnpm test` is never a finding and never a deliberation. No mapped area (Coverage map) → say so once in the findings edit, skip.
+- Review scope is the spec requirements plus the suites the diff touches. No what-if traces, no web or project-memory search. A live check (fixture daemon, Playwright) is the live-tester's job: never run, re-run, schedule, or deliberate one; a prior live check in Notes records as a pass. An unrun full `pnpm test` is never a finding and never a deliberation. No mapped area (Coverage map) → say so once in the findings edit, skip.
 
 ## Checks
 - One requirement, one command, one recorded pass/fail. A requirement the diff already settles needs no command: record the pass in the findings edit. If your note and the file disagree, the file wins, recorded once.
 - Ordering spec points end at one read of the producing site; the call sites around it answer the coverage question. No caller traces, no spawn-path re-derivation, no import/export chain traces (see Facts that bite): a symbol grep'd clean at its producing site and in its importer is settled coverage.
+- Removed-consumer neutrality (top measured loss: 4 blocks in one run): the diff removes a symbol's only consumer → one grep for remaining consumers settles that a co-located change to the symbol is behavior-neutral. Never re-derive UI reachability (which component renders in which mode), never read render code past the producing site, never dig git history for a removed call, never re-weigh the Notes claim that states it.
 - A consumer class (undefined-field defaults like `t.agents || []`, `t.body || ""`) is proven by one grep of the consuming functions, once, batched with its neighboring checks. Never re-prove it per field or in a later turn.
 - Materiality: a discrepancy blocks only if it changes the verdict or hides a defect. A minor Notes inaccuracy is one line in findings, never a blocked merge.
 
@@ -59,9 +60,9 @@
 - Final text is exactly: `Moved #<nn> to <state>.` A checks recap after kanban_set_state duplicates the findings edit verbatim; the spawn prompt asks for no summary.
 
 ## Files
-- read tool, one file per call; a bash command that prints two or more files hits the 50KB cap, hides the echo headers, and forces grep salvage from a log file.
+- read tool, one file per call, offset/limit for excerpts. Never sed, cat, or awk a file into bash output: a malformed range prints nothing and fails silently, forcing a retry.
 - cwd SPECS.md is a symlink through the board to the task file in the main checkout. Read and edit through it. Never inspect the link chain (no ls, realpath, worktree-vs-board); reading the task body or other .kanban files in the main checkout is allowed and expected.
-- .kanban files are untracked in the worktree: git diff and git log say nothing about them. A "moved into .kanban" claim: grep the worktree directly; no git-history searches.
+- .kanban files are untracked in the worktree: git diff and git log say nothing about them. A "moved into .kanban" claim: grep the worktree directly; no git-history searches. Git history answers no code question either: the diff plus one producing-site read is the whole evidence.
 
 ## Facts that bite
 - Split modules keep one-line re-export shims (src/webui.ts → ./webui/index.ts, src/orchestrator.ts → ./orchestrator/index.ts). A symbol that greps clean at its producing site and in its importer is settled; a shim grep miss is the whole answer. Never read the shim or trace the chain: one past run lost ~25% of its blocks proving src/webui.ts re-exports ./webui/index.ts.

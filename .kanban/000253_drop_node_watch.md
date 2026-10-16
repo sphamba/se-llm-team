@@ -1,8 +1,8 @@
 ---
 name: "fix: remove node --watch from the orchestrator start path"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/253-drop-node-watch"
 issuer: "user"
 complexity: "simple"
 shortName: "drop-node-watch"
