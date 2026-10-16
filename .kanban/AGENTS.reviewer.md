@@ -3,35 +3,39 @@
 ## Run shape (in order)
 1. Read cwd SPECS.md (symlink to the task file): body, Notes, Open questions.
 2. Recon: exactly two bash calls (Recon). Never re-run, never split further.
-3. Checks: one command per spec requirement (Checks), one-line lead-in each.
+3. Checks: one command per spec requirement (Checks), related checks batched in one block, one-line lead-in each.
 4. Tests: the suites the diff touches, once (Tests).
-5. Findings edit: append to # Notes and close Open questions, one edit (Findings). The block after the suite passes is this edit.
+5. Findings edit: append to # Notes and close Open questions, one edit (Findings). The block after the last suite passes is this edit.
 6. State transition, always last: tool_search → kanban_get → kanban_set_state, then one sentence naming the state (State transition).
 
-## Thinking discipline (largest measured waste: 4 of 15 blocks in the last run)
-- Thinking interprets tool output only. Never plan, rehearse the shape, recap the diff, or weigh a policy the shape already fixes (findings target, test scope). If the next action is fixed above, act without a thinking block.
+No thinking block at a phase boundary: none before Recon call 1, none after checks, none after the last suite (that block is the findings edit), none before tool_search.
+
+## Thinking discipline (largest measured waste: 7 of 9 thinking blocks in the last run were plan or recap, 3 more blocks burned on a test-log count reconciliation)
+- Thinking interprets tool output only. Never plan, rehearse the shape, recap the diff or results, or weigh a policy the shape already fixes (findings target, test scope, diff range). If the next action is fixed above, act without a thinking block.
 - One narration per fact, in the findings edit. The only text outside it is one-line tool lead-ins and the final state sentence. Never emit a rehearsal, recap, or verification-summary block at any point.
 - Reason per command: grep answers a location, a test asserts a value, so run it and reason from its output. Cut hand-computed values, prose re-reads of diff code, and re-derived answers.
 - A settled check never reopens: output in context is evidence. Never re-grep, re-read, re-diff, or re-verify a confirmed site. One doubt, one command, executed now.
-- Batching related checks in one block is good; front-loading their reasoning is not. Regex and shell quoting on a producing line are settled fact.
 - Scope: spec requirements plus the tests the diff touches. No potential-issue branch, no what-if trace, no web or project-memory search. An unrun full `pnpm test` is never a finding and never a deliberation. No mapped area (Coverage map) → say so once in the findings edit, skip.
+
+## Re-reviews
+- A task already in reviewing with review bullets in Notes is a second pass: normal cycle, not a puzzle. Never deliberate session state (fresh vs continued) or whether prior evidence is stale; the transcript is not evidence, the repo is.
+- Verify each prior claim against the code with the usual one command per requirement, recorded once. Claims that check out: one findings line ("re-review at <sha>, no new findings"). Claims that fail: findings in Notes.
 
 ## Recon (exactly two bash calls)
 - Call 1, state and stat (prints `base=<name>`, the only branch name call 2 needs):
   `b=$(git -C /home/phamba/repos/se-llm-team branch --show-current) && echo "base=$b" && git log --oneline -5 && git status --short && git diff "$b"...HEAD --stat`
 - Call 2, full diff: `git diff <name-from-base=...>...HEAD`, a mechanical substitution of the printed name. Substitute even when the name looks like `main`: branches stack, and a branch typed from memory silently reviews the wrong base.
 - The `-C` lookup reads the main checkout; the task worktree sits on the task branch. No root-vs-worktree question exists.
-- The base diff carries other tasks' commits. When Notes name the implemented commit, review `git show <sha>` and treat the rest as out of scope.
+- The base diff carries other tasks' commits. When Notes name the implemented commit(s), those commit(s) are the review scope: one `git show <sha>` each, treat the rest as out of scope, no range deliberation.
 
 ## Checks
 - One requirement, one command, one recorded pass/fail. If your note and the file disagree, the file wins, recorded once.
 - Ordering spec points end at one read of the producing site; the call sites around it answer the coverage question. No caller traces, no spawn-path re-derivation.
-- A claim that names a commit: one `git show <sha>`, stop.
 - Materiality: a discrepancy blocks only if it changes the verdict or hides a defect. A minor Notes inaccuracy is one line in findings, never a blocked merge.
 
 ## Tests
 - One command, once: `node tests/<suite>.test.ts > /tmp/s.log 2>&1; echo exit=$?; tail -3 /tmp/s.log`. /tmp/s.log is scratch: leave it in place.
-- Tasks add smoke-style `part X` console sections to these plain node scripts; a diff that adds one closes its check right after the run with `grep -n "part X" /tmp/s.log`. No separate deliberation, no runner.
+- Tasks add smoke-style `part X` console sections to these plain node scripts; a diff that adds one closes its check right after the run with one `grep -n "part X" /tmp/s.log`. Part names come from the diff, never from memory or a task note: notes go stale, and a mismatch with a remembered total is never a recount loop. A count that looks off: one corrective grep against the log, then move to the next suite.
 - Policy: fix → a test for the bug; feature → tests for the new behavior; refactor → tests pass; trivial → exempt. A diff that edits a test: one grep of tests/ for the old assertion closes the "other tests pin the old behavior" question.
 - Long suites (orchestrator, webui) spawn real daemons: one at a time, allow 10 min. Never pipe a suite to `tail` (hides the exit code, forces a ~3.5 min re-run).
 - kanban.test.ts concurrency tests are load-sensitive: when the diff touches createTask or the allocation path, run it 3+ times; a single pass can hide a race.
