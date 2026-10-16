@@ -1,7 +1,7 @@
 ---
 name: "feat: agent and subagent link lines in the task detail view"
 priority: "medium"
-state: "live-testing"
+state: "done"
 worktree: "feat/237-detail-relation-lines"
 issuer: "user"
 complexity: "moderate"
@@ -46,3 +46,16 @@ The task detail view shows the agent run columns and their stacked subagent and 
 - Shape checks: the doctor match's /\\.doctor$/ in the page.ts source is the template-literal escape (the served page carries /\.doctor$/, which the test asserts); curve(from, box(next), false) is the correct same=false branch (cross-column and wrapped pairs; the side reversal on wrap is curve()'s own minimizing behavior); #m-head is sticky z-1, so the z-0 #m-agent keeps the z-2 cards under it.
 - tests/webui.test.ts: exit=0, all assertions passed (one run).
 - Open questions closed: the wrap-side reversal and the ~9px left-edge clip are inherent to the spec-pinned curve() reuse (verified live at 375px, recorded in the implemented-commit note); both entries deleted as spec-answered assumptions, no user questions remain.
+
+## Live test (hub-only, worktree commit 8c95600)
+
+- Fixture: /tmp/rel237/repo held a to-review task with 4 run logs (developer.0, developer.1, reviewer.0, live-tester.0), one sub transcript that developer.0 names in /tmp/pi-subagents-1000, one developer.0.doctor.log, and two backlog probes for the board line. The hub served the worktree on port 4383 with an isolated HOME. Playwright ran 30 checks: 29 passed, 1 failed.
+- Lines: 5 paths render (3 chain, 1 sub drop, 1 doctor drop). Each chain path runs from a run card's right edge into the next card's left edge. The sub and the doctor leave run 0's bottom edge and enter the card's left side. The doctor card is matched by its stripped handle and sits in its run's column.
+- Layering: the svg is #m-agent's first child with z-index 1 and pointer-events none, the cards have z-index 2, and a card click opens the right log. The lines do not block the cards.
+- Rest and hover: at rest each path reads stroke-opacity 0.3, stroke-width 1.5, dash 6 4 and the muted stroke. Hovering run 0 raises its 3 connected lines to 0.8. Mouseleave reverts all 5 to 0.3. The sub card raises its drop. The doctor card raises only the doctor drop.
+- Selection: the selected run keeps its 3 lines at 0.8 through a poll refresh. A refresh does not rewrite the svg, so the same path nodes keep the dash animation running.
+- Wrap: at 375 px the run row wraps (card centres 22, 22, 22, 167) and the chain still connects every adjacent pair right-out to left-in. The sub and doctor drops survive.
+- Themes: in dark and light the path stroke equals var(--muted) (rgb(90, 102, 115) and rgb(173, 174, 177)) and 5 paths stay.
+- No page or console errors.
+- FAIL, reduced motion. In a `reducedMotion: "reduce"` context the board's #relations path reads animation none, but all 5 #agent-relations paths keep animation dashflow. The Specs (Rendering) say prefers-reduced-motion disables the new animation. Cause: the media rule at src/webui/page.ts:163 (served line 79) does carry the new selector, but the base `#agent-relations path` rule at src/webui/page.ts:212 (served line 128) sits later in the same sheet with equal specificity, so `animation: dashflow 1s linear infinite` wins. A fix can move the base rule above the media block, move the reduced-motion rule after the base rule, or raise its specificity.
+- Assumptions: "both themes" means the explicit #theme toggle. "Lines behind the cards" rests on z-index, DOM order and a card click-through, with no pixel comparison. The fixture holds no doctor without a run, because the Specs tie every doctor drop to its analysed run. The shipped unit tests were not run (role test policy), and the live check covers the acceptance surface they pin.

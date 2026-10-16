@@ -1,8 +1,8 @@
 ---
 name: "feat: relation lines always run right out, left in"
 priority: "medium"
-state: "live-testing"
-worktree: "feat/236-relations-right-out-left-in"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "relations-right-out-left-in"
@@ -42,3 +42,24 @@ The #relations SVG sits behind the cards (board.insertBefore first child, z-inde
 - Checked: `node tests/webui.test.ts` passes (red first: the new same-column, left-edge assertion failed against the old branch).
 - Review: verified against the specs (one right-out/left-in branch, sBend kept with the 480 cap, signed same-row clamp, same and side-pair branches plus same-columnness removed, both doc comments updated, endpoint and within-span assertions per the constraints, no page.ts or CSS change, hover wiring and skip rules unchanged). Scoped suite re-run: `node tests/webui.test.ts` exit 0.
 - Closed the same-row clamp question: the spec's purpose clause (never overshoot the entry point, double back, or self-overlap) and the Summary's "keeps the S monotone" rule out the magnitude reading, which would retrace the line; the signed clamp is the spec-consistent reading.
+
+## Live test (#236)
+Interface: hub-only fixture served from the merged worktree by startHub on 127.0.0.1:4371; Playwright/Chromium over the live page and /api/tasks. Fixture: blocked card `000301_FIXTURE_blocked.md` (to-do, blockedBy "#401, #402, #403, #999") with blockers in `doing` (same stacked-pair x), `backlog` (one column left, same row) and `to-review` (one column right, same row), plus a done blocker and the dangling #999.
+
+Result: 48 checks, 0 failed.
+- Only 3 paths render: the done blocker and the dangling ref draw nothing.
+- Every path starts at the blocked card's right edge midpoint and ends at the blocker's left edge midpoint, for all three column pairs.
+- Controls match the served formula sBend (40 floor, 0.35 * span, 480 cap) with the signed same-row clamp: left same-row blocker d = -362.80 (both controls at the midpoint), right same-row 32 px gap d = 16 (both controls at the midpoint).
+- Same-row lines are one clean hop: x'(t) keeps a single sign over 201 samples and x(t) stays inside the endpoints. The cross-row same-column S wrap keeps its intended shape.
+- Dash animation: dashflow on all three; stroke-dashoffset decreases (-2 px at 200 ms, -8 px at 800 ms), so dashes travel blocked -> blocker.
+- Both themes through the real #theme toggle: light #fcfcfc / dark #10141c, identical path d per theme, theme-colored dashed stroke (rgb(173,174,177) light, rgb(90,102,115) dark; 6/4 dashes).
+- Hover wiring unchanged: blocked card lights all 3 paths, the left blocker lights only its own, none before hover. No console or page errors.
+- Differential control over the same fixture from parent 89f2c76: old same-column ends at the blocker's RIGHT edge, old left blocker starts at the blocked card's LEFT edge, old right same-row gap doubles back (dx +140/-61); merged all three are right-out/left-in and both same-row lines are monotone.
+- Source read (the suite is not run): tests/webui.test.ts:495-561 pins the new endpoints for the same-column, left and right cases, the within-span controls, the halved 30 px bow and the span-scaled S.
+
+Assumptions:
+- "One column left/right in the same row" is the blocked card in to-do with blockers in backlog (left) and to-review (right); "same column" is the stacked pair's shared x (doing).
+- The page draws the paths during the 200 ms card entrance transform, so endpoints sit ~1.5 px off until the next 5 s board poll redraws them. This draw order predates the change; the check samples after the poll.
+- The unrendered-ref skip (folded or absent card) was source-read in the shipped test, not live-checked.
+
+No open user/client questions.
