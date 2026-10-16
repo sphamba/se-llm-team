@@ -53,6 +53,7 @@
 - Once `ensureInfoExclude` names a path, a blanket `git add -A` silently skips it (#234): commit fixture files with explicit paths, or track them on the base BEFORE any exclude write, or a staging/merge check passes for the wrong reason.
 - Timestamps: daemon log lines carry UTC ISO; fixture file mtimes are local (UTC+2). Do not compare the two directly (#212).
 - Node 24 strips types: import merged src directly (`await import('<repo>/src/kanban.ts')`). Worktrees need no node_modules (node resolves up the tree); git archives do (symlink the repo's) (#179, #195, #216).
+- Hub-side stats caches survive fixture edits: `doneAgents` holds a done task's agents per task file and `logStats` re-parses only when the log's byte size changes, so a same-size log rewrite keeps the stale tokens in `/api/tasks` and the detail even after a changed time field. Apply all fixture edits before the first hub start, or restart the hub after a rewrite (#247).
 
 ## Playwright discipline (each trap cost a failed run at least once)
 

@@ -1,18 +1,18 @@
 # Reviewer guidance (se-llm-team)
 
 ## Shape (in order)
-1. Read cwd SPECS.md (symlink; see Files): body, Notes, Open questions. No thinking before it.
+1. Read cwd SPECS.md (symlink; see Files): body, Notes, Open questions. No thinking around it: Recon call 1 is the next block.
 2. Recon: exactly two bash calls (see Recon); the scope is decided there, once.
 3. Checks: one command per requirement the diff in context does not already settle; related commands share one block, one-line lead-in each (see Checks).
-4. Tests: the suites the diff touches, once (see Tests); the suite may share the last check's block.
+4. Tests: the suites the diff touches, once (see Tests); the suite may share the last check's block. A test-run lead-in names only the suite.
 5. Findings: one edit call to SPECS.md (see Findings).
-6. State transition: tool_search → kanban_get → kanban_set_state; final text is one sentence (see State transition).
+6. State transition: tool_search → kanban_get → kanban_set_state; final text is the one-line template (see State transition).
 
 ## Thinking (largest measured waste)
-- A thinking block only reads the last tool result and names the next command, in one or two lines. It never restates the previous result, the Shape, or the budget. If the next action is fixed above, act with no thinking block. Hard boundaries: no thinking before the SPECS.md read, before Recon call 1, or before tool_search.
-- Never in thinking: restate the Shape as a plan, walk the Specs point by point or map requirement→command (that mapping is the one-line lead-ins of the check commands), quote spec or diff code, trace data flow, races, counter interleavings, or import/export chains, compose the findings text, state the verdict anywhere but the findings edit's newText, or narrate a fact twice (once in a lead-in or in the findings edit, never both). Run the command, then reason from its output.
-- A settled check never reopens: output in context is evidence, in a fresh pass or a re-review. One doubt, one command, executed now. No hand-computed values, no re-derived answers, no range or ancestry deliberation.
-- Budget: at most 2 thinking blocks, ~300 chars total, target 0-1. This run: all 7 thinking blocks carried pain, and the top loss was one export-chain trace (3 thinking + 3 bash, ~25% of the run).
+- A thinking block only reads the last tool result and names the next command, in one or two lines. It never restates the previous result, the Shape, or the budget. If the next action is fixed above, act with no thinking block (the read → Recon call 1 adjacency is fixed in the Shape). Hard boundary: no thinking before tool_search.
+- Never in thinking: restate the Shape as a plan, walk the Specs point by point, or map requirement→command (that mapping is the one-line lead-ins of the check commands; after the diff, thinking at most names the first requirement the diff does not settle), quote spec or diff code, trace data flow, races, counter interleavings, or import/export chains, compose the findings text, state the verdict anywhere but the findings edit's newText, or narrate a check result twice (a result is stated once, in the findings edit; a lead-in names the requirement, never the result). Run the command, then reason from its output.
+- A settled check never reopens: output in context is evidence, in a fresh pass or a re-review. One doubt, one command, executed now. No hand-computed values, no re-derived answers, no range or ancestry deliberation, no re-weighing of a settled Open-question (see Findings).
+- Budget: at most 2 thinking blocks, ~300 chars total, target 0-1. This run: 5 thinking blocks, 4 carried waste (a Shape plan, a command choice, an Open-question weighed twice, check results narrated twice); top loss was the Open-question loop.
 
 ## Re-reviews
 - A task in reviewing with review bullets in Notes is a second pass: a normal cycle. Never deliberate fresh-vs-continued session state or prior-evidence staleness; verify each prior claim with the usual one command per requirement.
@@ -21,7 +21,7 @@
 ## Recon (exactly two bash calls)
 - Call 1, state + diff stat: `b=$(git -C /home/phamba/repos/se-llm-team branch --show-current) && echo "base=$b" && git log --oneline -5 && git status --short && git diff "$b"...HEAD --stat`. The `-C` lookup reads the main checkout; the task worktree sits on the task branch, so no root-vs-worktree question exists.
 - Call 2, full diff: `git diff <name-from-base=...>...HEAD`, a mechanical substitution of the printed name. Substitute even when the name looks like `main`: branches stack, and a branch typed from memory silently reviews the wrong base.
-- Commit scope, decided once, no ancestry derivation: Notes name the implemented commit(s) → those commits are the review scope, one `git show <sha>` each; Notes name none → the range diff is the scope.
+- Commit scope, decided once, no ancestry derivation: Notes name the implemented commit(s) → those commits are the review scope, one `git show <sha>` each; Notes name none → the range diff is the scope. One commit in a one-commit range → the range diff and `git show` print the same output; run the range diff, never deliberate the equivalence.
 - Review scope is the spec requirements plus the suites the diff touches. No what-if traces, no web or project-memory search. An unrun full `pnpm test` is never a finding and never a deliberation. No mapped area (Coverage map) → say so once in the findings edit, skip.
 
 ## Checks
@@ -49,14 +49,14 @@
 - One edit call; its edits[] may carry several disjoint changes: the Open-questions deletion and the Notes append go in the same call. Two changes are never a deliberation about the cap.
 - The spec-by-spec pass/fail verdict is written exactly once, in this edit's newText, assembled from the recorded per-check results and the diff evidence already in context. Do not re-walk the diff or re-derive the verdict to compose it.
 - Never edit the task body, another task's file, or AGENTS.*.md.
-- Open questions are decided on first read of the Specs and never revisited; the ladder is mechanical: the specs already answer it → delete it in the findings edit, never move it to Notes; the answer changes direction → finding in Notes; a genuine user question → keep. An empty section → delete the header.
+- Open questions: the first read of the Specs settles delete/keep/finding; every later pass applies the settled call, in checks and when composing the edit. The ladder is mechanical: the specs already answer it → delete it in the findings edit, never move it to Notes; the answer changes direction → finding in Notes; a genuine user question → keep. An empty section → delete the header.
 
 ## State transition (always last, three steps)
 1. tool_search("kanban") loads the MCP tools.
 2. kanban_get({}): the spawn prompt mandates the re-read; make it and move on. Abort when the state no longer matches the start.
 3. kanban_set_state({ state }) is the run's last action; nothing follows it.
 - Pass → to-merge. A task parked per its own specs (no runnable precondition) → backlog, never to-merge: to-merge closes it as done without the run, and promoteBacklog never promotes a task with unanswered open questions (src/orchestrator/pipeline.ts), so backlog holds it for the user with no respawn loop. to-do re-spawns a developer at once.
-- Final text: one sentence naming the state, nothing else. A checks recap after kanban_set_state duplicates the findings edit verbatim; the spawn prompt asks for no summary.
+- Final text is exactly: `Moved #<nn> to <state>.` A checks recap after kanban_set_state duplicates the findings edit verbatim; the spawn prompt asks for no summary.
 
 ## Files
 - read tool, one file per call; a bash command that prints two or more files hits the 50KB cap, hides the echo headers, and forces grep salvage from a log file.

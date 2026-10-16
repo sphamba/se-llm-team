@@ -1,8 +1,8 @@
 ---
 name: "feat: Splitter card and logs on the task details view"
 priority: "medium"
-state: "doing"
-worktree: "feat/247-splitter-card-logs"
+state: "done"
+worktree: ""
 issuer: "#241"
 complexity: "moderate"
 shortName: "splitter-card-logs"
@@ -42,3 +42,21 @@ The task details view shows agent run cards (Developer) and Doctor cards, but Sp
 
 # Notes
 - Splitter pass (#247): no split. The work is one tight chain, not parallel pieces: the role validation (LOG_ROLES + agentLogPath regex) feeds agentHistory, which feeds the detail payload's t.agents, which renderAgent, taskStats, and openLog all read. Backend and frontend pieces would both add tests to the shared 2000-line tests/webui.test.ts hub, and two review/merge/live-test cycles outweigh two ~20-line coupled diffs. Run as one moderate task.
+- Shipped (commit 19e7853): LOG_ROLES leads with "splitter" (pipeline order, before the developer) and agentLogPath's role regex accepts it, so splitter handles resolve for .log and .log.gz, sub=list and chunked reads; agentHistory enumerates the role, so the detail payload's t.agents carries splitter runs, taskStats sums them through the shared agents array, and the log pane opens a splitter log like any other run card. Card order needed no explicit role ordering: the Splitter runs on the to-do task before the Developer (startTodo, src/orchestrator/pipeline.ts), so the history sort (start ?? mtime) already puts it first.
+- renderAgent gives a splitter run's card a new agent-splitter class instead of reusing agent-doctor: the relation-chain selectors (#m-agent-btns > .agent-col > .agent-card:not(.agent-doctor)) must keep counting it as a run card, so the doctor class would break the splitter-to-developer connector. The CSS mirrors the doctor trio (rest text, .agent-card-active outline and highlight, .check) off the same --doctor-fg/--doctor-bg-strong variables.
+- Tests (red first, then green): LOG_ROLES membership, a renderAgent class pin and three CSS pins in tests/webui.test.ts, plus a daemon block asserting the history order (splitter 0 before the developer, backdated mtime via utimesSync to mirror the pipeline chronology), the taskStats sum, sub=list 200 with an empty list, and tail and poll reads. webui.test.ts is the scoped suite (all changed files) and passes; the full pnpm test was not run (scoped suite stands in, stated as the deviation). Live check (fixture /tmp/spl247, port 4399, Playwright): a done probe with splitter and developer JSONL run logs renders the Splitter card first with 2k · 30s in rgb(47, 111, 221), clicking it opens the splitter log in the log pane and marks the card active, and the developer click switches logs.
+
+- Re-review at 19e7853: all seven spec points hold. Req 1 settles in the diff (LOG_ROLES leads with "splitter", the agentLogPath regex accepts it); req 2 via agentHistory iterating LOG_ROLES (payload.ts:105); req 3 via startTodo spawning the Splitter before the Developer fall-through (pipeline.ts:47), so the start/mtime sort puts the card first with no explicit role ordering; reqs 4-7 via the shared data-handle/stats paths and the --doctor-fg/--doctor-bg-strong palette. Scoped webui.test.ts exit=0 (history order, taskStats "2k · 40s", sub=list 200, tail and poll reads). No fixes. The Open-questions note was a technical contingency (answerable in code), not a user question, and is removed.
+
+## Live test (merged 19e7853)
+Fixture: hub-only, root /tmp/lt247/repo on port 4351 with an isolated HOME. Task 000300_FIXTURE_spl_probe (done) has a splitter.0 run log, a developer.0 run log and a past developer.0.doctor log. Task 000301_FIXTURE_gz_probe (done) has only a splitter.0.log.gz. The fixture keeps the real pipeline chronology (the splitter log starts 60 s before the developer's). Script /tmp/lt247/check.mjs: 21 checks, 0 failed. No product issue.
+
+- Log handles: a splitter tail read answers 200 and renders `<p>SPLITTERMARKER splitter plan paragraph</p>` for the plain .log and `<p>GZMARKER splitter gz paragraph</p>` for the .log.gz. `sub=list` answers 200 `[]`. An unknown role handle stays 404.
+- Detail payload: `/api/task-detail?num=300` lists splitter (2400 tokens, 30 s) before developer (600 tokens, 10 s). The gz splitter run reaches the history of task 301.
+- Board footer: the done card's `.card-stats` reads `3k · 40s`, the splitter plus the developer run.
+- Detail view: the run cards sit in DOM order splitter then developer. The splitter card carries `agent-card agent-splitter agent-past` (not agent-doctor) with a past `.check`. Its stats read `2k · 30s` against the developer's `600 · 10s`.
+- Palette (measured, light theme): the splitter text and check are `rgb(47, 111, 221)`, equal to the doctor card's, and the developer run card stays `rgb(242, 151, 24)`. The active splitter card shows border `rgb(47, 111, 221)` and background `rgba(47, 111, 221, 0.24)`, equal to the active doctor card's.
+- Log pane: clicking the splitter card opens the pane with the splitter log and no developer text, and the card turns active. A developer click switches the log. A second splitter click reopens the splitter log. No page errors.
+- Chunked poll: an appended no-timestamp line read at the recorded tail streams only `<p>SPLITTERLATEMARKER appended paragraph</p>`.
+- Assumptions: the probe task is a done task with past cards (no pid, no aliveness). The splitter log carries the earlier start, so the history sort puts its card first. That is the real pipeline order.
+- Fixture-side remark, not a product finding: the hub caches the agent stats of done tasks per task file and parses a log per file size. A fixture log rewrite without a size change keeps the old values until a hub restart.
