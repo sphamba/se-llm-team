@@ -51,9 +51,9 @@ assert.deepEqual(resolveRoot(plain), null);
 // orchestrator_start on a fresh git repo resolves the root and spawns the daemon there
 const started = await tools.get("orchestrator_start").execute("id", {}, undefined, undefined, ctx(sub));
 assert.equal(calls().length, 1);
-assert.ok(calls()[0].args[0] === "--watch", "the daemon runs under node --watch");
-assert.ok(calls()[0].args[1].endsWith(join("src", "orchestrator.ts")));
-assert.deepEqual(calls()[0].args.slice(2, 4), ["--root", repo]);
+assert.ok(calls()[0].args[0].endsWith(join("src", "orchestrator.ts")), "the daemon runs as a plain node process");
+assert.ok(!calls()[0].args.includes("--watch"), "no node --watch supervisor");
+assert.deepEqual(calls()[0].args.slice(1, 3), ["--root", repo]);
 assert.deepEqual(calls()[0].args.slice(-2), ["--default-agent", "pi"], "the pi extension passes pi as the default agent");
 assert.match(started.content[0].text, /^Orchestrator starting \(pid 4242\)/);
 
@@ -89,9 +89,9 @@ try {
 	victim.kill();
 }
 
-// a node --watch-style victim: a detached supervisor leading its own group, a child in it.
-// The stop signals the group, so both die; a bare pid kill would orphan the child to
-// resurrect the daemon on the next watched change
+// a detached group leader with a child in it (000253: not a node --watch supervisor any
+// more, but a hand-set lock pid can still name a group leader). The stop signals the group,
+// so both die; a bare pid kill would orphan the child
 const childPidPath = join(repo, ".kanban", "watch-child.pid");
 const victimGroup = spawn(
 	process.execPath,
@@ -124,54 +124,8 @@ try {
 	}
 }
 
-// 000195: orchestrator_start warns when the running daemon lacks a node --watch supervisor
-// (a daemon spawned by a stale session, pre-000192 extension code, survives no src change).
-// The warn victim is a real child whose cmdline carries orchestrator.ts, so the daemon
-// identification passes and the missing supervisor is decidable
-const orchDir = mkdtempSync(join(tmpdir(), "index-orch-"));
-const warnScript = join(orchDir, "orchestrator.ts");
-writeFileSync(warnScript, "setInterval(() => {}, 60000);\n");
-const unwatched = spawn(process.execPath, [warnScript], { stdio: "ignore" });
-try {
-	writeFileSync(join(repo, ".kanban", ".orchestrator.lock"), `${unwatched.pid}\n`);
-	const warned = await tools.get("orchestrator_start").execute("id", {}, undefined, undefined, ctx(sub));
-	assert.equal(calls().length, 1, "no new spawn while a daemon runs");
-	assert.match(warned.content[0].text, /^Orchestrator already running \(pid \d+\) without a node --watch supervisor: /);
-	assert.ok(warned.content[0].text.includes("Stop the orchestrator, then start it again"), "the warning names the remedy");
-} finally {
-	unwatched.kill();
-}
-
-// the watched counterpart: a node --watch supervisor with a daemon child (the 000192 spawn
-// shape, the lock pid is the child) keeps the start silent
-const watchDir = mkdtempSync(join(tmpdir(), "index-watch-"));
-const watchedScript = join(watchDir, "orchestrator.ts");
-const watchedPidFile = join(watchDir, "child.pid");
-// type module: node loads a .ts fixture as CJS without it and the child dies before writing
-writeFileSync(join(watchDir, "package.json"), '{"type": "module"}');
-writeFileSync(watchedScript, `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(watchedPidFile)}, String(process.pid));\nsetInterval(() => {}, 60000);\n`);
-const supervisor = spawn(process.execPath, ["--watch", watchedScript], { detached: true, stdio: "ignore" });
-supervisor.unref();
-try {
-	let daemonPid = 0;
-	for (let i = 0; i < 100 && !daemonPid; i++) {
-		await new Promise((r) => setTimeout(r, 100));
-		try { daemonPid = parseInt(readFileSync(watchedPidFile, "utf8").trim(), 10); } catch { /* the child has not started yet */ }
-	}
-	assert.ok(daemonPid > 0 && pidAlive(daemonPid), "the watched daemon child is alive");
-	writeFileSync(join(repo, ".kanban", ".orchestrator.lock"), `${daemonPid}\n`);
-	const quiet = await tools.get("orchestrator_start").execute("id", {}, undefined, undefined, ctx(sub));
-	assert.equal(calls().length, 1, "no new spawn while a daemon runs");
-	assert.match(quiet.content[0].text, new RegExp(`^Orchestrator already running \\(pid ${daemonPid}\\)$`));
-} finally {
-	try {
-		process.kill(-supervisor.pid!, "SIGKILL");
-	} catch {
-		/* already gone */
-	}
-}
-
-// a lock pid that is not an orchestrator daemon (here: this test process) stays silent too:
+// a lock pid that is not an orchestrator daemon (here: this test process) reads the same
+// plain running message (000253: no supervisor check left)// a lock pid that is not an orchestrator daemon (here: this test process) stays silent too:
 // the warning fires only when the missing supervisor is decidable (non-Linux /proc: the same)
 writeFileSync(join(repo, ".kanban", ".orchestrator.lock"), `${process.pid}\n`);
 const foreign = await tools.get("orchestrator_start").execute("id", {}, undefined, undefined, ctx(sub));
@@ -180,6 +134,4 @@ assert.match(foreign.content[0].text, new RegExp(`^Orchestrator already running 
 
 rmSync(repo, { recursive: true, force: true });
 rmSync(plain, { recursive: true, force: true });
-rmSync(orchDir, { recursive: true, force: true });
-rmSync(watchDir, { recursive: true, force: true });
 console.log("index.test.ts: all assertions passed");

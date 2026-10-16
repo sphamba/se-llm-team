@@ -274,8 +274,8 @@ const killAll = () => {
 			}
 		}
 		try {
-			// the daemon may run under node --watch: the lock pid is its child, which the
-			// supervisor kill above does not take down
+			// the lock pid names the daemon itself, but a hand-written or stale lock can still
+			// name a process the daemon kill above does not cover
 			const lock = parseInt(readFileSync(join(kanbanDir(root), ".orchestrator.lock"), "utf8").trim(), 10);
 			if (lock > 0) killTree(lock, "SIGKILL");
 		} catch {
@@ -3561,9 +3561,9 @@ assert.ok(!existsSync(pidPath(rootAU, "merger")) && !existsSync(exitFilePath(roo
 cleanupAll(rootAU, homeAU);
 console.log("orchestrator.test.ts: ... + superseded merger requeue smoke passed");
 
-// --- part AV: 000192 the daemon runs under node --watch. The launch mirrors index.ts
-// orchestrator_start; an mtime-only touch of a watched src file restarts the daemon child
-// (the lock pid changes) and the webui answers again after the re-election ---
+// --- part AV: 000253 the daemon runs as a plain node process, no node --watch supervisor.
+// The launch mirrors index.ts orchestrator_start; an mtime-only touch of a src file restarts
+// nothing (the lock pid survives), and the webui keeps answering ---
 const rootAV = fixture();
 cleaned.push(rootAV);
 const homeAV = mkdtempSync(join(tmpdir(), "orch-watch-home-"));
@@ -3571,12 +3571,12 @@ cleaned.push(homeAV);
 mkdirSync(join(homeAV, ".pi", "agent"), { recursive: true });
 const portAV = await freePort();
 writeFileSync(join(homeAV, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portAV }, backlogIdleMinutes: 0 }));
-const watchEnv = { ...process.env, HOME: homeAV, SE_LLM_TEAM_HUB_HEALTH_MS: "500" };
-delete watchEnv.SE_LLM_TEAM_NO_WEBUI; // the re-election needs the webui enabled; the temp HOME config picks a free port
+const envAV = { ...process.env, HOME: homeAV, SE_LLM_TEAM_HUB_HEALTH_MS: "500" };
+delete envAV.SE_LLM_TEAM_NO_WEBUI; // the webui check needs it enabled; the temp HOME config picks a free port
 const dAV = spawn(
 	process.execPath,
-	["--watch", join(HERE, "../src/orchestrator.ts"), "--root", rootAV, "--rescan-seconds", "1", "--poll-minutes", "0.05"],
-	{ stdio: ["ignore", "pipe", "pipe"], env: watchEnv },
+	[join(HERE, "../src/orchestrator.ts"), "--root", rootAV, "--rescan-seconds", "1", "--poll-minutes", "0.05"],
+	{ stdio: ["ignore", "pipe", "pipe"], env: envAV },
 );
 daemons.push({ daemon: dAV, root: rootAV });
 let outAV = "";
@@ -3599,35 +3599,16 @@ await waitForAsync(async () => {
 		return false;
 	}
 }, 15000, "the daemon serves the webui");
-// mtime-only touch of a watched src file: no content change, the module graph changes
+// mtime-only touch of a src file: without node --watch nothing restarts the daemon, so the
+// lock pid survives and the log never sees node --watch's "Restarting" line (000253)
 utimesSync(join(HERE, "../src/orchestrator.ts"), new Date(), new Date());
-await waitFor(
-	() => {
-		const pid = lockPidAV();
-		return pid > 0 && pid !== pidAV1 && pidAlive(pid);
-	},
-	30000,
-	"the lock pid changed after the touch",
-	() => outAV,
-);
-assert.ok(outAV.includes("Restarting"), "node --watch restarted the daemon after the touch");
-await waitForAsync(async () => {
-	try {
-		return (await (await fetch(`${baseAV}/api/projects`)).json()).length === 1;
-	} catch {
-		return false;
-	}
-}, 20000, "the webui answers again after the re-election");
-// the supervisor dies without the child: signal both, then wait for the lock to vanish
+await new Promise((r) => setTimeout(r, 4000));
+assert.equal(lockPidAV(), pidAV1, "the daemon survived the src touch without a restart");
+assert.ok(!outAV.includes("Restarting"), "no node --watch supervisor restarted the daemon");
+// a plain process: one SIGTERM takes it down and the lock vanishes, no supervisor survives
 dAV.kill("SIGTERM");
-try {
-	const pid = lockPidAV();
-	if (pid > 0) process.kill(pid, "SIGTERM");
-} catch {
-	/* already gone */
-}
-await waitFor(() => lockPidAV() === 0, 10000, "the restarted daemon exited and released the lock", () => outAV);
-console.log("orchestrator.test.ts: ... + node --watch restart smoke passed");
+await waitFor(() => lockPidAV() === 0, 10000, "the daemon exited and released the lock", () => outAV);
+console.log("orchestrator.test.ts: ... + plain daemon, no node --watch smoke passed");
 
 // --- part AW: 000197 a done move the sweep itself makes unblocks the dependent in the same
 // sweep. The state loop lands the done move (to-merge with nothing to merge): blocker

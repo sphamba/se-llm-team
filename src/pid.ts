@@ -28,16 +28,7 @@ export function procPgrp(pid: number): string | null {
 	}
 }
 
-// parent pid (stat field 4): index 1 after the last ')'. Null when /proc is unreadable (non-Linux)
-function procPpid(pid: number): number | null {
-	try {
-		const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-		return parseInt(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1], 10) || null;
-	} catch {
-		return null;
-	}
-}
-
+// /proc/<pid>/cmdline with NULs as spaces; null when /proc is unreadable (non-Linux)
 function procCmdline(pid: number): string | null {
 	try {
 		return readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ").trim() || null;
@@ -46,23 +37,6 @@ function procCmdline(pid: number): string | null {
 	}
 }
 
-// does pid run the orchestrator daemon under a live node --watch supervisor (the 000192 spawn
-// shape: the supervisor is the parent process and its cmdline carries --watch)? true: watched.
-// false: an orchestrator daemon whose parent is gone or carries no --watch, so no src change
-// restarts it. null: /proc is unreadable (non-Linux) or pid is not an orchestrator daemon at
-// all (a stale or foreign lock pid): the check cannot decide, so callers stay silent (000195)
-export function orchestratorWatched(pid: number): boolean | null {
-	const cmd = procCmdline(pid);
-	if (cmd === null || !cmd.includes("orchestrator.ts")) return null;
-	const ppid = procPpid(pid);
-	if (ppid === null) return null;
-	const parent = procCmdline(ppid);
-	if (parent === null) return false; // the supervisor died: nothing restarts the daemon on change
-	return parent.includes("--watch");
-}
-
-// the discriminator recorded next to a pid: the process start time, or the cmdline when the
-// start time is unreadable; null when neither is available (non-Linux keeps today's behavior)
 function pidDiscriminator(pid: number): string | null {
 	return procStartTicks(pid) ?? procCmdline(pid);
 }

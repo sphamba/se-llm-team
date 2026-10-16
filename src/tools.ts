@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyseLog } from "./efficiency-analysis.ts";
 import { createTask, getTask, kanbanDir, listAll, listTasks, resolveTaskFromCwd, setState, setWorktree, taskNum, updateTask, STATES, type TaskState } from "./kanban.ts";
-import { orchestratorWatched, pidAlive, procPgrp } from "./pid.ts";
+import { pidAlive, procPgrp } from "./pid.ts";
 import { removeTask } from "./orchestrator.ts";
 import { loadConfig, resolveLlm } from "./orchestrator/config.ts";
 
@@ -210,14 +210,8 @@ export const TOOLS: Record<string, ToolDef> = {
 			const root = resolveRoot(ctx.cwd);
 			if (!root) return ok("Not a git repository: agents cannot run without git (worktrees, branches, board commits). No orchestrator started.");
 			const pid = readPid(root);
-			if (pid && pidAlive(pid)) {
-				// 000195: a daemon spawned by a stale session (pre-000192 extension code) has no
-				// --watch supervisor, so a src change never restarts it. null (non-Linux /proc,
-				// or a lock pid that is no daemon) stays silent
-				return orchestratorWatched(pid) === false
-					? ok(`Orchestrator already running (pid ${pid}) without a node --watch supervisor: a merge that changes src/ will not restart it. Stop the orchestrator, then start it again to restore the self-restart.`)
-					: ok(`Orchestrator already running (pid ${pid})`);
-			}
+			// 000253: the daemon is a plain node process, so no supervisor check is needed
+			if (pid && pidAlive(pid)) return ok(`Orchestrator already running (pid ${pid})`);
 			let log: number;
 			try {
 				for (const dir of [".logs", ".pids"]) mkdirSync(join(kanbanDir(root), dir), { recursive: true });
@@ -225,9 +219,9 @@ export const TOOLS: Record<string, ToolDef> = {
 			} catch (err) {
 				return ok(`Cannot start the orchestrator: ${(err as Error).message}`);
 			}
-			// node --watch restarts the daemon whenever its module graph changes, so a merge
-			// that changes the orchestrator takes effect without a manual stop and start (000192)
-			const child = spawn(process.execPath, ["--watch", join(dirname(fileURLToPath(import.meta.url)), "orchestrator.ts"), "--root", root, "--default-agent", ctx.defaultAgent], {
+			// 000253: a plain node process, no --watch supervisor. An exit or crash is final:
+			// only a manual start brings the daemon back, so UI and src changes apply on restart
+			const child = spawn(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), "orchestrator.ts"), "--root", root, "--default-agent", ctx.defaultAgent], {
 				detached: true,
 				stdio: ["ignore", log, log],
 			});
@@ -278,9 +272,8 @@ export const TOOLS: Record<string, ToolDef> = {
 			const pid = readPid(resolveRoot(ctx.cwd) ?? ctx.cwd);
 			if (!pid || !pidAlive(pid)) return ok("Orchestrator not running");
 			try {
-				// under node --watch the supervisor shares the daemon's process group: a bare pid
-				// kill would leave it to resurrect the daemon on the next watched change, so
-				// signal the group when it is not our own group (a test victim shares it)
+				// the daemon is a detached spawn and leads its own process group, so signal the
+				// whole group; when the lock pid shares our own group (a test victim), a bare pid kill
 				const pgrp = procPgrp(pid);
 				if (pgrp && pgrp !== procPgrp(process.pid)) process.kill(-Number(pgrp), "SIGTERM");
 				else process.kill(pid, "SIGTERM");

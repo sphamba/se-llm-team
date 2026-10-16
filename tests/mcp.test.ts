@@ -160,9 +160,9 @@ const { TOOLS } = await import("../src/tools.ts");
 const started = await TOOLS.orchestrator_start.run({}, { cwd: root, defaultAgent: "claude" });
 const calls = (globalThis as any).__spawnCalls as Array<{ cmd: string; args: string[] }>;
 assert.equal(calls.length, 1);
-assert.ok(calls[0].args[0] === "--watch", "the daemon runs under node --watch");
-assert.ok(calls[0].args[1].endsWith(join("src", "orchestrator.ts")));
-assert.deepEqual(calls[0].args.slice(2, 4), ["--root", root]);
+assert.ok(calls[0].args[0].endsWith(join("src", "orchestrator.ts")), "the daemon runs as a plain node process");
+assert.ok(!calls[0].args.includes("--watch"), "no node --watch supervisor");
+assert.deepEqual(calls[0].args.slice(1, 3), ["--root", root]);
 assert.deepEqual(calls[0].args.slice(-2), ["--default-agent", "claude"], "the MCP server passes claude as the default agent");
 assert.match(started.text, /^Orchestrator starting \(pid 4242\)/);
 
