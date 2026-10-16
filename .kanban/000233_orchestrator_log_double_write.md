@@ -1,8 +1,8 @@
 ---
 name: "fix: orchestrator log lines are written twice"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/233-orchestrator-log-double-write"
 issuer: "user"
 complexity: "simple"
 shortName: "orchestrator-log-double-write"
