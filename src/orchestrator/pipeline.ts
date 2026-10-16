@@ -49,6 +49,37 @@ function clearMergerAttempt(root: string, slug: string): void {
 		/* already gone */
 	}
 }
+// merge-lane hygiene before every rebase attempt (each retry after a Merger conflict round
+// included): the two context paths must never block the rebase with unstaged noise. A context
+// symlink committed by a developer sits as an unstaged deletion once clearContextSymlinks
+// removed it (#234), and a rebase refuses on unstaged changes. Unset any skip-worktree bit
+// first (a restore refuses a skip-worktree path), then restore each path to HEAD. Untracked
+// paths fail both steps and are ignored
+function cleanContextPaths(wtDir: string): void {
+	for (const name of ["AGENTS.md", "SPECS.md"]) {
+		git(wtDir, ["update-index", "--no-skip-worktree", name], true);
+		git(wtDir, ["restore", "--staged", "--worktree", "--", name], true);
+	}
+}
+
+// after the fast-forward: a context path tracked as a symlink (git mode 120000) came from a
+// worktree commit and never belongs on the merged branch. Remove the symlink-mode entries only
+// (a project's own tracked real file is mode 100644 and untouched) with one follow-up commit
+function stripContextSymlinks(root: string): void {
+	const removed: string[] = [];
+	for (const name of ["AGENTS.md", "SPECS.md"]) {
+		if (git(root, ["ls-tree", "HEAD", "--", name], true)?.startsWith("120000 ")) removed.push(name);
+	}
+	if (!removed.length) return;
+	for (const name of removed) git(root, ["rm", "--quiet", name], true);
+	// housekeeping commit: never require signing (the merge lane must not wedge on a signing setup)
+	if (git(root, ["-c", "commit.gpgsign=false", "commit", "-m", "chore: remove task context symlinks committed by mistake"]) === null) {
+		log(root, `strip commit for ${removed.join(", ")} failed, left staged at the project root`);
+	} else {
+		log(root, `removed committed context symlink(s) ${removed.join(", ")} from the merged branch`);
+	}
+}
+
 // the to-merge sweep: a task the reviewer passed sits in to-merge until the orchestrator
 // rebases the branch onto the base in the worktree, then fast-forwards the base to the
 // branch at the project root and sets to-live-test; main history stays linear with no merge
@@ -113,6 +144,7 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	// the next merger operation rebases another branch onto a moved base. A rebase already in
 	// progress (a conflict round from an earlier run) makes a fresh rebase fail without
 	// touching state, which lands in the conflict path below and respawns the Merger
+	cleanContextPaths(ensured.wtDir);
 	if (git(ensured.wtDir, ["rebase", base]) === null) {
 		mkdirSync(join(kanbanDir(root), ".pids"), { recursive: true });
 		writeFileSync(mergerAttemptPath(root, slug), "");
@@ -144,6 +176,7 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 		log(root, `${task.file}: fast-forward to ${base} failed, left in to-merge for the retry`);
 		return;
 	}
+	stripContextSymlinks(root);
 	setState(root, task, "to-live-test");
 	log(root, `${task.file}: fast-forwarded ${base} to ${ensured.wt}, set to-live-test`);
 }

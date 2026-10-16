@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { kanbanDir, roleNotesPath, taskSlug, type Task } from "../kanban.ts";
 import { agentAlive, writePid, pidPath } from "../pid.ts";
@@ -49,6 +49,35 @@ function isRealFile(path: string): boolean {
 		return lstatSync(path).isFile();
 	} catch {
 		return false;
+	}
+}
+
+// fresh projects track neither context path, so the cwd symlinks are untracked and visible to
+// a blanket git add -A (fix #234: committed symlinks wedge the merge lane). Hide both in the
+// repo's common info/exclude, shared by the main checkout and all linked worktrees. Idempotent:
+// append only the missing names. Excludes never affect tracked files, so a project's own
+// tracked AGENTS.md keeps its skip-worktree flow. Best-effort: an unwritable info/exclude
+// logs and never fails the spawn
+export function ensureInfoExclude(root: string, cwd: string): void {
+	try {
+		const common = git(cwd, ["rev-parse", "--git-common-dir"], true);
+		if (!common) return; // no git, nothing to hide from
+		const dir = isAbsolute(common) ? common : join(cwd, common);
+		mkdirSync(join(dir, "info"), { recursive: true });
+		const path = join(dir, "info", "exclude");
+		let content = "";
+		try {
+			content = readFileSync(path, "utf8");
+		} catch {
+			/* missing: start fresh */
+		}
+		const have = new Set(content.split("\n").map((l) => l.trim()));
+		const missing = ["AGENTS.md", "SPECS.md"].filter((name) => !have.has(name));
+		if (!missing.length) return;
+		if (content && !content.endsWith("\n")) content += "\n";
+		writeFileSync(path, content + missing.join("\n") + "\n");
+	} catch (err) {
+		log(root, `could not add AGENTS.md and SPECS.md to info/exclude: ${err instanceof Error ? err.message : err}`);
 	}
 }
 
@@ -171,6 +200,8 @@ export function spawnAgent(root: string, cfg: Config, role: string, task: Task, 
 	ensureRoleNotes(root, role);
 	// the cwd symlinks give the session its task (SPECS.md) and role guidance (AGENTS.md) at startup
 	ensureContextSymlinks(root, cwd, task.file, role);
+	// hide both context paths from git status, so a blanket git add never commits them
+	ensureInfoExclude(root, cwd);
 	// the project's own AGENTS.md rides as an appended system prompt: the cwd AGENTS.md is the
 	// role-notes symlink, so the project's own instructions would otherwise never load
 	const projectPrompt = projectAgentsPrompt(root);
