@@ -1,7 +1,7 @@
 ---
 name: "chore: split-test-suite webui area"
 priority: "medium"
-state: "doing"
+state: "backlog"
 worktree: "chore/256-split-test-suite-webui"
 issuer: "#254"
 complexity: "simple"

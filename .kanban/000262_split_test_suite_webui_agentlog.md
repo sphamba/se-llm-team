@@ -6,6 +6,7 @@ worktree: ""
 issuer: "#256"
 complexity: "moderate"
 shortName: "split-test-suite-webui-agentlog"
+blockedBy: ""
 ---
 
 # Summary
@@ -29,3 +30,5 @@ Acceptance:
 - git status shows only tests/webui/agentlog.test.ts as new.
 
 # Notes
+
+- 2026-10-17, splitter: no split. The 179-assertion range is one continuous fixture run on shared state (one hub, one smoke task, .dead/pid files, board setState, docRoot rmSync at the end) with cursor chains between scenarios (tail.head -> h1 -> h2 -> h3). The deliverable is one file (tests/webui/agentlog.test.ts) owned by this task, so parallel subtasks would write the same file or force the parent to stitch partial files. Split overhead (2x hub boot, 2x fixture recreation, one review and live run each, one merge) exceeds the wall-clock saved on a mechanical extraction. One developer runs this task whole.

@@ -1,7 +1,7 @@
 ---
 name: "chore: split-test-suite webui board group"
 priority: "medium"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "#256"
 complexity: "simple"
