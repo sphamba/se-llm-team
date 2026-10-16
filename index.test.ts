@@ -125,8 +125,7 @@ try {
 }
 
 // a lock pid that is not an orchestrator daemon (here: this test process) reads the same
-// plain running message (000253: no supervisor check left)// a lock pid that is not an orchestrator daemon (here: this test process) stays silent too:
-// the warning fires only when the missing supervisor is decidable (non-Linux /proc: the same)
+// plain running message (000253: no supervisor check is left)
 writeFileSync(join(repo, ".kanban", ".orchestrator.lock"), `${process.pid}\n`);
 const foreign = await tools.get("orchestrator_start").execute("id", {}, undefined, undefined, ctx(sub));
 assert.equal(calls().length, 1);
