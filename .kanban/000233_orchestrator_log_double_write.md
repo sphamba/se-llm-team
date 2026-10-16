@@ -1,8 +1,8 @@
 ---
 name: "fix: orchestrator log lines are written twice"
 priority: "medium"
-state: "reviewing"
-worktree: "fix/233-orchestrator-log-double-write"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "orchestrator-log-double-write"
@@ -38,6 +38,22 @@ Exactly one write per line when the daemon runs detached. Preferred minimal fix:
 - Live check: daemon started with stdout+stderr redirected to .kanban/.logs/orchestrator.log (the orchestrator_start stdio shape) and --no-webui; after SIGTERM, `tail -30 .kanban/.logs/orchestrator.log | sort | uniq -d` printed nothing, and the log held exactly the startup and stop lines.
 - Scoped suite: node tests/orchestrator.test.ts passes, part AZ included.
 - Left untouched: main()'s --compact-logs branch still runs log(summary) plus an explicit stdout write, so a foreground --compact-logs prints the summary twice; that one-shot CLI path is not the daemon and was already double before this fix.
+- Review: scoped suite tests/orchestrator.test.ts exit=0 with part AZ ("single orchestrator log write passed"). Deviation accepted: the dev+ino predicate meets the acceptance exactly (one write per line when stdout is the log file), is narrower than the isTTY guard (pipes keep the echo), and the spec already allowed dropping the stdout write entirely. Harness rationale confirmed: runDaemon (tests/orchestrator.test.ts:161) plus 15+ daemon spawns pipe stdout and read log lines from it, so an isTTY guard would silence all of them. Cosmetic, non-blocking: the stdoutIsLog comment ends with a stray "---".
 
-# Open questions
-- Assumption: the same-file (dev+ino) predicate is an acceptable substitute for the spec's preferred isTTY guard, made because the test harnesses read daemon log lines from piped stdout. Confirm.
+## Live test (2026-10-16, merge 889b0d3)
+
+Scope: the detached daemon's double log write. The main checkout was at the merged commit, so the pi extension symlink resolved to the merged code. No unit suite was run (developer/reviewer gate). 14 checks, 0 failed.
+
+A. Real `orchestrator_start` (acceptance). One `pi -p --mode json` session, cwd = scratch git fixture, called the extension tool with `SE_LLM_TEAM_NO_WEBUI=1`. The tool spawned the watched daemon (pid 3794364) with stdio `["ignore", log, log]`.
+   - `orchestrator started` x1 and `web ui disabled (no-webui)` x1 in `.kanban/.logs/orchestrator.log`, after a 10 s rescan sweep and after the stop: no duplicate lines.
+   - The acceptance command `tail -30 .kanban/.logs/orchestrator.log | sort | uniq -d` printed nothing.
+   - Stop with the same pgrp SIGTERM that `orchestrator_stop` sends: `orchestrator stopped` x1, lock removed, watcher and daemon gone.
+B. Foreground pipe shape. The merged daemon with a piped stdout kept the echo (`orchestrator started` x1 and `orchestrator stopped` x1 on stdout) and the file held exactly one copy per line.
+C. Control. The parent commit (54cf596, `git archive`) in the same detached fd shape wrote `orchestrator started` x2 and `orchestrator stopped` x2 (3 duplicated lines). The duplicate check detects the old bug.
+
+Assumptions:
+- The acceptance was exercised through the real pi extension tool on a scratch git fixture with an empty board, so the run produced startup, sweep and stop lines only. Agents, worktrees and merges were not involved, which matches the change's scope (`log()` only).
+- The daemon was stopped by its process group SIGTERM (the exact signal `orchestrator_stop` sends). The stop tool itself was not re-run through pi.
+- `--compact-logs` (the known, intentionally untouched one-shot double print named in the Notes) was not re-tested.
+
+No finding. No observed behavior contradicts the task's assumptions. The Notes' deviation (the dev+ino same-file predicate instead of an isTTY guard) behaved as described: a pipe keeps the echo, the detached file shape writes once.

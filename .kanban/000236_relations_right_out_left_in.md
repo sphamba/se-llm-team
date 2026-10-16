@@ -1,8 +1,8 @@
 ---
 name: "feat: relation lines always run right out, left in"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/236-relations-right-out-left-in"
 issuer: "user"
 complexity: "simple"
 shortName: "relations-right-out-left-in"
