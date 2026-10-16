@@ -833,6 +833,11 @@ function openLog(handle, sub) {
 	// the previous view's meta line must not flash before the init payload arrives
 	const meta = document.getElementById("m-log-meta");
 	if (meta) { meta.textContent = ""; meta.classList.add("hidden"); }
+	// 000243: the previous agent's log must not stay visible while the new one loads: the pane
+	// clears at once, and the loading text stays until the init payload replaces it (a failed
+	// fetch leaves it in place, never the previous log)
+	const text = document.getElementById("m-log-text");
+	if (text) text.textContent = "Loading...";
 	logState = { handle, sub: sub == null ? null : sub, head: 0, tail: 0, atStart: false, busy: false, idle: false };
 	markActiveAgent();
 	pullLog(logUrl(""), "init");

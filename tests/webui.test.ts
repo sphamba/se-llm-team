@@ -1082,6 +1082,58 @@ assert.ok(page.includes('modal.classList.remove("closing");'), "openTask drops a
 const openTaskSrc = page.match(/function openTask\(file\) \{[\s\S]*?\n\}/)![0];
 assert.ok(openTaskSrc.indexOf('classList.remove("hidden")') < openTaskSrc.indexOf("scrollTop = 0"), "openTask resets the scroll after the un-hide, so every open (same-task reopen included) shows the top");
 assert.match(page, /function openLog\(handle, sub\) \{[\s\S]*?p\.classList\.remove\("closing"\);/, "openLog drops a pending close before reopening");
+// 000243: opening a log clears the previous agent's content at once and shows the loading state
+// until the init payload replaces it; a failed init fetch leaves that loading state in place,
+// never the previous agent's log
+const openLogBody = page.match(/function openLog\(handle, sub\) \{[\s\S]*?\n\}/)![0];
+let logPaneText = "the previous agent's log";
+const logTextStub = {
+	get textContent() { return logPaneText; },
+	set textContent(v: string) { logPaneText = v; },
+	classList: { add: () => {}, remove: () => {}, contains: () => false, toggle: () => {} },
+};
+const logMetaStub = { textContent: "", classList: { add: () => {}, remove: () => {}, contains: () => false, toggle: () => {} } };
+const logPaneStub = { classList: { add: () => {}, remove: () => {}, contains: () => false, toggle: () => {} } };
+let openInitMode = "";
+const openLogFn = new Function(
+	"activeBoard", "modalFile", "logPane", "document", "markActiveAgent", "pullLog", "pollLog", "logUrl", "setInterval", "clearInterval",
+	"let logState = null, logTimer = null;\n" + openLogBody + "\nreturn openLog;",
+)(
+	() => ({ tasks: [{ file: "t.md" }] }),
+	"t.md",
+	() => logPaneStub,
+	{ getElementById: (id: string) => (id === "m-log-text" ? logTextStub : id === "m-log-meta" ? logMetaStub : null) },
+	() => {},
+	(_qs: string, mode: string) => { openInitMode = mode; },
+	() => {},
+	() => "",
+	() => 1,
+	() => {},
+);
+openLogFn("t.developer.0", null);
+assert.equal(logPaneText, "Loading...", "openLog clears the previous agent's log and shows the loading text before the init payload");
+assert.equal(openInitMode, "init", "openLog still starts the init fetch after clearing the pane");
+const pullLogBody = page.match(/function pullLog\(qs, mode\) \{[\s\S]*?\n\}/)![0];
+const failedState: Record<string, any> = { handle: "t.developer.0", sub: null, head: 0, tail: 0, busy: false };
+let failedIngest = 0;
+const failingPull = new Function(
+	"logState", "logPane", "document", "fetch", "ingest", "logFixups", "glide", "atBottom", "markLiveLine",
+	pullLogBody + "\nreturn pullLog;",
+)(
+	failedState,
+	() => logPaneStub,
+	{ getElementById: (id: string) => (id === "m-log-text" ? logTextStub : logMetaStub) },
+	() => Promise.reject(new Error("offline")),
+	() => { failedIngest++; },
+	() => {},
+	() => {},
+	() => true,
+	() => {},
+);
+failingPull("", "init");
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(failedIngest, 0, "a failed init fetch renders no log content");
+assert.equal(logPaneText, "Loading...", "a failed init fetch leaves the loading text visible, never the previous agent's log");
 
 // 000142 the poll refresh updates the agent row in place: an unchanged run set moves only the
 // cards' .agent-stats text, so the live run's .spin node keeps its animation across the poll; a
