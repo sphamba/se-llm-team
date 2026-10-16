@@ -8,7 +8,7 @@ import { createTask, getTask, PRIORITY_RANK, setState } from "../src/kanban.ts";
 import { startHub } from "../src/hub.ts";
 import { agentLabel, agentRowSig, agentStatsText, agentLogPayload, boardOf, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, tabNames, tabsHtml, taskPayload, taskStats } from "../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the logpane module
-import { LOG_ROLES } from "../src/webui/logpane.ts";
+import { esc, LOG_ROLES } from "../src/webui/logpane.ts";
 import { gzipSync } from "node:zlib";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -571,7 +571,7 @@ assert.match(page, /\.card \{ position: relative; z-index: 2;[^}]*background: co
 assert.ok(page.includes('setAttribute("pointer-events", "none")'), "the overlay is created non-interactive");
 assert.ok(page.includes("stroke-dasharray: 6 4"), "the relation paths render dashed");
 assert.ok(page.includes("@keyframes dashflow { to { stroke-dashoffset: -10; } }"), "dashes flow along the path, from the blocked task towards the blocker");
-assert.match(page, /@media \(prefers-reduced-motion: reduce\) \{ \.spin \{ animation: none; \} #relations path \{ animation: none; \} \}/, "reduced motion renders the relation paths static");
+assert.match(page, /@media \(prefers-reduced-motion: reduce\) \{ \.spin \{ animation: none; \} #relations path, #agent-relations path \{ animation: none; \} \}/, "reduced motion renders the relation paths static");
 // 000191 motion: the new keyframes and rules ship in the page css, and the second reduced-motion
 // rule stops the new animations without touching the spinner rule above
 assert.ok(page.includes(".card.enter { animation: cardIn var(--enter) ease-out; }"), "new board cards fade and rise in");
@@ -891,7 +891,7 @@ const upd = page.match(/function updateOpenTask\(t\) \{[\s\S]*?\n\}/)![0];
 assert.ok(page.includes("if (open) updateOpenTask(open); else closeModal();"), "the refresh updates the open card in place and closes it when its task is gone");
 assert.ok(upd.includes("writeHead(t)") && upd.includes("renderAgent(t, true)") && upd.includes("setBody(t)"), "the refresh re-derives title, attrs, agent row and body from the fresh payload");
 assert.ok(!upd.includes("closeLog") && !upd.includes("logState"), "the refresh path never touches the log pane, logState or the log timer");
-assert.ok(page.includes('<div id="m-agent"><div id="m-agent-btns"></div><div id="m-doctor"></div><div id="m-log-meta" class="hidden"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>'), "000154: the meta line ships as a sibling above the log pane, hidden until a payload carries meta; 000222 adds the doctor row between the run columns and the meta line");
+assert.ok(page.includes('<div id="m-agent"><svg id="agent-relations"></svg><div id="m-agent-btns"></div><div id="m-doctor"></div><div id="m-log-meta" class="hidden"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>'), "000154: the meta line ships as a sibling above the log pane, hidden until a payload carries meta; 000222 adds the doctor row between the run columns and the meta line; 000237 ships the relation SVG as the agent area's first child");
 // 000222/000230 the Doctor card: one card per analysed run's doctor step, slotted into the
 // analysed run's column below the run card (matched by handle, the run's plus the .doctor
 // suffix); the residual #m-doctor row sits between the run columns and the log meta and keeps
@@ -1196,6 +1196,156 @@ assert.ok(ra.includes('el.__sig = "";'), "an empty run set clears the signature"
 assert.ok(page.includes(String(agentRowSig)) && page.includes(String(syncAgentStats)), "the page runs the tested agent-row helpers");
 assert.ok(page.includes(String(syncStatsLine)) && page.includes(String(doctorCol)) && page.includes(String(syncDoctorCards)), "the page runs the tested doctor-slot helpers");
 assert.ok(page.includes('for (const b of document.querySelectorAll("#m-agent .agent-card"))'), "markActiveAgent's #m-agent scope still hits the in-column doctor cards");
+// 000237 the detail card's relation lines: an SVG layer inside #m-agent (relative, fenced at
+// z-index 0 so the sticky #m-head keeps covering the scrolled area) draws the run chain
+// right-out/left-in with the board curve and drops a line from each run card's bottom edge into
+// every sub and doctor card's left side, dimmed at rest, raised on hover and while selected
+const boardPathCss = page.match(/#relations path \{[^}]*\}/)![0];
+assert.ok(page.includes('<div id="m-agent"><svg id="agent-relations"></svg><div id="m-agent-btns"></div>'), "the relation SVG ships as #m-agent's first child, before the cards");
+assert.ok(page.includes("#m-agent { position: relative; z-index: 0; margin-bottom: 12px; }"), "#m-agent is the SVG's offset parent and its own stacking context, so the z-index-2 cards stay under the sticky #m-head");
+const relSvgCss = page.match(/#agent-relations \{[^}]*\}/)![0];
+assert.ok(relSvgCss.includes("pointer-events: none") && relSvgCss.includes("z-index: 1"), "the relation SVG never intercepts card clicks and paints below the cards");
+const relPathCss = page.match(/#agent-relations path \{ fill[^}]*\}/)![0];
+assert.ok(relPathCss.replace("#agent-relations", "#relations") === boardPathCss, "the detail card's path style mirrors the board's #relations path exactly");
+assert.ok(page.includes("#agent-relations path.relations-hot, #agent-relations path.relations-sel { stroke-opacity: .8; }"), "hover and selection raise a connected line to the board's hot opacity");
+assert.ok(page.includes("#relations path, #agent-relations path { animation: none; }"), "reduced motion stops the dashflow on the detail card's lines too");
+assert.ok(agentCardCss.includes("position: relative") && agentCardCss.includes("z-index: 2"), "the agent cards stack at z-index 2 above the lines, like the board's cards");
+const drawFn = page.match(/function drawAgentRelations\(\) \{[\s\S]*?\n\}/)![0];
+assert.ok(drawFn.includes("curve("), "the run chain reuses the board curve geometry");
+assert.ok(drawFn.includes('.replace(/\\.doctor$/, "")'), "a doctor card matches its analysed run by stripping the trailing .doctor (the #230 rule)");
+assert.ok(drawFn.includes("if (svg.__html !== html)"), "the rewrite is html-gated, so the dash animation survives a refresh that changes nothing");
+assert.ok(drawFn.includes("if (hoverHandle) hotAgentRelations(hoverHandle, true)"), "a rewrite re-applies the hover highlight, so a redraw landing mid-hover does not kill it");
+assert.ok(page.includes("hoverHandle = on ? handle : null;"), "the hover helper tracks the hovered handle for the rewrite re-apply");
+assert.ok(openTaskSrc.indexOf('classList.remove("hidden")') < openTaskSrc.indexOf("drawAgentRelations()"), "the open draw runs after the un-hide: rects read zero while the modal is display: none");
+assert.ok(openTaskSrc.includes("onanimationend"), "the entrance transform skews the first measure, the settled box redraws once");
+assert.ok(upd.includes("drawAgentRelations()"), "the poll refresh redraws the lines");
+assert.ok(page.includes("markActiveAgent();\n\t\tdrawAgentRelations();"), "sub fetches landing redraw the lines");
+assert.ok(page.includes('window.addEventListener("resize", drawAgentRelations);'), "a window resize redraws the lines");
+assert.equal([...page.matchAll(/b\.onmouseenter = \(\) => hotAgentRelations\(b\.dataset\.handle, true\);/g)].length, 3, "run, sub and doctor cards all bind the hover raise, mouseleave reverts");
+assert.ok(page.includes('for (const path of document.querySelectorAll("#agent-relations path"))'), "markActiveAgent also toggles the selection highlight on the connected lines");
+// 000237 run against the served source: the drop leaves the run card's bottom edge heading down
+// and enters the sub or doctor card's left side heading right, over any span
+const relDrop = new Function(page.match(/function dropCurve\(from, to\) \{[\s\S]*?\n\}/)![0] + "; return dropCurve;")();
+const dropPath = relDrop({ x: 0, y: 0, w: 200, h: 40 }, { x: 0, y: 44, w: 200, h: 30 });
+assert.ok(dropPath.startsWith("M 100 40 C"), "the drop leaves the run card's bottom edge at its center");
+assert.ok(dropPath.endsWith(", 0 59"), "the drop enters the sub card's left side at its vertical middle");
+const dropSeg = dropPath.match(/C (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+)$/)!;
+assert.ok(Number(dropSeg[1]) === 100 && Number(dropSeg[2]) > 40, "the departure control sits below the bottom edge, so the line heads down");
+assert.ok(Number(dropSeg[3]) < 0 && Number(dropSeg[4]) === 59, "the arrival control sits left of the left edge, so the line heads right into the card");
+// 000237 run the served draw against a stub agent area: two run columns with run 2 wrapped below
+// run 1, two subs under run 1, one doctor card in the residual #m-doctor row. The wrap must not
+// break the chain: curve spans any x/y pair, so the line still connects the wrapped pair
+class RelEl {
+	className = "";
+	dataset: Record<string, string> = {};
+	children: RelEl[] = [];
+	parentElement: RelEl | null = null;
+	scrollLeft = 0;
+	scrollTop = 0;
+	innerHTML = "";
+	__html: string | undefined;
+	rect: { left: number; top: number; width: number; height: number };
+	constructor(rect: { left: number; top: number; width: number; height: number }) { this.rect = rect; }
+	classList = {
+		contains: (cls: string) => this.className.split(" ").includes(cls),
+		toggle: (cls: string, on: boolean) => { this.className = on ? (this.className ? this.className + " " + cls : cls) : this.className.split(" ").filter((c) => c !== cls).join(" "); },
+	};
+	querySelector(sel: string): RelEl | null { return this.children.find((c) => c.className.split(" ").includes(sel.replace(".", ""))) ?? null; }
+	querySelectorAll(sel: string): RelEl[] { return sel === ".agent-card" ? this.children.filter((c) => c.classList.contains("agent-card")) : []; }
+	getBoundingClientRect() { return { left: this.rect.left, top: this.rect.top, width: this.rect.width, height: this.rect.height }; }
+}
+const relHost = new RelEl({ left: 0, top: 0, width: 760, height: 400 });
+const relSvg = new RelEl({ left: 0, top: 0, width: 760, height: 400 });
+const relModal = new RelEl({ left: 0, top: 0, width: 800, height: 600 });
+const relRun1 = new RelEl({ left: 0, top: 0, width: 200, height: 40 });
+relRun1.dataset.handle = "t.dev.0";
+const relSubs1 = new RelEl({ left: 0, top: 0, width: 200, height: 68 });
+relSubs1.className = "agent-subs";
+const relSub1 = new RelEl({ left: 0, top: 44, width: 200, height: 30 });
+const relSub2 = new RelEl({ left: 0, top: 78, width: 200, height: 30 });
+for (const s of [relSub1, relSub2]) { s.dataset.handle = "t.dev.0"; s.className = "agent-card agent-sub"; s.parentElement = relSubs1; relSubs1.children.push(s); }
+const relCol1 = new RelEl({ left: 0, top: 0, width: 200, height: 108 });
+relCol1.children = [relRun1, relSubs1];
+relRun1.parentElement = relCol1;
+const relRun2 = new RelEl({ left: 0, top: 150, width: 200, height: 40 });
+relRun2.dataset.handle = "t.rev.1";
+const relCol2 = new RelEl({ left: 0, top: 150, width: 200, height: 40 });
+relCol2.children = [relRun2];
+relRun2.parentElement = relCol2;
+const relDoctor = new RelEl({ left: 0, top: 200, width: 200, height: 30 });
+relDoctor.dataset.handle = "t.dev.0.doctor";
+relDoctor.className = "agent-card agent-doctor agent-past";
+const relDoc = {
+	getElementById: (id: string) => ({ "m-agent": relHost, "agent-relations": relSvg, "modal": relModal } as Record<string, RelEl>)[id] ?? null,
+	querySelectorAll: (sel: string): RelEl[] => sel.includes(":not(.agent-doctor)") ? [relRun1, relRun2] : sel.includes(".agent-doctor") ? [relDoctor] : [],
+};
+let relMarks = 0;
+let relHotApply: string | null = null;
+const relDraw = new Function("document", "curve", "esc", "markActiveAgent", "dropCurve", "hotAgentRelations", "hoverHandle", page.match(/function drawAgentRelations\(\) \{[\s\S]*?\n\}/)![0] + "; return drawAgentRelations;")(relDoc, curve, esc, () => { relMarks++; }, relDrop, (h: string | null) => { relHotApply = h; }, "t.dev.0");
+relDraw();
+assert.equal(relHotApply, "t.dev.0", "the rewrite re-applies the hovered handle's highlight");
+const drawn = relSvg.innerHTML.match(/<path [^>]*\/>/g) ?? [];
+assert.equal(drawn.length, 4, "two wrapped runs, two subs and one doctor draw four lines");
+assert.ok(drawn[0].includes('data-from="t.dev.0"') && drawn[0].includes('data-to="t.rev.1"'), "the chain path carries both run handles");
+const chainSeg = drawn[0].match(/d="M (-?[\d.]+) (-?[\d.]+) C (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+)"/)!;
+assert.ok(chainSeg[1] === "200" && chainSeg[2] === "20", "the chain leaves the first run card's right edge");
+assert.ok(chainSeg[7] === "0" && chainSeg[8] === "170", "the chain enters the wrapped run card's left edge: the wrap does not break the pair");
+assert.ok(drawn[1].includes('data-from="t.dev.0"') && drawn[1].includes('data-to="t.dev.0"') && drawn[1].includes('d="M 100 40 C 100 49.5, -8 59, 0 59"'), "a sub's drop line runs from its run card's bottom edge into its left side");
+assert.ok(drawn[3].includes('data-to="t.dev.0.doctor"') && drawn[3].includes('d="M 100 40 C 100 100, -8 215, 0 215"'), "a doctor card in the residual row still drops from its analysed run's card");
+relHotApply = null;
+relDraw();
+assert.equal(relMarks, 1, "the rewrite is html-gated: an unchanged redraw neither rewrites nor re-runs markActiveAgent");
+assert.equal(relHotApply, null, "an unchanged redraw re-applies no hover");
+relHotApply = null;
+relRun2.rect = { left: 0, top: 160, width: 200, height: 40 };
+relDraw();
+assert.ok(relSvg.innerHTML !== drawn.join("") && relMarks === 2, "a layout change rewrites the lines and re-applies the selection");
+assert.equal(relHotApply, "t.dev.0", "a layout change re-applies the hovered handle's highlight");
+const htmlHidden = relSvg.innerHTML;
+relModal.className = "hidden";
+relDraw();
+assert.equal(relSvg.innerHTML, htmlHidden, "a draw with the modal hidden bails before measuring display: none rects");
+relModal.className = "";
+// 000237 hover: the hot function toggles only the paths the hovered card connects to
+const hotPath1 = new RelEl({ left: 0, top: 0, width: 0, height: 0 });
+hotPath1.dataset.from = "t.dev.0";
+hotPath1.dataset.to = "t.rev.1";
+const hotPath2 = new RelEl({ left: 0, top: 0, width: 0, height: 0 });
+hotPath2.dataset.from = "t.rev.1";
+hotPath2.dataset.to = "t.rev.1.doctor";
+const hotDoc = { querySelectorAll: (sel: string): RelEl[] => sel.includes("path") ? [hotPath1, hotPath2] : [] };
+const relHot = new Function("document", page.match(/function hotAgentRelations\(handle, on\) \{[\s\S]*?\n\}/)![0] + "; return hotAgentRelations;")(hotDoc);
+relHot("t.dev.0", true);
+assert.ok(hotPath1.classList.contains("relations-hot") && !hotPath2.classList.contains("relations-hot"), "hovering a run card raises its connected lines only");
+relHot("t.dev.0", false);
+assert.ok(!hotPath1.classList.contains("relations-hot"), "mouseleave reverts the raise");
+relHot("t.rev.1.doctor", true);
+assert.ok(hotPath2.classList.contains("relations-hot"), "a doctor card's handle matches its drop line");
+// 000237 selection: the selected card's connected lines carry .relations-sel while its log is
+// open, a sub view selects through the parent's handle, closing the log clears them
+const selRun = new RelEl({ left: 0, top: 0, width: 0, height: 0 });
+selRun.dataset.handle = "t.dev.0";
+const selSub = new RelEl({ left: 0, top: 0, width: 0, height: 0 });
+selSub.dataset.handle = "t.dev.0";
+selSub.dataset.sub = "2";
+const selPath1 = new RelEl({ left: 0, top: 0, width: 0, height: 0 });
+selPath1.dataset.from = "t.dev.0";
+selPath1.dataset.to = "t.rev.1";
+const selPath2 = new RelEl({ left: 0, top: 0, width: 0, height: 0 });
+selPath2.dataset.from = "t.other.0";
+selPath2.dataset.to = "t.other.1";
+const selPane = new RelEl({ left: 0, top: 0, width: 0, height: 0 });
+const selDoc = { querySelectorAll: (sel: string): RelEl[] => sel.includes(".agent-card") ? [selRun, selSub] : [selPath1, selPath2] };
+const markSel = new Function("logPane", "logState", "document", page.match(/function markActiveAgent\(\) \{[\s\S]*?\n\}/)![0] + "; return markActiveAgent;")(() => selPane, { handle: "t.dev.0", sub: null }, selDoc);
+markSel();
+assert.ok(selRun.classList.contains("agent-card-active"), "the open run's card is active");
+assert.ok(selPath1.className.includes("relations-sel") && !selPath2.className.includes("relations-sel"), "the selected card's connected lines highlight, unconnected ones stay dim");
+const markSubSel = new Function("logPane", "logState", "document", page.match(/function markActiveAgent\(\) \{[\s\S]*?\n\}/)![0] + "; return markActiveAgent;")(() => selPane, { handle: "t.dev.0", sub: "2" }, selDoc);
+markSubSel();
+assert.ok(selSub.classList.contains("agent-card-active") && selPath1.className.includes("relations-sel"), "a sub view selects through the parent run's handle, its run's lines stay lit");
+const markNone = new Function("logPane", "logState", "document", page.match(/function markActiveAgent\(\) \{[\s\S]*?\n\}/)![0] + "; return markActiveAgent;")(() => selPane, null, selDoc);
+markNone();
+assert.ok(!selRun.classList.contains("agent-card-active") && !selPath1.className.includes("relations-sel"), "closing the log clears the active card and the line highlight");
 // the cadence: 1 s while the open task has a live agent, 5 s otherwise, log pane open or closed
 assert.equal(refreshMs({ agents: [{ alive: true }] }), 1000, "a live agent on the open card ticks the poll at 1 s");
 assert.equal(refreshMs({ agents: [{ alive: false }], doctors: [{ alive: true }] }), 1000, "a live doctor with no live agent also ticks the poll at 1 s");

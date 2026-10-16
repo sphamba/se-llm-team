@@ -160,7 +160,7 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .num-link:hover { text-decoration: underline; }
 .spin { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border: 2px solid var(--border); border-top-color: var(--fg); border-radius: 50%; vertical-align: -1px; animation: spin .9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spin { animation: none; } #relations path { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } #relations path, #agent-relations path { animation: none; } }
 .chip { font-size: 0.75rem; padding: 1px 7px; border-radius: 999px; background: var(--border); color: var(--soft); }
 .chip.issuer { background: var(--code-bg); color: var(--muted); }
 .chip.cx { background: var(--code-bg); color: var(--muted); }
@@ -180,7 +180,7 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .toggle { display: block; width: 100%; margin-top: 2px; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.875rem; }
 .toggle:hover { background: var(--hover); }
 /* 000120: each run as a card, its subagent cards stacked below it in the same column */
-.agent-card { display: block; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 0.875rem; text-align: left; }
+.agent-card { display: block; border: 1px solid var(--border); background: var(--panel); color: var(--link); border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 0.875rem; text-align: left; position: relative; z-index: 2; }
 .agent-card:hover { background: var(--hover); }
 /* 000191: a genuinely new run card rises in with the board cards' entrance */
 .agent-card.enter { animation: cardIn var(--enter) ease-out; }
@@ -203,7 +203,14 @@ the opened card keeps the blue outline and highlight via .agent-card-active */
 .agent-doctor .check { color: var(--doctor-fg); }
 .check { color: var(--low-fg); margin-right: 5px; }
 .cross { color: var(--critical-fg); margin-right: 5px; }
-#m-agent { margin-bottom: 12px; }
+#m-agent { position: relative; z-index: 0; margin-bottom: 12px; }
+/* 000237: the detail card's relation lines, behind the cards: the agent area is the svg's offset
+parent and its own stacking context (z-index 0), so the z-index-2 agent cards stay under the
+sticky #m-head while the svg (z-index 1) paints under them; pointer-events none lets the card
+clicks through, the canvas fills the area, the paths carry the geometry */
+#agent-relations { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+#agent-relations path { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-opacity: .3; stroke-dasharray: 6 4; animation: dashflow 1s linear infinite; transition: stroke-opacity .15s ease; }
+#agent-relations path.relations-hot, #agent-relations path.relations-sel { stroke-opacity: .8; }
 /* 000152: the pane grows to 70vh so long logs show more content */
 #m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 70vh; overflow: auto; }
 #m-log.hidden { display: none; }
@@ -304,7 +311,7 @@ line is the fallback for the dvh line (older mobile browsers), max-height none l
 <div id="modal" class="hidden"><div id="m-box">
 <div id="m-head"><h2 id="m-title"></h2><button id="m-close" onclick="closeModal()">Close</button></div>
 <div id="m-attrs"></div>
-<div id="m-agent"><div id="m-agent-btns"></div><div id="m-doctor"></div><div id="m-log-meta" class="hidden"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>
+<div id="m-agent"><svg id="agent-relations"></svg><div id="m-agent-btns"></div><div id="m-doctor"></div><div id="m-log-meta" class="hidden"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>
 <div id="m-body"></div>
 </div></div>
 <script>
@@ -506,7 +513,12 @@ function openTask(file) {
 	modal.classList.remove("closing");
 	modal.classList.remove("hidden");
 	// 000209: the reset runs after the un-hide: a scrollTop write while .hidden (display: none) is discarded
-	document.getElementById("m-box").scrollTop = 0;
+	// 000237: the lines draw after the un-hide too (display: none rects read zero) and once more
+	// when the entrance settles, since the boxIn transform skews the first measure
+	const box = document.getElementById("m-box");
+	box.scrollTop = 0;
+	box.onanimationend = e => { if (e && e.target === box) { box.onanimationend = null; drawAgentRelations(); } };
+	drawAgentRelations();
 }
 // the 5 s refresh of the open detail card: every block re-derives from the fresh payload with no
 // close/reopen; renderAgent's keep mode moves only the stats lines on an unchanged run set and
@@ -518,6 +530,7 @@ function updateOpenTask(t) {
 	renderDoctor(t, true);
 	setBody(t);
 	markLiveLine();
+	drawAgentRelations();
 }
 // 000194: the shared animated close: .closing runs the entrance in reverse, the element hides on
 // animationend with a fixed-timeout fallback (a background tab never fires the event); a reopen
@@ -577,10 +590,71 @@ const logUrl = extra => "?file=" + encodeURIComponent(logState.handle) + (logSta
 function markActiveAgent() {
 	const p = logPane();
 	const st = logState && p && !p.classList.contains("hidden") ? logState : null;
+	let sel = null;
 	for (const b of document.querySelectorAll("#m-agent .agent-card")) {
 		const active = !!st && b.dataset.handle === st.handle && (b.dataset.sub || null) === (st.sub == null ? null : String(st.sub));
 		b.classList.toggle("agent-card-active", active);
+		if (active) sel = b.dataset.handle;
 	}
+	// 000237: the selected card's connected lines stay highlighted while its log is open
+	for (const path of document.querySelectorAll("#agent-relations path"))
+		path.classList.toggle("relations-sel", !!sel && (path.dataset.from === sel || path.dataset.to === sel));
+}
+// 000237 hovering a run, sub or doctor card raises the opacity of the lines it connects to, and
+// mouseleave reverts; the paths carry both endpoint handles as data, so the match needs no
+// selector interpolation (the hotRelations pattern). The hovered handle is tracked so a line
+// rewrite landing mid-hover (the entrance settle, a poll rebuild) re-applies the raise
+let hoverHandle = null;
+function hotAgentRelations(handle, on) {
+	hoverHandle = on ? handle : null;
+	for (const p of document.querySelectorAll("#agent-relations path"))
+		if (p.dataset.from === handle || p.dataset.to === handle) p.classList.toggle("relations-hot", on);
+}
+// the vertical connector: out of the run card's bottom edge heading down, into the sub or doctor
+// card's left side heading right; the horizontal hook stays short so a card flush with the area's
+// left edge (every sub and column doctor) loses no visible length to the canvas clip
+function dropCurve(from, to) {
+	const x1 = from.x + from.w / 2;
+	const y1 = from.y + from.h;
+	const x2 = to.x;
+	const y2 = to.y + to.h / 2;
+	const v = Math.max(8, Math.min((y2 - y1) * 0.5, 60));
+	return "M " + x1 + " " + y1 + " C " + x1 + " " + (y1 + v) + ", " + (x2 - 8) + " " + y2 + ", " + x2 + " " + y2;
+}
+// 000237 the detail card's relation lines, behind the cards in #m-agent: one dashed connector per
+// drawn pair; run cards chain right-out/left-in with the board curve (any x/y pair, so a
+// flex-wrap line break stays connected); every sub and doctor card of a run drops from its bottom
+// edge into the card's left side, wherever the doctor renders (its run's column or the residual
+// #m-doctor row). Rewritten only on change, so the dash animation keeps running across refreshes;
+// bails while the modal is hidden: display: none rects read zero and would corrupt the gate
+function drawAgentRelations() {
+	const svg = document.getElementById("agent-relations");
+	const modal = document.getElementById("modal");
+	if (!svg || !modal || modal.classList.contains("hidden")) return;
+	const host = document.getElementById("m-agent");
+	const hostRect = host.getBoundingClientRect();
+	const box = el => {
+		const r = el.getBoundingClientRect();
+		return { x: r.left - hostRect.left + host.scrollLeft, y: r.top - hostRect.top + host.scrollTop, w: r.width, h: r.height };
+	};
+	const paths = [];
+	const runs = [...document.querySelectorAll("#m-agent-btns > .agent-col > .agent-card:not(.agent-doctor)")];
+	runs.forEach((run, i) => {
+		const from = box(run);
+		const next = runs[i + 1];
+		if (next) paths.push({ from: run.dataset.handle, to: next.dataset.handle, d: curve(from, box(next), false) });
+		const subs = run.parentElement.querySelector(".agent-subs");
+		if (subs) for (const sub of subs.querySelectorAll(".agent-card"))
+			paths.push({ from: run.dataset.handle, to: sub.dataset.handle, d: dropCurve(from, box(sub)) });
+	});
+	const byHandle = new Map(runs.map(r => [r.dataset.handle, r]));
+	for (const doc of document.querySelectorAll("#m-agent .agent-doctor")) {
+		const run = byHandle.get(doc.dataset.handle.replace(/\\.doctor$/, ""));
+		if (!run) continue;
+		paths.push({ from: run.dataset.handle, to: doc.dataset.handle, d: dropCurve(box(run), box(doc)) });
+	}
+	const html = paths.map(p => '<path d="' + p.d + '" data-from="' + esc(p.from) + '" data-to="' + esc(p.to) + '"/>').join("");
+	if (svg.__html !== html) { svg.innerHTML = html; svg.__html = html; markActiveAgent(); if (hoverHandle) hotAgentRelations(hoverHandle, true); }
 }
 // 000194: while the viewed run is alive, the shine sits on the LATEST block and only while the
 // run is inside one: an open thinking block (data-open) or a tool block still awaiting its result
@@ -651,6 +725,8 @@ function renderAgent(t, keep) {
 	// card animates in, the rebuilt old cards stay still
 	for (const b of el.querySelectorAll(".agent-col > .agent-card")) {
 		b.onclick = () => openAgentLog(b.dataset.handle);
+		b.onmouseenter = () => hotAgentRelations(b.dataset.handle, true);
+		b.onmouseleave = () => hotAgentRelations(b.dataset.handle, false);
 		if (oldSubs && !oldSubs.has(b.dataset.handle)) b.classList.add("enter");
 	}
 	if (oldSubs) for (const c of el.querySelectorAll(".agent-col")) {
@@ -696,6 +772,8 @@ function renderDoctor(t, keep) {
 		const b = tmp.firstChild;
 		(doctorCol(row, d.handle) ?? el).appendChild(b);
 		b.onclick = () => openAgentLog(b.dataset.handle);
+		b.onmouseenter = () => hotAgentRelations(b.dataset.handle, true);
+		b.onmouseleave = () => hotAgentRelations(b.dataset.handle, false);
 		if (oldHandles && !oldHandles.has(b.dataset.handle)) {
 			b.classList.add("enter");
 			b.onanimationend = () => { b.classList.remove("enter"); b.onanimationend = null; };
@@ -720,6 +798,8 @@ function fetchSubs(gen, a, box) {
 		box.__html = html;
 		for (const b of box.querySelectorAll(".agent-card")) {
 			b.onclick = () => openSubLog(b.dataset.handle, Number(b.dataset.sub));
+			b.onmouseenter = () => hotAgentRelations(b.dataset.handle, true);
+			b.onmouseleave = () => hotAgentRelations(b.dataset.handle, false);
 			if (prev && !prev.has(b.dataset.sub)) {
 				// same one-shot drop as makeCard: a row rebuild re-attaches the carried-over sub
 				// boxes, and a lingering enter class would replay their entrance then
@@ -728,6 +808,7 @@ function fetchSubs(gen, a, box) {
 			}
 		}
 		markActiveAgent();
+		drawAgentRelations();
 	}).catch(() => {});
 }
 function openAgentLog(handle) {
@@ -831,6 +912,8 @@ function pullLog(qs, mode) {
 document.getElementById("modal").onclick = e => { if (e.target.id === "modal") closeModal(); };
 // 000194: Esc joins the X button and the overlay click on the same close path
 window.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+// 000237: the run columns wrap with the width, the lines follow
+window.addEventListener("resize", drawAgentRelations);
 // the log pane is static markup: the scroll handler binds once and reads the live logState
 const pane = logPane();
 pane.onscroll = () => {
