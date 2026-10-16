@@ -495,20 +495,20 @@ const same = relationPaths([
 assert.equal(same.length, 1, "one curve per stored relation");
 assert.equal(same[0].file, "000002_b.md", "each path is keyed by the blocked task's file, so the hover highlight reaches its lines without re-deriving geometry");
 assert.equal(same[0].blocker, "000004_d.md", "each path also carries the blocker's file, so hovering the blocker highlights the line too (000144)");
-assert.ok(same[0].d.startsWith(`M ${310 + 280} ${midY(rects["000002_b.md"])}`), "same column: the path starts at the blocked card's right edge");
-assert.ok(same[0].d.endsWith(`${310 + 280} ${midY(rects["000004_d.md"])}`), "same column: both ends sprout from the right sides, the path ends at the blocker's right edge");
-// stacked pair columns share one x: different states at one x still loop out of the right sides
+assert.ok(same[0].d.startsWith(`M ${310 + 280} ${midY(rects["000002_b.md"])}`), "one uniform geometry: the path starts at the blocked card's right edge");
+assert.ok(same[0].d.endsWith(`310 ${midY(rects["000004_d.md"])}`), "same column: the path enters the blocker's left edge, wrapping behind the cards");
+// the geometry no longer depends on same-columnness or on the pair's states
 assert.deepEqual(relationPaths([
 	{ file: "000002_b.md", state: "to-do", blockedBy: "#4" },
 	{ file: "000004_d.md", state: "doing", blockedBy: "" },
-], rectOf)[0], same[0], "a different state at the same x (stacked pair) loops out of the right sides too, never through the cards");
+], rectOf)[0], same[0], "a stacked pair at one x draws the same wrap, whatever the states");
 const cross = relationPaths([
 	{ file: "000002_b.md", state: "to-do", blockedBy: "#1, #3" },
 	{ file: "000001_a.md", state: "backlog", blockedBy: "" },
 	{ file: "000003_c.md", state: "to-review", blockedBy: "" },
 ], rectOf);
 assert.equal(cross.length, 2, "multiple blockers draw one curve each");
-assert.ok(cross[0].d.startsWith(`M 310 ${midY(rects["000002_b.md"])}`) && cross[0].d.endsWith(`280 ${midY(rects["000001_a.md"])}`), "blocker left of blocked: blocked's left edge to the blocker's right edge");
+assert.ok(cross[0].d.startsWith(`M ${310 + 280} ${midY(rects["000002_b.md"])}`) && cross[0].d.endsWith(`0 ${midY(rects["000001_a.md"])}`), "blocker left of blocked: out the blocked's right edge and into the blocker's left edge too");
 assert.ok(cross[1].d.startsWith(`M ${310 + 280} ${midY(rects["000002_b.md"])}`) && cross[1].d.endsWith(`620 ${midY(rects["000003_c.md"])}`), "blocker right of blocked: blocked's right edge to the blocker's left edge");
 assert.equal(relationPaths([
 	{ file: "000002_b.md", state: "to-do", blockedBy: "#3" },
@@ -534,17 +534,20 @@ assert.ok(!hotPath.hot.has("relations-hot"), "the blocker's mouseleave reverts i
 hotFn("000009_x.md", true);
 assert.ok(!hotPath.hot.has("relations-hot"), "an unrelated file highlights nothing");
 
-// 000127: far-apart columns bend the line into an S (the control offsets scale with the span,
-// capped); near pairs and same-column loops keep the fixed bow. The path format is fixed, so the
+// 000127/000236: far-apart cards bend the line into an S (the control offsets scale with the
+// span, capped); same-row pairs clamp the offset inside the span, because a same-row cubic is
+// collinear and any control past an endpoint retraces the line. The path format is fixed, so the
 // control points parse straight out of the d string
 const parseCurve = (d: string) => d.match(/^M (-?[\d.]+) (-?[\d.]+) C (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+)$/)!.slice(1).map(Number);
 const [sx1, , sc1x, , sc2x, , sx2] = parseCurve(same[0].d);
-assert.equal(sc1x, sx1 + 40, "same-column loops keep the fixed bow");
-assert.equal(sc2x, sx2 + 40, "same-column loops keep the fixed bow");
-const [nx1, , nc1x, , nc2x, , nx2] = parseCurve(cross[0].d);
-assert.equal(nc1x, nx1 - 40, "adjacent columns keep the fixed bow, the small span never triggers the S");
-assert.equal(nc2x, nx2 + 40, "adjacent columns keep the fixed bow, the small span never triggers the S");
-const farRects = { ...rects, "000005_e.md": { x: 1240, y: 0, w: 280, h: 60 }, "000006_f.md": { x: 2000, y: 0, w: 280, h: 60 } };
+assert.equal(sc1x, sx1 + 280 * 0.35, "a same-column wrap scales the right-edge offset with the span");
+assert.equal(sc2x, sx2 - 280 * 0.35, "a same-column wrap scales the left-edge offset with the span");
+const [lx1, , lc1x, , lc2x, , lx2] = parseCurve(cross[0].d);
+assert.ok(lc1x >= lx2 && lc1x <= lx1 && lc2x >= lx2 && lc2x <= lx1, "a same-row blocker left of the blocked card keeps both controls inside the span, so the straight line never doubles back");
+const [rx1, , rc1x, , rc2x, , rx2] = parseCurve(cross[1].d);
+assert.ok(rc1x <= rx2 && rc2x >= rx1, "same-row pairs keep the offsets within the span (c1x <= x2 and c2x >= x1)");
+assert.equal(rc1x, rx1 + (rx2 - rx1) / 2, "the clamp halves the 40 px bow floor on the 30 px same-row gap, so the bezier never overshoots the entry point");
+const farRects = { ...rects, "000005_e.md": { x: 700, y: 70, w: 280, h: 60 }, "000006_f.md": { x: 2000, y: 70, w: 280, h: 60 } };
 const farOf = (f: string) => farRects[f] ?? null;
 const farTasks = (file: string) => [
 	{ file, state: "to-do", blockedBy: "#1" },
@@ -554,11 +557,11 @@ const [fx1, fy1, fc1x, fc1y, fc2x, fc2y, fx2, fy2] = parseCurve(relationPaths(fa
 const farSpan = Math.abs(fx2 - fx1);
 assert.equal(fc1y, fy1, "the S leaves the source card horizontally");
 assert.equal(fc2y, fy2, "the S arrives into the target card horizontally");
-assert.equal(fc1x, fx1 - farSpan * 0.35, "far-apart columns: the near control offset scales with the span, the line bends into an S");
-assert.equal(fc2x, fx2 + farSpan * 0.35, "far-apart columns: the far control scales too, so the S crosses in the middle");
+assert.equal(fc1x, fx1 + farSpan * 0.35, "far-apart cards: the right-edge control offset scales with the span, the line bends into an S");
+assert.equal(fc2x, fx2 - farSpan * 0.35, "far-apart cards: the left-edge control scales too, so the S crosses in the middle");
 const capped = parseCurve(relationPaths(farTasks("000006_f.md"), farOf)[0].d);
-assert.equal(capped[2], capped[0] - 480, "an extreme width caps the control offset at 480 so it never overshoots the board");
-assert.equal(capped[4], capped[6] + 480, "an extreme width caps both controls");
+assert.equal(capped[2], capped[0] + 480, "an extreme width caps the right-edge control offset at 480 so it never overshoots the board");
+assert.equal(capped[4], capped[6] - 480, "an extreme width caps both controls");
 
 // the page runs the tested helpers and ships the overlay wiring
 assert.ok(page.includes(String(numLinkHtml)) && page.includes(String(curve)) && page.includes(String(relationPaths)), "the page ships the tested id-link and relation helpers");

@@ -210,49 +210,31 @@ export function numLinkHtml(file: string, cls = "") {
 }
 
 // the bezier between two rendered cards, running blocked -> blocker so the dash animation flows
-// towards the blocker: a loop out of the right sides within one column, otherwise the side pair
-// that minimizes the line (blocker left of blocked: blocked's left edge to the blocker's right
-// edge, reversed when the blocker sits to the right)
-export function curve(from, to, same) {
+// towards the blocker: always out of the blocked card's right edge and into the blocker's left
+// edge, whatever the column pair, so one uniform wrap shape serves every relation
+export function curve(from, to) {
 	const mid = (r) => r.y + r.h / 2;
 	const bow = 40;
 	// 000127: a fixed bow flattens into a near-straight diagonal over a long cross-column span, so
 	// scale the offset with the span (capped so extreme widths stay sane) and the curve bends into
 	// an S that hugs the cards at both ends and crosses in the middle; near spans keep the bow
 	const sBend = (a, b) => Math.max(bow, Math.min(Math.abs(b - a) * 0.35, 480));
-	let x1, y1, x2, y2, c1x, c2x;
-	if (same) {
-		x1 = from.x + from.w;
-		y1 = mid(from);
-		x2 = to.x + to.w;
-		y2 = mid(to);
-		c1x = x1 + bow;
-		c2x = x2 + bow;
-	} else if (to.x < from.x) {
-		x1 = from.x;
-		y1 = mid(from);
-		x2 = to.x + to.w;
-		y2 = mid(to);
-		const d = sBend(x1, x2);
-		c1x = x1 - d;
-		c2x = x2 + d;
-	} else {
-		x1 = from.x + from.w;
-		y1 = mid(from);
-		x2 = to.x;
-		y2 = mid(to);
-		const d = sBend(x1, x2);
-		c1x = x1 + d;
-		c2x = x2 - d;
-	}
-	return "M " + x1 + " " + y1 + " C " + c1x + " " + y1 + ", " + c2x + " " + y2 + ", " + x2 + " " + y2;
+	const x1 = from.x + from.w;
+	const y1 = mid(from);
+	const x2 = to.x;
+	const y2 = mid(to);
+	// 000236: a same-row cubic is collinear, so clamp the offset inside the signed half-span (a
+	// blocker left of the blocked card gets a negative offset) or the controls would retrace the
+	// segment and the dashes would double back; the bow floor applies only when the span allows it
+	let d = sBend(x1, x2);
+	if (y1 === y2) d = Math.min(d, (x2 - x1) / 2);
+	return "M " + x1 + " " + y1 + " C " + (x1 + d) + " " + y1 + ", " + (x2 - d) + " " + y2 + ", " + x2 + " " + y2;
 }
 
 // one curve per stored relation the board can draw: the blocked task's card to each blocking
 // task's card, both currently rendered, carrying both endpoint files for the hover highlight
 // (000127, 000144). A "#<num>" ref maps to its task via parseInt(file); a ref
-// without a rendered card is skipped, and a done blocker draws nothing. Stacked pair columns
-// share one x, which counts as the same column (the right-side loop, never a line through the cards).
+// without a rendered card is skipped, and a done blocker draws nothing.
 export function relationPaths(tasks, rectOf) {
 	const out = [];
 	for (const t of tasks) {
@@ -265,7 +247,7 @@ export function relationPaths(tasks, rectOf) {
 			if (!blocker || blocker.state === "done") continue;
 			const to = rectOf(blocker.file);
 			if (!to) continue;
-			out.push({ file: t.file, blocker: blocker.file, d: curve(from, to, t.state === blocker.state || Math.abs(to.x - from.x) < 1) });
+			out.push({ file: t.file, blocker: blocker.file, d: curve(from, to) });
 		}
 	}
 	return out;
