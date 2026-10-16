@@ -1,8 +1,8 @@
 ---
 name: "perf: defer webui task details to a per-task detail endpoint"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "perf/242-webui-lazy-task-details"
 issuer: "user"
 complexity: "complex"
 shortName: "webui-lazy-task-details"
@@ -40,3 +40,5 @@ Lazy loading for ALL tasks: /api/tasks returns only light rows; full details loa
 - `pnpm test:changed` passes for the touched files.
 
 # Notes
+- Splitter pass, no split (#242): the work is one contract slice across src/webui/payload.ts, src/hub.ts, src/webui/page.ts and tests/webui.test.ts. The light rows, the detail endpoint and the client fetch must agree, so one developer pass costs less than two review, merge and live-test cycles.
+- Open point for the developer: the board cards and the poll cadence read t.agents and t.doctors (src/webui/board.ts:56,74, src/webui/page.ts:77) for the card stats lines, the spinners and the 1 s/5 s cadence. But the light-row contract excludes agent history and per-task doctor data. The clause "any field the board renderer or row click needs to open" decides. Keep the fields the cards and the cadence read, drop the rest, and make payload and renderer agree in the same pass. The new tests must cover the shape you settle on.

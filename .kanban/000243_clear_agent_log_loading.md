@@ -1,8 +1,8 @@
 ---
 name: "fix: clear agent log panel while the new log loads"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/243-clear-agent-log-loading"
 issuer: "user"
 complexity: "simple"
 shortName: "clear-agent-log-loading"
