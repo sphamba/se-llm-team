@@ -928,7 +928,12 @@ assert.match(page, /\.agent-subs \{ display: flex; flex-direction: column/, "sub
 assert.ok(page.includes('if (gen !== agentGen || !box) return;'), "a superseded open's sub fetches never write into the new view");
 // 000191: the sub list rebuild is html-gated (the keep pass re-fetches every second), and only a
 // newly spawned sub card animates; a genuinely new run card carries the entrance too
-assert.ok(page.includes("if (box.__html === html) return;"), "the sub list rebuild is html-gated, so unchanged subs never replay");
+// 000251: the sub list gate keys on the sub set only, so a growing transcript's advancing tokens
+// and duration never rebuild the cards; an unchanged set moves the stats lines in place
+assert.ok(!page.includes("if (box.__html === html) return;"), "the sub list gate no longer keys on the full html, a growing transcript's stats never trigger a rebuild");
+const fsSubs = page.match(/function fetchSubs\(gen, a, box\) \{[\s\S]*?\n\}/)![0];
+assert.ok(fsSubs.includes(".map(s => s.index)"), "the sub list gate keys on the sub indexes only");
+assert.ok(fsSubs.includes("syncStatsLine("), "an unchanged sub list updates the stats lines in place, the cards stay mounted");
 assert.ok(page.includes('if (prev && !prev.has(b.dataset.sub)) {'), "only a newly spawned sub card animates");
 assert.ok(page.includes('b.onanimationend = () => { b.classList.remove("enter"); b.onanimationend = null; };'), "the sub cards' entrance class is dropped too, the rebuild's box carry-over never replays it");
 assert.ok(page.includes('if (oldSubs && !oldSubs.has(b.dataset.handle)) b.classList.add("enter")'), "only a genuinely new run card animates");
@@ -964,6 +969,10 @@ assert.ok(ra.includes('a.role === "splitter" ? "agent-splitter " : ""'), "the sp
 // card was opened gets its button without re-opening the run; past runs' lists are never re-fetched
 assert.ok(ra.includes('if (live) fetchSubs(agentGen, live,') && ra.includes('.agent-col:last-child > .agent-subs'), "the keep refresh re-fetches only the live run's (last column's) sub list");
 assert.ok(ra.indexOf("if (keep) {") < ra.indexOf("++agentGen"), "the keep refresh passes the current generation, only an openTask render bumps agentGen");
+// 000251: a run-row rebuild lifts the slotted doctor cards out before the innerHTML write and
+// re-slots them after, so the keep pass's parentElement check holds and no doctor card remounts
+assert.ok(ra.includes("doctorRow.__cards || []"), "the run-row rebuild lifts the slotted doctor cards out before the innerHTML write");
+assert.ok(ra.includes("(doctorCol(el, c.dataset.handle) ?? doctorRow).appendChild(c)"), "the run-row rebuild re-slots the preserved doctor cards after");
 // 000130: a sub transcript of a still-alive parent keeps polling (an empty poll is not proof a
 // growing transcript stopped); a past run's log still stops after the first empty poll
 const pollSrc = page.match(/function pollLog\(\) \{[\s\S]*?\n\}/)![0];
@@ -1124,6 +1133,9 @@ closeOf(true)(still);
 assert.ok(still.classList.contains("hidden") && !still.classList.contains("closing"), "reduced motion hides at once with no exit");
 const closeFn = page.match(/function closeModal\(\) \{[\s\S]*?\n\}/)![0];
 assert.ok(closeFn.includes("closeLog()") && closeFn.includes("closeAnimated(modal)"), "the modal close clears the log state and runs the shared exit");
+// 000251: the loaded log text is the heavy part of the detail card, dropped at close so the tab
+// holds no transcript memory while the card is shut; the run cards stay mounted for the reopen
+assert.ok(closeFn.includes('getElementById("m-log-text")') && closeFn.includes('textContent = "";'), "the modal close discards the loaded log text");
 assert.ok(page.includes('onclick="closeModal()"'), "the X button uses the shared close path");
 assert.ok(page.includes('if (e.target.id === "modal") closeModal();'), "the overlay click uses the shared close path");
 assert.ok(page.includes('if (e.key === "Escape") closeModal();'), "Esc uses the shared close path");
@@ -1147,6 +1159,14 @@ assert.ok(openTaskSrc.indexOf('classList.remove("hidden")') < openTaskSrc.indexO
 assert.ok(openTaskSrc.includes('box.style.height = box.scrollHeight + "px";'), "000246: the arrival transitions to the measured content height");
 assert.ok(openTaskSrc.includes('box.style.height = "";'), "000246: the pinned height returns to auto after the grow");
 assert.ok(/if \(!d\) \{[\s\S]*?box\.style\.height = ""[\s\S]*?Task details failed to load/.test(openTaskSrc), "000246: a failed fetch unpins the modal before the error shows, so it never grows");
+// 000251: no upfront agent render from the light row (the row data carries no doctors and no
+// mounted sub boxes, so every card unmounted and remounted on the detail); the mounted cards
+// are this task's on a same-task reopen, the row clears once on a switch, and the history
+// render keeps mode so the cards mount once and stay mounted
+assert.ok(!openTaskSrc.includes("renderAgent(t)") && !openTaskSrc.includes("renderDoctor(t)"), "openTask never renders the agent or doctor rows from the light row");
+assert.ok(openTaskSrc.includes("renderAgent({})") && openTaskSrc.includes("renderDoctor({})"), "a task switch clears the stale row once, a same-task reopen keeps the mounted cards");
+assert.ok(openTaskSrc.includes("renderAgent(h, keepCards)") && openTaskSrc.includes("renderDoctor(h, keepCards)"), "the history render keeps mode, the cards mount once and stay mounted across opens");
+assert.ok(!page.includes("detailGen"), "no detail generation counter, a poll cycle never discards a just-opened task's response");
 assert.match(page, /function openLog\(handle, sub\) \{[\s\S]*?p\.classList\.remove\("closing"\);/, "openLog drops a pending close before reopening");
 // 000243: opening a log clears the previous agent's content at once and shows the loading state
 // until the init payload replaces it; a failed init fetch leaves that loading state in place,
@@ -2229,6 +2249,15 @@ const docLive = (await docDetail(docTask)).doctors[0];
 assert.equal(docLive.alive, true, "a live analysis pid marks the analysed run's doctor entry alive");
 assert.equal(docLive.status, "live", "a live doctor entry reads live, so its card spins");
 assert.ok(docLive.duration! >= 600000, "a live doctor's duration ticks with now - first, not the frozen parsed last - first");
+rmSync(join(docRoot, ".kanban", ".pids", `${docSlug}.developer.0.analysis.pid`));
+
+// 000251: a stale or recycled analysis pid file cannot flip a doctor entry alive: a dead pid
+// reads dead and a live pid whose start ticks no longer match reads dead, so the sig never
+// flips on a stale file
+writeFileSync(join(docRoot, ".kanban", ".pids", `${docSlug}.developer.0.analysis.pid`), "999999 123456");
+assert.equal((await docDetail(docTask)).doctors[0].alive, false, "a stale analysis pid file (dead pid) reads the doctor entry dead");
+writeFileSync(join(docRoot, ".kanban", ".pids", `${docSlug}.developer.0.analysis.pid`), `${process.pid} 0`);
+assert.equal((await docDetail(docTask)).doctors[0].alive, false, "a recycled analysis pid (live pid, mismatched start ticks) reads the doctor entry dead");
 rmSync(join(docRoot, ".kanban", ".pids", `${docSlug}.developer.0.analysis.pid`));
 
 // the doctor handle serves the doctor log through the same chunked payload; the handle needs the

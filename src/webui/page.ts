@@ -515,16 +515,19 @@ const detailUrl = file => "/api/task-detail?num=" + parseInt(file.slice(0, 6), 1
 const historyUrl = file => "/api/task-history?num=" + parseInt(file.slice(0, 6), 10) + projectParam();
 // 000242: the light rows carry no body or agent data, so openTask renders the shell from the row
 // and loads the heavy detail per task; every open re-fetches (no client-side cache, the 5 s poll
-// is the documented upgrade path), a superseded open's response is discarded by generation
+// is the documented upgrade path). 000251: the mounted cards are this task's on a same-task
+// reopen, so no upfront agent render clears them: the row clears once only on a task switch,
+// the history render keeps mode, and no generation counter lets a poll discard the open's
+// response (the modalFile and modal-state checks gate the writes)
 function openTask(file) {
 	const t = activeBoard().tasks.find(x => x.file === file);
 	if (!t) return;
 	closeLog();
+	const keepCards = modalFile === file;
 	modalFile = file;
 	openDetail = null;
 	writeHead(t);
-	renderAgent(t);
-	renderDoctor(t);
+	if (!keepCards) { renderAgent({}); renderDoctor({}); }
 	// the loading placeholder: the heavy blocks fill on the detail's arrival
 	const loading = '<div class="empty"><span class="spin"></span>Loading task details…</div>';
 	const el = document.getElementById("m-body");
@@ -532,6 +535,8 @@ function openTask(file) {
 	el.__html = loading;
 	// 000194: a reopen during the close drops .closing first, the pending hide must not re-run
 	const modal = document.getElementById("modal");
+	// 000251: the response guards check this, a closing modal discards them, a reopen's accepted
+	const visible = () => !modal.classList.contains("hidden") && !modal.classList.contains("closing");
 	modal.classList.remove("closing");
 	modal.classList.remove("hidden");
 	// 000209: the reset runs after the un-hide: a scrollTop write while .hidden (display: none) is discarded
@@ -553,11 +558,9 @@ function openTask(file) {
 	}
 	box.onanimationend = e => { if (e && e.target === box) { box.onanimationend = null; drawAgentRelations(); } };
 	drawAgentRelations();
-	const gen = ++detailGen;
 	fetch(detailUrl(file)).then(r => r.ok ? r.json() : null).catch(() => null).then(d => {
-		// a superseded open must not write into the new modal
-		if (gen !== detailGen || modalFile !== file) return;
-		if (document.getElementById("modal").classList.contains("hidden")) return;
+		// a superseded open or a closing modal must not write into the new view
+		if (modalFile !== file || !visible()) return;
 		if (!d) {
 			// 000246: no grow on failure, the box returns to its natural height under the error
 			box.classList.remove("grow");
@@ -567,7 +570,7 @@ function openTask(file) {
 			el.__html = html;
 			return;
 		}
-		openDetail = d;
+		openDetail = Object.assign({}, openDetail, d);
 		writeHead(d);
 		setBody(d);
 		markLiveLine();
@@ -582,13 +585,12 @@ function openTask(file) {
 		// 000248: the text is up, the heavy agent/doctor history loads in a follow-up fetch and
 		// renders when it arrives (loading state per the run cards' own lifecycle)
 		return fetch(historyUrl(file)).then(r => r.ok ? r.json() : null).catch(() => null).then(h => {
-			// a superseded open must not write into the new modal
-			if (gen !== detailGen || modalFile !== file) return;
-			if (document.getElementById("modal").classList.contains("hidden")) return;
+			// a superseded open or a closing modal must not write into the new view
+			if (modalFile !== file || !visible()) return;
 			if (!h) return;
 			openDetail = Object.assign({}, openDetail, h);
-			renderAgent(h);
-			renderDoctor(h);
+			renderAgent(h, keepCards);
+			renderDoctor(h, keepCards);
 			markLiveLine();
 			drawAgentRelations();
 		});
@@ -630,6 +632,10 @@ function closeModal() {
 	if (modal.classList.contains("hidden")) return;
 	closeLog();
 	openDetail = null;
+	// 000251: the loaded log text is the heavy part, dropped at close so the tab holds no
+	// transcript memory while the detail card is shut; the run cards stay mounted for the reopen
+	const text = document.getElementById("m-log-text");
+	if (text) text.textContent = "";
 	closeAnimated(modal);
 }
 // a stored "#<num>" ref resolved to its task on the active board: undefined when absent
@@ -657,9 +663,8 @@ function issuerCell(t) {
 // path; each run's subagent transcripts load through the same endpoint with sub=list / sub=n
 let modalFile = null;
 // 000242: the open task's detail (the heavy per-task payload), fetched on open and re-fetched by
-// the poll; detailGen discards a superseded open's response
+// the poll; 000251: no generation counter, the modalFile and modal-state checks gate the writes
 let openDetail = null;
-let detailGen = 0;
 let agentGen = 0; // bumped per renderAgent: a superseded open's sub fetches must not write
 let logTimer = null;
 let logState = null;
@@ -796,6 +801,12 @@ function renderAgent(t, keep) {
 	el.__sig = agentRowSig(runs);
 	const oldSubs = keep ? new Map() : null;
 	if (oldSubs) for (const c of el.querySelectorAll(".agent-col > .agent-card:not(.agent-doctor)")) oldSubs.set(c.dataset.handle, c.parentElement.querySelector(".agent-subs"));
+	// 000251: the doctor cards slotted inside these columns survive the rebuild: lift them out
+	// first (the innerHTML write would destroy them) and re-slot after, so the keep pass's
+	// parentElement check holds and no doctor card remounts
+	const doctorRow = document.getElementById("m-doctor");
+	const keepDocs = doctorRow.__cards || [];
+	for (const c of keepDocs) c.remove();
 	const count = {};
 	for (const a of runs) count[a.role] = (count[a.role] || 0) + 1;
 	el.innerHTML = runs.map(a =>
@@ -815,11 +826,16 @@ function renderAgent(t, keep) {
 		const box = oldSubs.get(c.querySelector(".agent-col > .agent-card").dataset.handle);
 		if (box) c.querySelector(".agent-subs").replaceWith(box);
 	}
+	for (const c of keepDocs) (doctorCol(el, c.dataset.handle) ?? doctorRow).appendChild(c);
 	markActiveAgent();
 	// the live run is the last column, so its sub list is the one re-fetched: a sub spawned after
 	// the card was opened surfaces without re-opening, past runs' lists are never re-fetched
 	if (keep) {
+		// the live run's list re-fetches for freshness; a run whose box carried over nothing (a
+		// run added while the card was shut) fetches its list too, past runs' mounted lists stay
 		if (live) fetchSubs(agentGen, live, el.querySelector(".agent-col:last-child > .agent-subs"));
+		const boxes = el.querySelectorAll(".agent-subs");
+		runs.forEach((a, i) => { if (a !== live && !boxes[i].children.length) fetchSubs(agentGen, a, boxes[i]); });
 		return;
 	}
 	// every run's subs on open, in parallel: one sub=list fetch per run handle, each list rendered
@@ -870,14 +886,23 @@ function fetchSubs(gen, a, box) {
 	fetch("/api/agent-log?file=" + encodeURIComponent(a.handle) + "&sub=list" + projectParam()).then(r => r.ok ? r.json() : []).then(list => {
 		// a superseded open must not write into the new view
 		if (gen !== agentGen || !box) return;
-		const html = (Array.isArray(list) ? list : []).map(s =>
+		const subs = Array.isArray(list) ? list : [];
+		// 000251: the gate keys on the sub set only, so a growing transcript's advancing tokens
+		// and duration never rebuild the cards; an unchanged set moves the stats lines in place
+		const sig = subs.map(s => s.index).join("|");
+		if (box.__sig === sig) {
+			const bySub = new Map([...box.querySelectorAll(".agent-card")].map(c => [c.dataset.sub, c]));
+			for (const s of subs) {
+				const card = bySub.get(String(s.index));
+				if (card) syncStatsLine(card, s.tokens, s.duration, document);
+			}
+			return;
+		}
+		const prev = box.__sig === undefined ? null : new Set([...box.querySelectorAll(".agent-card")].map((c) => c.dataset.sub));
+		box.__sig = sig;
+		const html = subs.map(s =>
 			agentCardHtml("agent-sub", 'data-handle="' + esc(a.handle) + '" data-sub="' + s.index + '"', "Sub-" + a.role, s.tokens, s.duration, "")).join("");
-		// html-gated: the keep pass re-fetches the live run's list every second, so an unchanged
-		// list never rebuilds and the sub cards' entrance never replays; only a new sub animates
-		if (box.__html === html) return;
-		const prev = box.__html === undefined ? null : new Set([...box.querySelectorAll(".agent-card")].map((c) => c.dataset.sub));
 		box.innerHTML = html;
-		box.__html = html;
 		for (const b of box.querySelectorAll(".agent-card")) {
 			b.onclick = () => openSubLog(b.dataset.handle, Number(b.dataset.sub));
 			b.onmouseenter = () => hotAgentRelations(b.dataset.handle, true);
@@ -1062,18 +1087,20 @@ function refresh() {
 }
 // 000242: the poll's detail re-fetch for the open card; a failed fetch keeps the last detail, a
 // loading modal keeps the placeholder until a cycle succeeds. 000248: the heavy history re-fetch
-// chains after the detail, the poll paces on the merged card
+// chains after the detail, the poll paces on the merged card. 000251: no generation counter, a
+// poll cycle never discards a just-opened task's response; the modalFile and modal-state checks
+// gate the writes
 function pollDetail() {
-	const gen = ++detailGen;
+	const modal = document.getElementById("modal");
 	return fetch(detailUrl(modalFile)).then(r => r.ok ? r.json() : null).catch(() => null).then(d => {
-		if (gen !== detailGen || !d || modalFile !== d.file) return;
-		if (document.getElementById("modal").classList.contains("hidden")) return;
+		if (!d || modalFile !== d.file) return;
+		if (modal.classList.contains("hidden") || modal.classList.contains("closing")) return;
 		openDetail = Object.assign({}, openDetail, d);
 		writeHead(d);
 		setBody(d);
 		return fetch(historyUrl(modalFile)).then(r => r.ok ? r.json() : null).catch(() => null).then(h => {
-			if (gen !== detailGen || !h || modalFile !== d.file) return;
-			if (document.getElementById("modal").classList.contains("hidden")) return;
+			if (!h || modalFile !== d.file) return;
+			if (modal.classList.contains("hidden") || modal.classList.contains("closing")) return;
 			openDetail = Object.assign({}, openDetail, h);
 			updateOpenTask(openDetail);
 		});
