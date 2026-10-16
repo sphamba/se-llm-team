@@ -933,10 +933,9 @@ for (const [theme, block] of [["light", lightVars], ["dark", darkVars], ["prefer
 	for (const v of ["--doctor-fg:", "--doctor-bg-strong:"]) assert.ok(block.includes(v), `the ${theme} theme block defines ${v}`);
 }
 assert.ok(!page.includes("--doctor-bg:"), "the unused --doctor-bg variable is gone from the theme blocks");
-// 000239: the light hover is near-opaque, so a hovered card stays readable against the white
-// panel; the dark hover keeps its opaque #1b1f29
-const lightHoverAlpha = Number(lightVars.match(/--hover: rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)/)?.[1]);
-assert.ok(lightHoverAlpha >= 0.9, `the light hover is near-opaque (alpha ${lightHoverAlpha}), so a hovered card stays readable against the white panel`);
+// 000240: the light hover is a near-opaque very light grey, so a hovered card stays clear
+// against the white panel; the dark hover keeps its opaque #1b1f29
+assert.ok(lightVars.includes("--hover: rgba(233, 237, 242, .95);"), `the light hover is the very light rgba(233, 237, 242, .95) (got ${lightVars.match(/--hover: [^;]+/)![0]})`);
 for (const [theme, block] of [["dark", darkVars], ["prefers-dark", mediaVars]] as const) {
 	assert.ok(block.includes("--hover: #1b1f29;"), `the ${theme} hover stays the opaque #1b1f29`);
 }
