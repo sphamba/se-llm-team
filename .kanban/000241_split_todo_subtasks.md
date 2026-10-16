@@ -1,8 +1,8 @@
 ---
 name: "feat: split to-do tasks into subtasks via a Splitter agent"
 priority: "high"
-state: "live-testing"
-worktree: "feat/241-split-todo-subtasks"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "complex"
 shortName: "split-todo-subtasks"
@@ -74,3 +74,19 @@ The Splitter (kanban tools are available to spawned agents) performs steps 1-4 a
 - Review suites: orchestrator exit 0 with 59 part sections (the earlier "55 parts" note is stale), context-symlinks exit 0 after eab7e0c, mcp/extension/plugin exit 0.
 - Open questions closed: the section held only accepted risks, not user questions. The root-SPECS.md symlink risk is settled by the decided design (Splitter at root cwd, task via the cwd symlink). The AGENTS.md-twice risk does not materialize: spawn.ts passes only the role notes as the root-cwd pi prompt, so the project AGENTS.md loads once via the cwd chain. Section deleted per guidance.
 - Re-review at eab7e0c, no new findings and no fixes: getTask is imported and the fresh re-read plus SPLITTER_COMPLEXITIES gate match the spec trigger; spawnAgent's pidName lands the guard on .pids/<slug>.splitter.pid and the sh wrapper's <name>.exit, distinct from the developer keys; liveness.ts has no splitter references, so the to-do poll path touches only the developer pid keys; promoteBacklog gates on BLOCKER_SATISFIED and openQuestions, matching the split path; ensureRoleNotes rides spawnAgent and piPrompt reads the role notes at the root cwd; parseTask still defaults a missing complexity to moderate (src/kanban.ts:178), the fact the context-symlinks pin rests on. Suites at this HEAD: orchestrator exit 0 with 59 passed sections including the five splitter parts (split, no-split, crash, linger, simple-skips), context-symlinks exit 0 after the pin, mcp/extension/plugin exit 0.
+
+## Live test (daemon e2e at eab7e0c)
+
+Method: a scratch clone at /tmp/lt241 ran the merged worktree code with an isolated HOME and a fake `agent` stub that records every spawn argv and acts by role. Poll cadence 0.05 min, rescan 1 s, backlogIdleMinutes 0. Five hand-written to-do tasks covered the acceptance. Every check ran against the real daemon spawn path, the pid and exit files, the board files, and the delivered prompts. Result: 47 checks, 0 failed.
+
+- Split path: task 900001 (moderate) spawned exactly one Splitter at the project root with no worktree. The stub split it, and the board showed subtasks 900101/900102 in to-do with issuer #900001, the inherited priority and simple complexity, and the parent in backlog with `complexity: simple` and `blockedBy: "#900101, #900102"`. Both subtasks ran the full developer, review, merge and live-test pipeline to done, then the parent re-promoted, spawned a worktree developer, and reached done.
+- No-split: the Splitter exited 0 with the note, the task kept moderate complexity, and the fallback spawned the worktree developer.
+- Crash: the Splitter exited 1. Exactly one Splitter spawn, no dead counter and no dead-without-state-update line, and the developer fallback ran.
+- Linger: over 4 s (several 1 s sweeps) the splitter pid stayed live, the task stayed in to-do, no developer spawned, and the splitter spawn count stayed 1. After the exit, one fallback developer ran.
+- Simple: no Splitter spawn at all, straight to the worktree developer.
+- Prompt delivery: the Splitter prompt equaled agents/splitter.md byte for byte (2205 bytes), and `--append-system-prompt` carried the auto-created `.kanban/AGENTS.splitter.md` notes. The root AGENTS.md stayed a real file with its content, and the root SPECS.md symlink served the task. Worktree developers still received the project AGENTS.md prompt, so the piPrompt change did not regress the other roles.
+- Config: `roles.splitter.model` reached the Splitter argv as `--model lt-splitter-model-241` with no code change.
+- Tool description: the `orchestrator_start` production export lists the Splitter role.
+
+Assumptions: the stub wrote the split result to the board files directly instead of calling the kanban tools, so the agent's own tool calls are covered only by the unit suite. Hand-written to-do task files replace the PM promote step. The 0.05 min poll and backlogIdleMinutes 0 keep the fixture fast, and the liveness state moves run in the poll, so a flow fixture with the 5 min default stalls after every agent exit (a fixture fact, not a product defect, recorded in the role notes).
+Observed, no action: the stale `.pids/<slug>.splitter.pid` and `.splitter.exit` files persist after the run, as the review notes predicted (accepted ceiling). No analysis spawn referenced a Splitter run, matching the design. No contradiction with the task's stated assumptions. No open user questions. The acceptance suites were not run (not the live-test scope).
