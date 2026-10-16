@@ -24,16 +24,37 @@ function consumeReviewerRun(root: string, slug: string): void {
 	const pid = agentPid(root, slug);
 	if (armed > 0 && armed === pid) bumpCounter(root, `${slug}.reviewer-runs`);
 }
+// moderate and complex to-do tasks meet the Splitter first: the task stays in to-do while the
+// Splitter decomposes it (or declines), and the dead splitter pid file routes the fallback to
+// the Developer below with no second splitter pass
+const SPLITTER_COMPLEXITIES = new Set(["moderate", "complex"]);
+
 function startTodo(root: string, cfg: Config, task: Task): void {
 	const slug = taskSlug(task.file);
 	// a manual to-do rewrite can land while the spawned agent still runs: the live pid is the
 	// guard, the state alone is not, or a second sweep spawns a twin that overwrites the pid file
 	if (pidAlive(agentPid(root, slug))) return;
-	const ensured = ensureWorktree(root, task);
+	// the Splitter rewrites and moves the parent mid-sweep, so the loop's snapshot can be stale:
+	// act on the file on disk, not on the snapshot, or a stale to-do call undoes the split
+	const fresh = getTask(root, task.file);
+	if (!fresh || fresh.state !== "to-do") return;
+	if (SPLITTER_COMPLEXITIES.has(fresh.complexity ?? "")) {
+		const entry = pidEntry(root, `${slug}.splitter`);
+		if (pidAlive(entry.pid, entry.disc)) return;
+		// no splitter pid file yet: the Splitter runs detached at the project root (it works the
+		// board through the kanban tools and needs no worktree), the task stays to-do
+		if (entry.pid === 0) {
+			spawnAgent(root, cfg, "splitter", fresh, root, `${slug}.splitter`);
+			return;
+		}
+		// a dead splitter pid file means the Splitter ran and left the task in to-do (a decline
+		// or a crash): fall through to the Developer, no second splitter pass
+	}
+	const ensured = ensureWorktree(root, fresh);
 	if (!ensured) return;
 	// state before spawn: the next sweep reads doing and defers, with the pid check as the belt
-	setState(root, task, "doing");
-	spawnAgent(root, cfg, "developer", { ...task, worktree: ensured.wt }, ensured.wtDir);
+	setState(root, fresh, "doing");
+	spawnAgent(root, cfg, "developer", { ...fresh, worktree: ensured.wt }, ensured.wtDir);
 }
 
 // one failed-merge marker per task: written when the sweep spawns a merger, it survives the

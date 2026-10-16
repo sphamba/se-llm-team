@@ -88,7 +88,7 @@ const roleStub = (root: string) => {
 	writeFileSync(
 		stub,
 		`#!/usr/bin/env node
-const { readFileSync, writeFileSync } = require("node:fs");
+const { readFileSync, readlinkSync, writeFileSync } = require("node:fs");
 const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 // the task comes from the cwd SPECS.md symlink, which the orchestrator re-points at spawn
@@ -96,6 +96,22 @@ const file = "SPECS.md";
 let front = "";
 try { front = readFileSync(file, "utf8"); } catch {}
 if (!front.match(/^state: /m)) process.exit(0);
+if (prompt.includes("Splitter agent")) {
+	// splitter behavior is selected by a marker in the task content: no marker is a silent
+	// no-split, so the shared parts that spawn the splitter stay unaffected
+	const num = parseInt(readlinkSync("SPECS.md").split("/").pop() ?? "", 10) || 0;
+	const priority = (front.match(/^priority: .*/m) ?? [])[0] ?? 'priority: "medium"';
+	if (front.includes("splitter-crash")) process.exit(1);
+	if (front.includes("splitter-linger")) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000);
+	if (front.includes("splitter-split")) {
+		const sub = (n) => '---\\nname: "feat: piece ' + n + '"\\n' + priority + '\\nstate: "to-do"\\nworktree: ""\\nissuer: "#' + num + '"\\ncomplexity: "simple"\\n---\\n\\n# Summary\\nPiece ' + n + ' of the split.\\n\\n# Specs\\nn/a\\n\\n# Notes\\n';
+		writeFileSync(".kanban/999001_piece_one.md", sub("one"));
+		writeFileSync(".kanban/999002_piece_two.md", sub("two"));
+		const parent = front.replace(/^state: .*/m, 'state: "backlog"').replace(/^complexity: .*/m, 'complexity: "simple"').replace(/\\n---\\n/, '\\nblockedBy: "#999001, #999002"\\n---\\n');
+		writeFileSync("SPECS.md", parent);
+	}
+	process.exit(0);
+}
 if (prompt.includes("Developer agent")) {
 	// emit JSONL only when spawned with --mode json, print-mode final text otherwise, so the
 	// developer-log assertion below actually verifies the orchestrator's spawn args
@@ -113,7 +129,10 @@ if (prompt.includes("Developer agent")) {
 	} else {
 		process.stdout.write("final text only\\n");
 	}
-	writeFileSync("code.txt", "work\\n");
+	// one file per task: two branches that add the same path hit add/add conflicts or a commit
+	// dropped as already-applied in the merge lane
+	const workFile = readlinkSync("SPECS.md").split("/").pop().replace(/\\.md$/, "") + ".txt";
+	writeFileSync(workFile, "work\\n");
 	execSync("git add -A && git commit -qm work", { stdio: "ignore" });
 }
 if (prompt.includes("Merger agent")) {
@@ -736,7 +755,7 @@ cleaned.push(rootI);
 mkdirSync(kanbanDir(rootI), { recursive: true });
 // missing executable: sh spawns fine and records exit 127 in the exit file
 writeFileSync(join(kanbanDir(rootI), "se-llm-team.json"), JSON.stringify({ agent: join(rootI, "missing-agent"), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
-const taskI = createTask(rootI, { name: "fix: failed spawn", summary: "Missing agent smoke", specs: "n/a" });
+const taskI = createTask(rootI, { name: "fix: failed spawn", summary: "Missing agent smoke", specs: "n/a", complexity: "simple" });
 setState(rootI, taskI, "to-do");
 
 const hi = await runDaemon(rootI);
@@ -2768,7 +2787,7 @@ setInterval(() => {
 );
 chmodSync(fakeAQ, 0o755);
 writeFileSync(join(kanbanDir(rootAQ), "se-llm-team.json"), JSON.stringify({ agent: fakeAQ, pollMinutes: 0.01, backlogIdleMinutes: 0 }));
-const taskAQ = createTask(rootAQ, { name: "fix: survive restart", summary: "Restart survival smoke", specs: "n/a" });
+const taskAQ = createTask(rootAQ, { name: "fix: survive restart", summary: "Restart survival smoke", specs: "n/a", complexity: "simple" });
 setState(rootAQ, taskAQ, "to-do");
 const slugAQ = taskAQ.file.replace(/\.md$/, "");
 const logAQ = join(kanbanDir(rootAQ), ".logs", `${slugAQ}.developer.0.log`);
@@ -3681,7 +3700,7 @@ appendFileSync(${JSON.stringify(join(rootAX, "argv.log"))}, JSON.stringify({ arg
 );
 chmodSync(stubAX, 0o755);
 cfgAX.agent = stubAX;
-const taskAX = createTask(rootAX, { name: "feat: agents injection", summary: "Injection smoke", specs: "n/a" });
+const taskAX = createTask(rootAX, { name: "feat: agents injection", summary: "Injection smoke", specs: "n/a", complexity: "simple" });
 setState(rootAX, taskAX, "to-do");
 rescan(rootAX, cfgAX);
 const wtAX = join(rootAX, ".worktrees", parseTask(rootAX, taskAX.file).worktree);
@@ -3698,7 +3717,7 @@ assert.equal(axSpawn.argv[promptIdx + 1], projectPromptAX, "the project AGENTS.m
 // at the cap the injection still rides as one argv element and the spawn works (the real kernel argv limit)
 writeFileSync(join(rootAX, "AGENTS.md"), "x".repeat(131_000));
 const beforeAX0 = axArgv().length;
-const taskAX0 = createTask(rootAX, { name: "feat: agents cap edge", summary: "Injection edge smoke", specs: "n/a" });
+const taskAX0 = createTask(rootAX, { name: "feat: agents cap edge", summary: "Injection edge smoke", specs: "n/a", complexity: "simple" });
 setState(rootAX, taskAX0, "to-do");
 rescan(rootAX, cfgAX);
 await waitFor(() => axArgv().length > beforeAX0, 10000, "the at-cap stub recorded its argv", () => "");
@@ -3709,7 +3728,7 @@ assert.equal(axSpawn0.argv[promptIdx0 + 1].length, 131_000, "a 131,000-byte prom
 // over the cap the injection skips with one warning line and the spawn continues
 writeFileSync(join(rootAX, "AGENTS.md"), "x".repeat(131_001));
 const beforeAX = axArgv().length;
-const taskAX2 = createTask(rootAX, { name: "feat: agents cap", summary: "Injection cap smoke", specs: "n/a" });
+const taskAX2 = createTask(rootAX, { name: "feat: agents cap", summary: "Injection cap smoke", specs: "n/a", complexity: "simple" });
 setState(rootAX, taskAX2, "to-do");
 rescan(rootAX, cfgAX);
 await waitFor(() => axArgv().length > beforeAX, 10000, "the capped stub recorded its argv", () => "");
@@ -3764,7 +3783,7 @@ appendFileSync(${JSON.stringify(join(rootAY, "argv.log"))}, JSON.stringify({ arg
 	const projectPromptAY = "# project instructions: claude backend\n";
 	writeFileSync(join(rootAY, "AGENTS.md"), projectPromptAY);
 	const spawnAY = () => {
-		const task = createTask(rootAY, { name: "feat: claude spawn", summary: "Claude backend smoke", specs: "n/a" });
+		const task = createTask(rootAY, { name: "feat: claude spawn", summary: "Claude backend smoke", specs: "n/a", complexity: "simple" });
 		setState(rootAY, task, "to-do");
 		const before = argvAY().length;
 		rescan(rootAY, cfgAY);
@@ -3800,7 +3819,7 @@ appendFileSync(${JSON.stringify(join(rootAY, "argv.log"))}, JSON.stringify({ arg
 		writeFileSync(cfgFile, JSON.stringify({ agent: stubAY, thinking }));
 		const cfgCase = loadConfig(rootAY, "claude");
 		const spawnCase = await (async () => {
-			const task = createTask(rootAY, { name: `feat: claude effort ${thinking}`, summary: "Effort mapping smoke", specs: "n/a" });
+			const task = createTask(rootAY, { name: `feat: claude effort ${thinking}`, summary: "Effort mapping smoke", specs: "n/a", complexity: "simple" });
 			setState(rootAY, task, "to-do");
 			const before = argvAY().length;
 			rescan(rootAY, cfgCase);
@@ -3813,7 +3832,7 @@ appendFileSync(${JSON.stringify(join(rootAY, "argv.log"))}, JSON.stringify({ arg
 	// over the 131,000-byte cap the project part skips with a warning; the role notes still ride
 	writeFileSync(join(rootAY, "AGENTS.md"), "x".repeat(131_001));
 	const capSpawn = await (async () => {
-		const task = createTask(rootAY, { name: "feat: claude cap", summary: "Cap smoke", specs: "n/a" });
+		const task = createTask(rootAY, { name: "feat: claude cap", summary: "Cap smoke", specs: "n/a", complexity: "simple" });
 		setState(rootAY, task, "to-do");
 		const before = argvAY().length;
 		rescan(rootAY, cfgAY);
@@ -3869,3 +3888,105 @@ assert.equal(pipedAZ.trim().split("\n").length, 2, "a piped stdout keeps the ech
 assert.equal(readFileSync(logAZ, "utf8").trim().split("\n").length, 2, "and the file still gets one line per call");
 rmSync(rootAZ, { recursive: true, force: true });
 console.log("orchestrator.test.ts: ... + single orchestrator log write passed");
+
+// --- part BA: the split path. A moderate to-do task whose Splitter stub splits: two subtasks
+// land in to-do, the parent moves to backlog with the subtask refs in blockedBy and complexity
+// simple, and re-promotes once the stubbed subtasks complete ---
+const rootBA = fixture();
+cleaned.push(rootBA);
+mkdirSync(join(kanbanDir(rootBA), ".logs"), { recursive: true });
+writeFileSync(join(kanbanDir(rootBA), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootBA), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+const taskBA = createTask(rootBA, { name: "feat: split me", summary: "Splitter split smoke", specs: "splitter-split" });
+setState(rootBA, taskBA, "to-do");
+const ba = await runDaemon(rootBA);
+const filesBA = ["999001_piece_one.md", "999002_piece_two.md"];
+const subBA = (f: string) => {
+	try {
+		return parseTask(rootBA, f);
+	} catch {
+		return undefined;
+	}
+};
+await waitFor(
+	() => filesBA.every((f) => subBA(f)?.state === "to-do") && parseTask(rootBA, taskBA.file).state === "backlog",
+	30000,
+	"the splitter split the parent into to-do subtasks",
+	ba.output,
+);
+assert.ok(ba.output().includes("spawned splitter"), "the splitter ran");
+const parentBA = parseTask(rootBA, taskBA.file);
+assert.equal(parentBA.blockedBy, "#999001, #999002", "the parent blocks on the two subtask refs");
+assert.equal(parentBA.complexity, "simple", "the parent's complexity dropped to simple");
+assert.equal(subBA(filesBA[0])?.issuer, `#${taskNum(taskBA.file)}`, "the subtask issuer is the parent number");
+// the subtasks run as developers (simple path) and finish; the parent re-promotes once both are done
+await waitFor(() => parseTask(rootBA, taskBA.file).state === "done", 90000, "the parent re-promoted and finished after the subtasks", ba.output);
+ba.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + splitter split path smoke passed");
+
+// --- part BB: the no-split path. A moderate to-do task whose Splitter stub declines: the
+// splitter exits 0 without touching state, and the orchestrator starts the Developer ---
+const rootBB = fixture();
+cleaned.push(rootBB);
+mkdirSync(join(kanbanDir(rootBB), ".logs"), { recursive: true });
+writeFileSync(join(kanbanDir(rootBB), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootBB), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+const taskBB = createTask(rootBB, { name: "feat: no split", summary: "Splitter no-split smoke", specs: "splitter-nosplit" });
+setState(rootBB, taskBB, "to-do");
+const bb = await runDaemon(rootBB);
+await waitFor(() => parseTask(rootBB, taskBB.file).state === "done", 90000, "the no-split task finished via the developer", bb.output);
+const bbOut = bb.output();
+assert.ok(bbOut.includes("spawned splitter"), "the splitter ran first");
+assert.equal(bbOut.split("spawned splitter").length - 1, 1, "exactly one splitter spawn");
+assert.ok(bbOut.includes("spawned developer"), "the developer followed the no-split exit");
+assert.equal(parseTask(rootBB, taskBB.file).complexity, "moderate", "the no-split task keeps its complexity");
+bb.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + splitter no-split path smoke passed");
+
+// --- part BC: a crashed splitter (exit 1) leaves the task in to-do: the dead splitter pid
+// file routes the next sweep straight to the Developer, with no second splitter spawn and no
+// dead-counter bump ---
+const rootBC = fixture();
+cleaned.push(rootBC);
+mkdirSync(join(kanbanDir(rootBC), ".logs"), { recursive: true });
+writeFileSync(join(kanbanDir(rootBC), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootBC), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+const taskBC = createTask(rootBC, { name: "feat: splitter crash", summary: "Splitter crash smoke", specs: "splitter-crash" });
+setState(rootBC, taskBC, "to-do");
+const bc = await runDaemon(rootBC);
+await waitFor(() => parseTask(rootBC, taskBC.file).state === "done", 90000, "the crashed splitter fell back to the developer", bc.output);
+const bcOut = bc.output();
+assert.equal(bcOut.split("spawned splitter").length - 1, 1, "exactly one splitter spawn, no respawn after the crash");
+assert.ok(bcOut.includes("spawned developer"), "the developer followed the crash");
+assert.ok(!existsSync(join(kanbanDir(rootBC), ".logs", `${taskBC.file.replace(/\.md$/, "")}.dead.count`)), "the splitter crash bumped no dead counter");
+bc.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + crashed splitter fallback smoke passed");
+
+// --- part BD: no double spawn while the Splitter pid is alive. The splitter stub lingers
+// 3 s: the next sweep sees the live pid and defers, and only the exit routes the task on ---
+const rootBD = fixture();
+cleaned.push(rootBD);
+mkdirSync(join(kanbanDir(rootBD), ".logs"), { recursive: true });
+writeFileSync(join(kanbanDir(rootBD), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootBD), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+const taskBD = createTask(rootBD, { name: "feat: splitter lingers", summary: "Splitter linger smoke", specs: "splitter-linger" });
+setState(rootBD, taskBD, "to-do");
+const bd = await runDaemon(rootBD);
+await waitFor(() => bd.output().includes("spawned splitter"), 30000, "the splitter spawned", bd.output);
+await new Promise((r) => setTimeout(r, 400));
+const bdOut = bd.output();
+assert.equal(bdOut.split("spawned splitter").length - 1, 1, "one splitter spawn while it lingers, no second");
+assert.equal(parseTask(rootBD, taskBD.file).state, "to-do", "the task stays in to-do while the splitter runs");
+await waitFor(() => parseTask(rootBD, taskBD.file).state === "done", 90000, "the lingered splitter fell through to the developer", bd.output);
+assert.equal(bd.output().split("spawned splitter").length - 1, 1, "still one splitter spawn after the fallback");
+bd.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + splitter linger guard smoke passed");
+
+// --- part BE: a simple task never meets the Splitter: straight to the Developer ---
+const rootBE = fixture();
+cleaned.push(rootBE);
+mkdirSync(join(kanbanDir(rootBE), ".logs"), { recursive: true });
+writeFileSync(join(kanbanDir(rootBE), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootBE), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+const taskBE = createTask(rootBE, { name: "fix: simple path", summary: "Simple path smoke", specs: "n/a", complexity: "simple" });
+setState(rootBE, taskBE, "to-do");
+const be = await runDaemon(rootBE);
+await waitFor(() => parseTask(rootBE, taskBE.file).state === "done", 90000, "the simple task finished", be.output);
+assert.equal(be.output().split("spawned splitter").length - 1, 0, "no splitter spawn for a simple task");
+be.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + simple task skips the splitter smoke passed");

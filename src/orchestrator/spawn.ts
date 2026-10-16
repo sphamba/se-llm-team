@@ -32,11 +32,25 @@ export function ensureRoleNotes(root: string, role: string): string {
 	return path;
 }
 
+// the role notes content, or null when the file is missing or empty
+function readRoleNotes(root: string, role: string): string | null {
+	try {
+		const notes = readFileSync(roleNotesPath(root, role), "utf8");
+		return notes.trim() ? notes : null;
+	} catch {
+		return null;
+	}
+}
+
 // the two cwd context symlinks the agent session reads at startup: SPECS.md is the task file
 // through the linked board, AGENTS.md the role's notes. Re-pointed at every spawn so the
 // correct role guidance loads (idempotent: a matching link stays untouched)
 export function ensureContextSymlinks(root: string, cwd: string, taskFile: string, role: string): void {
 	repointContextSymlink(root, join(cwd, "SPECS.md"), join(".kanban", taskFile));
+	// the Splitter runs at the project root, where a role-notes symlink would shadow the
+	// project's own AGENTS.md and poison the projectAgentsPrompt read of every later spawn:
+	// no AGENTS.md link at the root, the notes ride the appended system prompt instead
+	if (cwd === root) return;
 	// a target project's own tracked AGENTS.md sits where the role-notes symlink must go:
 	// skip-worktree hides the replacement from git status (an untracked file cannot be marked;
 	// the failure is ignored), then the symlink replaces it
@@ -173,13 +187,8 @@ export function clearExitFile(root: string, name: string): void {
 // pi's inline injection, so the project part keeps the same cap policy as pi and skips with
 // a warning above it. Overwritten at every spawn, so stale content never survives
 function claudeSystemPromptFile(root: string, name: string, role: string, projectPrompt: string | null): string | null {
-	let notes = "";
-	try {
-		notes = readFileSync(roleNotesPath(root, role), "utf8");
-	} catch {
-		/* no role notes yet: the project part alone */
-	}
-	if (!projectPrompt && !notes.trim()) return null;
+	const notes = readRoleNotes(root, role);
+	if (!projectPrompt && !notes) return null;
 	const path = join(kanbanDir(root), ".pids", `${name}.system-prompt.md`);
 	writeFileSync(path, [projectPrompt, notes].filter((part) => part && part.trim()).join("\n\n") + "\n");
 	return path;
@@ -203,8 +212,11 @@ export function spawnAgent(root: string, cfg: Config, role: string, task: Task, 
 	// hide both context paths from git status, so a blanket git add never commits them
 	ensureInfoExclude(root, cwd);
 	// the project's own AGENTS.md rides as an appended system prompt: the cwd AGENTS.md is the
-	// role-notes symlink, so the project's own instructions would otherwise never load
+	// role-notes symlink, so the project's own instructions would otherwise never load. At the
+	// project root (the Splitter) there is no AGENTS.md symlink: pi's cwd chain loads the
+	// project's own file, so only the role notes ride the appended element
 	const projectPrompt = projectAgentsPrompt(root);
+	const piPrompt = cwd === root ? readRoleNotes(root, role) : projectPrompt;
 	// per-backend argv from the resolved provider/model/thinking triple: pi keeps the
 	// byte-identical pre-backend construction (--approve, --mode json, the inline
 	// --append-system-prompt), claude swaps in bypassPermissions and stream-json and carries
@@ -213,7 +225,7 @@ export function spawnAgent(root: string, cfg: Config, role: string, task: Task, 
 	const prompt = renderPrompt(root, role);
 	const agentArgs = cfg.backend === "claude"
 		? claudeSpawnArgs(llm, prompt, claudeSystemPromptFile(root, name, role, projectPrompt))
-		: piSpawnArgs(llm, projectPrompt, prompt);
+		: piSpawnArgs(llm, piPrompt, prompt);
 	// the sh wrapper runs the agent and records its exit code into <name>.exit, so the poll can
 	// tell a successful finish (exit 0) from a crash even after a daemon restart. The agent
 	// command travels as positional args ($1..), so paths with spaces stay safe; $0 is a dummy
