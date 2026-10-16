@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { createServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
-import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -3835,3 +3835,37 @@ appendFileSync(${JSON.stringify(join(rootAY, "argv.log"))}, JSON.stringify({ arg
 }
 cleanupAll(rootAY);
 console.log("orchestrator.test.ts: ... + claude backend spawn smoke passed");
+
+// --- part AZ (#233): the detached daemon's stdout is the log file itself (orchestrator_start
+// spawns with stdio ["ignore", log, log]), so log()'s unconditional stdout echo appended
+// every line a second time. The echo is skipped only when stdout is that same file; a pipe
+// (a test harness, a foreground tee) still receives it ---
+const rootAZ = mkdtempSync(join(tmpdir(), "orch-log-"));
+const logsAZ = join(kanbanDir(rootAZ), ".logs");
+mkdirSync(logsAZ, { recursive: true });
+const logAZ = join(logsAZ, "orchestrator.log");
+const logModuleAZ = join(HERE, "../src/orchestrator/log.ts");
+const logCodeAZ = `import { log } from ${JSON.stringify(logModuleAZ)}; log(${JSON.stringify(rootAZ)}, "az first line"); log(${JSON.stringify(rootAZ)}, "az second line");`;
+const logChildAZ = (stdio: (string | number)[]) =>
+	new Promise<string>((resolve) => {
+		const child = spawn(process.execPath, ["--input-type=module", "-e", logCodeAZ], { stdio });
+		let out = "";
+		child.stdout?.on("data", (d) => (out += d));
+		child.on("exit", () => resolve(out));
+	});
+// the detached daemon shape: stdout IS the log file (orchestrator_start's stdio ["ignore", log, log])
+const logFdAZ = openSync(logAZ, "a");
+await logChildAZ(["ignore", logFdAZ, "ignore"]);
+closeSync(logFdAZ);
+const logLinesAZ = readFileSync(logAZ, "utf8").trim().split("\n");
+assert.equal(logLinesAZ.length, 2, "stdout pointing at the log file writes each line once");
+for (const message of ["az first line", "az second line"]) {
+	assert.equal(logLinesAZ.filter((l) => l.includes(message)).length, 1, `exactly one line for "${message}"`);
+}
+// a piped stdout is not the log file: the echo is kept (foreground and test visibility)
+writeFileSync(logAZ, "");
+const pipedAZ = await logChildAZ(["ignore", "pipe", "ignore"]);
+assert.equal(pipedAZ.trim().split("\n").length, 2, "a piped stdout keeps the echo");
+assert.equal(readFileSync(logAZ, "utf8").trim().split("\n").length, 2, "and the file still gets one line per call");
+rmSync(rootAZ, { recursive: true, force: true });
+console.log("orchestrator.test.ts: ... + single orchestrator log write passed");

@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, fstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { kanbanDir } from "../kanban.ts";
@@ -34,11 +34,25 @@ export function newestRunRole(root: string, slug: string): string | null {
 	return best ? best.role : null;
 }
 
+// stdout and the log file can be the same open file: orchestrator_start spawns the daemon
+// with stdio ["ignore", log, log], so an unconditional stdout echo would write every line
+// twice. Echo only when stdout is a different file (a terminal, a pipe, a test harness) ---
+function stdoutIsLog(logFile: string): boolean {
+	try {
+		const out = fstatSync(1);
+		const file = statSync(logFile);
+		return out.dev === file.dev && out.ino === file.ino;
+	} catch {
+		return false; // unresolvable: keep the echo, the file append already carries the line
+	}
+}
+
 export function log(root: string, message: string): void {
 	mkdirSync(join(kanbanDir(root), ".logs"), { recursive: true });
 	const line = `[${new Date().toISOString()}] ${message}`;
-	appendFileSync(logPath(root, "orchestrator"), line + "\n");
-	process.stdout.write(line + "\n");
+	const file = logPath(root, "orchestrator");
+	appendFileSync(file, line + "\n");
+	if (!stdoutIsLog(file)) process.stdout.write(line + "\n");
 }
 
 export function readCounter(root: string, name: string): number {
