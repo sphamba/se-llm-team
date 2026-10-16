@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, PRIORITY_RANK, setState } from "../src/kanban.ts";
 import { startHub } from "../src/hub.ts";
-import { agentLabel, agentRowSig, agentStatsText, agentLogPayload, boardOf, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, tabNames, tabsHtml, taskPayload, taskStats } from "../src/webui.ts";
+import { agentLabel, agentRowSig, agentStatsText, agentLogPayload, boardOf, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, loadWebUiConfig, LOG_LINES, logFixups, md, mergeBoards, numLinkHtml, pairLayout, refreshMs, relationPaths, renderLogChunk, spinnerHtml, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, tabNames, tabsHtml, taskDetail, taskStats } from "../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the logpane module
 import { esc, LOG_ROLES } from "../src/webui/logpane.ts";
 import { gzipSync } from "node:zlib";
@@ -333,7 +333,28 @@ assert.equal(listed[0].issuer, "user", "absent issuer reads as user");
 assert.equal(listed[0].blockedBy, "", "absent blockedBy reads as an empty string");
 assert.equal(listed[0].complexity, "moderate");
 assert.equal(listed[0].updated, statSync(join(root, ".kanban", task.file)).mtimeMs);
-assert.match(listed[0].body, /# Summary\nDashboard smoke/);
+// 000242 the light list: rows carry identity + summary only, what the board renderer and the row
+// click need; the heavy body, sections and agent history load per task through /api/task-detail
+for (const k of ["body", "specs", "notes", "openQuestions", "agents", "agent", "doctors"])
+	assert.ok(!(k in listed[0]), `light rows carry no ${k}`);
+assert.equal(listed[0].num, parseInt(task.file, 10), "light rows carry the task num");
+assert.equal(listed[0].summary, "Dashboard smoke");
+const detail = await (await fetch(`${base}/api/task-detail?num=${parseInt(task.file, 10)}`)).json();
+assert.equal(detail.file, task.file);
+assert.equal(detail.num, parseInt(task.file, 10));
+assert.equal(detail.summary, "Dashboard smoke");
+assert.equal(detail.specs, "Render the board");
+assert.equal(detail.notes, "");
+assert.equal(detail.openQuestions, "");
+assert.match(detail.body, /# Summary\nDashboard smoke/);
+assert.deepEqual(detail.agents, [], "the detail carries the agent history, empty without role logs");
+assert.equal(detail.agent, null);
+assert.deepEqual(detail.doctors, []);
+// unknown num: 404 with a JSON error body
+assert.equal((await fetch(`${base}/api/task-detail?num=999999`)).status, 404, "an unknown num is rejected");
+assert.equal((await fetch(`${base}/api/task-detail?num=x`)).status, 404, "a non-numeric num is rejected");
+assert.equal((await fetch(`${base}/api/task-detail`)).status, 404, "a missing num is rejected too");
+assert.ok((await (await fetch(`${base}/api/task-detail?num=999999`)).json()).error, "the 404 carries a JSON error body");
 
 // issuer flows to /api/tasks: the creation value for task-issued tasks
 const issued = createTask(root, { name: "feat: issued by 42", summary: "s", issuer: "#42" });
@@ -754,14 +775,14 @@ assert.ok(modalZ && relationsZ && Number(modalZ) > Number(relationsZ), "the #mod
 assert.ok(modalZ && cardZ && Number(modalZ) > Number(cardZ), "the #modal bumps above the z-index-2 task cards (000124)");
 assert.ok(page.includes("render(true); // no FLIP across boards"), "a tab switch never flips from the other board's layout");
 assert.ok(page.includes("Promise.all(projects.map(t => fetch(url(t))"), "every tab polls each cycle");
-assert.ok(page.includes("setTimeout(refresh, refreshMs(open))"), "the poll chains, the next tick keyed on the fresh open card's cadence");
+assert.ok(page.includes("setTimeout(refresh, refreshMs(openDetail))"), "the poll chains, the next tick keyed on the fresh open card's cadence");
 assert.ok(page.includes(".catch(() => setTimeout(refresh, 5000))"), "a failed cycle retries at the board cadence");
 // 000235: a throttled tab's delayed tick would land a full cadence after the wake; the client
 // cancels it and refreshes at once when the gap exceeds twice the last scheduled cadence
 assert.ok(page.includes("let pollTimer = null"), "the client tracks the pending poll timer");
 assert.ok(page.includes("lastReload = Date.now()"), "a served board stamps the reload time");
 assert.match(page, /if \(current && current\[1\]\) \{\s*document\.getElementById\("updated"\)\.textContent[\s\S]*?lastReload = Date\.now\(\);/, "the reload stamp lands with the updated line, only for a served board");
-assert.ok(page.includes("lastDelay = refreshMs(open)"), "the tick's cadence is kept as lastDelay");
+assert.ok(page.includes("lastDelay = refreshMs(openDetail)"), "the tick's cadence is kept as lastDelay");
 assert.ok(page.includes(".catch(() => setTimeout(refresh, 5000)).then(t => { pollTimer = t; })"), "the failed-cycle retry timer is tracked too, so a wake cancels it");
 assert.match(page, /addEventListener\("visibilitychange", \(\) => \{[\s\S]*?document\.visibilityState !== "visible"[\s\S]*?Date\.now\(\) - lastReload <= 2 \* lastDelay[\s\S]*?clearTimeout\(pollTimer\);[\s\S]*?refresh\(\);/, "a wake past twice the last cadence cancels the pending tick and refreshes at once");
 assert.ok(page.includes('(active ? "&project=" + encodeURIComponent(active) : "")'), "agent-log polls carry the active tab's project");
@@ -800,8 +821,8 @@ assert.ok(
 );
 
 // agent info: null for a backlog task; populated for a working task with a live pid
-assert.equal(listed[0].agent, null);
-assert.deepEqual(listed[0].agents, [], "no role logs yet, empty agent history");
+assert.equal(detail.agent, null);
+assert.deepEqual(detail.agents, [], "no role logs yet, empty agent history");
 assert.ok(page.includes('id="m-agent"'), "modal has the agent area");
 assert.ok(!page.includes("<div><span>name</span>"), "the detail card drops the name attribute row the title already shows");
 assert.ok(page.includes('"<div><span>issuer</span>" + issuerCell(t) + "</div>"'), "the detail card shows the issuer row");
@@ -888,7 +909,8 @@ assert.ok(page.includes("syncBoard(cols, tab.tasks, tab.expanded, cardEls, makeC
 // 000121: the 5 s refresh re-derives the open detail card in place: title and attrs freely, the
 // body html-gated, the run cards re-rendered without touching the log pane or its state
 const upd = page.match(/function updateOpenTask\(t\) \{[\s\S]*?\n\}/)![0];
-assert.ok(page.includes("if (open) updateOpenTask(open); else closeModal();"), "the refresh updates the open card in place and closes it when its task is gone");
+assert.ok(page.includes("if (!open) closeModal();"), "the refresh closes the open card when its task is gone");
+assert.ok(page.includes("function pollDetail()"), "000242: the poll re-fetches the open task's detail, the light rows carry no agent data");
 assert.ok(upd.includes("writeHead(t)") && upd.includes("renderAgent(t, true)") && upd.includes("setBody(t)"), "the refresh re-derives title, attrs, agent row and body from the fresh payload");
 assert.ok(!upd.includes("closeLog") && !upd.includes("logState"), "the refresh path never touches the log pane, logState or the log timer");
 assert.ok(page.includes('<div id="m-agent"><svg id="agent-relations"></svg><div id="m-agent-btns"></div><div id="m-doctor"></div><div id="m-log-meta" class="hidden"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>'), "000154: the meta line ships as a sibling above the log pane, hidden until a payload carries meta; 000222 adds the doctor row between the run columns and the meta line; 000237 ships the relation SVG as the agent area's first child");
@@ -986,8 +1008,8 @@ const markOf = (children: ShineEl[], opts: { alive?: boolean; hidden?: boolean; 
 	container.children = children;
 	const pane = new ShineEl("div");
 	if (opts.hidden) pane.className = "hidden";
-	const mark = new Function("activeBoard", "modalFile", "logPane", "logState", "document", page.match(/function markLiveLine\(\) \{[\s\S]*?\n\}/)![0] + "; return markLiveLine;")(
-		() => ({ tasks: [{ file: "t.md", agents: [{ handle: "h", alive: opts.alive !== false }] }] }),
+	const mark = new Function("openDetail", "modalFile", "logPane", "logState", "document", page.match(/function markLiveLine\(\) \{[\s\S]*?\n\}/)![0] + "; return markLiveLine;")(
+		{ file: "t.md", agents: [{ handle: "h", alive: opts.alive !== false }] },
 		"t.md",
 		() => pane,
 		{ handle: opts.handle ?? "h" },
@@ -1081,6 +1103,8 @@ assert.ok(page.includes('modal.classList.remove("closing");'), "openTask drops a
 // scrollTop write while the modal is display: none is discarded and the old offset returns on show
 const openTaskSrc = page.match(/function openTask\(file\) \{[\s\S]*?\n\}/)![0];
 assert.ok(openTaskSrc.indexOf('classList.remove("hidden")') < openTaskSrc.indexOf("scrollTop = 0"), "openTask resets the scroll after the un-hide, so every open (same-task reopen included) shows the top");
+assert.ok(openTaskSrc.includes("fetch(detailUrl(file))"), "000242: openTask fetches the per-task detail");
+assert.ok(openTaskSrc.includes("Loading task details"), "000242: openTask shows a loading placeholder while the detail fetch runs");
 assert.match(page, /function openLog\(handle, sub\) \{[\s\S]*?p\.classList\.remove\("closing"\);/, "openLog drops a pending close before reopening");
 // 000243: opening a log clears the previous agent's content at once and shows the loading state
 // until the init payload replaces it; a failed init fetch leaves that loading state in place,
@@ -1425,7 +1449,9 @@ mkdirSync(join(root, ".kanban", ".logs"), { recursive: true });
 const logFile = join(root, ".kanban", ".logs", `${slug}.developer.log`);
 const logText = Array.from({ length: 350 }, () => "H".repeat(63) + "\n").join(""); // 64-byte lines: far under the old byte chunk, so the collapsed-line cap is what pages
 writeFileSync(logFile, logText);
-const working = (await (await fetch(`${base}/api/tasks`)).json())[0];
+// 000242: the agent history lives on the per-task detail, never the light /api/tasks rows
+const detailOf = async (f: string) => (await (await fetch(`${base}/api/task-detail?num=${parseInt(f, 10)}`)).json());
+const working = await detailOf(task.file);
 assert.deepEqual(working.agent, { role: "developer", alive: true, log: `${slug}.developer` });
 assert.deepEqual(working.agents, [{ role: "developer", run: null, alive: true, status: "live", handle: `${slug}.developer`, tokens: null, duration: null }], "legacy role log, live agent only, no stats in a non-JSON log");
 
@@ -1435,7 +1461,7 @@ assert.deepEqual(working.agents, [{ role: "developer", run: null, alive: true, s
 writeFileSync(join(root, ".kanban", ".logs", `${slug}.developer.0.log`), "run zero\n");
 writeFileSync(join(root, ".kanban", ".logs", `${slug}.developer.0.dead`), "424242\n");
 writeFileSync(join(root, ".kanban", ".logs", `${slug}.developer.1.log`), "run one\n");
-const marked = (await (await fetch(`${base}/api/tasks`)).json())[0];
+const marked = await detailOf(task.file);
 assert.deepEqual(
 	marked.agents.map((a) => [a.run, a.status]),
 	[[null, "ok"], [0, "dead"], [1, "live"]],
@@ -1481,7 +1507,7 @@ assert.equal((await fetch(`${base}/api/agent-log`)).status, 404);
 
 // a past role log lists as a dead agent and streams through the same endpoint
 writeFileSync(join(root, ".kanban", ".logs", `${slug}.reviewer.log`), "REVIEW\n");
-const past = (await (await fetch(`${base}/api/tasks`)).json())[0];
+const past = await detailOf(task.file);
 assert.deepEqual(
 	past.agents,
 	[
@@ -1495,7 +1521,7 @@ assert.equal(reviewerLog.text, "REVIEW\n");
 
 // a stale pid file reports the agent as not alive
 writeFileSync(join(root, ".kanban", ".pids", `${slug}.pid`), "999999999");
-const stale = (await (await fetch(`${base}/api/tasks`)).json())[0];
+const stale = await detailOf(task.file);
 assert.equal(stale.agent.alive, false);
 assert.deepEqual(
 	stale.agents,
@@ -1535,7 +1561,7 @@ const clearedLog = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json
 assert.equal(clearedLog.model, null, "a latest usage-bearing record without a model clears the meta's model");
 assert.equal(clearedLog.thinkingLevel, null, "a latest usage-bearing record without a thinking level clears it too");
 // 000177: the card tokens sum input + output over the records, cacheRead/cacheWrite excluded
-const tokenEntry = (await (await fetch(`${base}/api/tasks`)).json())[0].agents.find((a) => a.handle === `${slug}.developer`);
+const tokenEntry = (await detailOf(task.file)).agents.find((a) => a.handle === `${slug}.developer`);
 assert.equal(tokenEntry.tokens, 300, "the card tokens sum input + output across the records, cache excluded");
 
 // 000158: an unterminated tail record (an agent mid-write) is not a line yet: init counts
@@ -1648,7 +1674,7 @@ writeFileSync(logFile, [
 	JSON.stringify({ type: "assistant", parent_tool_use_id: null, message: { role: "assistant", model: "claude-opus-4-6", id: "msg_2", content: [{ type: "text", text: "b" }], usage: { input_tokens: 10, output_tokens: 20 } } }),
 	JSON.stringify({ type: "result", subtype: "success", is_error: false, duration_ms: 4321, result: "done", usage: { input_tokens: 40, output_tokens: 90 } }),
 ].join("\n") + "\n");
-const claudeEntry = (await (await fetch(`${base}/api/tasks`)).json())[0].agents.find((a) => a.handle === `${slug}.developer`);
+const claudeEntry = (await detailOf(task.file)).agents.find((a) => a.handle === `${slug}.developer`);
 assert.equal(claudeEntry.tokens, 130, "the repeated msg_1 counts once and cache_read_input_tokens stays excluded");
 assert.equal(claudeEntry.duration, 4321, "the result record's wall-clock duration wins over the record-timestamp difference");
 assert.equal((await (await fetch(`${base}/api/agent-log?file=${enc}`)).json()).model, "claude-opus-4-6", "the meta's model comes off the latest usage-bearing record even without a timestamp");
@@ -1773,7 +1799,7 @@ at(lt0, t0 + 20);
 at(lt1, t0 + 30); // ties with the reviewer run: pipeline order breaks the tie (reviewer first)
 at(rv0, t0 + 30);
 at(mg1, t0 + 40);
-const history = (await (await fetch(`${base}/api/tasks`)).json())[0];
+const history = await detailOf(task.file);
 assert.deepEqual(
 	history.agents,
 	[
@@ -1844,7 +1870,7 @@ writeFileSync(dev1, [
 	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 1500, cost: { total: 0 } }, model: "m-1", thinkingLevel: "low" }, timestamp: Date.now() - 570000 }),
 	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 25000, output: 2500, cacheRead: 30000, cacheWrite: 1200, reasoning: 800, totalTokens: 58700 }, model: "m-2", thinkingLevel: "high" }, timestamp: new Date(Date.now() - 540000).toISOString() }),
 ].join("\n") + "\n");
-const statEntry = (await (await fetch(`${base}/api/tasks`)).json())[0].agents.find((a) => a.handle === `${slug}.developer.1`);
+const statEntry = (await detailOf(task.file)).agents.find((a) => a.handle === `${slug}.developer.1`);
 assert.equal(statEntry.tokens, 27515, "tokens sums input + output across the run log, cacheRead/cacheWrite excluded");
 assert.ok(statEntry.duration >= 600000, "a live run's duration ticks with now - first (the session record here), not the frozen parsed last - first");
 // 000169: a finished run is not live, so its duration stays the parsed last - first even when
@@ -1855,7 +1881,7 @@ writeFileSync(lt1, [
 	JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date(finishedBase).toISOString() }),
 	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { totalTokens: 10 } }, timestamp: new Date(finishedBase + 5000).toISOString() }),
 ].join("\n") + "\n");
-const finishedEntry = (await (await fetch(`${base}/api/tasks`)).json())[0].agents.find((a) => a.handle === `${slug}.live-tester.1`);
+const finishedEntry = (await detailOf(task.file)).agents.find((a) => a.handle === `${slug}.live-tester.1`);
 assert.equal(finishedEntry.duration, 5000, "a finished run keeps the parsed last - first");
 // 000146: the chunked payload carries the meta off the latest usage-bearing record, so the log
 // pane's meta line refreshes on every poll
@@ -1942,7 +1968,7 @@ writeFileSync(`${dev0}.gz`, gzipSync(Buffer.from([
 	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 24000, output: 5000, cacheRead: 10000, cacheWrite: 2000, reasoning: 3000, totalTokens: 44000 } }, timestamp: Date.parse("2026-10-11T09:36:24.121Z") }),
 ].join("\n") + "\n")));
 rmSync(dev0);
-const gzEntry = (await (await fetch(`${base}/api/tasks`)).json())[0].agents.find((a) => a.handle === `${slug}.developer.0`);
+const gzEntry = (await detailOf(task.file)).agents.find((a) => a.handle === `${slug}.developer.0`);
 assert.ok(gzEntry, "a gzipped run stays in the agent history");
 assert.equal(gzEntry.tokens, 29000, "the gzipped run's stats parse from the decompressed records");
 assert.ok((await (await get(`${slug}.developer.0`)).json()).text.includes("<p>from the gzipped run</p>"), "/api/agent-log serves the gzipped run with renderable content");
@@ -1965,7 +1991,7 @@ assert.deepEqual(gzSubList.map((s: any) => s.id), [
 writeFileSync(`${logFile}.gz`, gzipSync(Buffer.from("LEGACY\n")));
 rmSync(logFile);
 assert.ok(
-	(await (await fetch(`${base}/api/tasks`)).json())[0].agents.some((a) => a.handle === `${slug}.developer`),
+	(await detailOf(task.file)).agents.some((a) => a.handle === `${slug}.developer`),
 	"a gzipped legacy log stays in the history",
 );
 assert.equal((await (await get(`${slug}.developer`)).json()).text, "LEGACY\n", "the plain handle serves the gzipped legacy log");
@@ -1986,7 +2012,7 @@ writeFileSync(`${dev0}.gz`, gzipSync(Buffer.from(JSON.stringify({ type: "session
 at(`${dev0}.gz`, sweepT / 1000); // the sweep's fresh mtime, inverted against the in-log order
 writeFileSync(`${dev1}.gz`, gzipSync(Buffer.from(JSON.stringify({ type: "session", id: "s", timestamp: "2026-10-12T07:33:13.000Z" }) + "\n")));
 at(`${dev1}.gz`, (sweepT + 100_000) / 1000);
-const swept = (await (await fetch(`${base}/api/tasks`)).json())[0];
+const swept = await detailOf(task.file);
 assert.deepEqual(
 	swept.agents.map((a) => a.handle),
 	[`${slug}.developer.1`, `${slug}.developer`, `${slug}.developer.0`],
@@ -2003,9 +2029,10 @@ rmSync(`${dev1}.gz`, { force: true });
 const docRoot = mkdtempSync(join(tmpdir(), "webui-doctor-"));
 const docTask = createTask(docRoot, { name: "feat: doctor payload", summary: "s", specs: "s" });
 const docSlug = docTask.file.replace(/\.md$/, "");
+const docDetail = (t: { file: string }) => taskDetail(docRoot, parseInt(t.file, 10))!;
 const docLogs = join(docRoot, ".kanban", ".logs");
 mkdirSync(docLogs, { recursive: true });
-assert.deepEqual(taskPayload(docRoot).find((t) => t.file === docTask.file)!.doctors, [], "no doctor logs yet, empty doctor history");
+assert.deepEqual(docDetail(docTask).doctors, [], "no doctor logs yet, empty doctor history");
 // finished doctor logs with relative timestamps: the in-log first record timestamp is the sort
 // key, so the entries read oldest first regardless of file mtimes
 const docBase = Date.now() - 600000;
@@ -2023,7 +2050,7 @@ const otherTask = createTask(docRoot, { name: "fix: other doctor task", summary:
 const otherSlug = otherTask.file.replace(/\.md$/, "");
 writeFileSync(join(docLogs, `${otherSlug}.developer.0.doctor.log`), "OTHER TASK DOCTOR\n");
 assert.deepEqual(
-	taskPayload(docRoot).find((t) => t.file === docTask.file)!.doctors,
+	docDetail(docTask).doctors,
 	[
 		{ role: "doctor", run: 0, alive: false, status: "ok", handle: `${docSlug}.developer.0.doctor`, tokens: 20, duration: 5000 },
 		{ role: "doctor", run: 1, alive: false, status: "ok", handle: `${docSlug}.developer.1.doctor`, tokens: 30, duration: 3000 },
@@ -2031,7 +2058,7 @@ assert.deepEqual(
 	"one doctor entry per doctor log, tokens sum input + output (cache excluded), duration is last - first record timestamp, sorted oldest first",
 );
 assert.deepEqual(
-	taskPayload(docRoot).find((t) => t.file === otherTask.file)!.doctors,
+	docDetail(otherTask).doctors,
 	[{ role: "doctor", run: 0, alive: false, status: "ok", handle: `${otherSlug}.developer.0.doctor`, tokens: null, duration: null }],
 	"a doctor log belongs to its own task's payload, another task's slug is excluded",
 );
@@ -2039,7 +2066,7 @@ assert.deepEqual(
 // a live analysed run: the analysis pid file keeps the doctor entry live and its duration ticks
 mkdirSync(join(docRoot, ".kanban", ".pids"), { recursive: true });
 writeFileSync(join(docRoot, ".kanban", ".pids", `${docSlug}.developer.0.analysis.pid`), String(process.pid));
-const docLive = taskPayload(docRoot).find((t) => t.file === docTask.file)!.doctors[0];
+const docLive = docDetail(docTask).doctors[0];
 assert.equal(docLive.alive, true, "a live analysis pid marks the analysed run's doctor entry alive");
 assert.equal(docLive.status, "live", "a live doctor entry reads live, so its card spins");
 assert.ok(docLive.duration! >= 600000, "a live doctor's duration ticks with now - first, not the frozen parsed last - first");

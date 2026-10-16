@@ -501,15 +501,25 @@ function setBody(t) {
 	el.innerHTML = html;
 	el.__html = html;
 }
+// 000242: the detail url, the num off the file name and the active tab's project for the hub
+const detailUrl = file => "/api/task-detail?num=" + parseInt(file.slice(0, 6), 10) + projectParam();
+// 000242: the light rows carry no body or agent data, so openTask renders the shell from the row
+// and loads the heavy detail per task; every open re-fetches (no client-side cache, the 5 s poll
+// is the documented upgrade path), a superseded open's response is discarded by generation
 function openTask(file) {
 	const t = activeBoard().tasks.find(x => x.file === file);
 	if (!t) return;
 	closeLog();
 	modalFile = file;
+	openDetail = null;
 	writeHead(t);
 	renderAgent(t);
 	renderDoctor(t);
-	setBody(t);
+	// the loading placeholder: the heavy blocks fill on the detail's arrival
+	const loading = '<div class="empty">Loading task details…</div>';
+	const el = document.getElementById("m-body");
+	el.innerHTML = loading;
+	el.__html = loading;
 	// 000194: a reopen during the close drops .closing first, the pending hide must not re-run
 	const modal = document.getElementById("modal");
 	modal.classList.remove("closing");
@@ -521,6 +531,25 @@ function openTask(file) {
 	box.scrollTop = 0;
 	box.onanimationend = e => { if (e && e.target === box) { box.onanimationend = null; drawAgentRelations(); } };
 	drawAgentRelations();
+	const gen = ++detailGen;
+	fetch(detailUrl(file)).then(r => r.ok ? r.json() : null).catch(() => null).then(d => {
+		// a superseded open must not write into the new modal
+		if (gen !== detailGen || modalFile !== file) return;
+		if (document.getElementById("modal").classList.contains("hidden")) return;
+		if (!d) {
+			const html = '<div class="empty">Task details failed to load</div>';
+			el.innerHTML = html;
+			el.__html = html;
+			return;
+		}
+		openDetail = d;
+		writeHead(d);
+		renderAgent(d);
+		renderDoctor(d);
+		setBody(d);
+		markLiveLine();
+		drawAgentRelations();
+	});
 }
 // the 5 s refresh of the open detail card: every block re-derives from the fresh payload with no
 // close/reopen; renderAgent's keep mode moves only the stats lines on an unchanged run set and
@@ -557,6 +586,7 @@ function closeModal() {
 	const modal = document.getElementById("modal");
 	if (modal.classList.contains("hidden")) return;
 	closeLog();
+	openDetail = null;
 	closeAnimated(modal);
 }
 // a stored "#<num>" ref resolved to its task on the active board: undefined when absent
@@ -583,6 +613,10 @@ function issuerCell(t) {
 // live agent log pane: each run card carries only its handle, the server resolves the real
 // path; each run's subagent transcripts load through the same endpoint with sub=list / sub=n
 let modalFile = null;
+// 000242: the open task's detail (the heavy per-task payload), fetched on open and re-fetched by
+// the poll; detailGen discards a superseded open's response
+let openDetail = null;
+let detailGen = 0;
 let agentGen = 0; // bumped per renderAgent: a superseded open's sub fetches must not write
 let logTimer = null;
 let logState = null;
@@ -665,7 +699,8 @@ function drawAgentRelations() {
 // pre (tool_execution_start without its end); plain text, closed blocks and idle or dead runs
 // leave nothing shining, the same liveness signal the .spin spinner reads
 function markLiveLine() {
-	const t = activeBoard().tasks.find(x => x.file === modalFile);
+	// 000242: the light rows carry no agent data, the open detail holds the agent history
+	const t = openDetail && openDetail.file === modalFile ? openDetail : null;
 	const run = t && (t.agents || []).find(a => a.alive);
 	const p = logPane();
 	const on = !!run && !!logState && run.handle === logState.handle && !p.classList.contains("hidden");
@@ -858,7 +893,7 @@ function closeLog() {
 }
 function pollLog() {
 	if (!logState || logState.busy) return;
-	const t = activeBoard().tasks.find(x => x.file === modalFile);
+	const t = openDetail && openDetail.file === modalFile ? openDetail : null;
 	const liveRun = t && (t.agents || []).find(a => a.alive);
 	// logState carries the parent run's handle for a sub view too, so run aliveness keeps both the
 	// run's own log and its sub transcripts polling while the run is alive; a live doctor entry
@@ -958,12 +993,12 @@ function refresh() {
 	}).then(rows => {
 		mergeBoards(boards, rows);
 		render();
-		// the open detail card re-derives from the fresh payload: a state change or a new agent run
-		// shows in place, and a task gone from the board closes the card
+		// the open card's task still on the board, else the card closes (000242: the light rows
+		// carry no agent data, so the heavy blocks re-derive from the poll's detail re-fetch below)
 		let open = null;
 		if (modalFile && !document.getElementById("modal").classList.contains("hidden")) {
 			open = activeBoard().tasks.find(x => x.file === modalFile);
-			if (open) updateOpenTask(open); else closeModal();
+			if (!open) closeModal();
 		}
 		// stamp only a served board: during a hub outage the old stamp stays visible
 		const current = rows.find(([id]) => id === active);
@@ -972,10 +1007,26 @@ function refresh() {
 			lastReload = Date.now();
 		}
 		// the next tick keys on the fresh open card (000142): while it shows a live agent the stats
-		// advance at log speed, so the cadence is 1 s; no live agent keeps the 5 s board poll
-		lastDelay = refreshMs(open);
-		return setTimeout(refresh, refreshMs(open));
+		// advance at log speed, so the cadence is 1 s; no live agent keeps the 5 s board poll.
+		// 000242: the tick first re-fetches the open task's detail (the light rows carry no agent
+		// data), then paces on the fresh detail
+		if (!open) { lastDelay = 5000; return setTimeout(refresh, 5000); }
+		return pollDetail().then(() => {
+			lastDelay = refreshMs(openDetail);
+			return setTimeout(refresh, refreshMs(openDetail));
+		});
 	}).catch(() => setTimeout(refresh, 5000)).then(t => { pollTimer = t; }); // a failed cycle retries at the board cadence
+}
+// 000242: the poll's detail re-fetch for the open card; a failed fetch keeps the last detail, a
+// loading modal keeps the placeholder until a cycle succeeds
+function pollDetail() {
+	const gen = ++detailGen;
+	return fetch(detailUrl(modalFile)).then(r => r.ok ? r.json() : null).catch(() => null).then(d => {
+		if (gen !== detailGen || !d || modalFile !== d.file) return;
+		if (document.getElementById("modal").classList.contains("hidden")) return;
+		openDetail = d;
+		updateOpenTask(d);
+	});
 }
 refresh();
 // 000235: a wake past twice the last scheduled cadence means the tab slept; cancel the delayed

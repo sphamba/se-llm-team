@@ -1,7 +1,7 @@
 import { closeSync, existsSync, openSync, readFileSync, readdirSync, readSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
-import { kanbanDir, listAll, splitFrontmatter, taskFiles, taskSlug, type Task } from "../kanban.ts";
+import { getTask, kanbanDir, listAll, splitFrontmatter, taskFiles, taskNum, taskSlug, type Task } from "../kanban.ts";
 import { agentAlive } from "../pid.ts";
 import { AGENT_ROLE, LOG_LINES, LOG_ROLES, renderLogChunk } from "./logpane.ts";
 
@@ -444,28 +444,49 @@ function linesBack(full: Buffer | null, target: string, tail: number, count: num
 	return count > 0 ? 0 : head;
 }
 
-// one payload per task, from board files and pid files of one project root; the single-project
-// server and the hub's per-project variant both serve it
+// the light board row (000242): identity + summary only, what the board renderer and the row
+// click need; the heavy body, sections and agent history load per task through taskDetail
+function lightRow(root: string, t: Task) {
+	return {
+		file: t.file,
+		num: taskNum(t.file),
+		name: t.name,
+		shortName: t.shortName,
+		priority: t.priority,
+		state: t.state,
+		worktree: t.worktree,
+		blockedBy: t.blockedBy,
+		issuer: t.issuer,
+		complexity: t.complexity,
+		updated: taskUpdated(root, t.file),
+		summary: t.summary,
+	};
+}
+
+// one light row per task (000242): no body, no agent history, no log parsing, so a large board
+// opens fast and the 5 s poll stays cheap; the heavy data loads per task through taskDetail
 export function taskPayload(root: string) {
+	return listAll(root).map((t) => lightRow(root, t));
+}
+
+// the per-task detail (000242): the light row plus the heavy data the detail card renders; built
+// on open for ONE task, so only that task's logs parse; unknown num = null, the route answers 404
+export function taskDetail(root: string, num: number) {
+	const file = taskFiles(root).find((f) => taskNum(f) === num);
+	const t = file ? getTask(root, file) : undefined;
+	if (!t) return null;
 	const files = logDirFiles(root);
-	return listAll(root).map((t) => {
-		const agents = agentHistory(root, t, files);
-		return {
-			file: t.file,
-			name: t.name,
-			priority: t.priority,
-			state: t.state,
-			worktree: t.worktree,
-			blockedBy: t.blockedBy,
-			issuer: t.issuer,
-			complexity: t.complexity,
-			updated: taskUpdated(root, t.file),
-			body: taskBody(root, t.file),
-			agents,
-			agent: agentInfo(root, t, agents),
-			doctors: doctorHistory(root, t, files),
-		};
-	});
+	const agents = agentHistory(root, t, files);
+	return {
+		...lightRow(root, t),
+		body: taskBody(root, t.file),
+		specs: t.specs,
+		notes: t.notes,
+		openQuestions: t.openQuestions,
+		agents,
+		agent: agentInfo(root, t, agents),
+		doctors: doctorHistory(root, t, files),
+	};
 }
 
 // {status, body} for /api/agent-log against one project root; null = unknown file or handle

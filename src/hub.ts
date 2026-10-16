@@ -219,6 +219,18 @@ async function route(
 		} else {
 			json(res, webui.taskPayload(entry.root));
 		}
+	} else if (req.method === "GET" && path === "/api/task-detail") {
+		// 000242: the per-task detail (body, sections, agent history), loaded on open; the board
+		// poll stays on the light /api/tasks rows
+		const entry = resolveEntry(entries, project);
+		const num = Number(url.searchParams.get("num"));
+		const detail = entry && Number.isInteger(num) ? webui.taskDetail(entry.root, num) : null;
+		if (!detail) {
+			res.writeHead(404, { "content-type": "application/json; charset=utf-8", connection: "close" });
+			res.end(JSON.stringify({ error: "unknown task" }));
+		} else {
+			json(res, detail);
+		}
 	} else if (req.method === "GET" && path === "/api/agent-log") {
 		const entry = resolveEntry(entries, project);
 		const payload = entry ? webui.agentLogPayload(entry.root, url.searchParams) : null;
