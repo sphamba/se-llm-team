@@ -1,8 +1,8 @@
 ---
 name: "feat: maxParallel config to cap tasks running in parallel"
 priority: "medium"
-state: "live-testing"
-worktree: "feat/272-maxparallel-config-to"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 ---
@@ -51,3 +51,15 @@ Out of scope: splitter agent parallelism (splitter runs on to-do tasks, not coun
 - Scope note: pipeline.ts is not in the test-changed table, so the fallback would be the full suite; ran the four transition area files plus config.test.ts directly instead (the default 0 path is unchanged, no other area touches maxParallel). pnpm test (the acceptance line) therefore not run, per the task's never-full-suite instruction.
 - Assumption: the cap counts tasks in the four working states only (doing, reviewing, merging, live-testing), so a task whose agent died still holds its slot until the poll requeues it, and splitter/analysis spawns are uncounted and ungated. Backlog promotion deliberately ungated so ready tasks queue in to-do.
 - Re-review 2026-10-17 at b758a31 (base main), no fixes: maxParallel config settled by the diff (default 0 src/orchestrator/config.ts:14-16, interface :49, parse with integer >= 0 warn+keep-0 :159-162, wired :179; per-root override rides the existing shallow merge). runningCount helper over listAll with the four working-state literals src/orchestrator/pipeline.ts:33-40 (liveness.ts owns the same set but imports pipeline.ts, so the literals stay local). Gates: startTodo pipeline.ts:64-65 after the splitter branch + ensureWorktree, before setState("doing")+spawn; to-review pipeline.ts:389-390 immediately before setState("reviewing")+spawn, inside the !pidAlive branch (equivalent: a live pid defers regardless); to-live-test pipeline.ts:415-416 before setState("live-testing")+spawn; sweepToMerge pipeline.ts:143-145 after the one-merger guard, before the idle-clock reads (the gate writes nothing). Backlog promotion ungated (promoteBacklog untouched, queue covered by promote.test.ts part AY); splitter spawns out of scope, uncounted. README example README.md:73, table row README.md:87. Tests: all 13 tests/orchestrator/ suites exit=0 at b758a31 (the union the coverage map fixes for src/orchestrator/*), superseding the five-file scoped run above; 605 asserts across the 13 suites, +29 from the diff. No open questions.
+
+## Live test (2026-10-17)
+
+- Surface: daemon e2e from the merged worktree (src/orchestrator.ts + loadConfig), isolated HOME/XDG, role-aware fake agent, no browser (this change touches config and the pipeline only). Result: 44 checks, 0 failed (cap run 18, default run 11, config 12, README 3), tallied per phase.
+- Fixture: fresh git repo, 5 tasks (t0 to-do, t1 to-do, t2 to-live-test with a merged branch, t3 to-merge with an unmerged branch, t4 backlog), root `.kanban/se-llm-team.json` with `"maxParallel": 1`.
+- cap=1 held all four gates at once: t0's live developer filled the single slot; t1 stayed to-do with no pid, t2 stayed to-live-test with no pid, t3 stayed to-merge with no merger pid, and every state stayed unchanged across further 1 s rescans. The fake-agent log held exactly one spawn (developer, t0).
+- Backlog promotion stayed ungated as specified: t4 moved backlog -> to-do while the cap held and queued there (no pid) for the whole cap window.
+- Default 0 = no limit: after a restart with the key absent, all five tasks ran at once (t0/t1/t4 doing, t2/t3 live-testing), the queued t1/t4 started, t0 was not respawned, and the to-merge lane completed (`fast-forwarded main to wt-t3, set to-live-test`).
+- Config: absent key -> 0; project file 3; project overrides a global 7 -> 3; each invalid value (-1, 1.5, "2", true) stayed 0 and logged `maxParallel <JSON> ignored: must be an integer >= 0` in the orchestrator log.
+- README: the configuration example block shows `"maxParallel": 3`, and the key table has the row with default 0, the four working states, and "0 = no limit".
+- Assumptions: the cap counts the four state literals only (to-review and to-merge do not hold a slot), backlog promotion and splitter spawns stay uncounted, and a live agent keeps its slot. No observed behavior contradicted the task's stated assumptions.
+- Harness note (not a product finding): the first run pointed config `agent` at `/tmp/lt272/fake-pi` while only the `.mjs` existed; sh exited 127 and the daemon respawned in a loop. States still advanced, so only the pid-alive and fake-log checks caught it.

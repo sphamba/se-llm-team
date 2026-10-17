@@ -62,6 +62,7 @@
 - Timestamps: daemon log lines are UTC ISO, fixture mtimes local (UTC+2). Never compare directly (#212).
 - PM reports are atomic `.md` files in `<root>/.kanban/.reports/` (ISO-timestamp name, oldest first, 1 h cutoff); a daemon-only report acceptance reads those files directly, no pi RPC session (the extension drain stays #190/#197 territory). Seed catch-up fixture: write the suppressing `.kanban/.logs/<slug>.pm-processed` markers by hand before daemon start, and `reportDone` seeds per daemon process, so the first sweep is the seed (#270).
 - Node 24 strips types: import merged src directly (`await import('<repo>/src/kanban.ts')`). Worktrees need no node_modules (node resolves up the tree); git archives do (symlink the repo's) (#179, #195, #216).
+- A daemon fixture's state assertions pass even when no agent ever ran (the daemon sets the state before it spawns): an `agent` config path that names a nonexistent or broken wrapper makes sh exit 127, the poll bounces and respawns in a loop, and every `state:` check stays green. Pair each daemon state check with a pid-alive check and a fake-agent spawn-log check. For merge-lane fixtures, leave the `.kanban` task files UNTRACKED (empty initial commit, branch files committed in the worktrees) so the to-merge `git rebase` never refuses on modified tracked board files.
 
 ## Playwright discipline (each trap cost a failed run at least once)
 

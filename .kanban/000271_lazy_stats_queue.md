@@ -1,7 +1,7 @@
 ---
 name: "fix: card stats fetched lazy, deferred, one by one, top to bottom"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/271-lazy-stats-queue"
 issuer: "user"
 complexity: "simple"
@@ -34,3 +34,12 @@ Tests: extend the 000264 block in tests/webui/board.test.ts:412-541 — a scenar
 Acceptance: node tests/webui/board.test.ts passes, pnpm test passes.
 
 # Notes
+- Reshaped the card-stats fetch into a deferred sequential queue (000271). src/webui/board.ts exports makeStatsQueue: one file per request, in each column's top-to-bottom board order, drained via setTimeout 0 off the click and render path. src/webui/page.ts wires it: the statsQueue instance (per-file URL, mergeCardStats plus render on success), queueStats(enqueueCol with VISIBLE), and queueExpanded called after every poll's render.
+- Dedupe: the queue's internal requested set replaces the page's statsInFlight set, with the same statsKey keys, extended to successful fetches (one fetch per file per page load). A failed response deletes the key, so the next poll's re-enqueue retries it. statsKnown, the done-with-known-agents skip and the localStorage merge are unchanged. The old batched request mode of the endpoint is untouched, no hub.ts or payload.ts change.
+- Tests: the 000271 block in tests/webui/board.test.ts adds 14 asserts (deferred sequential order top to bottom, position-6 arrival re-queue, fetched-file no re-queue, failed-fetch retry) driving makeStatsQueue with an injected setTimer, so the drain order pins without sleeps. The PAGE pins now cover the per-file endpoint, makeStatsQueue, the enqueueCol wiring and queueExpanded. Red first (missing export), then green. 200 asserts in the file.
+- Scoped suites per the developer-role policy (scripts/test-changed.mjs maps src/webui/*.ts to the webui area): tests/webui/board.test.ts, page.test.ts, hub.test.ts, logpane.test.ts and agentlog.test.ts all exit 0. Deviation from the stated acceptance: the full pnpm test was not run.
+- Commit ce3de5c.
+
+# Open questions
+- Assumption: a successfully fetched file is fetched once per page load (its requested key is kept). The plan's failure-retry rule implies this, and it changes the old behavior where revealed non-done cards refetched at every unfold.
+- The reported never-appear did not reproduce on current source (harness-verified during fact-finding, before this change); please confirm a stale browser tab holding pre-#264 JS explains it on your side.
