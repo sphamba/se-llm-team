@@ -2,7 +2,7 @@
 name: "chore: split-test-suite efficiency-analysis and kanban areas"
 priority: "medium"
 state: "done"
-worktree: "chore/257-split-test-suite-eff-kanban"
+worktree: ""
 issuer: "#254"
 complexity: "simple"
 shortName: "split-test-suite-eff-kanban"
