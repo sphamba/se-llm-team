@@ -36,6 +36,7 @@ assert.ok(reportN.includes(`## Live-test findings for ${doneN1.name} (#${taskNum
 assert.ok(reportN.includes(findingN.file) && reportN.includes("Keep the flag?"), "the finding task and its open questions are listed");
 assert.match(reportN.slice(reportN.indexOf(`## Live-test findings for ${doneN2.name}`)), /^## Live-test findings for[^\n]*\nnone\n/, "a finished task without findings lists none");
 assert.ok(reportN.includes("## Instructions for the Project manager"), "the report ends with the PM instructions");
+assert.ok(reportN.includes("kanban_mark_processed"), "the PM instructions teach the mark flow");
 // a second sweep: already-seen done tasks do not re-report
 rescan(rootN, loadConfig(rootN));
 assert.equal(readdirSync(reportsDir(rootN)).filter((f) => f.endsWith(".md")).length, 1, "already-seen done tasks do not re-report");
@@ -51,6 +52,27 @@ rescan(rootN, loadConfig(rootN));
 assert.ok(!existsSync(staleReportN), "a stale report is pruned");
 assert.ok(!existsSync(staleClaimN), "a stale claim is pruned");
 assert.ok(existsSync(join(reportsDir(rootN), reportsN[0])), "the fresh report survives the prune");
+
+// daemon-start catch-up: done tasks left unmarked while the daemon was dead are reported at
+// the first sweep; a task carrying the marker #269 writes is not re-reported
+const rootN2 = fixture();
+cleaned.push(rootN2);
+mkdirSync(join(kanbanDir(rootN2), ".logs"), { recursive: true });
+writeFileSync(join(kanbanDir(rootN2), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootN2), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+const unmarkedN = createTask(rootN2, { name: "fix: unmarked done", summary: "Catch-up", specs: "n/a" });
+setState(rootN2, unmarkedN, "done");
+const markedN = createTask(rootN2, { name: "fix: marked done", summary: "Catch-up", specs: "n/a" });
+setState(rootN2, markedN, "done");
+writeFileSync(join(kanbanDir(rootN2), ".logs", `${markedN.file.replace(/\.md$/, "")}.pm-processed`), "");
+rescan(rootN2, loadConfig(rootN2));
+const catchupReportsN = readdirSync(reportsDir(rootN2)).filter((f) => f.endsWith(".md"));
+assert.equal(catchupReportsN.length, 1, "the daemon-start sweep queues one catch-up report");
+const catchupN = readFileSync(join(reportsDir(rootN2), catchupReportsN[0]), "utf8");
+assert.ok(catchupN.includes(unmarkedN.file), "a done task with no marker is reported at daemon start");
+assert.ok(!catchupN.includes(markedN.file), "a done task with a marker is not reported");
+// the next sweep stays silent: lastDone holds the catch-up task, only a new transition reports
+rescan(rootN2, loadConfig(rootN2));
+assert.equal(readdirSync(reportsDir(rootN2)).filter((f) => f.endsWith(".md")).length, 1, "the catch-up task is not re-reported on later sweeps");
 
 console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard + conflict skip + merge cooldown + mirror board + bootstrap + fresh-clone bootstrap + PM report queue passed");
 
@@ -194,9 +216,13 @@ const ag = await runDaemon(rootAG);
 // both tasks reach the mirror first: creates run for every file not on the mirror yet
 await waitFor(() => showTip(rootAG, taskAG.file) !== null && showTip(rootAG, taskAG2.file) !== null, 30000, "both tasks mirrored", ag.output);
 
+const markerAG = join(kanbanDir(rootAG), ".logs", `${taskAG.file.replace(/\.md$/, "")}.pm-processed`);
+mkdirSync(join(kanbanDir(rootAG), ".logs"), { recursive: true });
+writeFileSync(markerAG, "");
 // removal while the daemon runs: the file leaves the tree and the mirror in one operation
 assert.equal(await removeTask(rootAG, taskAG.file), null, "removal succeeds");
 assert.equal(existsSync(join(kanbanDir(rootAG), taskAG.file)), false, "task file deleted");
+assert.equal(existsSync(markerAG), false, "the removed task's pm-processed marker is deleted");
 assert.equal(showTip(rootAG, taskAG.file), null, "task gone from the mirror tip");
 assert.ok(mirrorSubjects(rootAG).includes(`kanban: delete ${taskAG.file}`), "delete commit recorded on the mirror");
 assert.ok(showTip(rootAG, taskAG2.file) !== null, "other task untouched on the mirror");

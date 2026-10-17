@@ -1,6 +1,6 @@
-import { mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { kanbanDir, listAll, taskNum, type Task } from "../kanban.ts";
+import { kanbanDir, listAll, taskNum, taskSlug, type Task } from "../kanban.ts";
 import { log } from "./log.ts";
 
 // 1h delivery cutoff: the extension drain delivers reports younger than this and discards
@@ -26,6 +26,7 @@ export function composeReport(root: string, finished: Task[], scheduled: Task[])
 	parts.push("", "## Instructions for the Project manager");
 	parts.push('- Create new tasks based on the findings above (kanban_create; issuer "#<num>" of the task whose live test produced the finding).');
 	parts.push('- Ask the user every open question above immediately via the structured question dialogs; fold each answer into the finding task\'s Specs with kanban_update, then clear the section (openQuestions: "") so the orchestrator promotes the task.');
+	parts.push("- After processing, mark the done tasks processed with kanban_mark_processed, so future PM sessions know they were handled.");
 	return `${parts.join("\n")}\n`;
 }
 
@@ -61,21 +62,19 @@ export function pruneReports(root: string): void {
 	}
 }
 
-// done tasks this process saw per root: seeded from the first sweep's board snapshot, so an
-// already-done task at daemon startup never reports; a task done now but not at the snapshot
-// is the sweep's done transition
+// done tasks this process saw per root: the seed sweep seeds from the board snapshot and
+// folds in every already-done task without a pm-processed marker (catch-up for a done
+// transition missed while the daemon was dead); later sweeps report only new transitions
 const lastDone = new Map<string, Set<string>>();
 
 // the rescan hook: the sweep schedules first (promoted passed in), then this detects the done
 // transitions against the sweep's own pre-state snapshot and queues one report for them
 export function reportDone(root: string, snapshot: Task[], promoted: Task[]): void {
-	let seen = lastDone.get(root);
-	if (!seen) {
-		seen = new Set(snapshot.filter((t) => t.state === "done" && !t.conflicted).map((t) => t.file));
-		lastDone.set(root, seen);
-	}
+	const known = lastDone.get(root);
+	const seen = known ?? new Set(snapshot.filter((t) => t.state === "done" && !t.conflicted).map((t) => t.file));
+	if (!known) lastDone.set(root, seen);
 	const doneNow = listAll(root).filter((t) => t.state === "done" && !t.conflicted);
-	const finished = doneNow.filter((t) => !seen.has(t.file));
+	const finished = doneNow.filter((t) => !seen.has(t.file) || (!known && !existsSync(join(kanbanDir(root), ".logs", `${taskSlug(t.file)}.pm-processed`))));
 	for (const t of doneNow) seen.add(t.file);
 	if (finished.length) {
 		try {

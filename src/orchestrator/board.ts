@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { kanbanDir, noteSelfWrite, setWorktree, slugWorktree, taskFiles, type Task } from "../kanban.ts";
+import { kanbanDir, noteSelfWrite, setWorktree, slugWorktree, taskFiles, taskSlug, type Task } from "../kanban.ts";
 import { pidAlive } from "../pid.ts";
 import { bumpCounter, counterPath, log, readCounter } from "./log.ts";
 
@@ -137,6 +137,8 @@ export async function removeTask(root: string, file: string): Promise<string | n
 	if (!taskFiles(root).includes(name)) return `No task ${file}`;
 	const hasGit = git(root, ["rev-parse", "--git-dir"], true) !== null;
 	rmSync(join(kanbanDir(root), name), { force: true });
+	// the task's PM-processed marker goes with it, else a recreated task reads as processed
+	rmSync(join(kanbanDir(root), ".logs", `${taskSlug(name)}.pm-processed`), { force: true });
 	// no git, no mirror and no reconcile: deleting the file is the whole removal
 	if (!hasGit) return null;
 	let daemonPid = 0;
