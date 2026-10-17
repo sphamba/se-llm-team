@@ -59,6 +59,7 @@
 - Once `ensureInfoExclude` names a path, a blanket `git add -A` silently skips it (#234): commit with explicit paths, or track on the base BEFORE any exclude write, or a staging/merge check passes for the wrong reason.
 - Timestamps: daemon log lines are UTC ISO, fixture mtimes local (UTC+2). Never compare directly (#212).
 - Node 24 strips types: import merged src directly (`await import('<repo>/src/kanban.ts')`). Worktrees need no node_modules (node resolves up the tree); git archives do (symlink the repo's) (#179, #195, #216).
+- A fake agent's own log is append-only across runs: truncate it in the fixture setup, or stale spawn records from an earlier run fake spawns and fail the new checks (#266).
 
 ## Playwright discipline (each trap cost a failed run at least once)
 

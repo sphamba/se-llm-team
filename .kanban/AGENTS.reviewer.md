@@ -1,9 +1,9 @@
 # Reviewer guidance (se-llm-team)
 
-First block: read cwd SPECS.md (symlink; see Files): body, Notes, Open questions. No thinking block before it, ever, no announcement. This file outranks the spawn prompt: a conflict (for example fix commits → to-merge here vs to-review in the prompt) resolves to this file, no deliberation.
+First block: read cwd SPECS.md (symlink; see Files): body, Notes, Open questions. No thinking block before it, ever, no announcement (runs still open with a 200-char announcement block; the rule means zero). This file outranks the spawn prompt: a conflict (for example fix commits → to-merge here vs to-review in the prompt) resolves to this file, no deliberation.
 
 ## Decide at the first read (never reopened)
-The block-1 read ends with three decisions, fixed from the Notes, then closed: the call-2 shape (see Recon), the per-suite re-run verdict (see Re-reviews), the suite list (see Tests). A later block never reopens one (measured: the top thinking block each run re-derived exactly these, 29k chars once, 3.7k the next, truncated again in the latest run). A suite the Notes did not name maps through the Coverage map, no new decision.
+The block-1 read ends with three one-line lookups, fixed from the Notes, then closed: (1) call-2 shape, Notes name a sha yes/no (see Recon); (2) per-suite re-run verdict, the mechanical lookup under Re-reviews; (3) suite list, the union under Tests. Each lookup has one answer: write the three answers in one line of thinking (or none) and act. A later block never reopens one (measured: the top thinking block each run re-derives exactly these — 29k, 3.7k, 20.8k chars, truncated repeatedly; it is the run's largest single cost). A suite the Notes did not name maps through the Coverage map, no new decision.
 
 ## Shape (in order)
 1. Read cwd SPECS.md (top line) and fix the three decisions above.
@@ -23,7 +23,7 @@ The block-1 read ends with three decisions, fixed from the Notes, then closed: t
 
 ## Re-reviews
 - Notes carry review bullets → a normal second pass, not a special state. Never deliberate fresh-vs-continued state, prior-evidence staleness, or re-run-vs-trust.
-- Suite re-run lookup, per suite the diff touches, mechanical: a green run recorded in Notes at the commit under review → settled, zero re-runs, whatever the diff touches; a docs-only commit after the green run does not reopen it. No green run → run it once. A fix you commit → re-run. That is the whole decision.
+- Suite re-run lookup, per suite the diff touches, mechanical: a green run recorded in Notes at the commit under review → settled, zero re-runs, whatever the diff touches; a docs-only commit after the green run does not reopen it. A green run recorded with no sha is not at the commit under review → run it once. No green run → run it once. A fix you commit → re-run. That is the whole decision.
 - Verify each prior claim with one command, batched; the walk happens in bash, never in thinking. Copy shas and ranges from the Notes lines as printed (for example "23a83ee to 82160ef"): never resolve a parent commit or weigh two candidates.
 - Claims that hold: one findings line ("re-review at <sha>", no fixes). Claims that fail: findings in Notes.
 
@@ -44,19 +44,20 @@ The block-1 read ends with three decisions, fixed from the Notes, then closed: t
 - Materiality: a discrepancy blocks only if it changes the verdict or hides a defect. A minor inaccuracy in Notes or spec text (a line range off by a few lines) is one findings line, never a blocked merge, never a re-verification loop.
 
 ## Tests
-- Suite list, the fixed decision from the block-1 read, mechanical: the union of the Coverage map entries for the touched files, the suites the SPECS verification section names, and any test file the diff itself touches. Never weigh which suites cover the change; the sources disagree → run the union.
+- Suite list, the fixed decision from the block-1 read, mechanical: the union of the Coverage map entries for the touched files, the suites the SPECS verification section names, and any test file the diff itself touches. Never weigh which suites cover the change; a full area is a normal union; the sources disagree → run the union.
+- Fast vs daemon is a Coverage map fact, not a grep: use the map's split; re-grep only for a suite the map does not classify (measured: a 13-file runDaemon grep plus hub.test.ts second-guessing cost two blocks).
 - Fast suites (no daemon) may share one block as parallel calls; daemon suites one at a time. Never deliberate parallel-vs-serial.
 - One command, once, failure-aware: `node tests/<suite>.test.ts > /tmp/s.log 2>&1; e=$?; echo exit=$e; if [ $e = 0 ]; then tail -3 /tmp/s.log; else grep -n -m1 -B2 -A8 AssertionError /tmp/s.log || tail -15 /tmp/s.log; fi`; /tmp/s.log is scratch. exit=0 settles the run, pass line or not: no log re-grep for a pass phrase, no assert-usage audit of the test file. Never pipe a suite to `tail` (hides the exit code, forces a re-run).
 - Failure triage: exit 1 → the next block is one re-run of that suite, nothing in between. Second failure → decide: a diff symbol in the assertion or message is a defect or a stale pin, fix it (see Fixes); no diff symbol records as pre-existing, next suite. Never read test sources, grep helpers, or cycle hypotheses before the re-run.
 - A diff that edits a test assertion (a pin, a count, a style string): one grep of tests/ for the old assertion before running. Suite files are byte copies of their pre-split source: pins (CSS strings, counts, margins) lag later edits to a sibling file with the same content, and the editing diff names only one of them.
 - tests/orchestrator/ merge smokes flake under load (daemon git timing): a clean re-run closes it; never investigate the assertion source first.
-- A diff that adds a smoke-style `part X` console section: close the check with one `grep -n "part X" /tmp/s.log` after the run. Part names come from the diff, never from memory or a task note; an off count gets one corrective grep, then the next suite, never a recount loop.
+- A diff that adds a smoke-style console section (a `// --- part X` comment above a console.log): close the check with one grep of /tmp/s.log after the run. The pattern is a substring of the console.log string literal as printed in the diff, never the comment label: labels do not reach the log (measured: grepping the label matched nothing, and the exit-1 chain cost a decode block plus a corrective grep). No match → one corrective grep with the literal from the diff, then the next suite, never a recount loop.
 - Policy: fix → a test for the bug; feature → tests for the new behavior; refactor → tests pass; trivial → exempt.
 - Long suites (tests/orchestrator/, tests/webui/) spawn real daemons: allow 10 min. tests/kanban/ concurrency tests, when the diff touches createTask or the allocation path: run 3+ times.
 
 ## Coverage map (decide once from the diff)
 Every suite is split: tests/<area>/<name>.test.ts per area (tests/orchestrator/, tests/webui/, tests/kanban/, tests/efficiency-analysis/), plus repo-root index.test.ts (the loop's first entry, not under tests/), standalone tests/{context-symlinks,mcp,extension,plugin}.test.ts and shared tests/helpers.ts. The old monoliths are deleted; package.json runs `index.test.ts tests/*.test.ts tests/*/*.test.ts`, so a new area file runs with no registration. A map-named file that does not exist: say so once in the findings edit, skip, no fallback deliberation.
-- src/orchestrator/*, src/pid.ts → tests/orchestrator/ (analysis, config, daemon, hub, log, merge, poll, promote, singleton, spawn, split, sweep, worktree); spawn and pipeline context paths → tests/context-symlinks.test.ts.
+- src/orchestrator/*, src/pid.ts → tests/orchestrator/ (analysis, config, daemon, hub, log, merge, poll, promote, singleton, spawn, split, sweep, worktree). Fast, no runDaemon: analysis, hub, log; the other ten are daemon suites, serial. Trust this list; re-grep only for a suite not in it. Spawn/pipeline cwd-handling changes (worktree resolution, symlink paths) also run tests/context-symlinks.test.ts.
 - src/efficiency-analysis.ts, src/analysis-run.ts → tests/efficiency-analysis/ (claude, commands, doctor, merge, parse, pipeline, prompts), plus tests/orchestrator/analysis.test.ts (exercises the real analysis hook).
 - src/tools.ts → tests/mcp.test.ts (fast) plus tests/extension.test.ts. src/mcp.ts → tests/mcp.test.ts.
 - src/webui/*, src/hub.ts → the touched tests/webui/ area file (agentlog, board, hub, logpane, page); src/hub.ts also hits tests/orchestrator/hub.test.ts.
@@ -84,6 +85,7 @@ Every suite is split: tests/<area>/<name>.test.ts per area (tests/orchestrator/,
 - .kanban files are untracked in the worktree: git diff and git log say nothing about them. A "moved into .kanban" claim: grep the worktree directly. Git history answers no code question: the diff plus one producing-site read is the whole evidence.
 
 ## Facts that bite
+- Test suites run straight through `node <file>.test.ts`: imports resolve at load, so a missing import or symbol fails the suite. Import existence is settled by the run itself, never a pre-run grep.
 - Per-area HERE anchors are deliberate locals, not copied helpers: tests/webui/hub.test.ts and tests/webui/agentlog.test.ts must point at tests/webui, so `const HERE` stays in each. Notes record them. Never flag them, never reconcile them in thinking.
 - repo-root index.test.ts is a real suite and the first entry of the test loop; it is not under tests/.
 - Split modules keep one-line re-export shims (src/webui.ts → ./webui/index.ts, src/orchestrator.ts → ./orchestrator/index.ts). A shim grep miss is the whole answer; never read the shim or trace the chain.
