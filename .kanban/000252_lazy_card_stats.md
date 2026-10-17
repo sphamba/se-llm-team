@@ -1,12 +1,12 @@
 ---
 name: "feat: lazy stats on all board cards"
 priority: "high"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "lazy-card-stats"
-blockedBy: "#250"
+blockedBy: ""
 ---
 
 # Summary

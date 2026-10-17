@@ -1,8 +1,8 @@
 ---
 name: "fix: stable task detail cards, no appear/disappear/reappear flicker"
 priority: "critical"
-state: "live-testing"
-worktree: "fix/251-stable-detail-cards"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "complex"
 shortName: "stable-detail-cards"
@@ -51,6 +51,17 @@ Acceptance:
 - Developer, 2026-10-16: for a task in state done the run card reads alive=false by design (AGENT_ROLE keys the live role off the task state, not the pid file), so the live check sampled the doctor card (alive, duration ticks) for the in-place stats move. The sub card's in-place stats path for a done task only fetches on an empty box or a rebuild, so the live check proved its mount persistence, the suite pins the in-place gate.
 - Reviewer, 2026-10-16 (a582b65): all six requirements verified, no fixes. Req 1: the diff drops the light-row agent render (renderAgent({})/renderDoctor({}) on a switch only, keepCards same-task reopen, history render keep mode) and detailGen is gone, writes gate on modalFile plus the hidden/closing state; the switch path nets to a cleared row because renderDoctor({}) removes all cards and resets #m-doctor.__cards. Req 2: the lift/re-slot verified against doctorCol (board.ts:118) and syncDoctorCards' parentElement check, which holds on re-slotted cards. Req 3: the gate keys on the sub index set; syncStatsLine(card, tokens, duration, doc) (board.ts:87) matches the new call, tokens/duration move in place. Req 4: no code change needed — agentAlive (pid.ts:94) reads pidEntry and pidAlive(pid, disc), the discriminator decides, so stale and recycled analysis pids read dead; two new payload tests pin both. Req 5: #m-log-text is the only transcript holder, closeLog already clears the log state, the close wipe drops the DOM text. Req 6: the three assumptions were voiced (they restated requirements 1/5 and the code's freshness behavior, so the Open questions section is now deleted). Tests: node tests/webui.test.ts exit=0, all assertions passed.
 
+## Live test (2026-10-17)
+
+- Setup: hub-only run from the merged worktree (a582b65), port 4351, isolated HOME, fixture `/tmp/lt251/repo/.kanban`: a live `doing` task (sleep pid, one run log, one subagent transcript, one doctor log) and a done task. 35 checks, 0 failed, 0 page errors. The served merged page holds 0 `detailGen` occurrences. The parent commit (b02daed) page holds 8.
+- Cards mount once and stay mounted (acceptance line 1): the tagged run, sub and doctor card nodes kept their identity across the open, the first live poll (5.6 s), two more 1 s polls, two 5 s poll cycles on the done task, close and reopen. A node-identity remount detector showed 0 remounts in the whole session. Control: the parent commit on the same fixture remounted the run card and both sub cards on open (3 remounts), so the harness detects the removed flicker.
+- Live transcript growth (path 3): an appended `turn_end` moved the run card and the mounted sub card stats lines in place, with the same nodes. The per-second sub list fetch did not rebuild the unchanged sub set. A new sub index then mounted with one entrance animation, and the new set stayed mounted across two more live polls with no per-second rebuild.
+- Doctor alive (path 4): a recycled analysis pid (a live sleep pid with the wrong discriminator) and a stale pid (999999999) both left the doctor card dead (no `.spin`, check mark present), with the same node and 0 remounts. `/api/task-history` reported `doctors[0].alive = false` for the recycled file, the stale file and a missing file.
+- Log memory (requirement 5): after the run log rendered in the pane (`LIVE251MARKER`), the close emptied `#m-log-text`, hid the pane and kept the cards mounted. A same-task reopen kept the same card nodes, and the log re-fetched from the server and rendered the marker again.
+- Late response guard: with `/api/task-history` delayed 1.5 s, an open followed by a close 300 ms later left `#m-agent-btns` empty and the modal closed, so the late response rendered nothing.
+- Skipped: the exact poll-versus-open generation race was not forced. The checked observable is the late-response guard plus the mount-once open render. The structural half (the counter is gone) comes from the served-page grep.
+- Assumptions: (a) the fixture is a hub-only board with a live `doing` task for the 1 s cadence and a done task for the 5 s cadence. (b) The log memory observable is `#m-log-text` plus the pane state, because the in-page `logState` is not reachable from the test. (c) A new sub index may rebuild its box (requirement 3 excludes stable parts only), so one rebuild of the existing sub card is expected.
+- Technical difficulties: the first harness run had 4 script defects (a spread Playwright `waitForFunction` argument, a class-list identity key that read the `agent-card-active` toggle at close as a remount, and a descendant selector). The fixture was rebuilt before the clean second run. No product issue found.
 
 # Open questions
 

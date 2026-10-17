@@ -1,8 +1,8 @@
 ---
 name: "chore: split-test-suite orchestrator area and shared test infra"
 priority: "medium"
-state: "to-do"
-worktree: ""
+state: "doing"
+worktree: "chore/255-split-test-suite-orchestrator"
 issuer: "#254"
 complexity: "moderate"
 shortName: "split-test-suite-orchestrator"

@@ -1,7 +1,7 @@
 ---
 name: "fix: orchestrator RAM ratchet (whole-log parse churn and never-evicting caches)"
 priority: "critical"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/250-orchestrator-ram-ratchet"
 issuer: "user"
 complexity: "moderate"
@@ -56,6 +56,16 @@ Acceptance:
 - Live check (fixture daemon, port 4399): the run log and doctor log landed as .log.gz at the
   daemon's first sweep; /api/task-history served the doctors from the .gz (tokens 10, duration
   2000 ms); RSS 118964 KB at baseline, 119100 KB after 3 history fetches, no ratchet.
+- Review at e1633e4 (the range's only commit): all six requirements check out against the diff.
+  Both acceptance suites re-run green (webui: all assertions passed; orchestrator: exit 0). The
+  agentLogPayload gunzip stays request-local (payload.ts:713), the new log.ts -> payload.ts import
+  is acyclic (payload imports only kanban/pid/logpane), and the Open-questions assumptions stand.
+- Minor, non-blocking: (1) the head fingerprint stores 4 KB of raw log text per cache entry, so
+  the requirement's "never content" letter bends; bounded at ~4 MB worst case across both maps and
+  stated openly in Notes, the no-ratchet/no-full-log intent holds. (2) scanLogLines splits a
+  multi-byte UTF-8 char at a 1 MB window boundary into replacement chars, so that one line's
+  JSON.parse fails and its record drops; only single lines over 1 MB, a small delta vs the old
+  whole-file read.
 
 # Open questions
 

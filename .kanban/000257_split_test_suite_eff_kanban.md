@@ -1,7 +1,7 @@
 ---
 name: "chore: split-test-suite efficiency-analysis and kanban areas"
 priority: "medium"
-state: "doing"
+state: "to-review"
 worktree: "chore/257-split-test-suite-eff-kanban"
 issuer: "#254"
 complexity: "simple"
@@ -29,3 +29,13 @@ Acceptance:
 - No assertion count regression: all 203 + 179 assertions land in the new files (compare the old files from git history with the new area dirs).
 
 # Notes
+- Split tests/efficiency-analysis.test.ts (987 lines, 203 assertions) into tests/efficiency-analysis/: parse, claude, commands, pipeline, merge, doctor, prompts, plus helpers.ts for the shared synthetic fixture and record stubs.
+- Split tests/kanban.test.ts (510 lines, 179 assertions) into tests/kanban/: naming, taskfile, attributes, blockedby, locking, git.
+- The split copies the original test bodies line for line. src imports use ../../src/*.ts. The two import.meta.dirname path joins in tests/kanban/locking.test.ts use ../.. to reach src from the subdir.
+- Assertion parity: grep -c 'assert\.' gives 203 and 179 on the new area dirs, the same counts as the old single files from git history.
+- All 13 split files pass standalone with node tests/<area>/<file>.test.ts. The two old single files are deleted. No change to package.json, scripts/test-changed.mjs, tests/helpers.ts, tests/orchestrator.test.ts or tests/webui.test.ts.
+- pnpm test still names the old single files and fails until task #255 lands the glob, as Spec 7 expects.
+- Updated one stale path in .kanban/AGENTS.developer.md: the prompt byte pin now points to tests/efficiency-analysis/doctor.test.ts.
+
+# Open questions
+- Assumption: the kanban split needs no tests/kanban/helpers.ts because the six groups share no helper code. Each file makes and removes its own fixture root. Confirm if a shared helper is wanted anyway.

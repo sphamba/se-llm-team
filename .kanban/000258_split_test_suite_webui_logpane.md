@@ -1,7 +1,7 @@
 ---
 name: "chore: split-test-suite-webui logpane"
 priority: "medium"
-state: "doing"
+state: "to-review"
 worktree: "chore/258-split-test-suite-webui-logpane"
 issuer: "#256"
 complexity: "simple"
@@ -29,3 +29,11 @@ Acceptance:
 - git status shows only tests/webui/logpane.test.ts as new.
 
 # Notes
+
+- Created tests/webui/logpane.test.ts with lines 43-313 of tests/webui.test.ts moved verbatim (a diff of the range against the new file body is clean): LogEl stub and selector matcher, logFixups promotion and join scenarios, renderLogChunk chunking and collapsible blocks (000122, 000148, 000141), sidechain transcripts and the md() markdown asserts.
+- Header imports only assert, logFixups and renderLogChunk from ../../src/webui.ts. md, esc, LOG_ROLES and LOG_LINES occur in the range only in comments and assertion messages, so they are not imported.
+- node tests/webui/logpane.test.ts exits 0 standalone. grep -c 'assert\.' gives 61. Committed as 1898b6a. Only the new file is in the commit; tests/webui.test.ts, package.json, scripts/test-changed.mjs and tests/helpers.ts are untouched.
+
+# Open questions
+
+- Assumption: requirement 3's import list is illustrative ("e.g."), so the new file imports only the symbols the range calls. Confirm or correct.

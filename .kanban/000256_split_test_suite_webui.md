@@ -29,3 +29,9 @@ Acceptance:
 - No assertion count regression: the union of the new files' assertions equals 739 (61 + 76 + 153 + 270 + 179).
 
 # Notes
+- Blocked, verification cannot run. The split has not landed at branch base a582b65 (= main, no commits in this worktree): tests/webui.test.ts is still present (2,379 lines, 739 assertions) and tests/webui/ does not exist.
+- Dependency state at check time: #258 has one commit (1898b6a, tests/webui/logpane.test.ts, 274 lines); #259 and #260 are running with branches still at a582b65; #261 and #262 are to-do with no branch. The board also holds a newer group plan (#265 page 755-1513 / 284 assertions, #266 payload 1514-2379 / 200 assertions; #263/#264 absent from main) that conflicts with the five-file targets in Specs (61/76/153/270/179).
+- No code change and no commit in this worktree. Re-run this task after the webui group tasks merge into main, then compare the counts against the group files that actually land.
+
+# Open questions
+- Assumption: the final group set (file names, ranges, per-file counts) can differ from the five names and the 61/76/153/270/179 targets in Specs, because the board holds two group plans. Confirm the final set when the pieces land.

@@ -1,7 +1,7 @@
 ---
 name: "chore: split-test-suite-webui board"
 priority: "medium"
-state: "doing"
+state: "to-review"
 worktree: "chore/260-split-test-suite-webui-board"
 issuer: "#256"
 complexity: "simple"
@@ -29,3 +29,10 @@ Acceptance:
 - git status shows only tests/webui/board.test.ts as new.
 
 # Notes
+- Split tests/webui/board.test.ts out of tests/webui.test.ts lines 422-797 (000260): the 376 lines moved byte-identical (`diff` against the old range is clean), with a standalone boot (own hub on port 0, temp HOME/root, XDG_CONFIG_HOME dropped) and only the used imports adapted to ../../src/.
+- `node tests/webui/board.test.ts` passes standalone and `grep -c "assert\."` reports exactly 153, matching the old range. The boot holds no assert, so the count stays at the ranged 153.
+- No seeded task: the group reads the served page text and the pure board helpers only, so the hub needs no board row.
+- tests/webui.test.ts, tests/helpers.ts, package.json, scripts/test-changed.mjs and every sibling test file untouched. pnpm test still runs the old file until #255 lands the glob, as the spec expects.
+
+# Open questions
+- Assumption: the board group needs no seeded task or registry entry; the green standalone run confirms the hub serves `/` on an empty root.

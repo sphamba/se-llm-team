@@ -1,7 +1,7 @@
 ---
 name: "chore: split-test-suite-webui hub"
 priority: "medium"
-state: "doing"
+state: "to-review"
 worktree: "chore/259-split-test-suite-webui-hub"
 issuer: "#256"
 complexity: "simple"
@@ -29,3 +29,14 @@ Acceptance:
 - git status shows only your new tests/webui/ file(s).
 
 # Notes
+- Split the three ranges 14-42, 315-421 and 2277-2379 of tests/webui.test.ts into a new tests/webui/hub.test.ts, moved verbatim apart from the imports and HERE paths. The file is self-contained: it deletes XDG_CONFIG_HOME, makes a temp HOME and root, registers the exit and signal cleanup, and imports only the symbols the ranges use from ../../src/kanban.ts, ../../src/hub.ts and ../../src/webui.ts.
+- One owner: the taskPayload and done-cache tail stays in hub.test.ts. It reads ui, root, home and cleanup from the earlier ranges, so a second file would need a second boot and a second hub.
+- Path adaptation: HERE is now tests/webui. The /api/hub root and commit checks use join(HERE, "../.."); the 000192 probe reads join(HERE, "../../src"); the daemon spawn uses join(HERE, "../../src/orchestrator.ts"). The final log line reads "hub.test.ts: all assertions passed".
+- Requirement 4 clean-up: statsRoot and doneRoot get one rmSync each before the final cleanup(), because the old cleanup() removed only root and home.
+- Check: node tests/webui/hub.test.ts exits 0 and prints "hub.test.ts: all assertions passed". grep -c "assert\." gives 76. A mechanical check reverted the five adaptations and compared each range with the old file: the three ranges are byte-identical.
+- tests/webui.test.ts, package.json, scripts/test-changed.mjs, tests/helpers.ts and the sibling suites are untouched. pnpm test still runs the old file until task #255 lands the glob.
+- Commit: 424ae73.
+
+# Open questions
+- Assumption (the spec allows either): tests/webui/hub.test.ts owns the taskPayload and done-cache tail (old lines 2334-2376) instead of a separate tests/webui/payload.test.ts, because the tail uses the first hub's ui, root and cleanup.
+- Assumption: the renamed final log line and the two added temp-dir clean-ups count as boot adaptation, not a scenario change. The 76 assertion lines themselves are unchanged.
