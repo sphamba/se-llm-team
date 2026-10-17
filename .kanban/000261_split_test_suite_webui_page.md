@@ -1,7 +1,7 @@
 ---
 name: "chore: split-test-suite-webui page"
 priority: "medium"
-state: "doing"
+state: "to-live-test"
 worktree: "chore/261-split-test-suite-webui-page"
 issuer: "#256"
 complexity: "moderate"
@@ -35,8 +35,4 @@ Acceptance:
 - The boot's hub-start check is a plain throw, not assert.ok, so grep -c "assert." is exactly 270.
 - Imports (only what the range uses): getTask/setState from kanban, startHub from hub, agentRowSig/agentStatsText/boardOf/curve/doctorCol/logFixups/md/mergeBoards/refreshMs/syncAgentStats/syncDoctorCards/syncStatsLine from the webui barrel, esc from the logpane module. numLinkHtml and syncBoard appear only inside page.includes strings, no imports for them.
 - node tests/webui/page.test.ts passes standalone (exit 0); the hub server is unref'd so the run exits; cleanup removes both temp dirs. The old file is untouched; pnpm test still runs only the old file (explicit list, no glob) until #255 lands the glob.
-
-# Open questions
-
-- Assumption: the boot fetches the history payload while the task is backlog with no role logs (matching the old file's state at its line 361), so the range's agent null / empty-agents asserts read the same data.
-- Assumption: the standalone run is safe in parallel with the other group files (distinctive webui-page-* temp prefixes, port 0); no fixtures are shared across group files.
+- Review of c1a9a6b (base main): verbatim move confirmed by range diff (old 801-1516 vs new 66-782: scenario code and 000NNN comments byte-identical, sole drift one added blank line at new 717); grep -c "assert." is exactly 270; node tests/webui/page.test.ts exit 0; git diff shows only tests/webui/page.test.ts, the old file untouched. Both former open assumptions verified: the old boot fetches histPayload at line 361 with the task still backlog, matching the new boot; parallel safety holds (port 0, distinctive webui-page-* temp prefixes, no shared fixtures). No fixes.

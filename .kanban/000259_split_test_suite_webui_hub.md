@@ -1,7 +1,7 @@
 ---
 name: "chore: split-test-suite-webui hub"
 priority: "medium"
-state: "live-testing"
+state: "done"
 worktree: "chore/259-split-test-suite-webui-hub"
 issuer: "#256"
 complexity: "simple"
@@ -37,3 +37,13 @@ Acceptance:
 - tests/webui.test.ts, package.json, scripts/test-changed.mjs, tests/helpers.ts and the sibling suites are untouched. pnpm test still runs the old file until task #255 lands the glob.
 - Commit: 424ae73.
 - Review at 424ae73: the old ranges' 76 assert lines match hub.test.ts 76:76, and the only three differences are the recorded path adaptations (hub.root, the hub.commit cwd and the 000192 probe use join(HERE, "../..") and ../../src). node tests/webui/hub.test.ts exits 0 and prints "hub.test.ts: all assertions passed"; the assert-line count gives 76. The boot pattern is inline (000215 XDG drop, temp HOME/root, exit/SIGINT/SIGTERM cleanup), imports come only from ../../src/kanban.ts, ../../src/hub.ts and ../../src/webui.ts, the daemon spawns join(HERE, "../../src/orchestrator.ts"), no helpers file, and git status is clean apart from the new file. Requirements 1-6 pass. The two stated assumptions stand: the tail ownership is requirement 1's delegated judgment, and the renamed log line plus the two temp-dir clean-ups are requirement 4's demanded cleanup, not a scenario change.
+
+## Live test (2026-10-17)
+
+- Scope: the task moves hub/config/daemon scenarios into tests/webui/hub.test.ts. The live-test instructions ban running *.test.ts, so `node tests/webui/hub.test.ts` was not run; that acceptance item stays a developer/reviewer gate. The live test verified the static move and exercised the production surface the moved scenarios pin.
+- Static move (independent subagent, spot re-checked): base = `git show 424ae73^:tests/webui.test.ts` (2379 lines / 739 asserts, matching the Specs). R1 (base 14-42) and R2 (base 315-421) are exact substrings of hub.test.ts after reverting the documented HERE/path adaptations. R3 (base 2277-2379) is byte-identical line for line apart from the two requirement-4 cleanup lines (`rmSync(statsRoot...)`, `rmSync(doneRoot...)`) and the renamed final log line, both documented in the Notes.
+- Assertions: grep -c "assert\." hub.test.ts = 76; the three ranges hold 1 + 54 + 21 = 76.
+- Static surface: imports are node builtins plus ../../src/kanban.ts, ../../src/hub.ts and ../../src/webui.ts only; no import of tests/webui.test.ts or tests/helpers.ts; tests/webui/helpers.ts absent; commit 424ae73 touches only tests/webui/hub.test.ts; git status clean.
+- Runtime usage (43 checks, 0 failed, /tmp/lt259/probe.mjs): hub boot on port 0; /api/tasks light-row fields, heavy keys absent, agents; /api/task-detail; /api/task-history; the 404s on both endpoints; issuer and blockedBy; the visible-subset fold; GET / markers (no-cache, script parses, title, theme, no notify, hub footer, task-history, all 10 state names); /api/hub pid/root/commit; no .webui-hot-* under src; second hub on the taken port returns null; loadWebUiConfig precedence (project over neutral over legacy pi path); taskPayload visible subset, usage sum, taskHistory equality, done cache stale/invalidate/re-cache; daemon wiring (HOME webUi config port 0, "web ui on <url>" logged, dashboard serves all states, /api/tasks serves the task).
+- Assumptions: (a) the verbatim base is `424ae73^`, because the working-tree tests/webui.test.ts no longer matches the Specs' 2379 lines after later sibling work; (b) R3 ends at base line 2379, the Specs' 2380 is one past EOF; (c) the added rmSync lines are requirement 4's cleanup, not scenario text.
+- Technical difficulties: none. No leftover fixture processes or temp dirs.

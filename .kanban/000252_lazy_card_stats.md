@@ -26,3 +26,10 @@ Acceptance:
 - Live test (feel-based): unfolding a column gives every revealed card its stats line, appearing smoothly with a subtle height animation; done tasks serve stats from localStorage on the next page load.
 
 # Notes
+
+- Blocked verification (checked 2026-10-17 at base 82160ef): neither dependency has landed. #263 is in state doing (its worktree has no commits, only an uncommitted tests/webui.test.ts change). #264 is in state to-do (its worktree is clean with no commits).
+- Absent from the base: no /api/card-stats route in src/hub.ts, no cardStatsPayload export in src/webui/payload.ts, no lazy stats fetch and no stats localStorage entry in src/webui/page.ts. VISIBLE_CARDS = 5 (src/webui/payload.ts:610) still caps the eager attach.
+- node tests/webui.test.ts passes with 757 asserts (exit 0, output in /tmp/252-webui-baseline.log). The test additions of both subtasks are absent, so the count is not above the 757 baseline.
+- No live check ran: there is no endpoint and no client behavior to verify.
+- This run raced the split: the daemon promoted the task when its earlier blockers #250 and #251 reached done, the splitter then set blockedBy #263 and #264, and the developer spawned in the same minute. The ordering was premature, not the implementation.
+- Next step: re-run this verification after #263 and #264 land on main. The worktree then needs a base that holds both commits.

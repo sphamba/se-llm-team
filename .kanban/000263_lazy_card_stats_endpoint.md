@@ -1,7 +1,7 @@
 ---
 name: "feat: lazy card stats batched endpoint"
 priority: "high"
-state: "doing"
+state: "to-review"
 worktree: "feat/263-lazy-card-stats-endpoint"
 issuer: "#252"
 complexity: "simple"
@@ -35,3 +35,16 @@ Acceptance:
 Tests: extend the existing 000245 fixture block (tests/webui.test.ts:2339-2440) - it already spins a hub (startHub) with task fixtures and logs; add the endpoint asserts right there. NEVER edit the shared import lines (lines 9-12) - add a NEW import line for the new payload export, so the merge with the client subtask stays trivial. Baseline: the file passes with 757 asserts (grep -c "assert\." tests/webui.test.ts); your additions raise that count.
 
 # Notes
+
+- Server half shipped: `cardStatsPayload(root, files)` in src/webui/payload.ts resolves each requested file against `listAll(root)` and calls `cardAgents` per on-board task, so #250's done memo and incremental parse stay in one place; exported from the barrel (src/webui/index.ts).
+- Route in src/hub.ts next to /api/task-history: GET /api/card-stats?files=a.md,b.md[&project=<id>], async; project resolves like /api/tasks, an unknown project 404s with an empty body, and a missing or empty files param answers {}.
+- taskPayload's eager first-5 attach is untouched.
+- Tests in tests/webui.test.ts: one new payload import line (shared lines 9-12 untouched), route asserts in the 000245 hub block (the hidden card's agents over HTTP, bogus file omitted, empty files {}, unknown project 404) and in-process payload asserts in the 000245 stats fixture (off-board omitted, agents equal the visible row's, empty list {}). 757 to 764 asserts, `node tests/webui.test.ts` passes.
+- Live check (feel-based): an in-process hub over a 6-task fixture answered all 6 files (the oldest hidden card with tokens 30), omitted bogus.md, answered {} without a files param, 404 for an unknown project, and /api/tasks still carried agents on exactly the first 5 rows.
+- Deviation: the Tests note places the hub fixture at tests/webui.test.ts:2339-2440, but the file closes that hub at line 2284; the route asserts went into the 000245 hub block that does run startHub (around line 315), and the 2339 fixture carries the in-process payload asserts.
+
+# Open questions
+
+- Assumption: swept .log.gz run logs flow through cardAgents' existing decompress path, no endpoint-specific handling.
+- Assumption: done-cache population and eviction stay entirely inside cardAgents; cardStatsPayload adds no cache, so the eviction interplay is identical to taskPayload's.
+- Assumption: project resolution is by root or unique bare name like /api/tasks; an unknown or duplicate-ambiguous project 404s (empty body).

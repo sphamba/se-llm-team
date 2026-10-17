@@ -1,7 +1,7 @@
 ---
 name: "chore: split-test-suite-webui logpane"
 priority: "medium"
-state: "live-testing"
+state: "done"
 worktree: "chore/258-split-test-suite-webui-logpane"
 issuer: "#256"
 complexity: "simple"
@@ -34,4 +34,17 @@ Acceptance:
 - Header imports only assert, logFixups and renderLogChunk from ../../src/webui.ts. md, esc, LOG_ROLES and LOG_LINES occur in the range only in comments and assertion messages, so they are not imported.
 - node tests/webui/logpane.test.ts exits 0 standalone. grep -c 'assert\.' gives 61. Committed as 1898b6a. Only the new file is in the commit; tests/webui.test.ts, package.json, scripts/test-changed.mjs and tests/helpers.ts are untouched.
 - Review at 1898b6a: old range 43-313 diffed against the new file body is clean apart from one blank line after the imports (boot, allowed by req 1). Imports hold logFixups and renderLogChunk only; md, esc, LOG_ROLES and LOG_LINES occur in the new file only in comments and assertion messages, so not importing them is correct (req 3's list is illustrative). Standalone run exit=0, 61 assertions. No grep of logpane in package.json, scripts/test-changed.mjs or tests/helpers.ts; tests/webui.test.ts untouched, git status shows only tests/webui/logpane.test.ts. No fixes, no open questions.
+
+## Live test (2026-10-17)
+
+- Result: 41 checks, 0 failed (13 static, 28 in the browser). The test file was parsed and inspected, never executed, so the unit suite ban stays in force. No code file was edited.
+- Assumption: "node tests/webui/logpane.test.ts passes standalone" is a developer and reviewer gate. The live test applied the same scenarios to the merged production surface: `node --check` on the file, resolution of both import specifiers from the merged src, and a replay of the moved scenarios through the real hub log pane.
+- Assumption: the sidechain records sit directly in the run log. The page renders isSidechain records through the same renderLogChunk path as a sub transcript, so the served behavior is the same.
+- Verbatim move: the new file body equals old lines 43-313 at branch base a582b65 and old lines 46-316 at merged parent b9ced0d. The 3-line shift comes from b9ced0d, which inserted 3 lines above the group. Both ranges carry 61 assertions. The scenario comments 000122, 000148 and 000141 are in the file.
+- Ownership: commit b7f3021 adds only tests/webui/logpane.test.ts. tests/webui.test.ts, tests/helpers.ts, package.json and scripts/test-changed.mjs are untouched by it. Worktree git status is clean.
+- Self-contained: exactly two imports (node:assert/strict and ../../src/webui.ts), no reference to the old file or to a helper file, no temp dir, HOME or child_process boot left, and the LogEl stub and logDoc are inlined.
+- Served-surface replay (hub on 127.0.0.1:4350, one doing task with a live pid and one developer run log): the log pane shows the prompt and the sidechain prompt lines, the md() paragraphs, the open Thinking block, the closed markdown thinking block with b and li, one tool block per call, the failed tool summary, the args body, the joined tool result, the sidechain tool block and result, the orphan result promoted with the generic summary, the non-JSON line, no raw JSON, and the bold, inline code and fenced code markdown.
+- Live poll at the 1 s cadence with appended records: a delta joins the init open block in place, a cross-window thinking_end closes it with the authoritative text, a delta with no open block promotes a new open block, and the next thinking_end closes that block. An `<img ...>` delta stays escaped (0 img elements). A partial trailing record is not rendered, then renders exactly once when its newline arrives. No page errors.
+- Finding: the Specs line range 43-313 is stale against the merged parent, because b9ced0d moved the logpane group to 46-316. A reviewer who diffs literal lines 43-313 against the current old file sees the 3-line shift. The extraction follows the semantic boundaries (stub comment to the thinkMd assert) and matches the old range verbatim at both revisions, so the move is correct.
+- Open questions: none.
 

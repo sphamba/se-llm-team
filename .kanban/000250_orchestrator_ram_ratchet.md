@@ -1,8 +1,8 @@
 ---
 name: "fix: orchestrator RAM ratchet (whole-log parse churn and never-evicting caches)"
 priority: "critical"
-state: "live-testing"
-worktree: "fix/250-orchestrator-ram-ratchet"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "orchestrator-ram-ratchet"
@@ -66,6 +66,45 @@ Acceptance:
   multi-byte UTF-8 char at a 1 MB window boundary into replacement chars, so that one line's
   JSON.parse fails and its record drops; only single lines over 1 MB, a small delta vs the old
   whole-file read.
+
+## Live test (2026-10-17)
+
+Merged b9ced0d on an isolated fixture (git root, fake agent, own HOME, daemon port 4350, poll
+0.05 min, rescan 1 s, startup plus continuous sweeps). 25 checks, 0 failed. No suites run.
+
+Sweep and doctor gzip:
+- The startup sweep gzipped the 34.8 MB developer.0.doctor log and the small reviewer.0.doctor
+  log, and removed the plain files. A doctor log guarded by a live reviewer.1.analysis pid
+  stayed plain. The live developer.0 run log stayed plain, and the .count sentinel was
+  untouched.
+- A doctor log written while the daemon ran was gzipped by a later sweep, and the web UI read
+  it back.
+
+Web UI:
+- /api/tasks and /api/task-detail served the done task. /api/task-history served the big doctor
+  stats from the .gz (tokens 600030, duration 201000 ms, equal to the generator values), the
+  small doctor stats (10, 4000 ms), the guarded doctor as alive, and the swept run log (300
+  tokens, 2000 ms).
+- /api/agent-log rendered the big doctor and the swept run log. A 100-token append to the live
+  plain log appeared as 400 tokens on the next task-history poll, so the incremental parse read
+  only the growth.
+- A real Chromium page opened the done task, clicked both doctor cards, and the log pane showed
+  DOCTORBIGMARKER and DOCTORSMALLMARKER. Zero page errors.
+
+RSS (feel-based, no soak and no numeric bar per the Specs decision):
+- Baseline 226 MB. 12 iterations of task-detail + task-history + the 34.8 MB agent-log gave
+  226/259/259/279/279/246/246/246/279/279/279/279/246 MB. After 12 s idle the daemon settled at
+  213 MB, below the baseline. No upward ratchet, only GC sawtooth.
+
+Assumptions:
+- The 34.8 MB doctor log stands in for the production 26.8 MB shape, and one daemon with sweeps
+  plus repeated detail opens is enough for the feel check.
+- The daemon pid is the whole RSS surface, because the web UI runs in the daemon process.
+- The detail-open load is the same three HTTP calls that the served page makes.
+
+Not tested live: the analysis-respawn skip on an existing .doctor.log.gz (unit-level, no
+acceptance bullet), and no second daemon as a ratchet control (the Specs asks for a feel-based
+check only). No observed behavior contradicts the stated assumptions.
 
 # Open questions
 
