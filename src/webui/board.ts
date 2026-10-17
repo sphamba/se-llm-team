@@ -389,21 +389,23 @@ export function makeStatsQueue(key, fetchStats, applyStats, setTimer = setTimeou
 	const pending = [];
 	const requested = new Set();
 	let timer = null;
+	let busy = false;
 	const drain = () => {
 		timer = null;
 		const item = pending.shift();
 		if (!item) return;
+		busy = true;
 		requested.add(item.key);
 		fetchStats(item.project, item.file).then(
 			(stats) => { if (stats) applyStats(item.project, stats); else requested.delete(item.key); },
 			() => requested.delete(item.key),
-		).finally(() => { if (pending.length) timer = setTimer(drain, 0); });
+		).finally(() => { busy = false; if (pending.length) timer = setTimer(drain, 0); });
 	};
 	const enqueue = (project, file) => {
 		const k = key(project, file);
 		if (requested.has(k) || pending.some((p) => p.key === k)) return;
 		pending.push({ project, file, key: k });
-		if (!timer) timer = setTimer(drain, 0);
+		if (!timer && !busy) timer = setTimer(drain, 0);
 	};
 	// the column's beyond-fold cards, in board order, skipping done cards with known stats
 	const enqueueCol = (project, tasks, st, visible) => {

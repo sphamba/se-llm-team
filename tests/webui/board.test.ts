@@ -549,6 +549,21 @@ assert.deepEqual(csSeq.applied, [{ project: "p", stats: { "cs_f.md": { agents: c
 csSeq.calls[1].d.resolve({ "cs_g.md": { agents: csAgents } });
 await csSettle();
 
+// an enqueue during an in-flight fetch never starts a second concurrent request
+const csOne = csNewQueue();
+csOne.queue.enqueueCol("p", [{ file: "cs4_a.md", state: "doing", updated: 1 }], "doing", 0);
+csFlush();
+assert.deepEqual(csOne.calls.map((c) => c.file), ["cs4_a.md"], "the first card fetches");
+csOne.queue.enqueueCol("p", [{ file: "cs4_z.md", state: "doing", updated: 0 }], "doing", 0);
+csFlush();
+assert.equal(csOne.calls.length, 1, "no second request while the first is in flight");
+csOne.calls[0].d.resolve({ "cs4_a.md": { agents: csAgents } });
+await csSettle();
+csFlush();
+assert.deepEqual(csOne.calls.map((c) => c.file), ["cs4_a.md", "cs4_z.md"], "the mid-flight enqueue drains after the first settles");
+csOne.calls[1].d.resolve({ "cs4_z.md": { agents: csAgents } });
+await csSettle();
+
 // a task arriving at position 6 in an expanded column re-queues on the next pass; a fetched file never does
 const csArr = csNewQueue();
 const csFive = ["a", "b", "c", "d", "e"].map((n, i) => ({ file: `cs2_${n}.md`, state: "doing", updated: 10 - i }));
