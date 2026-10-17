@@ -642,6 +642,21 @@ export async function taskPayload(root: string) {
 	return served;
 }
 
+// 000263: the batched lazy-stats endpoint: the client fetches the cards behind "show more" when
+// a column unfolds, so every requested on-board file answers with the same per-file agents
+// taskPayload attaches to the visible rows; no cache of its own, cardAgents carries the done memo
+// and the incremental parse, and files not on the board are omitted
+export async function cardStatsPayload(root: string, files: string[]) {
+	const tasks = listAll(root);
+	const logs = logDirFiles(root);
+	const out: Record<string, { agents: AgentEntry[] }> = {};
+	for (const file of files) {
+		const t = tasks.find((x) => x.file === file);
+		if (t) out[file] = { agents: await cardAgents(root, t, logs) };
+	}
+	return out;
+}
+
 // the per-task detail text (000242 light, 000248): the light row plus the body, sections and
 // attributes, built on open for ONE task with no log parsing, so the text shows as soon as it
 // lands; the agent/doctor history loads through taskHistory in a follow-up fetch; unknown num =

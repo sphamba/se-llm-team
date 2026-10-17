@@ -244,6 +244,17 @@ async function route(
 		} else {
 			json(res, history);
 		}
+	} else if (req.method === "GET" && path === "/api/card-stats") {
+		// 000263: the batched lazy-stats endpoint for the cards behind "show more" (the eager
+		// /api/tasks response carries only the first five per column); async like task-history,
+		// so a slow parse never delays a concurrent client's response
+		const entry = resolveEntry(entries, project);
+		if (!entry) {
+			res.writeHead(404).end(); // unknown projects are rejected like /api/tasks
+		} else {
+			const files = (url.searchParams.get("files") ?? "").split(",").filter(Boolean);
+			json(res, await webui.cardStatsPayload(entry.root, files));
+		}
 	} else if (req.method === "GET" && path === "/api/agent-log") {
 		const entry = resolveEntry(entries, project);
 		const payload = entry ? await webui.agentLogPayload(entry.root, url.searchParams) : null;

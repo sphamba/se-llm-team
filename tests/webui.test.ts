@@ -11,6 +11,7 @@ import { agentLabel, agentRowSig, agentStatsText, agentLogPayload, boardOf, buil
 import { esc, LOG_ROLES } from "../src/webui/logpane.ts";
 // not re-exported by the webui barrel: import directly from the payload module
 import { logStats, MAX_LOG_CACHES, statsCache, subagentLogs, subsCache } from "../src/webui/payload.ts";
+import { cardStatsPayload } from "../src/webui/payload.ts";
 import { compactFinishedLogs } from "../src/orchestrator.ts";
 import { gzipSync } from "node:zlib";
 
@@ -394,6 +395,19 @@ const bulkRows = (await (await fetch(`${base}/api/tasks`)).json()).filter((r: an
 assert.equal(bulkRows.length, 6);
 for (const r of bulkRows)
 	assert.equal("agents" in r, r.num !== parseInt(bulk[0].file, 10), "the five visible rows carry the stat data, a card behind show more carries none");
+// 000263: the batched lazy-stats endpoint serves the cards behind "show more": every requested
+// on-board file answers with its agent stats, a bogus file is omitted, and the eager /api/tasks
+// response keeps carrying only the first five
+mkdirSync(join(root, ".kanban", ".logs"), { recursive: true });
+const hiddenSlug = bulk[0].file.replace(/\.md$/, "");
+const hiddenLog = join(root, ".kanban", ".logs", `${hiddenSlug}.developer.0.log`);
+writeFileSync(hiddenLog, JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 20, output: 10 } }, timestamp: Date.now() }) + "\n");
+const cardStats = await (await fetch(`${base}/api/card-stats?files=${bulk.map((t) => t.file).join(",")},bogus.md`)).json();
+assert.deepEqual(cardStats[bulk[0].file].agents.map((a) => a.tokens), [30], "the endpoint serves the card behind show more, the eager response omits it");
+assert.deepEqual(Object.keys(cardStats).sort(), bulk.map((t) => t.file).sort(), "the endpoint keys every on-board requested file and omits a bogus one");
+assert.deepEqual(await (await fetch(`${base}/api/card-stats`)).json(), {}, "a missing files param answers an empty object");
+assert.equal((await fetch(`${base}/api/card-stats?project=nope&files=x.md`)).status, 404, "an unknown project is rejected like /api/tasks");
+rmSync(hiddenLog);
 for (const t of bulk) rmSync(join(root, ".kanban", t.file)); // restore the one-task board
 
 // GET / mentions all 10 state names; other paths and methods are 404
@@ -2357,6 +2371,12 @@ writeFileSync(join(statsRoot, ".kanban", ".logs", `${loggedSlug}.developer.log`)
 const loggedRow = (await taskPayload(statsRoot)).find((r: any) => r.file === statsTasks[1].file)!;
 assert.equal(loggedRow.agents[0].tokens, 800, "a visible card's row sums the run's usage like the detail's history");
 assert.deepEqual(loggedRow.agents, (await taskHistory(statsRoot, loggedRow.num))!.agents, "the row carries the same agent history the detail's history serves");
+// 000263: the batched stats payload answers the same per-file agents the visible rows carry,
+// keyed by the requested files, with the off-board and missing cases empty
+const batch = await cardStatsPayload(statsRoot, [statsTasks[1].file, "bogus.md"]);
+assert.deepEqual(Object.keys(batch), [statsTasks[1].file], "the batched stats answer omits a requested file not on the board");
+assert.deepEqual(batch[statsTasks[1].file].agents, loggedRow.agents, "the batched agents match the visible row's agent history");
+assert.deepEqual(await cardStatsPayload(statsRoot, []), {}, "an empty files list answers an empty object");
 
 // the done cache: a done task's stats serve from the cache (a rewritten plain log stays stale) and
 // leaving done invalidates it, so a re-done task re-caches fresh
