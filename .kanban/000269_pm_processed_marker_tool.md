@@ -1,7 +1,7 @@
 ---
 name: "feat: PM done-processing marker tool and unprocessed scope"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "feat/269-pm-processed-marker-tool"
 issuer: "#268"
 complexity: "moderate"
@@ -30,3 +30,7 @@ Out of scope: the catch-up report, the report instructions line and the kanban_d
 
 # Notes
 - No-split decision (2026-10-17): this task does not parallelize. Every cut shares files. The tool in tools.ts imports pmProcessedPath from kanban.ts, so a tools.ts-only subtask does not compile until the kanban.ts piece merges. The new test file covers both the list scope and the tool, so no side owns it alone. A scope-vs-tool cut makes both subtasks edit kanban.ts and tools.ts, so it conflicts at merge. The work is small (one helper, one scope member, one tool, one test file). One developer pass is faster than two reviews, two merges, and two live tests. No state change; the developer starts on this task as-is.
+
+# Open questions
+- Assumption: a files entry without the .md extension (e.g. "000042_name") resolves through getTask and marks the .md task's marker path.
+- Assumption: kanban_mark_processed creates .kanban/.logs when missing (recursive mkdir), so a fresh board works before the daemon ever made the dir.
