@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PRIORITY_RANK } from "../kanban.ts";
 import { esc, inline, logFixups, md } from "./logpane.ts";
-import { agentLabel, agentRowSig, agentStatsText, applyCardStats, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, mergeCardStats, numLinkHtml, relationPaths, sortedCol, spinnerHtml, statsKey, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, taskStats, taskStatsText } from "./board.ts";
+import { agentLabel, agentRowSig, agentStatsText, applyCardStats, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, makeStatsQueue, mergeCardStats, numLinkHtml, relationPaths, sortedCol, spinnerHtml, statsKey, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, taskStats, taskStatsText } from "./board.ts";
 
 // the served page: PAGE interpolates the tested renderers and helpers as client source; the
 // webui config loader and the per-tab client state helpers live here too
@@ -383,6 +383,7 @@ ${syncCardStats}
 ${statsKey}
 ${applyCardStats}
 ${mergeCardStats}
+${makeStatsQueue}
 ${refreshMs}
 // tabs: one per registered project, the active one renders that project's board
 function renderTabs() {
@@ -400,37 +401,23 @@ function switchTab(name) {
 function activeBoard() { return boardOf(boards, active); }
 // fold choice keyed by state name, so the 5 s refresh keeps it
 function toggleCol(st) { const b = activeBoard(); if (b.expanded.has(st)) b.expanded.delete(st); else b.expanded.add(st); render(); if (b.expanded.has(st)) queueStats(st); }
-// 000264: one batched lazy stats fetch per unfold for the newly shown cards past the fold the
-// payload's eager first-5 attach does not cover; done cards skip when their stats are known
-// (cached or applied), non-done cards refetch fresh at every unfold and never touch localStorage.
-// The response merges into the known stats and re-renders; a failure leaves the cards stats-less
-// until a later poll, and until #263 merges the 404 is a silent no-op
-function queueStats(st) {
-	const b = activeBoard();
-	const project = active;
-	const files = [];
-	for (const t of sortedCol(b.tasks, st).slice(VISIBLE)) {
-		if (statsInFlight.has(statsKey(project, t.file)) || (t.state === "done" && t.agents)) continue;
-		files.push(t.file);
-	}
-	if (!files.length) return;
-	const url = "/api/card-stats?files=" + files.map((f) => encodeURIComponent(f)).join(",") + projectParam();
-	for (const f of files) statsInFlight.add(statsKey(project, f));
-	fetch(url).then(r => r.ok ? r.json() : null).catch(() => null).then(stats => {
-		for (const f of files) statsInFlight.delete(statsKey(project, f));
-		if (!stats) return;
-		mergeCardStats(stats, b.tasks, statsKnown, localStorage, project);
-		render();
-	});
-}
+// 000271: the lazy stats queue, one file per request in each column's top-to-bottom board order,
+// drained off the click/render path; the queue dedupes on the fetched-or-in-flight keys (a
+// successful file stays fetched) and skips done cards with known stats. A failed fetch drops its
+// key, so the next poll's re-enqueue retries it; each response merges and re-renders
+const statsQueue = makeStatsQueue(
+	statsKey,
+	(project, file) => fetch("/api/card-stats?files=" + encodeURIComponent(file) + (project ? "&project=" + encodeURIComponent(project) : "")).then(r => r.ok ? r.json() : null).catch(() => null),
+	(project, stats) => { mergeCardStats(stats, boardOf(boards, project).tasks, statsKnown, localStorage, project); render(); },
+);
+function queueStats(st) { const b = activeBoard(); statsQueue.enqueueCol(active, b.tasks, st, VISIBLE); }
+function queueExpanded() { const b = activeBoard(); for (const st of b.expanded) queueStats(st); }
 // one element per task file, kept across refreshes: an unchanged card keeps its node, so its
 // spinner animation and in-flight FLIP transform are never restarted
 const cardEls = new Map();
 let cols = null;
-// 000264: the lazily-known card stats, keyed per project and task (statsKey), and the card-stats
-// fetches in flight, deduped per unfold
+// 000264: the lazily-known card stats, keyed per project and task (statsKey)
 const statsKnown = Object.create(null);
-const statsInFlight = new Set();
 function makeCard(file) {
 	const el = document.createElement("div");
 	el.className = "card";
@@ -1097,6 +1084,7 @@ function refresh() {
 	}).then(rows => {
 		mergeBoards(boards, rows);
 		render();
+		queueExpanded(); // 000271: each poll re-queues the expanded columns, retrying failed files
 		// the open card's task still on the board, else the card closes (000242: the light rows
 		// carry no agent data, so the heavy blocks re-derive from the poll's detail re-fetch below)
 		let open = null;

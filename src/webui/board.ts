@@ -379,6 +379,42 @@ export function mergeCardStats(stats, rows, known, storage, project) {
 	}
 }
 
+// 000271 the lazy card-stats queue: each file enqueues once and the queue drains one request at
+// a time, in enqueue order, deferred off the caller's path. requested is the fetched-or-in-flight
+// key set: a successful file stays (fetched once per page load), a failed response drops its key
+// so the next enqueue retries. fetchStats(project, file) resolves the response or null;
+// applyStats(project, stats) merges a success. setTimer is injected so tests drive the drain
+// without sleeps
+export function makeStatsQueue(key, fetchStats, applyStats, setTimer = setTimeout) {
+	const pending = [];
+	const requested = new Set();
+	let timer = null;
+	const drain = () => {
+		timer = null;
+		const item = pending.shift();
+		if (!item) return;
+		requested.add(item.key);
+		fetchStats(item.project, item.file).then(
+			(stats) => { if (stats) applyStats(item.project, stats); else requested.delete(item.key); },
+			() => requested.delete(item.key),
+		).finally(() => { if (pending.length) timer = setTimer(drain, 0); });
+	};
+	const enqueue = (project, file) => {
+		const k = key(project, file);
+		if (requested.has(k) || pending.some((p) => p.key === k)) return;
+		pending.push({ project, file, key: k });
+		if (!timer) timer = setTimer(drain, 0);
+	};
+	// the column's beyond-fold cards, in board order, skipping done cards with known stats
+	const enqueueCol = (project, tasks, st, visible) => {
+		for (const t of sortedCol(tasks, st).slice(visible)) {
+			if (t.state === "done" && t.agents) continue;
+			enqueue(project, t.file);
+		}
+	};
+	return { enqueueCol };
+}
+
 // the column's rows in board order: backlog priority-first (critical above high above medium above
 // low), every other column newest-first only; the sort is stable and the payload arrives in
 // task-number order, so equal keys keep that order. syncBoard and the lazy stats fetch share it

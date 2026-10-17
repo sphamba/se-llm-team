@@ -9,7 +9,7 @@ import { startHub } from "../../src/hub.ts";
 import { PRIORITY_RANK } from "../../src/kanban.ts";
 import { boardOf, buildShell, cardBaseHtml, cardHtml, curve, flipDiff, LAYOUT, mergeBoards, numLinkHtml, pairLayout, relationPaths, spinnerHtml, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats } from "../../src/webui.ts";
 // 000264: not re-exported by the webui barrel (pre-#263 merge): import directly from the board module
-import { applyCardStats, mergeCardStats, sortedCol, statsKey } from "../../src/webui/board.ts";
+import { applyCardStats, makeStatsQueue, mergeCardStats, sortedCol, statsKey } from "../../src/webui/board.ts";
 import { PAGE } from "../../src/webui/page.ts";
 
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-merge", "merging", "to-live-test", "live-testing", "done"];
@@ -514,6 +514,72 @@ mergeCardStats({ "000009_z.md": { agents: [{ role: "developer", tokens: 1, durat
 assert.deepEqual(csMergeKnown[statsKey("p", "000009_z.md")], [{ role: "developer", tokens: 1, duration: 1 }]);
 assert.equal(csMergeStore.getItem(statsKey("p", "000009_z.md")), null);
 
+// 000271: the stats queue drains one file per request in board order, deferred off the caller's
+// path; a successful file stays fetched, a failed one drops out so the next pass retries it
+const csTimers = [];
+const csSchedule = (fn) => { csTimers.push(fn); return csTimers.length; };
+const csFlush = () => { const fn = csTimers.shift(); if (fn) fn(); };
+const csSettle = () => new Promise((resolve) => setImmediate(resolve));
+const csDeferred = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
+const csNewQueue = () => {
+	const calls = [];
+	const applied = [];
+	const queue = makeStatsQueue(
+		statsKey,
+		(project, file) => { const d = csDeferred(); calls.push({ project, file, d }); return d.promise; },
+		(project, stats) => applied.push({ project, stats }),
+		csSchedule,
+	);
+	return { queue, calls, applied };
+};
+
+// one file per request, top to bottom, never in the caller's stack
+const csSeq = csNewQueue();
+const csCol7 = ["a", "b", "c", "d", "e", "f", "g"].map((n, i) => ({ file: `cs_${n}.md`, state: "doing", updated: 10 - i }));
+csSeq.queue.enqueueCol("p", csCol7, "doing", 5);
+assert.equal(csSeq.calls.length, 0, "the drain defers off the caller's path");
+csFlush();
+assert.deepEqual(csSeq.calls.map((c) => c.file), ["cs_f.md"], "one file per request, the top beyond-fold card first");
+csSeq.calls[0].d.resolve({ "cs_f.md": { agents: csAgents } });
+await csSettle();
+assert.equal(csSeq.calls.length, 1, "no second request until the first settles");
+csFlush();
+assert.deepEqual(csSeq.calls.map((c) => c.file), ["cs_f.md", "cs_g.md"], "the next card drains after the first, top to bottom");
+assert.deepEqual(csSeq.applied, [{ project: "p", stats: { "cs_f.md": { agents: csAgents } } }], "each response merges as it lands");
+csSeq.calls[1].d.resolve({ "cs_g.md": { agents: csAgents } });
+await csSettle();
+
+// a task arriving at position 6 in an expanded column re-queues on the next pass; a fetched file never does
+const csArr = csNewQueue();
+const csFive = ["a", "b", "c", "d", "e"].map((n, i) => ({ file: `cs2_${n}.md`, state: "doing", updated: 10 - i }));
+csArr.queue.enqueueCol("p", csFive, "doing", 5);
+assert.equal(csArr.calls.length, 0, "the eager first five never fetch");
+const csSix = [...csFive, { file: "cs2_f.md", state: "doing", updated: 0 }];
+csArr.queue.enqueueCol("p", csSix, "doing", 5);
+assert.equal(csArr.calls.length, 0, "the arrival queues deferred");
+csFlush();
+assert.deepEqual(csArr.calls.map((c) => c.file), ["cs2_f.md"], "a task arriving at position 6 fetches on the next pass");
+csArr.calls[0].d.resolve({ "cs2_f.md": { agents: [] } });
+await csSettle();
+csArr.queue.enqueueCol("p", csSix, "doing", 5);
+csFlush();
+assert.equal(csArr.calls.length, 1, "a fetched file does not re-queue");
+
+// a failed fetch drops out of the fetched-or-in-flight set, the next pass retries it
+const csRetry = csNewQueue();
+const csFailCol = ["a", "b", "c", "d", "e", "f"].map((n, i) => ({ file: `cs3_${n}.md`, state: "doing", updated: 10 - i }));
+csRetry.queue.enqueueCol("p", csFailCol, "doing", 5);
+csFlush();
+assert.deepEqual(csRetry.calls.map((c) => c.file), ["cs3_f.md"], "the beyond-fold card fetches");
+csRetry.calls[0].d.resolve(null);
+await csSettle();
+csRetry.queue.enqueueCol("p", csFailCol, "doing", 5);
+assert.equal(csRetry.calls.length, 1, "the retry defers off the caller's path");
+csFlush();
+assert.deepEqual(csRetry.calls.map((c) => c.file), ["cs3_f.md", "cs3_f.md"], "a failed fetch retries on the next pass");
+csRetry.calls[1].d.resolve({});
+await csSettle();
+
 // the poll's agent-less rows never wipe revealed stats: the merge fills, the poll's fresh rows re-apply
 const csPollKnown = Object.create(null);
 const csPollStore = csStorage();
@@ -525,15 +591,17 @@ const csPolled = [{ file: "000001_a.md", state: "to-do", updated: 2 }];
 applyCardStats(csPolled, csPollKnown, csPollStore, "p");
 assert.equal(csPolled[0].agents.length, 1, "the poll's agent-less rows take the known stats back");
 
-// the served page wires the apply pass ahead of the board pass, the batched fetch, the dedupe
-// and the stats entrance (reduced motion included)
+// the served page wires the apply pass ahead of the board pass, the per-file queue, its poll
+// re-enqueue and the stats entrance (reduced motion included)
 assert.ok(PAGE.includes("function sortedCol("), "sortedCol interpolates into the page");
 assert.ok(PAGE.includes("function statsKey("), "statsKey interpolates into the page");
 assert.ok(PAGE.includes("function applyCardStats("), "applyCardStats interpolates into the page");
 assert.ok(PAGE.includes("function mergeCardStats("), "mergeCardStats interpolates into the page");
+assert.ok(PAGE.includes("function makeStatsQueue("), "makeStatsQueue interpolates into the page");
 assert.ok(PAGE.indexOf("applyCardStats(tab.tasks") < PAGE.indexOf("syncBoard(cols, tab.tasks"), "the apply pass runs before the board pass");
-assert.ok(PAGE.includes('"/api/card-stats?files="'), "the unfold queues the pinned endpoint");
-assert.ok(PAGE.includes("statsInFlight"), "in-flight fetches dedupe");
+assert.ok(PAGE.includes('"/api/card-stats?files=" + encodeURIComponent(file)'), "each queued file fetches the pinned endpoint");
+assert.ok(PAGE.includes("statsQueue.enqueueCol(active, b.tasks, st, VISIBLE)"), "the unfold enqueues the column's beyond-fold cards");
+assert.ok(PAGE.includes("queueExpanded()"), "each poll re-queues the already-expanded columns");
 assert.ok(PAGE.includes("statsIn var(--fade) ease-out"), "the stats entrance animates");
 assert.ok(PAGE.includes(".card-stats, #modal:not(.hidden)"), "reduced motion turns the stats entrance off");
 
