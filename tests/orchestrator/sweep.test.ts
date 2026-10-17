@@ -260,3 +260,48 @@ am.daemon.kill("SIGTERM");
 silentOrigin.close();
 for (const s of silentOriginSockets) s.destroy();
 console.log("orchestrator.test.ts: ... + non-blocking push smoke passed");
+
+// --- part AP: the .pids janitor sweeps dead pid files once their reader is done with them ---
+// generic pids accumulate: nothing clears a splitter pid after the task leaves to-do, a killed
+// analysis leaves its pid behind (the wrapper self-removes only on a clean exit), and a task
+// removed mid-run leaves its per-task pid. A live process's file always stays, and so does a
+// board task's per-task pid: the poll reads it in every state (exit code, armed reviewer
+// marker, dead-streak clear) and clears the file itself. A to-do task's splitter pid also
+// stays: its dead file is the splitter-ran marker that routes the fallback to the Developer
+const rootAP = fixture();
+cleaned.push(rootAP);
+mkdirSync(join(kanbanDir(rootAP), ".pids"), { recursive: true });
+writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAP), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+const pidsAP = join(kanbanDir(rootAP), ".pids");
+const pidAP = (name: string) => join(pidsAP, `${name}.pid`);
+const doneAP = createTask(rootAP, { name: "fix: done leftovers", summary: "Janitor smoke", specs: "n/a" });
+const doneSlugAP = doneAP.file.replace(/\.md$/, "");
+setState(rootAP, doneAP, "done");
+const doingAP = createTask(rootAP, { name: "fix: working agent", summary: "Janitor smoke", specs: "n/a" });
+const doingSlugAP = doingAP.file.replace(/\.md$/, "");
+setState(rootAP, doingAP, "doing");
+// simple: the sweep starts a Developer, not a splitter, so the seeded marker is not overwritten
+const todoAP = createTask(rootAP, { name: "fix: splitter marker", summary: "Janitor smoke", specs: "n/a", complexity: "simple" });
+const todoSlugAP = todoAP.file.replace(/\.md$/, "");
+setState(rootAP, todoAP, "to-do");
+// dead pids: 999999999 never existed; the live orphan names a real sleeper
+writeFileSync(pidAP("000999_gone_task"), "999999999");
+writeFileSync(pidAP("000999_gone_task.reviewer.0.analysis"), "999999999");
+writeFileSync(pidAP(`${doneSlugAP}.splitter`), "999999999");
+writeFileSync(pidAP(`${doneSlugAP}.developer.0.analysis`), "999999999");
+writeFileSync(pidAP(doneSlugAP), "999999999");
+writeFileSync(pidAP(doingSlugAP), "999999999");
+writeFileSync(pidAP(`${todoSlugAP}.splitter`), "999999999");
+const sleeperAP = spawn("sleep", ["30"], { stdio: "ignore" });
+writeFileSync(pidAP("000999_gone_live"), String(sleeperAP.pid));
+rescan(rootAP, loadConfig(rootAP));
+assert.ok(!existsSync(pidAP("000999_gone_task")), "a dead orphan per-task pid is swept");
+assert.ok(!existsSync(pidAP("000999_gone_task.reviewer.0.analysis")), "a dead orphan analysis pid is swept");
+assert.ok(!existsSync(pidAP(`${doneSlugAP}.splitter`)), "a splitter pid is swept once its task left to-do");
+assert.ok(!existsSync(pidAP(`${doneSlugAP}.developer.0.analysis`)), "a done task's dead analysis pid is swept");
+assert.ok(existsSync(pidAP("000999_gone_live")), "a live process keeps its pid file even when its task is gone");
+assert.ok(existsSync(pidAP(doneSlugAP)), "a board task's per-task pid survives: the poll consumes it and clears it itself");
+assert.ok(existsSync(pidAP(doingSlugAP)), "a keep-state task's per-task pid survives");
+assert.ok(existsSync(pidAP(`${todoSlugAP}.splitter`)), "a to-do task's splitter pid survives as the splitter-ran marker");
+sleeperAP.kill("SIGKILL");
+console.log("orchestrator.test.ts: ... + .pids dead-pid janitor smoke passed");

@@ -240,14 +240,16 @@ function deadCooldownActive(root: string, cfg: Config, task: Task): boolean {
 	return Date.now() - statSync(join(kanbanDir(root), task.file)).mtimeMs < cfg.retryIdleMinutes * 60_000;
 }
 
-// stale per-task merger pid leftovers (the old per-task merger scheme, e.g. 000038.merger.pid):
-// current code reads only the global merger pid, so a leftover is dead weight. Drop each one
-// whose process is dead; a live pid keeps its file, and a task still in merging is skipped.
-// Exit-code files the poll never consumed (the task vanished mid-run) drop with their name:
-// the next spawn clears its own exit file, so only orphaned names are swept here
+// .pids janitor, one sweep per rescan. Exit-code files the poll never consumed (the task
+// vanished mid-run) drop with their name: the next spawn clears its own exit file, so only
+// orphaned names are swept here. Stale per-task merger pid leftovers (the old per-task merger
+// scheme, e.g. 000038.merger.pid) drop once dead while their task is not merging. The generic
+// pid files drop once their reader is done with them (see the branch below). The project-wide
+// merger pid is live state for the poll's merging lane: never swept
 function janitorPids(root: string, tasks: Task[]): void {
 	const merging = new Set(tasks.filter((t) => t.state === "merging").map((t) => taskSlug(t.file)));
 	const slugs = new Set(tasks.map((t) => taskSlug(t.file)));
+	const todo = new Set(tasks.filter((t) => t.state === "to-do").map((t) => taskSlug(t.file)));
 	let files: string[] = [];
 	try {
 		files = readdirSync(join(kanbanDir(root), ".pids"));
@@ -268,11 +270,32 @@ function janitorPids(root: string, tasks: Task[]): void {
 			}
 			continue;
 		}
-		if (!f.endsWith(".merger.pid")) continue;
-		const name = f.slice(0, -".pid".length); // "<slug>.merger"
-		if (merging.has(name.slice(0, -".merger".length))) continue;
-		const { pid, disc } = pidEntry(root, name);
-		if (pidAlive(pid, disc)) continue; // never remove a running process's pid file
+		// the project-wide merger pid is live state for the poll's merging lane: never swept
+		if (f === "merger.pid") continue;
+		if (f.endsWith(".merger.pid")) {
+			const name = f.slice(0, -".pid".length); // "<slug>.merger"
+			if (merging.has(name.slice(0, -".merger".length))) continue;
+			const { pid, disc } = pidEntry(root, name);
+			if (pidAlive(pid, disc)) continue; // never remove a running process's pid file
+		} else if (f.endsWith(".pid")) {
+			// generic pid files: per-task agents (<slug>.pid), splitters (<slug>.splitter.pid)
+			// and per-run analyses (<slug>.<role>.<n>.analysis.pid). Every live process keeps its
+			// file. A dead one goes once its reader is done with it: the poll consumes a board
+			// task's per-task pid in every state (exit code, armed reviewer marker, dead-streak
+			// clear) and clears the file itself; startTodo reads a to-do task's splitter pid as
+			// the splitter-ran marker that routes the fallback to the Developer; spawnRunAnalysis
+			// reads an analysis pid only while it is alive (the wrapper self-removes its file at
+			// exit, a killed analysis leaves it behind)
+			const name = f.slice(0, -".pid".length);
+			const { pid, disc } = pidEntry(root, name);
+			if (pidAlive(pid, disc)) continue; // never remove a running process's pid file
+			if (!name.endsWith(".analysis")) {
+				const slug = name.endsWith(".splitter") ? name.slice(0, -".splitter".length) : name;
+				if (name.endsWith(".splitter") ? todo.has(slug) : slugs.has(slug)) continue;
+			}
+		} else {
+			continue; // not a pid file
+		}
 		try {
 			rmSync(join(kanbanDir(root), ".pids", f));
 		} catch {
