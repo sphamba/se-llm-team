@@ -6,7 +6,7 @@ worktree: "chore/254-split-test-suite"
 issuer: "user"
 complexity: "simple"
 shortName: "split-test-suite"
-blockedBy: "#255, #256"
+blockedBy: "#256"
 ---
 
 # Summary

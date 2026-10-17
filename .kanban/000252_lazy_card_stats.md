@@ -1,12 +1,12 @@
 ---
 name: "feat: lazy stats on all board cards"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "live-testing"
+worktree: "feat/252-lazy-card-stats"
 issuer: "user"
 complexity: "simple"
 shortName: "lazy-card-stats"
-blockedBy: "#264"
+blockedBy: ""
 ---
 
 # Summary
@@ -33,3 +33,13 @@ Acceptance:
 - No live check ran: there is no endpoint and no client behavior to verify.
 - This run raced the split: the daemon promoted the task when its earlier blockers #250 and #251 reached done, the splitter then set blockedBy #263 and #264, and the developer spawned in the same minute. The ordering was premature, not the implementation.
 - Next step: re-run this verification after #263 and #264 land on main. The worktree then needs a base that holds both commits.
+- Verification run 2026-10-17 at base f53e4c5: both dependencies landed on main (#263 commit 0e9cab6, #264 commit 4d35ac0, stale-pin fix f53e4c5). The worktree branch fast-forwarded from 82160ef to f53e4c5, so the check ran against the integrated code. No source change was necessary.
+- Suites pass: node tests/webui.test.ts gives exit 0 with 797 assert lines (baseline 757, after #263 764). node tests/webui/board.test.ts, node tests/webui/page.test.ts and node tests/webui/hub.test.ts give exit 0. Full output in /tmp/252-webui.log.
+- Spec 1 (pinned contract), direct curl on the live daemon: /api/tasks carries agents for the five newest done cards only (000003 to 000007) and none for 000001 and 000002. /api/card-stats?files=000001_probe.md,000002_probe.md,bogus.md answers both requested files with their agents (tokens 100 and 200) and omits bogus.md. project=nope answers 404 with an empty body.
+- Spec 2: the eager first-5 attach in /api/tasks is unchanged. The first-5-only limit is gone for the user because the client fetches the folded cards through the endpoint.
+- Spec 3 (animation), live Playwright check with 7 done cards: the 5 folded cards carry stats, one unfold reveals all 7, and the 2 folded cards first show no stats, then gain the stats line. The card height grows 21 px and the statsIn animation fires. Reduced motion gives computed animationName "none" with no statsIn event.
+- Spec 4 (localStorage): after the lazy fetch, the two folded done cards sit in localStorage under card-stats|| keys. After a reload and an unfold they render from localStorage and fire no request. When one task leaves done, the page poll removes its entry and keeps the other entry. Non-done cards never write localStorage and refetch fresh after a reload. A collapse and a second unfold during an in-flight fetch produce one batched request only.
+- Spec 5: both subtask test additions sit in tests/webui.test.ts in disjoint regions (the #263 hub and stats fixture regions, and the #264 helper block at the end). The assert count is above the baseline.
+- Location shift: the lazy fetch, the done localStorage cache and the statsKey, applyCardStats and mergeCardStats helpers live in src/webui/board.ts, not src/webui/page.ts as the earlier blocker note said. page.ts interpolates them into PAGE and wires toggleCol and queueStats.
+- Live fixture: 7 done tasks plus 6 to-do tasks, each with one run log, on port 4399. The check daemon ran with --rescan-seconds 3600 --poll-minutes 3600, so it never spawned an agent for the to-do tasks. Fixture and script: /tmp/252-live/, log: /tmp/252-live/check.log. The daemon was stopped after the check.
+- Re-review at f53e4c5 (HEAD = main = f53e4c5, worktree clean, no new commits): all prior passes stand. Spec 1: route at src/hub.ts:247, cardStatsPayload at src/webui/payload.ts:649, client merge via syncCardStats. Spec 2: VISIBLE_CARDS = 5 unchanged (src/webui/payload.ts:610), eager attach untouched. Spec 3: statsIn animation and prefers-reduced-motion override at src/webui/page.ts:168-170, 271. Spec 4: applyCardStats/mergeCardStats at src/webui/board.ts:327, 366, statsInFlight de-dupe at src/webui/page.ts:413-433. Spec 5: recorded runs at this exact base stand (webui.test.ts 797 asserts, board/page/hub suites exit 0). No fixes. The fast-forward assumption held: the branch FFed 82160ef to f53e4c5 and every check ran on the integrated base, so the open question is resolved.
