@@ -188,7 +188,7 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .agent-card:hover { background: var(--hover); }
 /* 000191: a genuinely new run card rises in with the board cards' entrance */
 .agent-card.enter { animation: cardIn var(--enter) ease-out; }
-.agent-card-active { border-color: var(--link); background: var(--medium-bg); }
+.agent-card-active { border-color: var(--link); background: color-mix(in srgb, var(--link) 20%, var(--panel)); }
 .agent-dead { color: var(--critical-fg); }
 .agent-stats { display: block; font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
 .agent-col { display: flex; flex-direction: column; gap: 4px; }
@@ -203,11 +203,11 @@ analysed run's column and in the residual #m-doctor row alike; 000232: at rest o
 check mark stay blue and the plain .agent-card outline and panel background show through, while
 the opened card keeps the blue outline and highlight via .agent-card-active */
 .agent-doctor { color: var(--doctor-fg); }
-.agent-doctor.agent-card-active { border-color: var(--doctor-fg); background: var(--doctor-bg-strong); }
+.agent-doctor.agent-card-active { border-color: var(--doctor-fg); background: color-mix(in srgb, var(--doctor-fg) 20%, var(--panel)); }
 .agent-doctor .check { color: var(--doctor-fg); }
 /* 000247: the splitter cards read the same blue as the doctor cards */
 .agent-splitter { color: var(--doctor-fg); }
-.agent-splitter.agent-card-active { border-color: var(--doctor-fg); background: var(--doctor-bg-strong); }
+.agent-splitter.agent-card-active { border-color: var(--doctor-fg); background: color-mix(in srgb, var(--doctor-fg) 20%, var(--panel)); }
 .agent-splitter .check { color: var(--doctor-fg); }
 .check { color: var(--low-fg); margin-right: 5px; }
 .cross { color: var(--critical-fg); margin-right: 5px; }

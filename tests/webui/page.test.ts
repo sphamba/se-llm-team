@@ -271,15 +271,15 @@ assert.equal(lightVars.match(/--doctor-fg: (#[0-9a-f]{6})/)![1], "#2f6fdd", "the
 assert.equal(darkVars.match(/--doctor-fg: (#[0-9a-f]{6})/)![1], "#59a7ff", "the dark doctor blue is the lighter #59a7ff");
 assert.ok(page.includes(".agent-doctor { color: var(--doctor-fg); }"), "the .agent-doctor rest state sets only the blue text, so the plain card outline and panel background show through, in their run's column and in the residual row alike");
 assert.ok(!page.includes(".agent-doctor:hover"), "the doctor card inherits the plain .agent-card hover, with no blue rest highlight");
-assert.ok(page.includes(".agent-doctor.agent-card-active { border-color: var(--doctor-fg); background: var(--doctor-bg-strong); }"), "the active doctor card keeps the blue outline and highlight, never the base link/medium-bg pair");
+assert.ok(page.includes(".agent-doctor.agent-card-active { border-color: var(--doctor-fg); background: color-mix(in srgb, var(--doctor-fg) 20%, var(--panel)); }"), "the active doctor card keeps the blue outline and a 20% blue panel mix, never the base link/medium-bg pair");
 assert.ok(page.includes(".agent-doctor .check { color: var(--doctor-fg); }"), "the doctor card's checkmark reads the same blue as the card text");
 assert.ok(page.includes(".agent-splitter { color: var(--doctor-fg); }"), "the splitter card reads the doctor blue at rest");
-assert.ok(page.includes(".agent-splitter.agent-card-active { border-color: var(--doctor-fg); background: var(--doctor-bg-strong); }"), "the active splitter card keeps the blue outline and highlight");
+assert.ok(page.includes(".agent-splitter.agent-card-active { border-color: var(--doctor-fg); background: color-mix(in srgb, var(--doctor-fg) 20%, var(--panel)); }"), "the active splitter card keeps the blue outline and a 20% blue panel mix");
 assert.ok(page.includes(".agent-splitter .check { color: var(--doctor-fg); }"), "the splitter card's checkmark reads the same blue");
 assert.ok(page.includes(".check { color: var(--low-fg); margin-right: 5px; }"), "the unscoped .check keeps var(--low-fg) for the run cards' and sub cards' checkmarks");
 assert.ok(page.includes('agentCardHtml("agent-doctor " + (d.alive ? "agent-live" : "agent-past")'), "doctor cards keep their agent-live/agent-past classes under the agent-doctor marker, so no unscoped per-variant rule sets a color on them");
 assert.ok(agentCardCss.includes("color: var(--link)") && agentCardCss.includes("border: 1px solid var(--border)") && agentCardCss.includes("background: color-mix(in srgb, var(--panel) 85%, transparent)"), "the unscoped .agent-card keeps gold text, grey outline and the main view's semi-transparent rest background for the run and sub cards");
-assert.ok(page.includes(".agent-card:hover { background: var(--hover); }") && page.includes(".agent-card-active { border-color: var(--link); background: var(--medium-bg); }"), "the unscoped hover and active rules keep today's colors");
+assert.ok(page.includes(".agent-card:hover { background: var(--hover); }") && page.includes(".agent-card-active { border-color: var(--link); background: color-mix(in srgb, var(--link) 20%, var(--panel)); }"), "the unscoped hover stays and the active rule mixes 20% link into the panel");
 // 000194: the live pulse follows the viewed run's aliveness, the same signal the poll timer
 // reads, refreshed from pullLog after every payload and dropped on close
 assert.ok(page.includes("function markLiveLine()"), "the page wires the live block pulse");
