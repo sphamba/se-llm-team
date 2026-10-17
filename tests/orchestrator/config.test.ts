@@ -215,3 +215,32 @@ assert.ok(orchLogAP().includes('invalid roles.analyst.concurrency 2.5, ignored (
 assert.ok(orchLogAP().includes('invalid roles.analyst.mergeThreshold 0, ignored (expected a positive integer)'), "a non-positive roles.analyst.mergeThreshold warned about");
 assert.ok(orchLogAP().includes('invalid roles.analyst.mergeThreshold 2.5, ignored (expected a positive integer)'), "a non-integer roles.analyst.mergeThreshold warned about");
 console.log("orchestrator.test.ts: ... + logStallMinutes config smoke passed");
+
+// --- part AQ: the maxParallel config: a missing key keeps the default 0 (no limit), a
+// configured value applies, an invalid value warns and keeps 0. loadConfig runs directly;
+// the empty temp HOME keeps the ambient user-level config out ---
+const rootAQ = fixture();
+cleaned.push(rootAQ);
+const homeAQ = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAQ);
+mkdirSync(kanbanDir(rootAQ), { recursive: true });
+const savedHomeAQ = process.env.HOME;
+process.env.HOME = homeAQ;
+try {
+	assert.equal(loadConfig(rootAQ).maxParallel, 0, "a missing maxParallel key keeps the default 0");
+	writeFileSync(join(kanbanDir(rootAQ), "se-llm-team.json"), JSON.stringify({ maxParallel: 3 }));
+	assert.equal(loadConfig(rootAQ).maxParallel, 3, "a configured maxParallel applies");
+	writeFileSync(join(kanbanDir(rootAQ), "se-llm-team.json"), JSON.stringify({ maxParallel: 0 }));
+	assert.equal(loadConfig(rootAQ).maxParallel, 0, "maxParallel 0 is valid and means no limit");
+	writeFileSync(join(kanbanDir(rootAQ), "se-llm-team.json"), JSON.stringify({ maxParallel: -1 }));
+	assert.equal(loadConfig(rootAQ).maxParallel, 0, "a negative maxParallel keeps 0");
+	writeFileSync(join(kanbanDir(rootAQ), "se-llm-team.json"), JSON.stringify({ maxParallel: 2.5 }));
+	assert.equal(loadConfig(rootAQ).maxParallel, 0, "a non-integer maxParallel keeps 0");
+} finally {
+	process.env.HOME = savedHomeAQ;
+}
+const orchLogAQ = () => readFileSync(join(kanbanDir(rootAQ), ".logs", "orchestrator.log"), "utf8");
+assert.ok(orchLogAQ().includes("maxParallel -1 ignored: must be an integer >= 0"), "a negative maxParallel warned about");
+assert.ok(orchLogAQ().includes("maxParallel 2.5 ignored: must be an integer >= 0"), "a non-integer maxParallel warned about");
+assert.ok(!orchLogAQ().includes("maxParallel 0 ignored"), "maxParallel 0 is valid, no warning");
+console.log("orchestrator.test.ts: ... + maxParallel config smoke passed");

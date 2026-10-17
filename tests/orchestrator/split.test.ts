@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTask, kanbanDir, parseTask, setState, taskNum } from "../../src/kanban.ts";
-import { fixture, roleStub, runDaemon, waitFor, cleaned } from "../helpers.ts";
+import { createTask, kanbanDir, parseTask, setState, taskNum, taskSlug } from "../../src/kanban.ts";
+import { loadConfig } from "../../src/orchestrator.ts";
+import { rescan } from "../../src/orchestrator/pipeline.ts";
+import { pidPath } from "../../src/pid.ts";
+import { fixture, roleStub, deadStub, runDaemon, waitFor, cleaned } from "../helpers.ts";
 
 // --- part BA: the split path. A moderate to-do task whose Splitter stub splits: two subtasks
 // land in to-do, the parent moves to backlog with the subtask refs in blockedBy and complexity
@@ -106,3 +110,35 @@ await waitFor(() => parseTask(rootBE, taskBE.file).state === "done", 90000, "the
 assert.equal(be.output().split("spawned splitter").length - 1, 0, "no splitter spawn for a simple task");
 be.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + simple task skips the splitter smoke passed");
+
+// --- part BF: maxParallel caps the developer start: at the cap the to-do task stays in to-do
+// for the next rescan, below the cap it starts. rescan driven directly (part AW harness): the
+// slot holder is a doing task the rescan loop never touches, and poll is not driven ---
+const rootBF = fixture();
+cleaned.push(rootBF);
+const homeBF = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeBF);
+mkdirSync(kanbanDir(rootBF), { recursive: true });
+const savedHomeBF = process.env.HOME;
+process.env.HOME = homeBF;
+let cfgBF: ReturnType<typeof loadConfig>;
+try {
+	cfgBF = loadConfig(rootBF);
+} finally {
+	process.env.HOME = savedHomeBF;
+}
+cfgBF.backlogIdleMinutes = 0;
+cfgBF.maxParallel = 1;
+cfgBF.agent = deadStub(rootBF);
+const holderBF = createTask(rootBF, { name: "fix: working slot", summary: "MaxParallel smoke", specs: "n/a" });
+setState(rootBF, holderBF, "doing");
+const taskBF = createTask(rootBF, { name: "feat: capped start", summary: "MaxParallel smoke", specs: "n/a", complexity: "simple" });
+setState(rootBF, taskBF, "to-do");
+rescan(rootBF, cfgBF);
+assert.equal(parseTask(rootBF, taskBF.file).state, "to-do", "at the cap the to-do task stays in to-do");
+assert.ok(!existsSync(pidPath(rootBF, taskSlug(taskBF.file))), "at the cap no developer spawned");
+setState(rootBF, holderBF, "done");
+rescan(rootBF, cfgBF);
+assert.equal(parseTask(rootBF, taskBF.file).state, "doing", "below the cap the developer started");
+assert.ok(existsSync(pidPath(rootBF, taskSlug(taskBF.file))), "below the cap the developer pid file exists");
+console.log("orchestrator.test.ts: ... + maxParallel developer cap smoke passed");

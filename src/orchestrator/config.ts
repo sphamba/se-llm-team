@@ -11,6 +11,9 @@ const DEFAULT_BACKLOG_IDLE_MINUTES = 1;
 const DEFAULT_RETRY_IDLE_MINUTES = 1;
 // minutes a working agent's log may keep its size before the agent is assumed dead
 const DEFAULT_LOG_STALL_MINUTES = 10;
+// global parallelism cap: tasks in a working state (doing, reviewing, merging, live-testing)
+// at once; 0 disables the cap
+const DEFAULT_MAX_PARALLEL = 0;
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 export const RESPAWN_CAP = 5;
 // final fallback for the per-complexity cap when a Config carries no reviewerCap entry for
@@ -43,6 +46,7 @@ export interface Config {
 	backlogIdleMinutes: number;
 	retryIdleMinutes: number;
 	logStallMinutes: number;
+	maxParallel: number;
 	llm: LlmConfig;
 	roles: Record<string, RoleLlmConfig>;
 	reviewerCap: Record<string, number>;
@@ -82,7 +86,7 @@ const legacyConfigPath = () => join(process.env.HOME ?? "", ".pi", "agent", "se-
 // (stubs, custom wrappers) and leaves the backend to the host default, with the spawned
 // executable staying that override.
 export function loadConfig(root: string, defaultAgent?: string): Config {
-	let cfg: { agent?: string; pollMinutes?: number; backlogIdleMinutes?: unknown; retryIdleMinutes?: unknown; logStallMinutes?: unknown; provider?: unknown; model?: unknown; thinking?: unknown; roles?: unknown; reviewerCap?: unknown } = {};
+	let cfg: { agent?: string; pollMinutes?: number; backlogIdleMinutes?: unknown; retryIdleMinutes?: unknown; logStallMinutes?: unknown; maxParallel?: unknown; provider?: unknown; model?: unknown; thinking?: unknown; roles?: unknown; reviewerCap?: unknown } = {};
 	// neutral global first, the legacy pi path is a read-only fallback, project .kanban/se-llm-team.json overrides both
 	const paths = [neutralConfigPath()];
 	if (!existsSync(paths[0])) {
@@ -152,6 +156,12 @@ export function loadConfig(root: string, defaultAgent?: string): Config {
 		if (typeof stall !== "number" || stall <= 0) log(root, `logStallMinutes ${JSON.stringify(stall)} ignored: must be a positive number of minutes`);
 		else logStallMinutes = stall;
 	}
+	let maxParallel = DEFAULT_MAX_PARALLEL;
+	const mp = cfg.maxParallel;
+	if (mp !== undefined) {
+		if (typeof mp !== "number" || !Number.isInteger(mp) || mp < 0) log(root, `maxParallel ${JSON.stringify(mp)} ignored: must be an integer >= 0`);
+		else maxParallel = mp;
+	}
 	const configured = typeof cfg.agent === "string" && cfg.agent ? cfg.agent : undefined;
 	const backend: Backend = configured && BACKENDS.includes(configured as Backend)
 		? (configured as Backend)
@@ -166,6 +176,7 @@ export function loadConfig(root: string, defaultAgent?: string): Config {
 		backlogIdleMinutes: idleMinutes(root, cfg.backlogIdleMinutes, "backlogIdleMinutes", DEFAULT_BACKLOG_IDLE_MINUTES),
 		retryIdleMinutes: idleMinutes(root, cfg.retryIdleMinutes, "retryIdleMinutes", DEFAULT_RETRY_IDLE_MINUTES),
 		logStallMinutes,
+		maxParallel,
 		llm: cleanLlm(root, cfg, " (global)"),
 		roles,
 		reviewerCap,

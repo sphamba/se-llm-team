@@ -29,6 +29,15 @@ function consumeReviewerRun(root: string, slug: string): void {
 // the Developer below with no second splitter pass
 const SPLITTER_COMPLEXITIES = new Set(["moderate", "complex"]);
 
+// the states the maxParallel cap counts: state-based, so a task whose agent died still holds
+// its slot until the poll requeues it; liveness.ts owns the same set but imports this module,
+// so the literals are repeated here
+const WORKING_CAP_STATES = new Set(["doing", "reviewing", "merging", "live-testing"]);
+
+function runningCount(root: string): number {
+	return listAll(root).filter((task) => WORKING_CAP_STATES.has(task.state)).length;
+}
+
 function startTodo(root: string, cfg: Config, task: Task): void {
 	const slug = taskSlug(task.file);
 	// a manual to-do rewrite can land while the spawned agent still runs: the live pid is the
@@ -52,6 +61,8 @@ function startTodo(root: string, cfg: Config, task: Task): void {
 	}
 	const ensured = ensureWorktree(root, fresh);
 	if (!ensured) return;
+	// at the maxParallel cap the start waits: the task stays to-do for the next rescan
+	if (cfg.maxParallel > 0 && runningCount(root) >= cfg.maxParallel) return;
 	// state before spawn: the next sweep reads doing and defers, with the pid check as the belt
 	setState(root, fresh, "doing");
 	spawnAgent(root, cfg, "developer", { ...fresh, worktree: ensured.wt }, ensured.wtDir);
@@ -129,6 +140,9 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	}
 	// at most one merger at a time, project-wide
 	if (agentAlive(root, "merger")) return;
+	// at the maxParallel cap the merge waits: the task stays to-merge for the next rescan, and
+	// this return writes nothing, so the idle-clock checks below keep their reads first
+	if (cfg.maxParallel > 0 && runningCount(root) >= cfg.maxParallel) return;
 	// a task bounced here past the respawn cap (dead merger) also waits for the idle
 	// cooldown before its merge runs
 	if (deadCooldownActive(root, cfg, task)) return;
@@ -371,6 +385,8 @@ export function rescan(root: string, cfg: Config): void {
 					} else if (!pidAlive(agentPid(root, slug))) {
 						// the previous agent for this task (usually the developer writing its report) may
 						// still be alive: defer the spawn to a later sweep instead of double-spawning
+						// at the maxParallel cap the reviewer spawn waits too: the task stays to-review
+						if (cfg.maxParallel > 0 && runningCount(root) >= cfg.maxParallel) continue;
 						setState(root, task, "reviewing");
 						spawnAgent(root, cfg, "reviewer", task, ensured.wtDir);
 						const pid = agentPid(root, slug);
@@ -395,6 +411,8 @@ export function rescan(root: string, cfg: Config): void {
 					const ensured = ensureWorktree(root, task);
 					if (!ensured) log(root, `${task.file}: worktree could not be created, live-tester not spawned (state unchanged)`);
 					else {
+						// at the maxParallel cap the live-tester spawn waits: the task stays to-live-test
+						if (cfg.maxParallel > 0 && runningCount(root) >= cfg.maxParallel) continue;
 						setState(root, task, "live-testing");
 						spawnAgent(root, cfg, "live-tester", { ...task, worktree: ensured.wt }, ensured.wtDir);
 					}

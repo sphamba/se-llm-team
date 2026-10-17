@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn, execSync } from "node:child_process";
 import { createServer as createNetServer } from "node:net";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTask, kanbanDir, parseTask, setState, taskNum } from "../../src/kanban.ts";
+import { createTask, kanbanDir, parseTask, setState, setWorktree, taskNum, taskSlug } from "../../src/kanban.ts";
 import { REPORT_MAX_AGE_MS, reportsDir } from "../../src/orchestrator/report.ts";
 import { loadConfig, poll, removeTask } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline.ts";
+import { pidPath } from "../../src/pid.ts";
 import { fixture, mirrorSubjects, showTip, roleStub, deadStub, runDaemon, waitFor, cleaned } from "../helpers.ts";
 
 // --- part N: the PM report: one report per done sweep, queued for the PM session ---
@@ -331,3 +333,37 @@ assert.ok(existsSync(pidAP(doingSlugAP)), "a keep-state task's per-task pid surv
 assert.ok(existsSync(pidAP(`${todoSlugAP}.splitter`)), "a to-do task's splitter pid survives as the splitter-ran marker");
 sleeperAP.kill("SIGKILL");
 console.log("orchestrator.test.ts: ... + .pids dead-pid janitor smoke passed");
+
+// --- part AZ: maxParallel caps the live-tester spawn: at the cap a to-live-test task stays
+// put, below the cap it starts. Direct-drive rescan (part AW harness), poll is not driven ---
+const rootAZ = fixture();
+cleaned.push(rootAZ);
+const homeAZ = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAZ);
+mkdirSync(kanbanDir(rootAZ), { recursive: true });
+const savedHomeAZ = process.env.HOME;
+process.env.HOME = homeAZ;
+let cfgAZ: ReturnType<typeof loadConfig>;
+try {
+	cfgAZ = loadConfig(rootAZ);
+} finally {
+	process.env.HOME = savedHomeAZ;
+}
+cfgAZ.backlogIdleMinutes = 0;
+cfgAZ.maxParallel = 1;
+cfgAZ.agent = deadStub(rootAZ);
+const holderAZ = createTask(rootAZ, { name: "fix: working slot", summary: "MaxParallel smoke", specs: "n/a" });
+setState(rootAZ, holderAZ, "doing");
+// a branch at HEAD (merged): the to-live-test branch requires the worktree branch merged
+execSync("git branch cap-live", { cwd: rootAZ, shell: "/bin/bash" });
+const taskAZ = createTask(rootAZ, { name: "feat: capped live test", summary: "MaxParallel smoke", specs: "n/a" });
+setWorktree(rootAZ, taskAZ, "cap-live");
+setState(rootAZ, taskAZ, "to-live-test");
+rescan(rootAZ, cfgAZ);
+assert.equal(parseTask(rootAZ, taskAZ.file).state, "to-live-test", "at the cap the live-tester spawn waits");
+assert.ok(!existsSync(pidPath(rootAZ, taskSlug(taskAZ.file))), "at the cap no live-tester spawned");
+setState(rootAZ, holderAZ, "done");
+rescan(rootAZ, cfgAZ);
+assert.equal(parseTask(rootAZ, taskAZ.file).state, "live-testing", "below the cap the live-tester spawned");
+assert.ok(existsSync(pidPath(rootAZ, taskSlug(taskAZ.file))), "below the cap the live-tester pid file exists");
+console.log("orchestrator.test.ts: ... + maxParallel live-test cap smoke passed");

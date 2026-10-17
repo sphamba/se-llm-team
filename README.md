@@ -70,6 +70,7 @@ Optional config in the global config file `$XDG_CONFIG_HOME/se-llm-team/se-llm-t
 {
   "agent": "pi",
   "pollMinutes": 1,
+  "maxParallel": 3,
   "model": "anthropic/claude-sonnet-4-5",
   "thinking": "high",
   "roles": { "developer": { "thinking": "xhigh", "complex": { "model": "big-model" } } },
@@ -83,6 +84,7 @@ Optional config in the global config file `$XDG_CONFIG_HOME/se-llm-team/se-llm-t
 | `agent` | `pi` | Agent backend the orchestrator spawns: `pi` or `claude`. Resolution: this key when it names a backend, then the daemon's `--default-agent` flag (the pi extension passes `pi`), then `pi`. Any other value overrides the spawned executable (stubs, custom wrappers). |
 | `pollMinutes` | `1` | Agent liveness poll interval. |
 | `logStallMinutes` | `10` | A working agent whose log size stays unchanged for this many minutes is assumed dead: the task bounces one state back, the agent process is killed, and the respawn machinery takes over. An invalid value (non-number or <= 0) warns and keeps the default. |
+| `maxParallel` | `0` | Maximum tasks in a working state (doing, reviewing, merging, live-testing) at once; 0 = no limit. Ready backlog tasks keep promoting into to-do and queue while the cap holds. An invalid value (non-integer or < 0) warns and keeps the default. |
 | `provider` | unset | LLM provider to pass as `--provider` (pi backend only; claude ignores it). Requires `model`; a provider without a model is ignored with a warning. |
 | `model` | unset | LLM model or pattern to pass as `--model`. A `:<thinking>` suffix in the pattern keeps working natively. |
 | `thinking` | unset | Reasoning level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. Passed as `--thinking` (pi) or `--effort` (claude); claude has no `off`/`minimal` effort, both map to `low`. An unknown value is ignored with a warning. |

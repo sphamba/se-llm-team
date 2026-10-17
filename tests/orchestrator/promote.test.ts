@@ -3,10 +3,11 @@ import { spawn, execSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskNum, updateTask } from "../../src/kanban.ts";
+import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskNum, taskSlug, updateTask } from "../../src/kanban.ts";
 import { reportsDir } from "../../src/orchestrator/report.ts";
 import { dropDoneBlockers, loadConfig, poll, promoteBacklog } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline.ts";
+import { pidPath } from "../../src/pid.ts";
 import { fixture, roleStub, deadStub, runDaemon, waitFor, runIdx, cleanupAll, cleaned } from "../helpers.ts";
 
 // --- part R: promotion is event-driven: every schedulable backlog task promotes on the
@@ -455,3 +456,67 @@ assert.ok(reportAW.includes(blockerAW.name), "the report's Done section names th
 assert.ok(reportAW.includes(dependentAW.name), "the report's Scheduled section names the same-sweep promotion");
 cleanupAll(rootAW);
 console.log("orchestrator.test.ts: ... + same-sweep unblock smoke passed");
+
+// --- part AX: maxParallel caps the reviewer spawn: at the cap a to-review task stays in
+// to-review, below the cap it starts. Direct-drive rescan (part AW harness): the slot
+// holders are reviewing/merging tasks the rescan loop never touches, poll is not driven ---
+const rootAX = fixture();
+cleaned.push(rootAX);
+const homeAX = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAX);
+mkdirSync(kanbanDir(rootAX), { recursive: true });
+const savedHomeAX = process.env.HOME;
+process.env.HOME = homeAX;
+let cfgAX: ReturnType<typeof loadConfig>;
+try {
+	cfgAX = loadConfig(rootAX);
+} finally {
+	process.env.HOME = savedHomeAX;
+}
+cfgAX.backlogIdleMinutes = 0;
+cfgAX.maxParallel = 2;
+cfgAX.agent = deadStub(rootAX);
+const holderAX = createTask(rootAX, { name: "fix: reviewing slot", summary: "MaxParallel smoke", specs: "n/a" });
+setState(rootAX, holderAX, "reviewing");
+const holderAX2 = createTask(rootAX, { name: "fix: merging slot", summary: "MaxParallel smoke", specs: "n/a" });
+setState(rootAX, holderAX2, "merging");
+const taskAX = createTask(rootAX, { name: "feat: capped review", summary: "MaxParallel smoke", specs: "n/a" });
+setState(rootAX, taskAX, "to-review");
+rescan(rootAX, cfgAX);
+assert.equal(parseTask(rootAX, taskAX.file).state, "to-review", "at the cap the to-review task stays in to-review");
+assert.ok(!existsSync(pidPath(rootAX, taskSlug(taskAX.file))), "at the cap no reviewer spawned");
+setState(rootAX, holderAX2, "done");
+rescan(rootAX, cfgAX);
+assert.equal(parseTask(rootAX, taskAX.file).state, "reviewing", "below the cap the reviewer spawned");
+assert.ok(existsSync(pidPath(rootAX, taskSlug(taskAX.file))), "below the cap the reviewer pid file exists");
+cleanupAll(rootAX);
+console.log("orchestrator.test.ts: ... + maxParallel reviewer cap smoke passed");
+
+// --- part AY: backlog promotion is not gated by maxParallel: a ready backlog task promotes
+// to to-do while the cap holds and queues there instead of starting ---
+const rootAY = fixture();
+cleaned.push(rootAY);
+const homeAY = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAY);
+mkdirSync(kanbanDir(rootAY), { recursive: true });
+const savedHomeAY = process.env.HOME;
+process.env.HOME = homeAY;
+let cfgAY: ReturnType<typeof loadConfig>;
+try {
+	cfgAY = loadConfig(rootAY);
+} finally {
+	process.env.HOME = savedHomeAY;
+}
+cfgAY.backlogIdleMinutes = 0;
+cfgAY.maxParallel = 1;
+cfgAY.agent = deadStub(rootAY);
+const holderAY = createTask(rootAY, { name: "fix: working slot", summary: "MaxParallel smoke", specs: "n/a" });
+setState(rootAY, holderAY, "doing");
+const queuedAY = createTask(rootAY, { name: "feat: queued next", summary: "MaxParallel smoke", specs: "n/a", complexity: "simple" });
+rescan(rootAY, cfgAY);
+assert.equal(parseTask(rootAY, queuedAY.file).state, "to-do", "the ready backlog task promoted despite the cap");
+assert.ok(!existsSync(pidPath(rootAY, taskSlug(queuedAY.file))), "the promoted task did not start under the cap");
+rescan(rootAY, cfgAY);
+assert.equal(parseTask(rootAY, queuedAY.file).state, "to-do", "the queued task stays to-do while the cap holds");
+cleanupAll(rootAY);
+console.log("orchestrator.test.ts: ... + maxParallel backlog queue smoke passed");

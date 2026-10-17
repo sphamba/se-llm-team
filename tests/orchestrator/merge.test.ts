@@ -525,3 +525,37 @@ assert.ok(orchLogAU().includes(`${slugAUa}: its merger run is over (superseded o
 assert.ok(!existsSync(pidPath(rootAU, "merger")) && !existsSync(exitFilePath(rootAU, "merger")), "the recorded task consumed the shared pid/exit pair");
 cleanupAll(rootAU, homeAU);
 console.log("orchestrator.test.ts: ... + superseded merger requeue smoke passed");
+
+// --- part AV: maxParallel gates the merge lane: at the cap a to-merge task waits (no rebase,
+// no fast-forward), below the cap the clean merge lands. Direct-drive rescan (part AW
+// harness), poll is not driven; the clean path spawns no merger ---
+const rootAV = fixture();
+cleaned.push(rootAV);
+const homeAV = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAV);
+mkdirSync(kanbanDir(rootAV), { recursive: true });
+const savedHomeAV = process.env.HOME;
+process.env.HOME = homeAV;
+let cfgAV: ReturnType<typeof loadConfig>;
+try {
+	cfgAV = loadConfig(rootAV);
+} finally {
+	process.env.HOME = savedHomeAV;
+}
+cfgAV.backlogIdleMinutes = 0;
+cfgAV.maxParallel = 1;
+const holderAV = createTask(rootAV, { name: "fix: working slot", summary: "MaxParallel smoke", specs: "n/a" });
+setState(rootAV, holderAV, "doing");
+// a branch one commit ahead of main: below the cap the clean rebase+fast-forward lands
+execSync("git checkout -qb feat/cap-merge && git commit -q --allow-empty -m capped && git checkout -q main", { cwd: rootAV, shell: "/bin/bash" });
+const taskAV = createTask(rootAV, { name: "feat: capped merge", summary: "MaxParallel smoke", specs: "n/a" });
+setWorktree(rootAV, taskAV, "feat/cap-merge");
+setState(rootAV, taskAV, "to-merge");
+rescan(rootAV, cfgAV);
+assert.equal(parseTask(rootAV, taskAV.file).state, "to-merge", "at the cap the merge waits in to-merge");
+assert.equal(execSync("git log --format=%s -1 main", { cwd: rootAV, encoding: "utf8" }).trim(), "init", "main unmoved at the cap");
+setState(rootAV, holderAV, "done");
+rescan(rootAV, cfgAV);
+assert.equal(parseTask(rootAV, taskAV.file).state, "to-live-test", "below the cap the merge fast-forwarded and set to-live-test");
+assert.ok(execSync("git log --format=%s main", { cwd: rootAV, encoding: "utf8" }).includes("capped"), "main took the branch commit below the cap");
+console.log("orchestrator.test.ts: ... + maxParallel merge cap smoke passed");
