@@ -1,8 +1,8 @@
 ---
 name: "feat: PM done-processing marker tool and unprocessed scope"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/269-pm-processed-marker-tool"
 issuer: "#268"
 complexity: "moderate"
 shortName: "pm-processed-marker-tool"
@@ -29,3 +29,4 @@ Run: pnpm test (full) must pass; pnpm test:changed for your touched files.
 Out of scope: the catch-up report, the report instructions line and the kanban_delete marker cleanup (sibling), the analysis .exit accumulation (#267), REPORT_MAX_AGE_MS, any task-file frontmatter change.
 
 # Notes
+- No-split decision (2026-10-17): this task does not parallelize. Every cut shares files. The tool in tools.ts imports pmProcessedPath from kanban.ts, so a tools.ts-only subtask does not compile until the kanban.ts piece merges. The new test file covers both the list scope and the tool, so no side owns it alone. A scope-vs-tool cut makes both subtasks edit kanban.ts and tools.ts, so it conflicts at merge. The work is small (one helper, one scope member, one tool, one test file). One developer pass is faster than two reviews, two merges, and two live tests. No state change; the developer starts on this task as-is.

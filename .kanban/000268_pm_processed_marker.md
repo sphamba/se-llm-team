@@ -1,44 +1,34 @@
 ---
 name: "feat: PM done-processing marker and unprocessed done surface"
 priority: "medium"
-state: "to-do"
+state: "backlog"
 worktree: ""
 issuer: "user"
-complexity: "moderate"
+complexity: "simple"
 shortName: "pm-processed-marker"
+blockedBy: "#269, #270"
 ---
 
 # Summary
-The done-notification channel has no durable marker for "PM processed this task's follow-ups", and a done transition while the daemon was dead never reports (reportDone seeds from the first post-restart snapshot). Add a .logs/<slug>.pm-processed side-file written by a new batch kanban_mark_processed tool, a kanban_list scope=unprocessed surface, and a startup catch-up report for done tasks with no marker.
+Verification only: once #269 (marker tool + unprocessed scope) and #270 (catch-up report + delete cleanup) have landed, verify the pinned marker-path contract held end to end and the full suite passes.
 
 # Specs
-Goal: done tasks get marked as processed by the PM, unprocessed done tasks are visible in the kanban tools, and a done transition missed while the daemon was dead is reported at the next daemon start.
+Verification scope only - the pieces are #269 (marker tool + unprocessed scope) and #270 (catch-up report + delete cleanup).
 
-Background (audited 2026-10-17): the daemon queues one board report per done sweep in .kanban/.reports/ (src/orchestrator/report.ts; reportDone invoked from pipeline.ts:420), but reportDone's lastDone map (report.ts:67-79) seeds from the first post-restart snapshot, so done transitions while the daemon was dead never report. No durable per-task marker says "PM processed this task's follow-ups". All 12 tools live in the TOOLS record in src/tools.ts:46-280, registered generically in index.ts:44-58 and shared with the MCP host (src/mcp.ts imports TOOLS). kanban_list's scope is a 3-value union Scope (kanban.ts:22) consumed by listTasks's ternary (kanban.ts:269-273). .kanban/.logs/ is gitignored and follows the <name>.count convention (counterPath, log.ts:9).
+Pinned contract that must hold end to end: the PM-processed marker of a task is the empty side-file .kanban/.logs/<task file name minus the .md extension>.pm-processed (taskSlug; e.g. .kanban/.logs/000268_pm_processed_marker.pm-processed). #269 writes it (kanban_mark_processed) and reads it (kanban_list scope=unprocessed via the kanban.ts pmProcessedPath helper); #270 reads it (report.ts catch-up fold at the first sweep after daemon start) and removes it (board.ts removeTask). Check exactly one path shape everywhere: report.ts and board.ts read/remove the same path the kanban.ts helper builds (both sides pinned the convention independently).
 
-Decided plan (grill-me, user-confirmed 2026-10-17):
+Checks once both landed:
+- kanban_mark_processed exists in the TOOLS record, rides the generic pi and MCP registration (13 tools), and marks only done tasks.
+- kanban_list scope=unprocessed returns unmarked done tasks only.
+- The first sweep after daemon start reports a done task with no marker; a marked done task is not re-reported; later sweeps report only new done transitions.
+- kanban_delete removes the marker with the task.
+- The report's PM instructions mention the mark flow.
+- Tests: #269's new test file and #270's sweep.test.ts part N extension pass; pnpm test passes.
 
-1. Marker: .kanban/.logs/<slug>.pm-processed, an empty side-file per done task. Gitignored like the rest of .logs/, survives the 1h report prune, no task-file format change, no board commit per mark.
-
-2. New tool kanban_mark_processed in the TOOLS record (src/tools.ts): params files: string[] (one or more task file names). For each: resolve the task, only mark tasks in state done (skip others and list them in the result), write .kanban/.logs/<slug>.pm-processed (empty file). Idempotent: re-marking rewrites. Rides the generic registration (index.ts:44-58) and the MCP host import with no extra wiring. The tool resolves its board to ctx.cwd like the other kanban tools.
-
-3. kanban_list scope=unprocessed: extend the Scope union (kanban.ts:22) with "unprocessed" and turn listTasks's ternary (kanban.ts:269-273) into a switch. Unprocessed = tasks in state done with no marker file. The tools.ts kanban_list scope enum (tools.ts:52) gains the value.
-
-4. Catch-up report, startup only: in reportDone (report.ts:71-88), when lastDone is being seeded (first sweep after daemon start), fold done tasks with no marker file into finished in the composed report, so a done transition missed while the daemon was dead is reported at the next start. Later sweeps report only new done transitions via lastDone, so an unmarked task is never re-reported on every 10 s sweep; the kanban_list unprocessed scope covers it until marked.
-
-5. Report instructions: the "Instructions for the Project manager" section (report.ts:28-31) gains a line: after processing, mark the done tasks processed via kanban_mark_processed, so future PM sessions know the flow.
-
-6. kanban_delete (removeTask, src/orchestrator.ts) also removes the task's marker file when it exists.
-
-Tests:
-- tests/orchestrator/sweep.test.ts part N (report channel): a done task with no marker at daemon start is reported at the first sweep; a done task with a marker is not.
-- A tools test for kanban_mark_processed: marks a done task, skips a not-done task and names it in the result, idempotent on re-mark.
-- A list test for scope=unprocessed: unmarked done tasks are returned, marked done tasks are excluded, not-done tasks are never returned.
-
-Acceptance: the new/extended test files pass and pnpm test passes.
-
-Out of scope: the analysis .exit accumulation (janitor task #267), changing the report delivery cutoff (REPORT_MAX_AGE_MS), and any frontmatter change to the task file.
-
-Post-landing step (PM, not part of this task): one batch kanban_mark_processed call marks the current done stock so the catch-up rule starts clean. Do it promptly after this task reaches done, before the next daemon restart.
+Out of scope (unchanged): the analysis .exit accumulation (#267), REPORT_MAX_AGE_MS, any task-file frontmatter change.
+Post-landing step (PM, not part of any subtask): one batch kanban_mark_processed call marks the current done stock so the catch-up rule starts clean, promptly after this task reaches done and before the next daemon restart.
 
 # Notes
+- Blocked: #269 (marker tool + unprocessed scope) and #270 (catch-up report + delete cleanup) have not landed. This worktree is identical to main (0 commits ahead, 0 behind), so the pinned contract has no anchors to verify: no pmProcessedPath helper and no kanban_mark_processed tool in src/kanban.ts, no scope=unprocessed handling, and no PM-processed marker read in src/orchestrator/report.ts or removal in src/orchestrator/board.ts. tests/ holds no PM-processed assertion.
+- Baseline assert count: 1877 across tests/*/*.test.ts. tests/orchestrator/sweep.test.ts has part N (one report per done sweep) but no PM-processed catch-up extension.
+- No files changed and nothing committed. The verification run repeats once #269 and #270 reach main.

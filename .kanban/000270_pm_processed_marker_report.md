@@ -1,8 +1,8 @@
 ---
 name: "feat: PM done-processing marker catch-up report and delete cleanup"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/270-pm-processed-marker-report"
 issuer: "#268"
 complexity: "simple"
 shortName: "pm-processed-marker-report"
