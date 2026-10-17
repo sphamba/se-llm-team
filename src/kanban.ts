@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, sep } from "node:path";
 
 export const STATES = [
@@ -17,7 +17,7 @@ export const STATES = [
 export type TaskState = (typeof STATES)[number];
 export type Priority = "low" | "medium" | "high" | "critical";
 export const PRIORITIES = ["low", "medium", "high", "critical"] as const;
-export type Scope = "backlog" | "in-progress" | "done";
+export type Scope = "backlog" | "in-progress" | "done" | "unprocessed";
 // sort rank for priority-first boards: critical first, low last; unknown priorities sort after all
 export const PRIORITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 export const COMPLEXITIES = ["trivial", "simple", "moderate", "complex"] as const;
@@ -67,6 +67,14 @@ const IN_PROGRESS = new Set<TaskState>([
 
 export function kanbanDir(root: string): string {
 	return join(root, ".kanban");
+}
+
+// the PM-processed marker of a task: the empty .logs side-file <taskSlug>.pm-processed,
+// shared by the kanban_mark_processed tool and the catch-up report. Lives here (not
+// orchestrator/log.ts, where armedPath is the .logs side-file precedent) because log.ts
+// imports kanbanDir back, so a helper there would cycle
+export function pmProcessedPath(root: string, file: string): string {
+	return join(kanbanDir(root), ".logs", taskSlug(file) + ".pm-processed");
 }
 
 // [main root, worktree name] of a task worktree root, e.g. /repo/.worktrees/fix/1-x ->
@@ -202,9 +210,18 @@ export function listAll(root: string): Task[] {
 
 export function listTasks(root: string, scope: Scope, priority?: Priority | string): TaskRef[] {
 	return listAll(root)
-		.filter((t) =>
-			scope === "backlog" ? t.state === "backlog" : scope === "done" ? t.state === "done" : IN_PROGRESS.has(t.state),
-		)
+		.filter((t) => {
+			switch (scope) {
+				case "backlog":
+					return t.state === "backlog";
+				case "done":
+					return t.state === "done";
+				case "unprocessed":
+					return t.state === "done" && !existsSync(pmProcessedPath(root, t.file));
+				default:
+					return IN_PROGRESS.has(t.state);
+			}
+		})
 		.filter((t) => priority === undefined || t.priority === priority)
 		.map(({ file, name, shortName, priority, state, issuer, complexity, blockedBy, summary, openQuestions }) => ({ file, num: taskNum(file), name, shortName, priority, state, issuer, complexity, blockedBy, summary, openQuestions }));
 }

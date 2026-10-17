@@ -8,7 +8,7 @@ import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:f
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyseLog } from "./efficiency-analysis.ts";
-import { createTask, getTask, kanbanDir, listAll, listTasks, resolveTaskFromCwd, setState, setWorktree, taskNum, updateTask, STATES, type TaskState } from "./kanban.ts";
+import { createTask, getTask, kanbanDir, listAll, listTasks, pmProcessedPath, resolveTaskFromCwd, setState, setWorktree, taskNum, updateTask, STATES, type Scope, type TaskState } from "./kanban.ts";
 import { pidAlive, procPgrp } from "./pid.ts";
 import { removeTask } from "./orchestrator.ts";
 import { loadConfig, resolveLlm } from "./orchestrator/config.ts";
@@ -65,16 +65,16 @@ const NO_TASK = "no task; pass the file name or run from a worktree with SPECS.m
 export const TOOLS: Record<string, ToolDef> = {
 	kanban_list: {
 		description:
-			"List kanban tasks of this project. scope=backlog: tasks to prioritize. scope=in-progress: tasks being worked on. scope=done: completed tasks. Optional priority filter (low/medium/high/critical). Returns file, num (#NN), name, priority, state, issuer, summary, openQuestions (the task body's # Open questions section, empty when none), complexity and blockedBy (comma-joined blocker task refs like \"#42, #43\", empty when none) per task.",
+			"List kanban tasks of this project. scope=backlog: tasks to prioritize. scope=in-progress: tasks being worked on. scope=done: completed tasks. scope=unprocessed: completed tasks with no PM-processed marker. Optional priority filter (low/medium/high/critical). Returns file, num (#NN), name, priority, state, issuer, summary, openQuestions (the task body's # Open questions section, empty when none), complexity and blockedBy (comma-joined blocker task refs like \"#42, #43\", empty when none) per task.",
 		parameters: {
 			type: "object",
 			properties: {
-				scope: { type: "string", enum: ["backlog", "in-progress", "done"] },
+				scope: { type: "string", enum: ["backlog", "in-progress", "done", "unprocessed"] },
 				priority: { type: "string", enum: ["low", "medium", "high", "critical"] },
 			},
 			required: ["scope"],
 		},
-		async run(params: { scope: "backlog" | "in-progress" | "done"; priority?: "low" | "medium" | "high" | "critical" }, ctx) {
+		async run(params: { scope: Scope; priority?: "low" | "medium" | "high" | "critical" }, ctx) {
 			const refs = listTasks(ctx.cwd, params.scope, params.priority);
 			return ok(JSON.stringify(refs, null, 2), refs);
 		},
@@ -199,6 +199,35 @@ export const TOOLS: Record<string, ToolDef> = {
 			const error = await removeTask(ctx.cwd, params.file);
 			if (error) return ok(error);
 			return ok(`Deleted ${params.file}`);
+		},
+	},
+
+	kanban_mark_processed: {
+		description:
+			"Mark one or more done tasks as processed: writes the empty .kanban/.logs/<task file name minus .md>.pm-processed side-file marker (idempotent, no board change). Tasks that are missing or not in state done are skipped and named in the result.",
+		parameters: {
+			type: "object",
+			properties: {
+				files: { type: "array", items: { type: "string" }, description: "Task file names, e.g. [\"000042_nice_thing.md\"]" },
+			},
+			required: ["files"],
+			additionalProperties: false,
+		},
+		async run(params: { files: string[] }, ctx) {
+			const marked: string[] = [];
+			const skipped: string[] = [];
+			for (const file of params.files) {
+				const task = getTask(ctx.cwd, file);
+				if (!task || task.state !== "done") {
+					skipped.push(file);
+					continue;
+				}
+				const marker = pmProcessedPath(ctx.cwd, task.file);
+				mkdirSync(dirname(marker), { recursive: true });
+				closeSync(openSync(marker, "a"));
+				marked.push(task.file);
+			}
+			return ok(`Marked processed: ${marked.join(", ") || "none"}. Skipped (missing or not done): ${skipped.join(", ") || "none"}`);
 		},
 	},
 

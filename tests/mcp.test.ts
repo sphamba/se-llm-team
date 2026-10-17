@@ -92,7 +92,7 @@ try {
 	assert.deepEqual(ping.result, {});
 	assert.equal(received, before + 1, "a notification gets no reply");
 
-	// tools/list: the 12 shared tools with name, description and an object inputSchema
+	// tools/list: the 13 shared tools with name, description and an object inputSchema
 	const list = await request("tools/list");
 	const names: string[] = list.result.tools.map((t: any) => t.name).sort();
 	assert.deepEqual(names, [
@@ -101,6 +101,7 @@ try {
 		"kanban_delete",
 		"kanban_get",
 		"kanban_list",
+		"kanban_mark_processed",
 		"kanban_set_state",
 		"kanban_set_worktree",
 		"kanban_update",
