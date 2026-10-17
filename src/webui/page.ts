@@ -524,13 +524,22 @@ function attrsHtml(t) {
 		blockedRow(t);
 }
 // the body block, html-gated like syncBoard's cards: an unchanged body keeps its DOM node and
-// with it the reader's scroll position
+// with it the reader's scroll position; 000274: a changed body re-runs the 000246 grow while the
+// open pin is set, so the poll path that lands the detail first still grows the box
 function setBody(t) {
 	const el = document.getElementById("m-body");
 	const html = md(t.body || "");
 	if (el.__html === html) return;
 	el.innerHTML = html;
 	el.__html = html;
+	const box = document.getElementById("m-box");
+	if (!box.classList.contains("grow") || matchMedia("(max-width: 600px)").matches) return;
+	// 000246: the measured content height is the transition target; the fixed timeout mirrors
+	// closeAnimated's fallback and restores auto height once the grow settles. The html gate above
+	// leaves an identical repeat delivery alone, so the unpin always fires once the body settles
+	box.style.height = box.scrollHeight + "px";
+	clearTimeout(box.__growTimer);
+	box.__growTimer = setTimeout(() => { box.style.height = ""; box.classList.remove("grow"); }, 400);
 }
 // 000242: the detail url, the num off the file name and the active tab's project for the hub
 const detailUrl = file => "/api/task-detail?num=" + parseInt(file.slice(0, 6), 10) + projectParam();
@@ -598,13 +607,6 @@ function openTask(file) {
 		setBody(d);
 		markLiveLine();
 		drawAgentRelations();
-		if (grow) {
-			// 000246: the measured content height is the transition target; the fixed timeout
-			// mirrors closeAnimated's fallback and restores auto height once the grow settles
-			box.style.height = box.scrollHeight + "px";
-			clearTimeout(box.__growTimer);
-			box.__growTimer = setTimeout(() => { box.style.height = ""; box.classList.remove("grow"); }, 400);
-		}
 		// 000248: the text is up, the heavy agent/doctor history loads in a follow-up fetch and
 		// renders when it arrives (loading state per the run cards' own lifecycle)
 		return fetch(historyUrl(file)).then(r => r.ok ? r.json() : null).catch(() => null).then(h => {

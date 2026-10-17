@@ -230,6 +230,54 @@ assert.ok(page.includes('meta.classList.toggle("hidden", !label)') && page.inclu
 assert.ok(!page.includes(`+ '</div><div id="m-log"`), "renderAgent no longer rebuilds the log pane with the run cards");
 const setBodySrc = page.match(/function setBody\(t\) \{[\s\S]*?\n\}/)![0];
 assert.ok(setBodySrc.includes("if (el.__html === html) return;"), "the body rewrite is html-gated: an unchanged body keeps its node and the reader's scroll");
+// 000274: the poll path's setBody can land the detail while openTask's loading pin is still set,
+// so the 000246 grow runs from setBody and covers both fetch paths; the html gate above keeps an
+// identical repeat delivery from restarting the 400 ms unpin
+assert.ok(setBodySrc.includes('box.style.height = box.scrollHeight + "px";'), "000274: the grow lives in setBody, so either path that lands the body first reaches it");
+assert.ok(setBodySrc.includes('box.style.height = "";') && setBodySrc.includes('box.classList.remove("grow")'), "000274: setBody keeps the 400 ms unpin that returns the pinned height to auto");
+class GrowEl {
+	className = "grow";
+	scrollHeight = 480;
+	style: Record<string, string> = { height: "120px" };
+	classList = {
+		contains: (cls: string) => this.className.split(" ").includes(cls),
+		add: (cls: string) => { if (!this.classList.contains(cls)) this.className += (this.className ? " " : "") + cls; },
+		remove: (cls: string) => { this.className = this.className.split(" ").filter((c) => c !== cls).join(" "); },
+	};
+}
+const growTimers: Array<(() => void) | null> = [];
+const growBox = new GrowEl();
+const growBody: Record<string, any> = {};
+// the served setBody against stubs: a body landing while the pin is set grows to the measured
+// content height, a changed body re-runs the grow, and an identical repeat is html-gated, so
+// the unpin runs once the content settles and the height still returns to auto
+const makeSetBody = (reduce: boolean, box: GrowEl, body: Record<string, any>) => new Function(
+	"document", "matchMedia", "setTimeout", "clearTimeout", "md",
+	setBodySrc + "; return setBody;",
+)(
+	{ getElementById: (id: string) => (id === "m-body" ? body : id === "m-box" ? box : null) },
+	() => ({ matches: reduce }),
+	(fn: () => void) => { growTimers.push(fn); return growTimers.length - 1; },
+	(id?: number) => { if (id != null) growTimers[id] = null; },
+	(b: string) => "<p>" + b + "</p>",
+);
+const setBodyFn = makeSetBody(false, growBox, growBody);
+setBodyFn({ body: "first" });
+assert.equal(growBox.style.height, "480px", "a body landing while the pin is set grows the box to the measured content height");
+assert.equal(growTimers.length, 1, "the grow arms the 400 ms unpin");
+setBodyFn({ body: "first" });
+assert.equal(growTimers.length, 1, "an identical poll delivery is html-gated, the unpin timer is not restarted");
+setBodyFn({ body: "second" });
+assert.equal(growTimers.length, 2, "a changed body while the pin is still set re-runs the grow");
+growTimers[1]!();
+assert.equal(growBox.style.height, "", "the unpin returns the height to auto once the content settles");
+assert.ok(!growBox.classList.contains("grow"), "the unpin drops the grow class");
+setBodyFn({ body: "third" });
+assert.equal(growBox.style.height, "", "a body landing after the unpin writes no height, the box already sits at auto");
+assert.equal(growTimers.length, 2, "no pin, no grow: the unpinned path arms no timer");
+const mobileBox = new GrowEl();
+makeSetBody(true, mobileBox, {})({ body: "mobile" });
+assert.equal(mobileBox.style.height, "120px", "the mobile full-screen sheet never gets an inline height");
 const ra = page.match(/function renderAgent\(t, keep\) \{[\s\S]*?\n\}/)![0];
 assert.ok(ra.includes('.agent-subs").replaceWith(box)'), "a refresh carries the fetched sub boxes over by handle");
 assert.ok(ra.includes('a.role === "splitter" ? "agent-splitter " : ""'), "the splitter run's card carries the agent-splitter marker class");
@@ -417,6 +465,11 @@ const openTaskSrc = page.match(/function openTask\(file\) \{[\s\S]*?\n\}/)![0];
 assert.ok(openTaskSrc.indexOf('classList.remove("hidden")') < openTaskSrc.indexOf("scrollTop = 0"), "openTask resets the scroll after the un-hide, so every open (same-task reopen included) shows the top");
 assert.ok(openTaskSrc.includes("fetch(detailUrl(file))"), "000242: openTask fetches the per-task detail");
 assert.ok(openTaskSrc.includes("Loading task details"), "000242: openTask shows a loading placeholder while the detail fetch runs");
+// 000274: the markdown-before-cards order is fetch priority only (no render gate): both paths
+// request the detail first and chain the heavy history behind it
+assert.ok(openTaskSrc.indexOf("fetch(detailUrl(file))") < openTaskSrc.indexOf("fetch(historyUrl(file))"), "000274: the open path requests the detail markdown before the heavy history");
+const pollDetailSrc = page.match(/function pollDetail\(\) \{[\s\S]*?\n\}/)![0];
+assert.ok(pollDetailSrc.indexOf("fetch(detailUrl(modalFile))") < pollDetailSrc.indexOf("fetch(historyUrl(modalFile))"), "000274: the poll path chains detail before history too, the markdown-before-cards order holds on both");
 // 000246: the loading state pairs the existing spinner with the label, the arrival grows the
 // modal from the pinned loading height to the content height, and the failure path stays static
 assert.ok(openTaskSrc.includes('<div class="empty"><span class="spin"></span>Loading task details…</div>'), "000246: the loading placeholder pairs the spinner with the label");
@@ -424,8 +477,6 @@ assert.ok(page.includes("#m-box.grow { transition: height var(--enter) ease-out;
 assert.ok(page.includes("@media (prefers-reduced-motion: reduce) { #m-box.grow { transition: none; } }"), "000246: reduced motion turns the grow off");
 assert.ok(openTaskSrc.includes('box.classList.add("grow")') && openTaskSrc.includes('box.style.height = box.offsetHeight + "px"'), "000246: openTask pins the loading height");
 assert.ok(openTaskSrc.indexOf('classList.remove("hidden")') < openTaskSrc.indexOf("box.offsetHeight"), "000246: the pin runs after the un-hide, a hidden box measures zero");
-assert.ok(openTaskSrc.includes('box.style.height = box.scrollHeight + "px";'), "000246: the arrival transitions to the measured content height");
-assert.ok(openTaskSrc.includes('box.style.height = "";'), "000246: the pinned height returns to auto after the grow");
 assert.ok(/if \(!d\) \{[\s\S]*?box\.style\.height = ""[\s\S]*?Task details failed to load/.test(openTaskSrc), "000246: a failed fetch unpins the modal before the error shows, so it never grows");
 // 000251: no upfront agent render from the light row (the row data carries no doctors and no
 // mounted sub boxes, so every card unmounted and remounted on the detail); the mounted cards
