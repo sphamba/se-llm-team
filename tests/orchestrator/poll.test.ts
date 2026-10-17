@@ -28,6 +28,10 @@ setState(rootB, taskB2, "live-testing");
 const b = await runDaemon(rootB);
 const slugB = taskB.file.replace(/\.md$/, "");
 const bouncesB = () => b.output().split("doing -> to-do").length - 1;
+// the live-tester task dies too and logs its own cooldown line, so the counts below are
+// slug-scoped: the bare substring spans both tasks and races the live-tester's log
+const cooldownB = () =>
+	b.output().split("\n").filter((l) => l.includes(`${slugB}: agent died`) && l.includes("respawn waits for the idle cooldown")).length;
 // six deaths, six bounces: the poll never freezes the task at the respawn cap
 await waitFor(() => bouncesB() >= 6, 90000, "six unconditional bounces past the respawn cap", b.output);
 assert.ok(b.output().includes("doing -> to-do"), "poll moved the dead developer back to to-do");
@@ -43,7 +47,7 @@ for (let n = 0; n <= 5; n++) {
 }
 // the cooldown log fired once at cap+1, and the deferred spawn has not fired yet
 await waitFor(() => b.output().includes("respawn waits for the idle cooldown"), 30000, "cooldown log at cap+1", b.output);
-assert.equal(b.output().split("respawn waits for the idle cooldown").length - 1, 1, "cooldown log fired exactly once");
+assert.equal(cooldownB(), 1, "cooldown log fired exactly once");
 assert.ok(!existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.6.log`)) && !existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.6.log.gz`)), "no fresh spawn while the idle cooldown runs");
 // the death counter survived the cooldown wait: a bounce clears the pidfile first, so the
 // completed-run counter clear does not misfire on the waiting task
@@ -54,7 +58,7 @@ const aged = new Date(Date.now() - 6 * 60_000);
 utimesSync(taskBPath, aged, aged);
 await waitFor(() => existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.6.log`)) || existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.6.log.gz`)), 30000, "fresh spawn after the idle cooldown", b.output);
 // the 7th death bounced again with no second cooldown log
-assert.equal(b.output().split("respawn waits for the idle cooldown").length - 1, 1, "still one cooldown log past the cap");
+assert.equal(cooldownB(), 1, "still one cooldown log past the cap");
 // the dead live-tester bounces live-testing -> to-live-test; the branch is unmerged, so the
 // rescan requeues the task to to-merge and the ORCHESTRATOR merges it (no merger agent), after
 // which the dead live-tester respawns and bounces again under the dead counter
@@ -71,8 +75,8 @@ setState(rootB, taskB, "done");
 writeFileSync(join(kanbanDir(rootB), ".pids", `${slugB}.pid`), "999999999");
 await waitFor(() => b.output().includes("cleared the dead-agent counter"), 30000, "completed run cleared the dead counter", b.output);
 setState(rootB, taskB, "to-do");
-await waitFor(() => b.output().split("respawn waits for the idle cooldown").length - 1 >= 2, 90000, "second streak cooldown log", b.output);
-assert.equal(b.output().split("respawn waits for the idle cooldown").length - 1, 2, "second death streak logged its own cooldown message");
+await waitFor(() => cooldownB() >= 2, 90000, "second streak cooldown log", b.output);
+assert.equal(cooldownB(), 2, "second death streak logged its own cooldown message");
 b.daemon.kill("SIGTERM");
 
 // --- part I: pid 0 is dead and a failed spawn writes no pid file, so the poll bounces per DEAD_TRANSITIONS ---
