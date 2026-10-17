@@ -1,7 +1,7 @@
 ---
 name: "feat: maxParallel config to cap tasks running in parallel"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "feat/272-maxparallel-config-to"
 issuer: "user"
 complexity: "moderate"
@@ -50,3 +50,4 @@ Out of scope: splitter agent parallelism (splitter runs on to-do tasks, not coun
 - Tests red-then-green: all five touched files failed on exactly the new maxParallel parts before the fix (missing key kept no default; at-cap tasks started), passed after. Scoped run was the five touched area files (config, split, merge, sweep, promote), each green with exit 0.
 - Scope note: pipeline.ts is not in the test-changed table, so the fallback would be the full suite; ran the four transition area files plus config.test.ts directly instead (the default 0 path is unchanged, no other area touches maxParallel). pnpm test (the acceptance line) therefore not run, per the task's never-full-suite instruction.
 - Assumption: the cap counts tasks in the four working states only (doing, reviewing, merging, live-testing), so a task whose agent died still holds its slot until the poll requeues it, and splitter/analysis spawns are uncounted and ungated. Backlog promotion deliberately ungated so ready tasks queue in to-do.
+- Re-review 2026-10-17 at b758a31 (base main), no fixes: maxParallel config settled by the diff (default 0 src/orchestrator/config.ts:14-16, interface :49, parse with integer >= 0 warn+keep-0 :159-162, wired :179; per-root override rides the existing shallow merge). runningCount helper over listAll with the four working-state literals src/orchestrator/pipeline.ts:33-40 (liveness.ts owns the same set but imports pipeline.ts, so the literals stay local). Gates: startTodo pipeline.ts:64-65 after the splitter branch + ensureWorktree, before setState("doing")+spawn; to-review pipeline.ts:389-390 immediately before setState("reviewing")+spawn, inside the !pidAlive branch (equivalent: a live pid defers regardless); to-live-test pipeline.ts:415-416 before setState("live-testing")+spawn; sweepToMerge pipeline.ts:143-145 after the one-merger guard, before the idle-clock reads (the gate writes nothing). Backlog promotion ungated (promoteBacklog untouched, queue covered by promote.test.ts part AY); splitter spawns out of scope, uncounted. README example README.md:73, table row README.md:87. Tests: all 13 tests/orchestrator/ suites exit=0 at b758a31 (the union the coverage map fixes for src/orchestrator/*), superseding the five-file scoped run above; 605 asserts across the 13 suites, +29 from the diff. No open questions.

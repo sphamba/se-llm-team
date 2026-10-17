@@ -1,8 +1,8 @@
 ---
 name: "fix: poll.test.ts cooldown log fires twice on main"
 priority: "high"
-state: "live-testing"
-worktree: "fix/273-cooldown-log-twice"
+state: "done"
+worktree: ""
 issuer: "#270"
 complexity: "moderate"
 shortName: "cooldown-log-twice"
@@ -43,4 +43,12 @@ Out of scope: the respawn-cap semantics themselves, the webui, and the marker/sc
 - Tests: poll.test.ts green at 747ab05 recorded above (exit 0, 6 smoke parts); zero re-runs per the green-run-at-reviewed-sha rule. Scoped union = tests/orchestrator/poll.test.ts only (the diff touches no other file); pnpm test stays unrun per the project rule.
 - Hunt 3 overlap: none. The diff touches only tests/orchestrator/poll.test.ts, so #269 (markers/scope) and #271/#272 (src worktrees) share no file with it; #266's review-counter reset lives in pipeline.ts, also untouched.
 - Cosmetic: 747ab05 was committed on main rather than the task branch (the branch was ff'd to it afterward, so the merge is a no-op ff), and its commit message over-claims ("a probe at HEAD ... so the race predates the marker task" — a probe at a commit that already includes c19fc2c cannot prove predation; the Notes' timing-dependent record is the accurate one). Neither changes the verdict.
+
+## Live test (2026-10-17)
+- Scope: tests-only fix; HEAD is the merge 747ab05 (only tests/orchestrator/poll.test.ts, +8/-4). The named suites were not run (suite ban); the live test exercised the production surface poll.test.ts pins: the daemon cooldown log over the part-B fixture (dead developer + dead live-tester).
+- Static checks: `git diff --name-status 747ab05^ HEAD` = M tests/orchestrator/poll.test.ts only; assert count 62 == 62 and the sorted assert-line diff is exactly the three cooldown counts, messages unchanged. The helper at tests/orchestrator/poll.test.ts:33-35 filters on `<slug>: agent died` plus the cooldown text.
+- Live daemon (real src, isolated HOME, SE_LLM_TEAM_NO_WEBUI=1, poll 0.01 min, rescan 1 s, deadStub exit 1): 20 checks, 0 failed. Both fixture tasks reached cap+1 and logged their first cooldown line 2 ms apart (000001_dead_agent 20:51:19.782Z, 000002_dead_merger 20:51:19.784Z). At the moment the test's bare-substring wait returns, the bare count is 2 (the old assert's actual 2) while the slug-scoped counts are 1 and 1 (the new assert's values).
+- Exactly-once held: each slug-scoped count stayed 1 through the aged release and the 7th bounce; the death counter stayed 6 during the cooldown wait; all six developer runs carried their own `.dead` marker with a numeric pid; no run 6 log before aging and a run 6 log after. The deliberate second streak (done + stale pid, counter clear, back to to-do) took the task to exactly 2 scoped lines, the other task's count stayed 1.
+- Assumptions: the daemon fixture mirrors part B (deadStub agent, `feat/dead-merger` branch, backlogIdleMinutes 0); the real global config (agent `pi`, webui 4242) is bypassed by the isolated HOME and `--no-webui`, so no production daemon or hub was touched.
+- Not verified here: `node tests/orchestrator/poll.test.ts` and `pnpm test` (suite ban). Their green record is the developer/reviewer Notes at 747ab05; the live daemon behavior above is the independent evidence for the fix's property.
 

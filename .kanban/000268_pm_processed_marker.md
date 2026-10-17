@@ -1,7 +1,7 @@
 ---
 name: "feat: PM done-processing marker and unprocessed done surface"
 priority: "medium"
-state: "doing"
+state: "live-testing"
 worktree: "feat/268-pm-processed-marker"
 issuer: "user"
 complexity: "simple"
@@ -39,3 +39,7 @@ Post-landing step (PM, not part of any subtask): one batch kanban_mark_processed
 - First-sweep catch-up: an unmarked done task is folded into one report at daemon start, a marked done task is not, and later sweeps report only new done transitions; composeReport's PM instructions name kanban_mark_processed. Part N and its catch-up extension assert all of this.
 - Suite (run in /tmp/verify268): tests/tools.test.ts, tests/mcp.test.ts, all 13 tests/orchestrator/*.test.ts, all 6 tests/kanban/*.test.ts, all 5 tests/webui/*.test.ts exit 0. Deviation: the spec asked for pnpm test; per project test policy this run is the scoped set covering every changed module (kanban.ts maps to orchestrator+kanban+webui; tools.ts/report.ts/board.ts map to tools, mcp and the sweep area file). The remaining full-suite files (index, extension, plugin, context-symlinks, efficiency-analysis) map to no changed file.
 - The post-landing PM batch mark of the current done stock (then a daemon restart) stays with the PM, as the spec states.
+- Re-review at 747ab05: prior claims hold. Pinned marker path confirmed at src/kanban.ts:76 (pmProcessedPath, taskSlug strips only .md), read at report.ts reportDone and deleted at board.ts removeTask:140 with the same independent join, write-through at src/tools.ts:225; sweep.test.ts pins both sides with a hand-built path (part N catch-up, part AG delete).
+- Registration: kanban_mark_processed rides the single generic Object.entries(TOOLS) registration at src/mcp.ts:46; the earlier "index.ts (pi)" site names a nonexistent file (src/ has no other TOOLS consumer), so the registration is the generic MCP one and tests/mcp.test.ts pins the 13 names. Minor Notes inaccuracy, verdict unchanged.
+- Suite re-run (none recorded with a sha): all 26 files exit 0 on the current tree - tests/tools.test.ts, tests/mcp.test.ts, all 13 tests/orchestrator/*.test.ts (analysis, hub, log fast; the ten daemon suites serial), all 6 tests/kanban/*.test.ts, all 5 tests/webui/*.test.ts. The fast-forward also carries 747ab05, a tests/orchestrator/poll.test.ts-only commit (12 lines, test-only, covered by the poll suite).
+- No fixes committed; the pinned contract held end to end.
