@@ -6,7 +6,7 @@ worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "pm-processed-marker"
-blockedBy: "#269, #270"
+blockedBy: "#269"
 ---
 
 # Summary

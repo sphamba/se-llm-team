@@ -1,8 +1,8 @@
 ---
 name: "feat: maxParallel config to cap tasks running in parallel"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/272-maxparallel-config-to"
 issuer: "user"
 complexity: "moderate"
 ---
@@ -43,3 +43,5 @@ Operational note: a running daemon keeps its old code until restarted; the cap t
 Out of scope: splitter agent parallelism (splitter runs on to-do tasks, not counted), the reviewerCap and the analysis one-failed-attempt guard (unchanged).
 
 # Notes
+
+- No split (Splitter 2026-10-17): the only file-disjoint seam is config.ts (+ tests/orchestrator/config.test.ts, README) vs pipeline.ts (+ the promote/split/sweep/merge branch tests), but pipeline.ts is an import-pair consumer of config.ts (imports type Config; the gates read cfg.maxParallel), so the pipeline subtask's cap tests fail until the config piece merges (loadConfig never parses the key without it). Same no-split family as 000269; a tests-only cut serializes the same way, and a cut by transition shares pipeline.ts for all four gates and the helper. Total diff is small (~40 source lines, exact insertion points pinned in the Specs), so one review, one merge and one live test beat two cycles plus a verification parent.

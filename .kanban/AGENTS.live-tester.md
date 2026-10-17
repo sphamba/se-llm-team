@@ -59,6 +59,7 @@
 - `git init` fixtures need `.kanban/.logs` (a `>>` redirect fails without it) and `git -c commit.gpgsign=false commit` (global gpgsign=true). Rebase continue the same way: a read-only `~/.gnupg` stops the commit (#195, #235).
 - Once `ensureInfoExclude` names a path, a blanket `git add -A` silently skips it (#234): commit with explicit paths, or track on the base BEFORE any exclude write, or a staging/merge check passes for the wrong reason.
 - Timestamps: daemon log lines are UTC ISO, fixture mtimes local (UTC+2). Never compare directly (#212).
+- PM reports are atomic `.md` files in `<root>/.kanban/.reports/` (ISO-timestamp name, oldest first, 1 h cutoff); a daemon-only report acceptance reads those files directly, no pi RPC session (the extension drain stays #190/#197 territory). Seed catch-up fixture: write the suppressing `.kanban/.logs/<slug>.pm-processed` markers by hand before daemon start, and `reportDone` seeds per daemon process, so the first sweep is the seed (#270).
 - Node 24 strips types: import merged src directly (`await import('<repo>/src/kanban.ts')`). Worktrees need no node_modules (node resolves up the tree); git archives do (symlink the repo's) (#179, #195, #216).
 
 ## Playwright discipline (each trap cost a failed run at least once)
