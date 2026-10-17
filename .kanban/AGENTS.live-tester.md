@@ -89,6 +89,7 @@
 - Animation/growth: measure rendered rAF heights (first and last frames that moved), never the transition span alone; the property interpolates to the full target while the visible box stops at the cap (#246). A clamp-compressed grow and a height that jumps in ONE frame are product findings, report them with the frames (#246, #264). Spinner presence: hold a route delay long enough to sample `animationName`/`playState` mid-flight.
 - Geometry/animation measurement (#252): before a geometry baseline or an `animationstart` snapshot, sleep ~500 ms after the content lands (`getBoundingClientRect` includes the in-flight `.enter`/FLIP transform, `animationstart` runs in a later task). A locator click scrolls the target into view, so position deltas across a click must be read relative to `#board` (`rect.top - boardRect.top`), never viewport-absolute.
 - Computed color-mix() backgrounds come back as `color(srgb r g b / a)` in Chromium, never `rgb()`, and the alpha is 8-bit quantized (0.806667): parse both notations, assert channels with tolerance, never string-equal (#265).
+- Poll-path popup grow (#274): hold the open `/api/task-detail` response while the 1 s modal poll (live-agent fixture) delivers the same detail first; assert inline height == `scrollHeight` when the content lands, and a MutationObserver on `#m-box` attributes proves no `.grow` re-pin after the 400 ms unpin; read the mobile sheet geometry ~350 ms after the click, an immediate read catches the 200 ms `boxIn` at ~98.7% scale.
 
 ## Shell traps (each killed a run at least once)
 
