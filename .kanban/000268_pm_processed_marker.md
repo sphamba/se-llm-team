@@ -1,7 +1,7 @@
 ---
 name: "feat: PM done-processing marker and unprocessed done surface"
 priority: "medium"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "user"
 complexity: "moderate"
