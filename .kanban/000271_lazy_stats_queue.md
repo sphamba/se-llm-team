@@ -1,8 +1,8 @@
 ---
 name: "fix: card stats fetched lazy, deferred, one by one, top to bottom"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/271-lazy-stats-queue"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "lazy-stats-queue"
@@ -42,6 +42,15 @@ Acceptance: node tests/webui/board.test.ts passes, pnpm test passes.
 - Re-review at a36c82f: one defect found and fixed. makeStatsQueue (src/webui/board.ts:388) scheduled a drain from enqueue while a fetch was in flight (timer is null during the flight), so a click or poll enqueue mid-flight started a second concurrent request, against the one-at-a-time rule. Fix: a busy flag; enqueue defers to the in-flight fetch, the finally chain drains the rest. Regression test in the 000271 block pins no second request while the first is in flight, then the mid-flight enqueue drains after the first settles.
 - Verified against the specs: per-file endpoint URL with the project param (src/webui/page.ts:408-411, same shape as projectParam, which stays in use elsewhere), enqueueCol wired from toggleCol (page.ts:413) and from queueExpanded after each poll render (page.ts:414, page.ts:1087), failure drops the requested key for the next retry, done-with-known-agents skip kept, no hub.ts or payload.ts change, PAGE pins updated to the per-file endpoint, makeStatsQueue, enqueueCol wiring and queueExpanded. Deviation from the plan's "reuse statsInFlight" stands as stated: the queue's internal requested set replaces it, extended to successful fetches (one fetch per file per page load, no refetch on re-unfold).
 - Tests: 203 asserts in tests/webui/board.test.ts (16 added by ce3de5c, +4 from the re-review fix); suite exit 0 on the current tree. The other webui suites keep their green runs at ce3de5c; this fix touches only the queue internals plus board.test.ts.
+
+## Live test (2026-10-17)
+
+- Hub-only fixture at /tmp/lt271 (7 backlog tasks b1-b7 and 7 done d1-d7, one developer run log each with distinct tokens; isolated HOME, port 4350). Preflight GREEN (7 checks): /api/tasks stays a bare 14-row array, the folded b6/b7 rows carry no agents, /api/card-stats answers a per-file request and the batched two-file request, a missing files param answers {}. Browser probe: 22 checks, 0 failed (Playwright, /api/card-stats route-intercepted with an 800 ms hold and a one-shot 503).
+- Reveal: a click on the backlog "show all (7)" fetches nothing inside the click task (a capture listener's setTimeout 0 ran before the app's timer and saw 0 calls), all 7 cards render at that point, then one file per request (b6 then b7, the revealed DOM order), the next request starts only after the previous settles (first held 800 ms, one request in flight), and the stats render "6k · 10s" and "7k · 10s".
+- No eager fetch: the initial page load requests nothing, and the folded first-5 stats come from the payload attach (b1 renders "1k · 10s"). A re-fold and re-unfold requests nothing (2 requests stay 2).
+- Done column unfold: per-file requests in top-to-bottom order (d6, d7), stats render, and both fetched entries land in the localStorage cache (`card-stats||000271_d6.md`, `card-stats||000271_d7.md`), unchanged.
+- Poll arrival and retry: a low-priority task written while the column was expanded landed at position 8 (past the fold), was fetched with no click, its first request answered 503 (no stats, no error UI), and the next 5 s poll retried it (2 attempts, second ok) with "8k · 10s" rendered.
+- Whole run: exactly one request per file plus the one intentional retry, no page errors, no app console errors. No contradiction with the Specs. Assumptions: the failure was modeled with a transient 503 (the Specs name a stale-hub 404, the client path is the same null-on-not-ok branch), and the retry window is the next 5 s board poll. The batched endpoint mode, the done-with-known-agents skip and the localStorage merge behaved as documented.
 
 # Open questions
 - The reported never-appear did not reproduce on current source (harness-verified during fact-finding, before this change); please confirm a stale browser tab holding pre-#264 JS explains it on your side.
