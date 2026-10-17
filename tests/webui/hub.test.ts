@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import { createTask, setState } from "../../src/kanban.ts";
 import { startHub } from "../../src/hub.ts";
 import { loadWebUiConfig, taskHistory, taskPayload } from "../../src/webui.ts";
+// not re-exported by the webui barrel: import directly from the payload module
+import { logStats, MAX_LOG_CACHES, statsCache, subagentLogs, subsCache } from "../../src/webui/payload.ts";
+import { cardStatsPayload } from "../../src/webui/payload.ts";
+import { compactFinishedLogs } from "../../src/orchestrator.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-merge", "merging", "to-live-test", "live-testing", "done"];
@@ -117,6 +122,19 @@ const bulkRows = (await (await fetch(`${base}/api/tasks`)).json()).filter((r: an
 assert.equal(bulkRows.length, 6);
 for (const r of bulkRows)
 	assert.equal("agents" in r, r.num !== parseInt(bulk[0].file, 10), "the five visible rows carry the stat data, a card behind show more carries none");
+// 000263: the batched lazy-stats endpoint serves the cards behind "show more": every requested
+// on-board file answers with its agent stats, a bogus file is omitted, and the eager /api/tasks
+// response keeps carrying only the first five
+mkdirSync(join(root, ".kanban", ".logs"), { recursive: true });
+const hiddenSlug = bulk[0].file.replace(/\.md$/, "");
+const hiddenLog = join(root, ".kanban", ".logs", `${hiddenSlug}.developer.0.log`);
+writeFileSync(hiddenLog, JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 20, output: 10 } }, timestamp: Date.now() }) + "\n");
+const cardStats = await (await fetch(`${base}/api/card-stats?files=${bulk.map((t) => t.file).join(",")},bogus.md`)).json();
+assert.deepEqual(cardStats[bulk[0].file].agents.map((a) => a.tokens), [30], "the endpoint serves the card behind show more, the eager response omits it");
+assert.deepEqual(Object.keys(cardStats).sort(), bulk.map((t) => t.file).sort(), "the endpoint keys every on-board requested file and omits a bogus one");
+assert.deepEqual(await (await fetch(`${base}/api/card-stats`)).json(), {}, "a missing files param answers an empty object");
+assert.equal((await fetch(`${base}/api/card-stats?project=nope&files=x.md`)).status, 404, "an unknown project is rejected like /api/tasks");
+rmSync(hiddenLog);
 for (const t of bulk) rmSync(join(root, ".kanban", t.file)); // restore the one-task board
 
 // GET / mentions all 10 state names; other paths and methods are 404
@@ -224,6 +242,12 @@ writeFileSync(join(statsRoot, ".kanban", ".logs", `${loggedSlug}.developer.log`)
 const loggedRow = (await taskPayload(statsRoot)).find((r: any) => r.file === statsTasks[1].file)!;
 assert.equal(loggedRow.agents[0].tokens, 800, "a visible card's row sums the run's usage like the detail's history");
 assert.deepEqual(loggedRow.agents, (await taskHistory(statsRoot, loggedRow.num))!.agents, "the row carries the same agent history the detail's history serves");
+// 000263: the batched stats payload answers the same per-file agents the visible rows carry,
+// keyed by the requested files, with the off-board and missing cases empty
+const batch = await cardStatsPayload(statsRoot, [statsTasks[1].file, "bogus.md"]);
+assert.deepEqual(Object.keys(batch), [statsTasks[1].file], "the batched stats answer omits a requested file not on the board");
+assert.deepEqual(batch[statsTasks[1].file].agents, loggedRow.agents, "the batched agents match the visible row's agent history");
+assert.deepEqual(await cardStatsPayload(statsRoot, []), {}, "an empty files list answers an empty object");
 
 // the done cache: a done task's stats serve from the cache (a rewritten plain log stays stale) and
 // leaving done invalidates it, so a re-done task re-caches fresh
@@ -247,6 +271,81 @@ assert.equal((await doneRow()).agents[0].tokens, 1500, "a re-done task re-caches
 writeDoneLog(20000);
 assert.equal((await doneRow()).agents[0].tokens, 1500, "the re-cached entry is stale again until the next leave-done");
 
+// 000250 the RAM ratchet: the stats and subs parses are incremental (byte-offset bookkeeping,
+// a live log's re-poll reads only the new bytes), the sweep's rename evicts the plain-path
+// cache entries, and the caches stay bounded
+const incRoot = mkdtempSync(join(tmpdir(), "webui-inc-"));
+mkdirSync(join(incRoot, ".kanban", ".logs"), { recursive: true });
+const incLog = join(incRoot, ".kanban", ".logs", "inc.developer.0.log");
+const incRec = (input: number, ts: number) =>
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input, output: 0 } }, timestamp: ts });
+writeFileSync(incLog, [incRec(10, 1000), incRec(20, 2000)].join("\n") + "\n");
+const inc1 = await logStats(incLog);
+assert.equal(inc1.tokens, 30, "the cold parse sums the whole log");
+assert.equal(statsCache.get(incLog)?.offset, statSync(incLog).size, "the bookkeeping sits past the last complete line, so the next poll reads only the new bytes");
+appendFileSync(incLog, incRec(30, 3000) + "\n" + incRec(40, 4000) + "\n");
+const inc2 = await logStats(incLog);
+assert.equal(inc2.tokens, 100, "the growth parses only the new records and the sum is whole-log correct");
+assert.equal(inc2.duration, 3000, "the duration spans first to last across the incremental scans");
+assert.equal(statsCache.get(incLog)?.offset, statSync(incLog).size, "the bookkeeping advanced with the growth, it never restarts from zero");
+appendFileSync(incLog, incRec(50, 5000));
+const inc3 = await logStats(incLog);
+assert.equal(inc3.tokens, 100, "an unterminated tail record is not a line yet, it stays unparsed");
+assert.equal(statsCache.get(incLog)?.offset, statSync(incLog).size - incRec(50, 5000).length, "the bookkeeping stops before the partial line");
+appendFileSync(incLog, "\n");
+assert.equal((await logStats(incLog)).tokens, 150, "the completed tail record parses once");
+writeFileSync(incLog, incRec(5, 500) + "\n");
+assert.equal((await logStats(incLog)).tokens, 5, "a replaced shorter log resets the bookkeeping and parses fresh");
+
+const incParent = join(incRoot, ".kanban", ".logs", "inc.reviewer.0.log");
+const incSubRec = (id: string, file: string) =>
+	JSON.stringify({ type: "tool_execution_end", toolCallId: id, result: { content: [{ type: "text", text: `Agent ID: ${id}\nOutput file: ${file}` }] } });
+writeFileSync(incParent, incSubRec("s1", "/tmp/pi-subagents-1000/inc-one.output") + "\n");
+assert.deepEqual((await subagentLogs(incParent)).map((s) => s.id), ["s1"], "the parent parse enumerates its subs");
+assert.equal(subsCache.get(incParent)?.offset, statSync(incParent).size, "the parent bookkeeping sits past the last complete line");
+appendFileSync(incParent, incSubRec("s2", "/tmp/pi-subagents-1000/inc-two.output") + "\n");
+assert.deepEqual((await subagentLogs(incParent)).map((s) => s.id), ["s1", "s2"], "the parent growth appends only the new sub");
+
+// the sweep's rename evicts the plain-path cache entries
+const evRoot = mkdtempSync(join(tmpdir(), "webui-evict-"));
+mkdirSync(join(evRoot, ".kanban", ".logs"), { recursive: true });
+const evPlain = join(evRoot, ".kanban", ".logs", "ev.developer.0.log");
+writeFileSync(evPlain, incRec(10, 1000) + "\n");
+await logStats(evPlain);
+assert.ok(statsCache.has(evPlain), "the plain log's entry caches");
+compactFinishedLogs(evRoot);
+assert.ok(!existsSync(evPlain), "the sweep gzipped the plain log");
+assert.ok(!statsCache.has(evPlain), "the sweep's rename evicted the orphaned plain-path entry");
+
+// a swept doctor log stays in the doctor history: the read path decompresses transparently
+const gzDocRoot = mkdtempSync(join(tmpdir(), "webui-docgz-"));
+const gzDocTask = createTask(gzDocRoot, { name: "feat: docgz", summary: "s", specs: "s" });
+const gzDocSlug = gzDocTask.file.replace(/\.md$/, "");
+mkdirSync(join(gzDocRoot, ".kanban", ".logs"), { recursive: true });
+const gzDocLog = join(gzDocRoot, ".kanban", ".logs", `${gzDocSlug}.developer.0.doctor.log`);
+writeFileSync(gzDocLog, [
+	JSON.stringify({ type: "session", id: "s", timestamp: "2026-10-16T10:00:00.000Z" }),
+	JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 7, output: 3 } }, timestamp: "2026-10-16T10:00:02.000Z" }),
+].join("\n") + "\n");
+writeFileSync(`${gzDocLog}.gz`, gzipSync(readFileSync(gzDocLog)));
+rmSync(gzDocLog);
+const gzDoc = (await taskHistory(gzDocRoot, parseInt(gzDocTask.file, 10)))!.doctors;
+assert.equal(gzDoc.length, 1, "a swept doctor log stays in the doctor history");
+assert.equal(gzDoc[0].tokens, 10, "its stats parse from the decompressed stream");
+
+// the caches stay bounded: one entry past the cap evicts the oldest
+const bndRoot = mkdtempSync(join(tmpdir(), "webui-bnd-"));
+mkdirSync(join(bndRoot, ".kanban", ".logs"), { recursive: true });
+for (let b = 0; b <= MAX_LOG_CACHES; b++) {
+	const p = join(bndRoot, ".kanban", ".logs", `bnd.${b}.log`);
+	writeFileSync(p, incRec(1, 1000) + "\n");
+	await logStats(p);
+}
+assert.ok(statsCache.size <= MAX_LOG_CACHES, "one entry past the cap evicts the oldest, the map never grows unbounded");
+rmSync(incRoot, { recursive: true, force: true });
+rmSync(evRoot, { recursive: true, force: true });
+rmSync(gzDocRoot, { recursive: true, force: true });
+rmSync(bndRoot, { recursive: true, force: true });
 cleanup();
 rmSync(statsRoot, { recursive: true, force: true });
 rmSync(doneRoot, { recursive: true, force: true });

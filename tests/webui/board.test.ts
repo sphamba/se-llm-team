@@ -8,6 +8,9 @@ import { join } from "node:path";
 import { startHub } from "../../src/hub.ts";
 import { PRIORITY_RANK } from "../../src/kanban.ts";
 import { boardOf, buildShell, cardBaseHtml, cardHtml, curve, flipDiff, LAYOUT, mergeBoards, numLinkHtml, pairLayout, relationPaths, spinnerHtml, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats } from "../../src/webui.ts";
+// 000264: not re-exported by the webui barrel (pre-#263 merge): import directly from the board module
+import { applyCardStats, mergeCardStats, sortedCol, statsKey } from "../../src/webui/board.ts";
+import { PAGE } from "../../src/webui/page.ts";
 
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-merge", "merging", "to-live-test", "live-testing", "done"];
 
@@ -406,5 +409,133 @@ assert.ok(page.includes('<nav id="tabs"></nav>'), "page has the tab bar");
 assert.ok(page.includes("switchTab(b.dataset.project)"), "each tab button switches the active board");
 assert.match(page, /function switchTab\(name\) \{[\s\S]*?closeModal\(\);[\s\S]*?\}/, "a tab switch closes the open modal");
 assert.match(page, /#tabs \{ position: relative; z-index: 1;/, "the tab bar stacks above the #modal overlay (000091)");
+// --- 000264 lazy card stats: the sortedCol, statsKey, applyCardStats and mergeCardStats functions
+// over stubbed storage (no DOM, no hub; the endpoint is stubbed until #263 merges)
+
+const csStorage = () => {
+	const map = new Map<string, string>();
+	return {
+		getItem: (k: string) => (map.has(k) ? (map.get(k) as string) : null),
+		setItem: (k: string, v: string) => {
+			map.set(k, String(v));
+		},
+		removeItem: (k: string) => {
+			map.delete(k);
+		},
+	};
+};
+const csAgents = [{ role: "developer", tokens: 42, duration: 3 }];
+
+// per-project and per-task key: two checkouts with the same task number never share an entry
+assert.equal(statsKey("/repo-a", "000001_probe.md"), "card-stats|/repo-a|000001_probe.md");
+assert.notEqual(statsKey("/repo-a", "000001_probe.md"), statsKey("/repo-b", "000001_probe.md"));
+
+// the column's rows in board order: backlog priority-first, every other column newest-first
+const csBacklog = [
+	{ file: "000001_a.md", state: "backlog", priority: "medium", updated: 3 },
+	{ file: "000002_b.md", state: "backlog", priority: "critical", updated: 1 },
+	{ file: "000003_c.md", state: "backlog", priority: "high", updated: 5 },
+];
+assert.deepEqual(sortedCol(csBacklog, "backlog").map((t) => t.file), ["000002_b.md", "000003_c.md", "000001_a.md"]);
+const csDoneCol = [
+	{ file: "000001_a.md", state: "done", priority: "low", updated: 2 },
+	{ file: "000002_b.md", state: "done", priority: "critical", updated: 9 },
+];
+assert.deepEqual(sortedCol(csDoneCol, "done").map((t) => t.file), ["000002_b.md", "000001_a.md"]);
+
+// an agent-less row takes the known stats, the payload's eager agents win over them
+const csKnown = Object.create(null);
+csKnown[statsKey("p", "000001_a.md")] = csAgents;
+const csRows = [{ file: "000001_a.md", state: "to-do", updated: 1 }];
+applyCardStats(csRows, csKnown, csStorage(), "p");
+assert.deepEqual(csRows[0].agents, csAgents);
+const csPayload = [{ role: "developer", tokens: 7, duration: 1 }];
+const csCovered = [{ file: "000001_a.md", state: "to-do", updated: 1, agents: csPayload }];
+applyCardStats(csCovered, csKnown, csStorage(), "p");
+assert.equal(csCovered[0].agents, csPayload);
+
+// a done task's cached stats serve without a fetch, and the read lands in the known stats too
+const csStore = csStorage();
+csStore.setItem(statsKey("p", "000002_b.md"), JSON.stringify(csAgents));
+const csDoneRows = [{ file: "000002_b.md", state: "done", updated: 1 }];
+applyCardStats(csDoneRows, csKnown, csStore, "p");
+assert.deepEqual(csDoneRows[0].agents, csAgents);
+assert.equal(csKnown[statsKey("p", "000002_b.md")], csDoneRows[0].agents);
+
+// a done task's empty cached stats still count as served, the fetch never resumes for them
+csStore.setItem(statsKey("p", "000006_f.md"), "[]");
+const csEmptyRows = [{ file: "000006_f.md", state: "done", updated: 1 }];
+applyCardStats(csEmptyRows, csKnown, csStore, "p");
+assert.deepEqual(csEmptyRows[0].agents, []);
+
+// a stored entry for a task that left done drops with its merged agents, a fresh fetch resumes
+csStore.setItem(statsKey("p", "000003_c.md"), JSON.stringify(csAgents));
+csKnown[statsKey("p", "000003_c.md")] = csAgents;
+const csLeftRows = [{ file: "000003_c.md", state: "to-do", updated: 1 }];
+applyCardStats(csLeftRows, csKnown, csStore, "p");
+assert.equal(csStore.getItem(statsKey("p", "000003_c.md")), null);
+assert.equal(csKnown[statsKey("p", "000003_c.md")], undefined);
+assert.equal(csLeftRows[0].agents, undefined);
+
+// a corrupt entry and an unavailable storage fail soft, the row stays agent-less
+csStore.setItem(statsKey("p", "000004_d.md"), "{oops");
+const csBadRows = [{ file: "000004_d.md", state: "done", updated: 1 }];
+applyCardStats(csBadRows, csKnown, csStore, "p");
+assert.equal(csBadRows[0].agents, undefined);
+const csDenied = { getItem() { throw new Error("denied"); }, setItem() { throw new Error("denied"); }, removeItem() { throw new Error("denied"); } };
+const csDeniedRows = [{ file: "000005_e.md", state: "done", updated: 1 }];
+applyCardStats(csDeniedRows, csKnown, csDenied, "p");
+assert.equal(csDeniedRows[0].agents, undefined);
+
+// the card-stats response merges into the known stats; a done task's agents also cache to
+// storage, a non-done task's never touch it
+const csMergeStore = csStorage();
+const csMergeKnown = Object.create(null);
+const csMergeRows = [
+	{ file: "000001_a.md", state: "done", updated: 1 },
+	{ file: "000002_b.md", state: "to-do", updated: 2 },
+];
+mergeCardStats(
+	{ "000001_a.md": { agents: [{ role: "developer", tokens: 5, duration: 1 }] }, "000002_b.md": { agents: [{ role: "developer", tokens: 6, duration: 2 }] } },
+	csMergeRows,
+	csMergeKnown,
+	csMergeStore,
+	"p",
+);
+assert.deepEqual(csMergeKnown[statsKey("p", "000001_a.md")], [{ role: "developer", tokens: 5, duration: 1 }]);
+assert.deepEqual(csMergeKnown[statsKey("p", "000002_b.md")], [{ role: "developer", tokens: 6, duration: 2 }]);
+assert.deepEqual(JSON.parse(csMergeStore.getItem(statsKey("p", "000001_a.md"))), [{ role: "developer", tokens: 5, duration: 1 }]);
+assert.equal(csMergeStore.getItem(statsKey("p", "000002_b.md")), null);
+mergeCardStats({ "000003_c.md": {} }, [], csMergeKnown, csMergeStore, "p");
+assert.equal(csMergeKnown[statsKey("p", "000003_c.md")], undefined, "a response entry without agents is skipped");
+mergeCardStats({ "000001_a.md": { agents: [] } }, csMergeRows, csMergeKnown, csDenied, "p");
+assert.deepEqual(csMergeKnown[statsKey("p", "000001_a.md")], [], "a failing storage write still merges the known stats");
+mergeCardStats({ "000009_z.md": { agents: [{ role: "developer", tokens: 1, duration: 1 }] } }, [], csMergeKnown, csMergeStore, "p");
+assert.deepEqual(csMergeKnown[statsKey("p", "000009_z.md")], [{ role: "developer", tokens: 1, duration: 1 }]);
+assert.equal(csMergeStore.getItem(statsKey("p", "000009_z.md")), null);
+
+// the poll's agent-less rows never wipe revealed stats: the merge fills, the poll's fresh rows re-apply
+const csPollKnown = Object.create(null);
+const csPollStore = csStorage();
+const csPollRows = [{ file: "000001_a.md", state: "to-do", updated: 1 }];
+mergeCardStats({ "000001_a.md": { agents: [{ role: "developer", tokens: 9, duration: 9 }] } }, csPollRows, csPollKnown, csPollStore, "p");
+applyCardStats(csPollRows, csPollKnown, csPollStore, "p");
+assert.equal(csPollRows[0].agents.length, 1);
+const csPolled = [{ file: "000001_a.md", state: "to-do", updated: 2 }];
+applyCardStats(csPolled, csPollKnown, csPollStore, "p");
+assert.equal(csPolled[0].agents.length, 1, "the poll's agent-less rows take the known stats back");
+
+// the served page wires the apply pass ahead of the board pass, the batched fetch, the dedupe
+// and the stats entrance (reduced motion included)
+assert.ok(PAGE.includes("function sortedCol("), "sortedCol interpolates into the page");
+assert.ok(PAGE.includes("function statsKey("), "statsKey interpolates into the page");
+assert.ok(PAGE.includes("function applyCardStats("), "applyCardStats interpolates into the page");
+assert.ok(PAGE.includes("function mergeCardStats("), "mergeCardStats interpolates into the page");
+assert.ok(PAGE.indexOf("applyCardStats(tab.tasks") < PAGE.indexOf("syncBoard(cols, tab.tasks"), "the apply pass runs before the board pass");
+assert.ok(PAGE.includes('"/api/card-stats?files="'), "the unfold queues the pinned endpoint");
+assert.ok(PAGE.includes("statsInFlight"), "in-flight fetches dedupe");
+assert.ok(PAGE.includes("statsIn var(--fade) ease-out"), "the stats entrance animates");
+assert.ok(PAGE.includes(".card-stats, #modal:not(.hidden)"), "reduced motion turns the stats entrance off");
+
 
 ui.close();
