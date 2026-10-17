@@ -2,7 +2,7 @@
 name: "chore: split-test-suite-webui logpane"
 priority: "medium"
 state: "done"
-worktree: "chore/258-split-test-suite-webui-logpane"
+worktree: ""
 issuer: "#256"
 complexity: "simple"
 shortName: "split-test-suite-webui-logpane"
