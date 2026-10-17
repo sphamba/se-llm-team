@@ -318,9 +318,17 @@ export function rescan(root: string, cfg: Config): void {
 			// identical-tree guard keeps an already-mirrored file a no-op
 			const code = status.get(join(".kanban", task.file));
 			if (code === "??") commitKanban(root, `kanban: create ${task.file}`, files);
-			// past the respawn cap the fresh developer waits for the idle cooldown (state unchanged)
-			if (task.state === "to-do" && !deadCooldownActive(root, cfg, task)) startTodo(root, cfg, task);
-			else if (task.state === "to-review" && !deadCooldownActive(root, cfg, task)) {
+			if (task.state === "to-do") {
+				// a to-do arrival breaks the review streak: a stale count would force-merge the next
+				// to-review arrival without a review
+				const slug = taskSlug(task.file);
+				if (readCounter(root, `${slug}.reviewer-runs`) > 0) {
+					writeFileSync(counterPath(root, `${slug}.reviewer-runs`), "0");
+					log(root, `${task.file}: back in to-do, review counter reset`);
+				}
+				// past the respawn cap the fresh developer waits for the idle cooldown (state unchanged)
+				if (!deadCooldownActive(root, cfg, task)) startTodo(root, cfg, task);
+			} else if (task.state === "to-review" && !deadCooldownActive(root, cfg, task)) {
 				const ensured = ensureWorktree(root, task);
 				// a failed spawn would bounce or strand the task; leave the state for the next rescan to retry
 				if (!ensured) log(root, `${task.file}: worktree could not be created, reviewer not spawned (state unchanged)`);

@@ -123,6 +123,30 @@ assert.equal(runsAA(), 0, "counter still cleared after the pipeline completed");
 aa.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + reviewer successful-run cap smoke passed");
 
+// --- part AA2: a to-do arrival starts a fresh review streak: a stale reviewer-runs count on
+// a to-do task resets, so the next to-review arrival gets a real reviewer spawn instead of
+// the stale-count force-merge ---
+const rootAA2 = fixture();
+cleaned.push(rootAA2);
+mkdirSync(kanbanDir(rootAA2), { recursive: true });
+writeFileSync(join(kanbanDir(rootAA2), "se-llm-team.json"), JSON.stringify({ agent: loopStub(rootAA2), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+const taskAA2 = createTask(rootAA2, { name: "fix: re-entered to-do", summary: "Review counter reset smoke", specs: "n/a", complexity: "simple" });
+setState(rootAA2, taskAA2, "to-do");
+const slugAA2 = taskAA2.file.replace(/\.md$/, "");
+// a stale streak at the simple cap 1: without the reset the first to-review arrival force-merges
+mkdirSync(join(kanbanDir(rootAA2), ".logs"), { recursive: true });
+writeFileSync(join(kanbanDir(rootAA2), ".logs", `${slugAA2}.reviewer-runs.count`), "1");
+const aa2 = await runDaemon(rootAA2);
+await waitFor(() => parseTask(rootAA2, taskAA2.file).state === "done", 90000, "re-entered task completed", aa2.output);
+assert.ok(aa2.output().includes(`${taskAA2.file}: back in to-do, review counter reset`), "to-do arrival resets the streak with one log line");
+assert.equal(
+	aa2.output().split("\n").filter((l) => l.includes("spawned reviewer") && l.includes(taskAA2.file)).length,
+	1,
+	"the re-entered task got a real reviewer spawn, not the stale-count force-merge",
+);
+aa2.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + to-do re-entry review counter reset smoke passed");
+
 // --- part AH: the blockedBy gate holds a task with a blocker that still blocks; a ghost ref is
 // ignored; when the blocker stops blocking the daemon drops the ref and promotes in the sweep ---
 const rootAH = fixture();
