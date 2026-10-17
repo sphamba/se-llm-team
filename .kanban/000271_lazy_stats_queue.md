@@ -1,8 +1,8 @@
 ---
 name: "fix: card stats fetched lazy, deferred, one by one, top to bottom"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/271-lazy-stats-queue"
 issuer: "user"
 complexity: "simple"
 shortName: "lazy-stats-queue"

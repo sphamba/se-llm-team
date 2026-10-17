@@ -1,7 +1,7 @@
 ---
 name: "feat: PM done-processing marker catch-up report and delete cleanup"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "feat/270-pm-processed-marker-report"
 issuer: "#268"
 complexity: "simple"
@@ -27,3 +27,8 @@ Run: pnpm test (full) must pass; pnpm test:changed for your touched files.
 Out of scope: the mark tool and the unprocessed list scope (#269), the analysis .exit accumulation (#267), REPORT_MAX_AGE_MS, any task-file frontmatter change.
 
 # Notes
+- Landed the done-processing marker catch-up in src/orchestrator/report.ts. On the seed sweep (the first sweep after daemon start, when lastDone has no entry) the report's Done section folds in every done, non-conflicted task whose `.kanban/.logs/<taskSlug>.pm-processed` marker is absent, so a done transition missed while the daemon was dead is reported at the next start. Later sweeps report only new transitions, so an unmarked task is reported once, never on every sweep. The marker path is read inline with taskSlug + join, with no dependency on #269.
+- composeReport gained one PM instruction line: "After processing, mark the done tasks processed with kanban_mark_processed, so future PM sessions know they were handled." (#269 owns the tool itself, this wording is chosen here).
+- src/orchestrator/board.ts removeTask now deletes the task's `.pm-processed` marker right after the task file (rmSync with force), so a deleted task leaves no marker behind.
+- tests/orchestrator/sweep.test.ts: part N gained a catch-up fixture on a fresh root (one done task with no marker, one with a hand-written marker). The first sweep queues one report that lists only the unmarked task, and the next sweep queues none. Part AG writes a marker before removeTask and asserts its removal. Total 51 "assert." occurrences, old total 45, no existing assert dropped.
+- Deviation from the Specs run line: only the scoped suite ran, `node tests/orchestrator/sweep.test.ts` (exit 0), because report.ts and board.ts are outside the test-changed mapping and the role test policy bans the full suite. No other task area was touched.
