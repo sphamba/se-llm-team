@@ -1,8 +1,8 @@
 ---
 name: "chore: split-test-suite-webui page"
 priority: "medium"
-state: "live-testing"
-worktree: "chore/261-split-test-suite-webui-page"
+state: "done"
+worktree: ""
 issuer: "#256"
 complexity: "moderate"
 shortName: "split-test-suite-webui-page"
@@ -36,3 +36,15 @@ Acceptance:
 - Imports (only what the range uses): getTask/setState from kanban, startHub from hub, agentRowSig/agentStatsText/boardOf/curve/doctorCol/logFixups/md/mergeBoards/refreshMs/syncAgentStats/syncDoctorCards/syncStatsLine from the webui barrel, esc from the logpane module. numLinkHtml and syncBoard appear only inside page.includes strings, no imports for them.
 - node tests/webui/page.test.ts passes standalone (exit 0); the hub server is unref'd so the run exits; cleanup removes both temp dirs. The old file is untouched; pnpm test still runs only the old file (explicit list, no glob) until #255 lands the glob.
 - Review of c1a9a6b (base main): verbatim move confirmed by range diff (old 801-1516 vs new 66-782: scenario code and 000NNN comments byte-identical, sole drift one added blank line at new 717); grep -c "assert." is exactly 270; node tests/webui/page.test.ts exit 0; git diff shows only tests/webui/page.test.ts, the old file untouched. Both former open assumptions verified: the old boot fetches histPayload at line 361 with the task still backlog, matching the new boot; parallel safety holds (port 0, distinctive webui-page-* temp prefixes, no shared fixtures). No fixes.
+
+## Live test (2026-10-17)
+
+Split-chore live test. The acceptance names `node tests/webui/page.test.ts`, so the suite ban holds: no `*.test.ts` was executed. Five checks: anchored range diff, assert/ref parity, file-set, import probe (delegated to one subagent), boot replay (run here against a real hub).
+
+- Range diff (PASS): `git show 160c8b6:tests/webui.test.ts` and `git show e5d7d1a:tests/webui.test.ts` are byte-identical (md5 da572546edea762d33d76506e39fb6ff); extracted old 801-1516 and new 66-781 are byte-identical, 716/716 lines, sha256 8b25f67f60d18eba41c4d179d56b8ec6ebebdf5e39a7e01b8a0d067b0dd90744. Scenario order and 000NNN comments unchanged. The only extra lines are the blank 782 and the per-file `console.log("page.test.ts: all assertions passed")` at 783. The SPECS' 798-1513 plus the documented +3 shift resolves to 801-1516; at the SPECS' own numbering the range carries 273 assertions, so the shift is real.
+- Assert parity (PASS): 270/270 `assert\.`; the sorted line-multiset diff of the two ranges is empty; task refs 65/65, the only extra ref is 000215 in the boot block above line 66. `git cat-file -t c1a9a6b` exists and its page.test.ts is byte-identical to HEAD's.
+- File set (PASS): `git diff --name-status e5d7d1a^ e5d7d1a` is exactly `A tests/webui/page.test.ts` (783 added, 0 deleted); worktree clean vs HEAD; tests/webui.test.ts untouched; no package.json, scripts/test-changed.mjs, tests/helpers.ts or sibling test file touched.
+- Imports (PASS): all four relative specifiers resolve (kanban, hub, webui barrel, logpane) and all 16 named imports exist; no module-private helper (agentHistory) imported; no tests/webui/helpers.ts.
+- Boot replay (PASS, 23 checks / 0 failed): copied boot block without its asserts, isolated HOME, XDG_CONFIG_HOME deleted, `createTask`, real `startHub` port 0 (ephemeral 44259), `/` served 75,254 bytes, all 12 served markers the moved asserts read are present, all 6 functions the moved `new Function` scenarios extract (markLiveLine, closeAnimated, dropCurve, drawAgentRelations, hotAgentRelations, markActiveAgent) compile and return functions, the boot's `/api/task-history` reads match (`agent: null`, `agents: []`), a live `doing` task renders on `/api/tasks`, `ui.close()` and temp-dir cleanup leave no process or /tmp/lt261-* leftovers.
+
+Assumptions: (1) the moved range is measured against the merged parent 160c8b6 and the task commit e5d7d1a, which are byte-identical, so the +3 branch shift cannot hide drift; (2) the suite-named acceptance run is not the live test, and the boot replay covers the same boot surface and served markers; (3) the probe replays the file's own boot block and histPayload reads against a real hub, with port 0 as in the file. No contradicting behavior observed; no finding.
