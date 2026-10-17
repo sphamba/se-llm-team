@@ -1,12 +1,12 @@
 ---
 name: "chore: split the test suite into area subdirs"
 priority: "medium"
-state: "backlog"
+state: "doing"
 worktree: "chore/254-split-test-suite"
 issuer: "user"
 complexity: "simple"
 shortName: "split-test-suite"
-blockedBy: "#256"
+blockedBy: ""
 ---
 
 # Summary

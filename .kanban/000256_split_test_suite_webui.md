@@ -1,7 +1,7 @@
 ---
 name: "chore: split-test-suite webui area"
 priority: "medium"
-state: "doing"
+state: "live-testing"
 worktree: "chore/256-split-test-suite-webui"
 issuer: "#254"
 complexity: "simple"
@@ -36,5 +36,18 @@ Acceptance:
 - Dependency state at check time: #258 has one commit (1898b6a, tests/webui/logpane.test.ts, 274 lines); #259 and #260 are running with branches still at a582b65; #261 and #262 are to-do with no branch. The board also holds a newer group plan (#265 page 755-1513 / 284 assertions, #266 payload 1514-2379 / 200 assertions; #263/#264 absent from main) that conflicts with the five-file targets in Specs (61/76/153/270/179).
 - No code change and no commit in this worktree. Re-run this task after the webui group tasks merge into main, then compare the counts against the group files that actually land.
 
-# Open questions
+## Run 2 (unblocked, done)
+- Done in the worktree at commit 9673b45, on top of main 35e56b6. The branch had no own commits, so one fast-forward brought in the five split files (#258-#262), #263/#264 and the #255 glob.
+- Post-base diff (a582b65..35e56b6) of tests/webui.test.ts gave 240 changed lines and exactly 58 assert additions in four blocks. Each block moved verbatim (per-block diff empty):
+  - 000263 route asserts, 4, old lines 401-413, into hub.test.ts's 000245 visible-subset block.
+  - 000263 payload asserts, 3, old lines 2377-2382, into hub.test.ts's stats fixture block.
+  - 000250 RAM ratchet, 18, old lines 2406-2480, into hub.test.ts after the done-cache block.
+  - 000264 lazy card-stats client, 33, old lines 2482-2608, into board.test.ts before ui.close().
+- The other two post-base hunks were already in the split files and byte-identical to the old file: the 000200 card-stats CSS pin (board.test.ts:139) and the 000250 openSync preload (agentlog.test.ts:708). No action.
+- Imports added: hub.test.ts got appendFileSync, existsSync and readFileSync (node:fs), gzipSync (node:zlib), logStats, MAX_LOG_CACHES, statsCache, subagentLogs, subsCache, cardStatsPayload (payload module) and compactFinishedLogs (orchestrator barrel); board.test.ts got applyCardStats, mergeCardStats, sortedCol, statsKey (board module) and PAGE (page module).
+- tests/webui.test.ts is deleted. Assert counts: logpane 61, hub 101, board 186, page 270, agentlog 179, union 797 (739 carved + 58 migrated).
+- All five files pass standalone (node tests/webui/<file>.test.ts, outputs in /tmp/logpane.out, /tmp/hub.out, /tmp/board.out, /tmp/page.out, /tmp/agentlog.out).
+- No forbidden file touched: git diff main is empty for package.json, scripts/test-changed.mjs, tests/helpers.ts, tests/orchestrator.test.ts, tests/efficiency-analysis.test.ts and tests/kanban.test.ts.
+- Requirement 7 is obsolete: #255 landed, so the package.json test glob (tests/*/*.test.ts) picks up the five webui files. The full suite was not run, per policy.
+- Re-review at 9673b45 (worktree HEAD, on main 35e56b6): all Run 2 claims hold. tests/webui.test.ts is gone; the five files carry 61/101/186/270/179 asserts, union 797 (grep). The four moved blocks diff verbatim against the old file at 35e56b6 (old 401-413 and 2377-2382 and 2406-2480 into hub.test.ts, old 2482-2608 into board.test.ts; 58 asserts). Scenario-id union matches the old file; the only extra id is 000260 in board.test.ts line 1, the file's own split-source header comment, not a scenario. Git diff main is empty for the six forbidden files. Green standalone runs recorded at this commit stand, no union re-run. No fixes. 797 asserts across tests/webui/ (logpane, hub, board, page, agentlog).
 
