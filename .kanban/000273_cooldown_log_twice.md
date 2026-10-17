@@ -1,8 +1,8 @@
 ---
 name: "fix: poll.test.ts cooldown log fires twice on main"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "live-testing"
+worktree: "fix/273-cooldown-log-twice"
 issuer: "#270"
 complexity: "moderate"
 shortName: "cooldown-log-twice"
@@ -34,3 +34,13 @@ Acceptance: node tests/orchestrator/poll.test.ts passes on main, pnpm test passe
 Out of scope: the respawn-cap semantics themselves, the webui, and the marker/scope work of #269.
 
 # Notes
+- 2026-10-17 Splitter: no split. This is a one-root-cause debug, not parallel work. The log site (src/orchestrator/liveness.ts, bumpCounter === RESPAWN_CAP + 1) and the test scenario (tests/orchestrator/poll.test.ts part B) form one coupled pair. The two fix outcomes (fix the code vs make the assert match the intent) are alternatives, not parallel pieces, and the diagnosis must come first. Every candidate change touches both files, so no cut avoids a shared source file. One developer runs: git log the area, decide behavior vs test artifact, fix at the root, run the suite. Steps 1-3 of the Hunt are sequential and share one context; step 3 (#266/#269/#271/#272 overlap check) is a read-only note, not a work item.
+- 2026-10-17 Developer: root cause found; the fix already sits on main, no new commit needed. The part B cooldown-count asserts tallied the bare substring "respawn waits for the idle cooldown" over the whole daemon output, but part B runs two dying fixture tasks: the dead developer (taskB) and the dead live-tester (taskB2), which keeps respawning once the orchestrator merges its branch and also reaches RESPAWN_CAP + 1 inside the same window. Each streak fires the log exactly once (bounceDead logs only at bumpCounter === RESPAWN_CAP + 1, src/orchestrator/liveness.ts:90), so the second line is the live-tester's own streak, not a double fire of one streak. The behavior is correct; the assert was wrong.
+- Fix: commit 747ab05 on main ("test(orchestrator): scope the cooldown log counts to the dead-agent task", 2026-10-17 22:28), slug-scoped counts via a cooldownB helper that filters lines on "<slug>: agent died" plus the cooldown text. It matches the recipe recorded in the developer role notes (Project facts). Code untouched, every existing assert kept.
+- This worktree branched at cfb11c2, before the fix; fast-forwarded fix/273-cooldown-log-twice to main's tip 747ab05 and verified node tests/orchestrator/poll.test.ts green (exit 0, 6 smoke parts, no error lines). A pre-ff run at cfb11c2 also passed (exit 0): the race is timing-dependent (poll and rescan cadence alignment), which matches the flake reports from #270's union run.
+- Deviation: pnpm test (full suite) not run, per the project rule that the scoped suite is the whole test scope; 747ab05's commit message records "Full suite passes" on main.
+- 2026-10-17 Reviewer: re-review at 747ab05 (worktree HEAD == main tip, clean tree, diff main...HEAD empty). git show 747ab05 confirms the fix shape: the three count asserts and the second-streak waitFor now use the slug-scoped cooldownB helper (tests/orchestrator/poll.test.ts:32-35, :50, :62, :80-81); assert messages and every other assert kept, src untouched. The diagnosis holds: taskB2 (the dead live-tester) reaches its own RESPAWN_CAP + 1 streak inside the window, and the filter on "<slugB>: agent died" excludes its lines, so the counts are deterministic and each streak still logs exactly once (src/orchestrator/liveness.ts:90, cap+1 by design per the spec Facts).
+- Tests: poll.test.ts green at 747ab05 recorded above (exit 0, 6 smoke parts); zero re-runs per the green-run-at-reviewed-sha rule. Scoped union = tests/orchestrator/poll.test.ts only (the diff touches no other file); pnpm test stays unrun per the project rule.
+- Hunt 3 overlap: none. The diff touches only tests/orchestrator/poll.test.ts, so #269 (markers/scope) and #271/#272 (src worktrees) share no file with it; #266's review-counter reset lives in pipeline.ts, also untouched.
+- Cosmetic: 747ab05 was committed on main rather than the task branch (the branch was ff'd to it afterward, so the merge is a no-op ff), and its commit message over-claims ("a probe at HEAD ... so the race predates the marker task" — a probe at a commit that already includes c19fc2c cannot prove predation; the Notes' timing-dependent record is the accurate one). Neither changes the verdict.
+

@@ -1,8 +1,8 @@
 ---
 name: "feat: PM done-processing marker tool and unprocessed scope"
 priority: "medium"
-state: "reviewing"
-worktree: "feat/269-pm-processed-marker-tool"
+state: "done"
+worktree: ""
 issuer: "#268"
 complexity: "moderate"
 shortName: "pm-processed-marker-tool"
@@ -30,7 +30,27 @@ Out of scope: the catch-up report, the report instructions line and the kanban_d
 
 # Notes
 - No-split decision (2026-10-17): this task does not parallelize. Every cut shares files. The tool in tools.ts imports pmProcessedPath from kanban.ts, so a tools.ts-only subtask does not compile until the kanban.ts piece merges. The new test file covers both the list scope and the tool, so no side owns it alone. A scope-vs-tool cut makes both subtasks edit kanban.ts and tools.ts, so it conflicts at merge. The work is small (one helper, one scope member, one tool, one test file). One developer pass is faster than two reviews, two merges, and two live tests. No state change; the developer starts on this task as-is.
+- Review 2026-10-17, base main...HEAD at 1edd56a: pass. Moved to to-merge.
+  - pmProcessedPath at src/kanban.ts:77-79 has the exact pinned shape: join(kanbanDir(root), ".logs", taskSlug(file) + ".pm-processed"). It sits next to kanbanDir. kanban.ts does not import log.ts, so no cycle.
+  - Scope "unprocessed" is in the union at src/kanban.ts:20. listTasks uses a switch at src/kanban.ts:212-221. Unprocessed = state done and no marker file. The other scopes keep the old behavior. listTasks has one caller, the kanban_list tool (src/tools.ts:78).
+  - kanban_mark_processed at src/tools.ts:205-233: files is required, getTask resolves each entry, missing and not-done tasks are skipped and named, the marker is an empty idempotent file, mkdirSync recursive makes .kanban/.logs on a fresh board, the board comes from ctx.cwd.
+  - kanban_list scope enum and description name scope=unprocessed (src/tools.ts:69-81).
+  - tests/mcp.test.ts lists 13 tool names with kanban_mark_processed (tests/mcp.test.ts:95-110).
+  - New tests/tools.test.ts: 15 asserts, fixture() + cleaned.push(root), node:assert/strict. It covers the marker write, skip naming, idempotent re-mark, unprocessed exclusion, not-done never returned, and the pinned marker path.
+  - Gitignore: the repo .gitignore ignores .kanban/ whole, so the marker path is ignored.
+  - Tests: scoped union green, 10 suites exit=0 (6 tests/kanban suites, mcp, extension, tools, orchestrator/poll). Full pnpm test not run per the reviewer ban; the Spec Run line records the deviation.
+  - Commit 1edd56a (poll.test.ts cooldown-count scoping) rides the branch outside the own-files list. Test-only change; its suite is green.
+  - Open questions settled: getTask appends .md to an extensionless entry (src/kanban.ts:229-232), so that assumption holds. mkdirSync recursive covers a fresh board. Section removed.
 
-# Open questions
-- Assumption: a files entry without the .md extension (e.g. "000042_name") resolves through getTask and marks the .md task's marker path.
-- Assumption: kanban_mark_processed creates .kanban/.logs when missing (recursive mkdir), so a fresh board works before the daemon ever made the dir.
+## Live test (2026-10-17)
+
+- Surface: the merged extension in a real pi session (`pi -p --mode json`, real HOME, cwd = a fixture board repo) plus one direct import probe of the merged `src/tools.ts` and `src/kanban.ts`. The installed extension symlink points at the main checkout, and the main checkout HEAD equals the worktree HEAD 747ab05, so the session ran the merged code.
+- Result: 17 precheck checks and 23 session checks, all passed; the pi process exited 0.
+- `kanban_mark_processed` is registered (13 tools in TOOLS) and marks a done task with the empty pinned marker `.kanban/.logs/000269_fixture_done.pm-processed`. Its result names the marked file and the skipped files in order: `Marked processed: 000269_fixture_done.md. Skipped (missing or not done): 000270_fixture_todo.md, 000271_fixture_missing.md`.
+- A not-done task and a missing file are skipped and named. A second mark of the same done task is idempotent (same result, `none` skipped). An extensionless file name resolves to the same `.md` file and writes the same marker.
+- `kanban_list` with `scope=unprocessed` returned only the unmarked done task, and excluded the marked done task and the not-done task. The returned row carried `state: "done"`. The scopes `done`, `in-progress` and `backlog` kept their old results.
+- No board change: after the session the fixture git HEAD was unchanged, `git status --porcelain` was empty, the task files were byte-identical, and `git check-ignore` named the fixture `.gitignore` for the marker.
+- Technical note: the pi session surfaced the extension tools through `tool_search`, so its JSONL held a leading `tool_search` call before the four kanban calls. The first check pass counted that call and showed 14 script failures. The checks now filter tool records by the `kanban_` name prefix, and the same session JSONL passes 23 of 23 checks.
+- Assumptions: the fixture board tracks its task files and ignores `.kanban/` like the real repo, so "no board commit" is observable. The 1h report prune survival is the sibling path in `src/orchestrator/report.ts` and was not exercised here.
+
+

@@ -1,12 +1,12 @@
 ---
 name: "feat: PM done-processing marker and unprocessed done surface"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/268-pm-processed-marker"
 issuer: "user"
 complexity: "simple"
 shortName: "pm-processed-marker"
-blockedBy: "#269"
+blockedBy: ""
 ---
 
 # Summary
@@ -32,3 +32,10 @@ Post-landing step (PM, not part of any subtask): one batch kanban_mark_processed
 - Blocked: #269 (marker tool + unprocessed scope) and #270 (catch-up report + delete cleanup) have not landed. This worktree is identical to main (0 commits ahead, 0 behind), so the pinned contract has no anchors to verify: no pmProcessedPath helper and no kanban_mark_processed tool in src/kanban.ts, no scope=unprocessed handling, and no PM-processed marker read in src/orchestrator/report.ts or removal in src/orchestrator/board.ts. tests/ holds no PM-processed assertion.
 - Baseline assert count: 1877 across tests/*/*.test.ts. tests/orchestrator/sweep.test.ts has part N (one report per done sweep) but no PM-processed catch-up extension.
 - No files changed and nothing committed. The verification run repeats once #269 and #270 reach main.
+- Unblocked and verified: #269 (c19fc2c) and #270 (cfb11c2) landed on main, so this worktree fast-forwarded 995b317 -> 747ab05 (zero local commits, no files changed, nothing to commit).
+- Pinned marker path holds everywhere: src/kanban.ts pmProcessedPath builds join(kanbanDir(root), ".logs", taskSlug(file) + ".pm-processed"), with taskSlug stripping only the .md suffix; src/orchestrator/report.ts (catch-up read) and src/orchestrator/board.ts (removeTask delete) build the same join independently, and src/tools.ts kanban_mark_processed writes through the helper. sweep.test.ts pins the read (part N catch-up) and the delete (part AG) with a hand-built path, so the contract is verified from the outside, not read back from src.
+- kanban_mark_processed rides the generic Object.entries(TOOLS) registration in index.ts (pi) and src/mcp.ts (MCP); tests/mcp.test.ts pins the 13 tool names; tests/tools.test.ts pins empty marker, idempotence, skipped missing and not-done files, and scope=unprocessed (done unmarked only).
+- kanban_delete routes to removeTask, which deletes the marker with the task file (part AG asserts the marker is gone).
+- First-sweep catch-up: an unmarked done task is folded into one report at daemon start, a marked done task is not, and later sweeps report only new done transitions; composeReport's PM instructions name kanban_mark_processed. Part N and its catch-up extension assert all of this.
+- Suite (run in /tmp/verify268): tests/tools.test.ts, tests/mcp.test.ts, all 13 tests/orchestrator/*.test.ts, all 6 tests/kanban/*.test.ts, all 5 tests/webui/*.test.ts exit 0. Deviation: the spec asked for pnpm test; per project test policy this run is the scoped set covering every changed module (kanban.ts maps to orchestrator+kanban+webui; tools.ts/report.ts/board.ts map to tools, mcp and the sweep area file). The remaining full-suite files (index, extension, plugin, context-symlinks, efficiency-analysis) map to no changed file.
+- The post-landing PM batch mark of the current done stock (then a daemon restart) stays with the PM, as the spec states.

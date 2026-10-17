@@ -1,7 +1,7 @@
 ---
 name: "feat: maxParallel config to cap tasks running in parallel"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "feat/272-maxparallel-config-to"
 issuer: "user"
 complexity: "moderate"
@@ -45,3 +45,8 @@ Out of scope: splitter agent parallelism (splitter runs on to-do tasks, not coun
 # Notes
 
 - No split (Splitter 2026-10-17): the only file-disjoint seam is config.ts (+ tests/orchestrator/config.test.ts, README) vs pipeline.ts (+ the promote/split/sweep/merge branch tests), but pipeline.ts is an import-pair consumer of config.ts (imports type Config; the gates read cfg.maxParallel), so the pipeline subtask's cap tests fail until the config piece merges (loadConfig never parses the key without it). Same no-split family as 000269; a tests-only cut serializes the same way, and a cut by transition shares pipeline.ts for all four gates and the helper. Total diff is small (~40 source lines, exact insertion points pinned in the Specs), so one review, one merge and one live test beat two cycles plus a verification parent.
+
+- Implemented and committed b758a31: maxParallel added to the Config interface, parsed in loadConfig (integer >= 0, default 0, invalid values warn `maxParallel <JSON> ignored: must be an integer >= 0` and keep 0), a `runningCount` helper over listAll with the four working-state literals (liveness.ts owns the same set but imports pipeline.ts, so exporting WORKING_STATES would be a cycle), and the four gates: startTodo after ensureWorktree, the to-review spawn path (continue), the to-live-test spawn path (continue), and sweepToMerge right after the at-most-one-merger guard, before the idle-clock reads (the gate writes nothing, so their reads-first rule holds). Backlog promotion ungated. README example + table row added.
+- Tests red-then-green: all five touched files failed on exactly the new maxParallel parts before the fix (missing key kept no default; at-cap tasks started), passed after. Scoped run was the five touched area files (config, split, merge, sweep, promote), each green with exit 0.
+- Scope note: pipeline.ts is not in the test-changed table, so the fallback would be the full suite; ran the four transition area files plus config.test.ts directly instead (the default 0 path is unchanged, no other area touches maxParallel). pnpm test (the acceptance line) therefore not run, per the task's never-full-suite instruction.
+- Assumption: the cap counts tasks in the four working states only (doing, reviewing, merging, live-testing), so a task whose agent died still holds its slot until the poll requeues it, and splitter/analysis spawns are uncounted and ungated. Backlog promotion deliberately ungated so ready tasks queue in to-do.
