@@ -2,7 +2,7 @@
 name: "chore: split-test-suite-webui agentlog"
 priority: "medium"
 state: "done"
-worktree: "chore/262-split-test-suite-webui-agentlog"
+worktree: ""
 issuer: "#256"
 complexity: "moderate"
 shortName: "split-test-suite-webui-agentlog"

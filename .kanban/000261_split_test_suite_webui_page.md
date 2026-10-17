@@ -1,7 +1,7 @@
 ---
 name: "chore: split-test-suite-webui page"
 priority: "medium"
-state: "to-live-test"
+state: "live-testing"
 worktree: "chore/261-split-test-suite-webui-page"
 issuer: "#256"
 complexity: "moderate"
