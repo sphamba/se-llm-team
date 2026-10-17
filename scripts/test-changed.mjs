@@ -1,20 +1,30 @@
 // Selective test runner: maps the current git modifications to the affected test
 // files and runs only those; an unknown path falls back to running everything.
 import { execSync, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-const ALL = ["tests/kanban.test.ts", "tests/orchestrator.test.ts", "tests/webui.test.ts", "tests/extension.test.ts", "tests/efficiency-analysis.test.ts", "index.test.ts", "tests/mcp.test.ts", "tests/plugin.test.ts"];
+// area dirs expand to their *.test.ts files, so the map works before and after a
+// split task lands its directory
+const expand = (targets) => targets.flatMap((t) => {
+	if (!existsSync(t)) return [];
+	if (!statSync(t).isDirectory()) return [t];
+	return readdirSync(t).filter((f) => f.endsWith(".test.ts")).sort().map((f) => `${t}/${f}`);
+});
+
+const ORCH = expand(["tests/orchestrator"]);
+const WEBUI = expand(["tests/webui", "tests/webui.test.ts"]);
+const ALL = [...ORCH, "tests/kanban.test.ts", ...WEBUI, "tests/extension.test.ts", "tests/efficiency-analysis.test.ts", "index.test.ts", "tests/mcp.test.ts", "tests/plugin.test.ts"];
 
 const RULES = [
-	[/^src\/orchestrator\.ts$/, ["tests/orchestrator.test.ts"]],
-	[/^src\/pid\.ts$/, ["tests/orchestrator.test.ts"]],
-	[/^agents\/.*\.md$/, ["tests/orchestrator.test.ts"]],
-	[/^src\/webui\.ts$/, ["tests/webui.test.ts"]],
-	[/^src\/webui\/.+\.ts$/, ["tests/webui.test.ts"]],
+	[/^src\/orchestrator\.ts$/, ORCH],
+	[/^src\/pid\.ts$/, ORCH],
+	[/^agents\/.*\.md$/, ORCH],
+	[/^src\/webui\.ts$/, WEBUI],
+	[/^src\/webui\/.+\.ts$/, WEBUI],
 	[/^src\/efficiency-analysis\.ts$/, ["tests/efficiency-analysis.test.ts"]],
-	[/^src\/kanban\.ts$/, ["tests/kanban.test.ts", "tests/orchestrator.test.ts", "tests/webui.test.ts"]],
-	[/^src\/hub\.ts$/, ["tests/orchestrator.test.ts", "tests/webui.test.ts"]],
+	[/^src\/kanban\.ts$/, [...ORCH, ...WEBUI, "tests/kanban.test.ts"]],
+	[/^src\/hub\.ts$/, [...ORCH, ...WEBUI]],
 	[/^index\.ts$/, ["index.test.ts", "tests/extension.test.ts"]],
 	[/^package\.json$/, ALL],
 	[/^(\.claude-plugin\/|hooks\/|\.mcp\.json$)/, ["tests/plugin.test.ts"]],
