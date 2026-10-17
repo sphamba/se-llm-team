@@ -1,8 +1,8 @@
 ---
 name: "feat: lazy stats on all board cards"
 priority: "high"
-state: "live-testing"
-worktree: "feat/252-lazy-card-stats"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "lazy-card-stats"
@@ -43,3 +43,15 @@ Acceptance:
 - Location shift: the lazy fetch, the done localStorage cache and the statsKey, applyCardStats and mergeCardStats helpers live in src/webui/board.ts, not src/webui/page.ts as the earlier blocker note said. page.ts interpolates them into PAGE and wires toggleCol and queueStats.
 - Live fixture: 7 done tasks plus 6 to-do tasks, each with one run log, on port 4399. The check daemon ran with --rescan-seconds 3600 --poll-minutes 3600, so it never spawned an agent for the to-do tasks. Fixture and script: /tmp/252-live/, log: /tmp/252-live/check.log. The daemon was stopped after the check.
 - Re-review at f53e4c5 (HEAD = main = f53e4c5, worktree clean, no new commits): all prior passes stand. Spec 1: route at src/hub.ts:247, cardStatsPayload at src/webui/payload.ts:649, client merge via syncCardStats. Spec 2: VISIBLE_CARDS = 5 unchanged (src/webui/payload.ts:610), eager attach untouched. Spec 3: statsIn animation and prefers-reduced-motion override at src/webui/page.ts:168-170, 271. Spec 4: applyCardStats/mergeCardStats at src/webui/board.ts:327, 366, statsInFlight de-dupe at src/webui/page.ts:413-433. Spec 5: recorded runs at this exact base stand (webui.test.ts 797 asserts, board/page/hub suites exit 0). No fixes. The fast-forward assumption held: the branch FFed 82160ef to f53e4c5 and every check ran on the integrated base, so the open question is resolved.
+
+## Live test (2026-10-17)
+
+- Base: HEAD = main = 35e56b6, worktree clean. The diff f53e4c5..35e56b6 touches only tests/ and scripts/ (orchestrator test split, test-changed map), so src/webui is identical to the previously verified f53e4c5.
+- Method: hub-only (startHub from the worktree) on port 4351, isolated HOME /tmp/252-lt/home. Fixture /tmp/252-lt/repo: 7 done tasks (mtimes 1..7 min, tokens 1..7) and 6 to-do tasks (tokens 101..106), one run log each. Output /tmp/252-lt/api.log and /tmp/252-lt/browser3.log, scripts in /tmp/252-lt/.
+- Spec 1 (pinned contract), API preflight (12 checks, 0 failed): /api/card-stats?files=d2,d1,bogus answers exactly {file: {agents}} for the two real files (tokens 2 and 1) and omits bogus. Missing files and files=, each answer {}. project=nope answers 404 with an empty body. /api/projects lists one project.
+- Spec 2: /api/tasks carries agents for exactly the 5 newest rows per column (done: d3..d7 eager, d1/d2 absent, to-do: t2..t6 eager, t1 absent). The eager first-5 attach is unchanged.
+- Spec 3 (feel), Playwright (27 checks, 0 failed): the done column shows 5 of 7 cards with a visible "show all (7)" toggle. One unfold reveals both folded cards, stats-less at first. Exactly one batched request leaves the page with files=000002_d2.md,000001_d1.md. Both cards then show their stats line (2 · 10s and 1 · 10s), the revealed card grows +21 px (64 -> 85), and the statsIn animation fires for both. The 10 cards already on the board keep their exact board-relative position (0 px drift). Reduced motion: the stats line appears, 0 statsIn events, computed animationName "none".
+- Spec 4 (localStorage): after the fetch the two done files sit in localStorage under card-stats|| keys with the full agents JSON. A reload plus one unfold renders the cached stats line with 0 card-stats requests, and the statsIn animation still fires. The to-do t1 is fetched, is not written to localStorage, and refetches fresh on the next unfold. A collapse and a second unfold during the in-flight fetch produce one request only.
+- Spec 5 (unit suite): not run. The live-tester role forbids running any *.test.ts. The recorded developer/reviewer runs at f53e4c5 (webui.test.ts 797 assert lines, board/page/hub suites exit 0) stand, and no src file changed since.
+- Assumptions: the single-project board has no tabs, so the stats cache key is card-stats||<file>. Synthetic run logs carry usage input = the card's token value over a 10 s span, so fmtTokens renders the raw value. No observed behavior contradicts the task's stated assumptions.
+- Harness note (not product findings): two probe-script bugs were fixed during the run: a viewport-relative top read was offset by Playwright's scroll-into-view, and the board-relative baseline plus the animationstart snapshot were read during the card .enter animation and before the event task ran.
