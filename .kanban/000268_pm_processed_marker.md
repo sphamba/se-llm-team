@@ -1,8 +1,8 @@
 ---
 name: "feat: PM done-processing marker and unprocessed done surface"
 priority: "medium"
-state: "live-testing"
-worktree: "feat/268-pm-processed-marker"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "pm-processed-marker"
@@ -43,3 +43,13 @@ Post-landing step (PM, not part of any subtask): one batch kanban_mark_processed
 - Registration: kanban_mark_processed rides the single generic Object.entries(TOOLS) registration at src/mcp.ts:46; the earlier "index.ts (pi)" site names a nonexistent file (src/ has no other TOOLS consumer), so the registration is the generic MCP one and tests/mcp.test.ts pins the 13 names. Minor Notes inaccuracy, verdict unchanged.
 - Suite re-run (none recorded with a sha): all 26 files exit 0 on the current tree - tests/tools.test.ts, tests/mcp.test.ts, all 13 tests/orchestrator/*.test.ts (analysis, hub, log fast; the ten daemon suites serial), all 6 tests/kanban/*.test.ts, all 5 tests/webui/*.test.ts. The fast-forward also carries 747ab05, a tests/orchestrator/poll.test.ts-only commit (12 lines, test-only, covered by the poll suite).
 - No fixes committed; the pinned contract held end to end.
+
+## Live test (2026-10-17)
+
+- Environment: merged worktree cbe76d9 (carries #269 c19fc2c and #270 cfb11c2), fixtures under /tmp/268-lt. The unit suites were not run, per the live-test policy: the production surface that the named tests pin was exercised instead.
+- Tool surface through the real pi extension (`pi -p --mode json -ne -e index.ts` with the real HOME, fixture board): one session ran kanban_list scope=unprocessed, kanban_mark_processed on a done task and on a not-done task, kanban_list again, and kanban_delete. 11 checks, 0 failed. The list returned exactly the one unmarked done task, the mark wrote .kanban/.logs/000901_lt_pm_done_a.pm-processed and left the task file, the not-done task was skipped and named in the result, the second list was empty, kanban_delete removed the task file and its marker, and the marker of an untouched done task survived.
+- Registration: the real MCP stdio server tools/list returns 13 tools, kanban_mark_processed included, and the names equal Object.keys(TOOLS) from the merged src/tools.ts. 5 checks, 0 failed.
+- Daemon catch-up (isolated HOME, rescan 1 s, poll 0.05 min): the first sweep queued one report that names the unmarked done task LT-REPORT-A and not the marked LT-REPORT-B, and the PM instructions name kanban_mark_processed. A done task created after the first sweep produced a second report with only the new task; LT-REPORT-A was not reported again. 7 checks, 0 failed.
+- Finding (minor, pi UI metadata): the pi registration passes label: undefined for kanban_mark_processed. index.ts maps labels for the other 12 tools only, and ToolDefinition.label is a required string. The tool still registers and executes (verified above), so the contract holds; only the UI label is missing.
+- The earlier Notes bullet that questions the "index.ts (pi)" registration site is inaccurate: the repo-root index.ts is the pi entry, and loading it with `-e index.ts` registered and executed the tool.
+- Total 23 checks, 0 failed. Assumptions: the fixture uses the real .kanban layout and file names; report expectations were read from the report files on disk; "13 tools" was counted from Object.keys(TOOLS) and the MCP tools/list reply; the MCP probe sent tools/list without an initialize handshake, which the server accepts. No observed behavior contradicts the task assumptions.
