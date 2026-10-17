@@ -1,8 +1,8 @@
 ---
 name: "feat: lazy card stats batched endpoint"
 priority: "high"
-state: "to-review"
-worktree: "feat/263-lazy-card-stats-endpoint"
+state: "done"
+worktree: ""
 issuer: "#252"
 complexity: "simple"
 shortName: "lazy-card-stats-endpoint"
@@ -42,9 +42,16 @@ Tests: extend the existing 000245 fixture block (tests/webui.test.ts:2339-2440) 
 - Tests in tests/webui.test.ts: one new payload import line (shared lines 9-12 untouched), route asserts in the 000245 hub block (the hidden card's agents over HTTP, bogus file omitted, empty files {}, unknown project 404) and in-process payload asserts in the 000245 stats fixture (off-board omitted, agents equal the visible row's, empty list {}). 757 to 764 asserts, `node tests/webui.test.ts` passes.
 - Live check (feel-based): an in-process hub over a 6-task fixture answered all 6 files (the oldest hidden card with tokens 30), omitted bogus.md, answered {} without a files param, 404 for an unknown project, and /api/tasks still carried agents on exactly the first 5 rows.
 - Deviation: the Tests note places the hub fixture at tests/webui.test.ts:2339-2440, but the file closes that hub at line 2284; the route asserts went into the 000245 hub block that does run startHub (around line 315), and the 2339 fixture carries the in-process payload asserts.
+- Re-review at 3926052: contract holds (payload fn + barrel export + new import line; route async next to /api/task-history, project resolves via hub.ts:202 resolveEntry like /api/tasks, unknown 404; taskPayload untouched; 764 asserts, +7). The three former Open-question assumptions are confirmed in code (.log.gz handled in scanLogLines under cardAgents, no new cache, project by root or unique bare name) and are technical, so the section is deleted; all specs answered, tests/webui.test.ts and tests/webui/hub.test.ts both pass.
+## Live test (2026-10-17)
 
-# Open questions
-
-- Assumption: swept .log.gz run logs flow through cardAgents' existing decompress path, no endpoint-specific handling.
-- Assumption: done-cache population and eviction stay entirely inside cardAgents; cardStatsPayload adds no cache, so the eviction interplay is identical to taskPayload's.
-- Assumption: project resolution is by root or unique bare name like /api/tasks; an unknown or duplicate-ambiguous project 404s (empty body).
+- Ran the merged hub from this worktree (port 4350, isolated HOME, harness under `/tmp/t263`): 6 `done` fixture tasks (`000301`-`000306_stats_fixture_N.md`), one `<slug>.developer.0.log` per task with pi `session` + `turn_end` records (tokens 100 to 600, durations 1000 to 6000 ms), the fixture 6 log gzipped, mtimes 1 to 6 minutes old so fixtures 1-5 are the five visible cards and fixture 6 sits behind "show more".
+- Harness `/tmp/t263/check.mjs` (`/tmp/t263/check.out`): 41 checks, 0 failed.
+- `GET /api/tasks`: 6 rows, exactly fixtures 1-5 carry `agents` (tokens 100 to 500), the fixture 6 row carries no `agents` key. The eager first-5 attach is unchanged.
+- `GET /api/card-stats?files=<all 6>`: 200, keys exactly the 6 requested on-board files, each answers one developer run (`role` developer, `run` 0, `handle` `<slug>.developer.0`, `status` ok, `alive` false) with tokens 100 to 600 and durations 1000 to 6000 ms. The gzipped fixture 6 log served tokens 600, so the decompress path works.
+- The endpoint agents for a visible file equal the eager `/api/tasks` row agents byte for byte, so the done cache serves the same values.
+- `files=fixture1,bogus.md,fixture6`: bogus.md omitted, both on-board files keyed.
+- Missing `files`, `files=`, and `files=,,` answer `{}`. A trailing comma keeps the file keyed.
+- Unknown project: `/api/card-stats?project=nope` returns 404 with an empty body, the same as the `/api/tasks?project=nope` baseline. `project` resolves by unique bare name (`t263`) and by root (`/tmp/t263/repo`).
+- Assumptions: the `done` state keeps every agent entry static, so the deep equality between the two payloads is exact. The visible-five split comes from the measured `/api/tasks` answer, not from a derivation. The hidden log is gzipped to exercise the `.log.gz` path named in the Notes.
+- No observed behavior contradicts the task assumptions. No issues found, no flow blocked. The unit-test acceptance (`node tests/webui.test.ts`) is the developer and reviewer gate and was not run, per the role rules.

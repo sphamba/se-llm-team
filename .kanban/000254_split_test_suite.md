@@ -15,6 +15,8 @@ Verify the three area splits of the test suite landed: npm test runs the glob lo
 # Specs
 Facts (baseline, pre-split): orchestrator.test.ts 558 assertions, webui.test.ts 739, efficiency-analysis.test.ts 203, kanban.test.ts 179 (grep -c "assert\.").
 
+Blocking (settled 2026-10-17): this verification checks the merged result of #255, #256 and #257 on main. #257 is already done, so no extra blocker ref is needed; the task stays blocked by #255 and #256 and runs once those two clear.
+
 Verification steps:
 1. pnpm test passes: the glob loop over tests/**/*.test.ts picks up the orchestrator/, webui/, efficiency-analysis/ and kanban/ area dirs plus the root files (plugin, mcp, extension, context-symlinks, index).
 2. node tests/<area>/<file>.test.ts works standalone for each split file (spot-check at least one per area).
@@ -33,4 +35,4 @@ Acceptance:
 - No code change and no commit in this worktree. Re-run this task after #255, #256 and #257 merge.
 
 # Open questions
-- Assumption: this verification checks the merged result of #255, #256 and #257 on main. Should the pipeline keep #254 blocked until those three are done?
+

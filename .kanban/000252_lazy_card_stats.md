@@ -6,7 +6,7 @@ worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "lazy-card-stats"
-blockedBy: "#263, #264"
+blockedBy: "#264"
 ---
 
 # Summary
