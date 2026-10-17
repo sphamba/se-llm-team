@@ -6,15 +6,17 @@ import { pathToFileURL } from "node:url";
 
 // area dirs expand to their *.test.ts files, so the map works before and after a
 // split task lands its directory
-const expand = (targets) => targets.flatMap((t) => {
+export const expand = (targets) => targets.flatMap((t) => {
 	if (!existsSync(t)) return [];
 	if (!statSync(t).isDirectory()) return [t];
 	return readdirSync(t).filter((f) => f.endsWith(".test.ts")).sort().map((f) => `${t}/${f}`);
 });
 
 const ORCH = expand(["tests/orchestrator"]);
+const KANBAN = expand(["tests/kanban", "tests/kanban.test.ts"]);
 const WEBUI = expand(["tests/webui", "tests/webui.test.ts"]);
-const ALL = [...ORCH, "tests/kanban.test.ts", ...WEBUI, "tests/extension.test.ts", "tests/efficiency-analysis.test.ts", "index.test.ts", "tests/mcp.test.ts", "tests/plugin.test.ts"];
+const EFF = expand(["tests/efficiency-analysis", "tests/efficiency-analysis.test.ts"]);
+const ALL = [...ORCH, ...KANBAN, ...WEBUI, ...EFF, "tests/extension.test.ts", "index.test.ts", "tests/mcp.test.ts", "tests/plugin.test.ts"];
 
 const RULES = [
 	[/^src\/orchestrator\.ts$/, ORCH],
@@ -22,8 +24,8 @@ const RULES = [
 	[/^agents\/.*\.md$/, ORCH],
 	[/^src\/webui\.ts$/, WEBUI],
 	[/^src\/webui\/.+\.ts$/, WEBUI],
-	[/^src\/efficiency-analysis\.ts$/, ["tests/efficiency-analysis.test.ts"]],
-	[/^src\/kanban\.ts$/, [...ORCH, ...WEBUI, "tests/kanban.test.ts"]],
+	[/^src\/efficiency-analysis\.ts$/, EFF],
+	[/^src\/kanban\.ts$/, [...ORCH, ...KANBAN, ...WEBUI]],
 	[/^src\/hub\.ts$/, [...ORCH, ...WEBUI]],
 	[/^index\.ts$/, ["index.test.ts", "tests/extension.test.ts"]],
 	[/^package\.json$/, ALL],
