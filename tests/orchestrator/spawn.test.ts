@@ -283,6 +283,13 @@ for (const role of ["developer", "reviewer", "merger", "live-tester"]) {
 }
 assert.ok(!listAll(rootAS).some((t) => ROLE_NOTES_RE.test(t.file)), "role notes files are not tasks");
 assert.ok(!readFileSync(join(kanbanDir(rootAS), "AGENTS.md"), "utf8").match(/^state: /m), "a bare AGENTS.md never parses as a task");
+// the done fold-in commit lands one sweep after the file shows done, so wait for the mirror
+await waitFor(
+	() => ["developer", "reviewer", "merger", "live-tester"].every((role) => showTip(rootAS, `AGENTS.${role}.md`) !== null),
+	15000,
+	"role notes on the board mirror",
+	as.output,
+);
 for (const role of ["developer", "reviewer", "merger", "live-tester"]) {
 	assert.ok(showTip(rootAS, `AGENTS.${role}.md`) !== null, `the board mirror carries the ${role} notes file`);
 }
