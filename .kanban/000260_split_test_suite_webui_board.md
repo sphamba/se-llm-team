@@ -1,7 +1,7 @@
 ---
 name: "chore: split-test-suite-webui board"
 priority: "medium"
-state: "to-review"
+state: "live-testing"
 worktree: "chore/260-split-test-suite-webui-board"
 issuer: "#256"
 complexity: "simple"
@@ -33,6 +33,4 @@ Acceptance:
 - `node tests/webui/board.test.ts` passes standalone and `grep -c "assert\."` reports exactly 153, matching the old range. The boot holds no assert, so the count stays at the ranged 153.
 - No seeded task: the group reads the served page text and the pure board helpers only, so the hub needs no board row.
 - tests/webui.test.ts, tests/helpers.ts, package.json, scripts/test-changed.mjs and every sibling test file untouched. pnpm test still runs the old file until #255 lands the glob, as the spec expects.
-
-# Open questions
-- Assumption: the board group needs no seeded task or registry entry; the green standalone run confirms the hub serves `/` on an empty root.
+- Review at 355ee36: lines 33-408 of board.test.ts are byte-identical to webui.test.ts 422-797 (diff clean). The file carries exactly 153 assertions, node tests/webui/board.test.ts exits 0, the hub closes and the temp dirs clean up, and git status shows only board.test.ts as new. All 20 ../../src/* imports are used in the scenario code. No fixes.

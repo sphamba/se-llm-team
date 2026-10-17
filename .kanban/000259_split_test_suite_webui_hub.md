@@ -1,7 +1,7 @@
 ---
 name: "chore: split-test-suite-webui hub"
 priority: "medium"
-state: "to-review"
+state: "live-testing"
 worktree: "chore/259-split-test-suite-webui-hub"
 issuer: "#256"
 complexity: "simple"
@@ -36,7 +36,4 @@ Acceptance:
 - Check: node tests/webui/hub.test.ts exits 0 and prints "hub.test.ts: all assertions passed". grep -c "assert\." gives 76. A mechanical check reverted the five adaptations and compared each range with the old file: the three ranges are byte-identical.
 - tests/webui.test.ts, package.json, scripts/test-changed.mjs, tests/helpers.ts and the sibling suites are untouched. pnpm test still runs the old file until task #255 lands the glob.
 - Commit: 424ae73.
-
-# Open questions
-- Assumption (the spec allows either): tests/webui/hub.test.ts owns the taskPayload and done-cache tail (old lines 2334-2376) instead of a separate tests/webui/payload.test.ts, because the tail uses the first hub's ui, root and cleanup.
-- Assumption: the renamed final log line and the two added temp-dir clean-ups count as boot adaptation, not a scenario change. The 76 assertion lines themselves are unchanged.
+- Review at 424ae73: the old ranges' 76 assert lines match hub.test.ts 76:76, and the only three differences are the recorded path adaptations (hub.root, the hub.commit cwd and the 000192 probe use join(HERE, "../..") and ../../src). node tests/webui/hub.test.ts exits 0 and prints "hub.test.ts: all assertions passed"; the assert-line count gives 76. The boot pattern is inline (000215 XDG drop, temp HOME/root, exit/SIGINT/SIGTERM cleanup), imports come only from ../../src/kanban.ts, ../../src/hub.ts and ../../src/webui.ts, the daemon spawns join(HERE, "../../src/orchestrator.ts"), no helpers file, and git status is clean apart from the new file. Requirements 1-6 pass. The two stated assumptions stand: the tail ownership is requirement 1's delegated judgment, and the renamed log line plus the two temp-dir clean-ups are requirement 4's demanded cleanup, not a scenario change.

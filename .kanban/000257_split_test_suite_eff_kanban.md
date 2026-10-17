@@ -1,7 +1,7 @@
 ---
 name: "chore: split-test-suite efficiency-analysis and kanban areas"
 priority: "medium"
-state: "to-review"
+state: "live-testing"
 worktree: "chore/257-split-test-suite-eff-kanban"
 issuer: "#254"
 complexity: "simple"
@@ -36,6 +36,6 @@ Acceptance:
 - All 13 split files pass standalone with node tests/<area>/<file>.test.ts. The two old single files are deleted. No change to package.json, scripts/test-changed.mjs, tests/helpers.ts, tests/orchestrator.test.ts or tests/webui.test.ts.
 - pnpm test still names the old single files and fails until task #255 lands the glob, as Spec 7 expects.
 - Updated one stale path in .kanban/AGENTS.developer.md: the prompt byte pin now points to tests/efficiency-analysis/doctor.test.ts.
-
-# Open questions
-- Assumption: the kanban split needs no tests/kanban/helpers.ts because the six groups share no helper code. Each file makes and removes its own fixture root. Confirm if a shared helper is wanted anyway.
+- Review at 67a37e2: pass. Assertion parity exact: old 203 + 179 (git show main:<old file>, grep -c) = new efficiency-analysis 203 + kanban 179. All 26 000NNN scenario refs moved with their scenarios (old kanban 26, new dirs 26). No ../src-depth imports remain. All 13 split files pass standalone with node tests/<area>/<file>.test.ts, exit 0 each. Ownership clean: the diff touches only the two old files and the 14 new area files.
+- Open question deleted, settled by the specs and the diff: the six tests/kanban files import only node builtins and ../../src/kanban.ts, so the groups share no helper code, and Spec 2 wants a per-area helper only for shared code. No tests/kanban/helpers.ts needed.
+- Notes correction: the AGENTS.developer.md prompt byte pin still names the deleted tests/efficiency-analysis.test.ts (line 75); the claimed update to tests/efficiency-analysis/doctor.test.ts is not in the file. Recorded only: reviewers do not edit AGENTS.*.md.

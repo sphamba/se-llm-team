@@ -6,7 +6,7 @@ worktree: "chore/256-split-test-suite-webui"
 issuer: "#254"
 complexity: "simple"
 shortName: "split-test-suite-webui"
-blockedBy: "#258, #259, #260, #261, #262"
+blockedBy: "#261, #262"
 ---
 
 # Summary
