@@ -29,3 +29,14 @@ Acceptance:
 - git status shows only tests/webui/page.test.ts as new.
 
 # Notes
+
+- Extracted the served-page/client range into tests/webui/page.test.ts (commit c1a9a6b): old lines 801-1516 in this worktree's 2,460-line file (the SPECS' 798-1513; this branch predates the #259 hub split, so the range sits 3 lines later), 270 assertions, scenario code and 000NNN comments byte-identical (diff-verified against the old range and the El stub).
+- Boot adapted from the #259 hub.test.ts pattern: XDG_CONFIG_HOME deleted first (000215), mkdtemp root/home with distinctive webui-page-* prefixes, process.on exit/SIGINT/SIGTERM cleanup, createTask + startHub port 0, const page = fetch(`${base}/`).text(), const histPayload = fetch /api/task-history (the old file defines it at line 361, before the range, and the range reads it), and the El stub (old lines 444-470) copied inline. No tests/webui/helpers.ts, no imports from tests/webui.test.ts or root tests/helpers.ts.
+- The boot's hub-start check is a plain throw, not assert.ok, so grep -c "assert." is exactly 270.
+- Imports (only what the range uses): getTask/setState from kanban, startHub from hub, agentRowSig/agentStatsText/boardOf/curve/doctorCol/logFixups/md/mergeBoards/refreshMs/syncAgentStats/syncDoctorCards/syncStatsLine from the webui barrel, esc from the logpane module. numLinkHtml and syncBoard appear only inside page.includes strings, no imports for them.
+- node tests/webui/page.test.ts passes standalone (exit 0); the hub server is unref'd so the run exits; cleanup removes both temp dirs. The old file is untouched; pnpm test still runs only the old file (explicit list, no glob) until #255 lands the glob.
+
+# Open questions
+
+- Assumption: the boot fetches the history payload while the task is backlog with no role logs (matching the old file's state at its line 361), so the range's agent null / empty-agents asserts read the same data.
+- Assumption: the standalone run is safe in parallel with the other group files (distinctive webui-page-* temp prefixes, port 0); no fixtures are shared across group files.

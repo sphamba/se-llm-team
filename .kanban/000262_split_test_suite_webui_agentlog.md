@@ -1,7 +1,7 @@
 ---
 name: "chore: split-test-suite-webui agentlog"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "chore/262-split-test-suite-webui-agentlog"
 issuer: "#256"
 complexity: "moderate"
@@ -32,3 +32,10 @@ Acceptance:
 # Notes
 
 - 2026-10-17, splitter: no split. The 179-assertion range is one continuous fixture run on shared state (one hub, one smoke task, .dead/pid files, board setState, docRoot rmSync at the end) with cursor chains between scenarios (tail.head -> h1 -> h2 -> h3). The deliverable is one file (tests/webui/agentlog.test.ts) owned by this task, so parallel subtasks would write the same file or force the parent to stitch partial files. Split overhead (2x hub boot, 2x fixture recreation, one review and live run each, one merge) exceeds the wall-clock saved on a mechanical extraction. One developer runs this task whole.
+
+- 2026-10-17, developer: extracted the range verbatim into tests/webui/agentlog.test.ts (commit bce423f). The range runs from the 000242 comment to the rmSync(docRoot) tail; the 179-assert count holds because the three lines before the 000242 comment (logFile/logText/writeFileSync, no asserts) recreate in the boot instead. Scenario text matches the old range apart from two fs-probe src paths (HERE + "/../src" became HERE + "/../../src" for tests/webui/). Boot: XDG_CONFIG_HOME deleted first, temp root/home with process.on cleanup, HOME pinned to the temp home, thinkDelta/thinkEnd recreated, own hub (startHub, port 0), smoke task + page fetch + setState doing + slug/.pids/.logs/logFile/logText recreated from the old pre-range lines. node tests/webui/agentlog.test.ts passes standalone; git status shows only the new file; the old suite stays untouched.
+
+# Open questions
+
+- Assumption: HOME is pinned to the temp home for the whole run (the old file pinned it only for one loadWebUiConfig assert); no scenario in the range needs the real HOME.
+- Assumption: `page` recreates as a fresh fetch of `${base}/` in the boot (the old file fetched it at line 402); the page is the startup PAGE constant, identical at both points.

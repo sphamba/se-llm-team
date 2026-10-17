@@ -1,8 +1,8 @@
 ---
 name: "feat: lazy card stats client fetch cache animation"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/264-lazy-card-stats-client"
 issuer: "#252"
 complexity: "moderate"
 shortName: "lazy-card-stats-client"
@@ -34,3 +34,4 @@ Acceptance:
 Tests: append asserts at the END of tests/webui.test.ts, just before the final cleanup() - direct function tests with stubbed fetch/localStorage/doc (no hub needed; the endpoint is stubbed). NEVER edit the shared import lines (lines 9-12) - add a NEW import line for the new board.ts exports, so the merge with the server subtask stays trivial. Baseline: the file passes with 757 asserts (grep -c "assert\." tests/webui.test.ts); your additions raise that count.
 
 # Notes
+- No split (2026-10-17): the pieces share both source files. The lazy-stats state, merge, and localStorage cache (board.ts) are consumed by the page.ts fetch wiring, the animation rides the same syncCardStats span path, and every piece appends asserts at the end of the shared tests/webui.test.ts plus the new board.ts import line. Subtasks would conflict at merge and serialize on the tests for a ~150 line change. One developer is cheaper than 2-3 review passes. Keep the whole client half as one moderate task.

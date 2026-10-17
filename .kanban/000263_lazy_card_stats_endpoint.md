@@ -1,8 +1,8 @@
 ---
 name: "feat: lazy card stats batched endpoint"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "feat/263-lazy-card-stats-endpoint"
 issuer: "#252"
 complexity: "simple"
 shortName: "lazy-card-stats-endpoint"

@@ -1,28 +1,25 @@
 ---
 name: "feat: lazy stats on all board cards"
 priority: "high"
-state: "to-do"
+state: "backlog"
 worktree: ""
 issuer: "user"
-complexity: "moderate"
+complexity: "simple"
 shortName: "lazy-card-stats"
-blockedBy: ""
+blockedBy: "#263, #264"
 ---
 
 # Summary
-Every board card gets its token/time stat line: stats for cards beyond the first 5 are fetched lazily when a column unfolds, appear when available with subtle animations, and done-task stats cache in browser localStorage.
+Verification only: #263 (batched card-stats endpoint) and #264 (client lazy fetch on unfold, localStorage cache, subtle animation) together give every board card its token/time stat line - cards beyond the first 5 load lazily on unfold, appear when available with a subtle animation, and done-task stats cache in browser localStorage. Check the integrated feature once both pieces have landed.
 
 # Specs
-Problem (facts, confirmed by the PM probe on 2026-10-16): taskPayload attaches agents only to visibleCards, the first 5 per column plus the backlog task (src/webui/payload.ts:466-490, VISIBLE_CARDS=5). toggleCol merely adds to expanded and re-renders from the SAME payload rows, so cards 6+ carry no agents and taskStats returns "" (src/webui/board.ts:44). There is no fetch on expand and no per-card stats endpoint; cards 6+ only show stats if a later poll's first-5 shifts to include them. #245 specced stats on the first 5 visible cards only.
+Verification scope (the pieces land through #263 and #264; check them against the original goal, user decision 2026-10-16: ALL cards show stats, fetched lazily, subtle animation, done-task stats in browser localStorage):
 
-Decisions (user, 2026-10-16): ALL cards show the stats, but the stats can be fetched/queued lazily and appear when they become available, with a smooth subtle animation; the card height also grows with a subtle animation. For done tasks, stats can be cached in browser local storage, NOT orchestrator storage.
-
-Requirements:
-1. Unfolding a column queues lazy stats fetches for the newly visible cards (a batched endpoint is preferred over per-card N+1; the server computes per request under #250's rules: no full-log caching, incremental parsing).
-2. Stats appear when they become available with a smooth subtle animation; the card height grows with a subtle animation, no layout jump.
-3. Done-task stats cache in browser localStorage keyed per task, invalidated when a task leaves done; non-done tasks fetch fresh.
-4. Extends #245; the first-5-only cap goes away as the user-facing limit.
-5. State the big assumptions affecting the feature.
+1. The pinned contract held end to end: GET /api/card-stats?files=... answers {file: {agents}} and the client merges it so taskStats renders on every revealed card, not just the first 5.
+2. taskPayload's eager first-5 attach is unchanged (the 5 s poll stays cheap under #250's rules: no full-log caching, incremental parsing); the first-5-only cap is gone as the user-facing limit (#245 extended).
+3. Unfolding a column reveals every card's stats line with a smooth subtle animation and a subtle card height growth, no layout jump; prefers-reduced-motion turns the animation off.
+4. Done tasks serve stats from browser localStorage on the next page load and the next unfold; entries invalidate when a task leaves done; non-done tasks never serve stale stats (always fetch fresh); in-flight fetches de-duped, one batched request not N.
+5. node tests/webui.test.ts passes with both subtasks' test additions landed in disjoint regions of the shared file (assert count above the 757 baseline).
 
 Acceptance:
 - node tests/webui.test.ts passes.

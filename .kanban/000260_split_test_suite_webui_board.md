@@ -1,8 +1,8 @@
 ---
 name: "chore: split-test-suite-webui board"
 priority: "medium"
-state: "live-testing"
-worktree: "chore/260-split-test-suite-webui-board"
+state: "done"
+worktree: ""
 issuer: "#256"
 complexity: "simple"
 shortName: "split-test-suite-webui-board"
@@ -34,3 +34,14 @@ Acceptance:
 - No seeded task: the group reads the served page text and the pure board helpers only, so the hub needs no board row.
 - tests/webui.test.ts, tests/helpers.ts, package.json, scripts/test-changed.mjs and every sibling test file untouched. pnpm test still runs the old file until #255 lands the glob, as the spec expects.
 - Review at 355ee36: lines 33-408 of board.test.ts are byte-identical to webui.test.ts 422-797 (diff clean). The file carries exactly 153 assertions, node tests/webui/board.test.ts exits 0, the hub closes and the temp dirs clean up, and git status shows only board.test.ts as new. All 20 ../../src/* imports are used in the scenario code. No fixes.
+
+## Live test (2026-10-17)
+
+- Target: merged 3f8833c; `git diff --name-status HEAD^ HEAD` adds only tests/webui/board.test.ts. The acceptance run `node tests/webui/board.test.ts` is a unit-suite invocation and stayed out of the live test per role rules; it was verified without executing the suite, and the run itself stays a developer/reviewer gate.
+- Move fidelity: `diff` of board.test.ts lines 33-408 against the old file's lines 425-800 is clean (376 lines byte-identical). The Spec's 422-797 line numbers are stale in the merged tree (intervening commits added 3 lines above the range); the range anchored by its own markers (starts `// FLIP diff: which cards get transforms`, ends before `const modalZ`) is 425-800, and the board content is unchanged.
+- Assertions: `grep -c 'assert\.'` = 153 in board.test.ts and 153 in the old anchored range.
+- Ownership: no forbidden file touched by the merge (tests/webui.test.ts, tests/helpers.ts, package.json, scripts/test-changed.mjs); no tests/webui/helpers.ts; tests/webui/ holds board.test.ts and logpane.test.ts.
+- Imports resolve (probe parses the file, never runs it): all 20 named imports across ../../src/webui.ts, ../../src/kanban.ts and ../../src/hub.ts exist as exports (20 checks, 0 failed); every imported name appears in the scenario body; `node --check tests/webui/board.test.ts` parses.
+- Boot works as the file uses it (probe replicates the boot, without the asserts): XDG_CONFIG_HOME dropped, temp HOME/root, `startHub` port 0 serves `/` with 200 at 75,254 bytes; all 10 state accent rules match; the page ships the tested helpers and CSS (flipDiff, LAYOUT, PRIORITY_RANK, card-stats and chip rules, #relations overlay, cardIn, tabs bar and z-index); hotRelations and switchTab are extractable from the served script; flipDiff/tabNames/tabsHtml match the moved range's expected values; `ui.close()` stops the port; the boot cleanup removes both temp dirs (20 checks, 0 failed).
+- Assumptions: (1) the anchored marker comparison is the correct reading of "scenario text matches the old range", since the Spec line numbers predate an intervening commit; (2) board.test.ts line 409 is one blank separator before `ui.close()`, not a scenario line, so it falls under "boot apart"; (3) the suite execution acceptance is left to the developer/reviewer gates.
+- No issues found. No open questions.
