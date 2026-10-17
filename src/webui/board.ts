@@ -311,6 +311,83 @@ export function syncCardStats(el, t, doc) {
 	}
 }
 
+// 000264 the localStorage key of a done task's cached stats: per project (boards are per-project
+// tabs) and per task, so two checkouts with the same task number never share an entry
+export function statsKey(project: string, file: string) {
+	return "card-stats|" + project + "|" + file;
+}
+
+// 000264 the lazily-known stats applied onto the payload rows before the board pass (the page's
+// render calls it ahead of syncBoard): the payload's eager first-5 agents win over the client
+// cache, an agent-less row takes the known stats (an unfold fetch, or the localStorage cache for
+// a done task), and a stored entry for a task that left done drops with its merged agents so a
+// fresh fetch resumes. Every polled row is swept, folded cards included, so a done card's cache
+// fills at page load and a folded task that left done drops its entry at the next poll. storage
+// is injected so tests run this without a DOM
+export function applyCardStats(rows, known, storage, project) {
+	for (const t of rows) {
+		const key = statsKey(project, t.file);
+		let raw = null;
+		try {
+			raw = storage.getItem(key);
+		} catch {
+			// storage unavailable (privacy mode)
+		}
+		if (t.state !== "done" && raw != null) {
+			// a done cache entry for a task that left done is stale
+			try {
+				storage.removeItem(key);
+			} catch {
+				// storage unavailable
+			}
+			delete known[key];
+		}
+		if (t.agents) continue;
+		if (known[key]) {
+			t.agents = known[key];
+			continue;
+		}
+		if (t.state !== "done" || raw == null) continue;
+		try {
+			const agents = JSON.parse(raw);
+			known[key] = agents;
+			t.agents = agents;
+		} catch {
+			// corrupt entry, ignored
+		}
+	}
+}
+
+// 000264 the card-stats response merged into the lazily-known stats, keyed per project and task;
+// a done task's agents also land in the localStorage cache, so the next page load and unfold
+// serve them without a fetch, a non-done task's agents never touch storage. rows is the board's
+// current rows: a file's row state decides the cache write. storage is injected so tests run this
+// without a DOM
+export function mergeCardStats(stats, rows, known, storage, project) {
+	for (const file in stats) {
+		const agents = stats[file] && stats[file].agents;
+		if (!agents) continue;
+		const key = statsKey(project, file);
+		known[key] = agents;
+		const t = rows.find((r) => r.file === file);
+		if (!t || t.state !== "done") continue;
+		try {
+			storage.setItem(key, JSON.stringify(agents));
+		} catch {
+			// quota exceeded or storage unavailable
+		}
+	}
+}
+
+// the column's rows in board order: backlog priority-first (critical above high above medium above
+// low), every other column newest-first only; the sort is stable and the payload arrives in
+// task-number order, so equal keys keep that order. syncBoard and the lazy stats fetch share it
+export function sortedCol(tasks: Task[], st: string): Task[] {
+	return tasks
+		.filter((t) => t.state === st)
+		.sort((a, b) => (st === "backlog" ? (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) : 0) || b.updated - a.updated);
+}
+
 // one refresh pass: place every task's card in its column and update counts and the fold toggle. A
 // card is rewritten only when its markup changed, so an unchanged card keeps its DOM node and with
 // it its running spinner animation and in-flight FLIP transform; a stats-only change updates the
@@ -319,14 +396,9 @@ export function syncCardStats(el, t, doc) {
 // "enter" class for the page's one-shot entrance animation. The caller measures card positions
 // before and after this pass to animate the moves
 export function syncBoard(cols, tasks, expanded, els, make, visible, doc) {
-	// backlog is priority-first (critical above high above medium above low), every other column is
-	// newest-first only; the sort is stable and the payload arrives in task-number order, so equal
-	// keys keep that order
 	const live = new Set();
 	for (const st of Object.keys(cols)) {
-		const inState = tasks
-			.filter((t) => t.state === st)
-			.sort((a, b) => (st === "backlog" ? (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) : 0) || b.updated - a.updated);
+		const inState = sortedCol(tasks, st);
 		const shown = expanded.has(st) ? inState : inState.slice(0, visible);
 		const part = cols[st];
 		part.count.textContent = inState.length;

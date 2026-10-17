@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PRIORITY_RANK } from "../kanban.ts";
 import { esc, inline, logFixups, md } from "./logpane.ts";
-import { agentLabel, agentRowSig, agentStatsText, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, numLinkHtml, relationPaths, spinnerHtml, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, taskStats, taskStatsText } from "./board.ts";
+import { agentLabel, agentRowSig, agentStatsText, applyCardStats, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, mergeCardStats, numLinkHtml, relationPaths, sortedCol, spinnerHtml, statsKey, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, taskStats, taskStatsText } from "./board.ts";
 
 // the served page: PAGE interpolates the tested renderers and helpers as client source; the
 // webui config loader and the per-tab client state helpers live here too
@@ -165,7 +165,9 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .chip.issuer { background: var(--code-bg); color: var(--muted); }
 .chip.cx { background: var(--code-bg); color: var(--muted); }
 .issued { color: var(--muted); }
-.card-stats { display: block; font-size: 0.75rem; color: var(--muted); margin-top: 6px; }
+.card-stats { display: block; font-size: 0.75rem; color: var(--muted); margin-top: 6px; animation: statsIn var(--fade) ease-out; }
+/* 000264: lazily-fetched stats fade in when the span joins (syncCardStats); the height shift glides via the FLIP diff */
+@keyframes statsIn { from { opacity: 0; transform: translateY(2px); } }
 .p-low { background: var(--low-bg); color: var(--low-fg); }
 .p-medium { background: var(--medium-bg); color: var(--medium-fg); }
 .p-high { background: var(--high-bg); color: var(--high-fg); }
@@ -266,7 +268,7 @@ fixed-timeout fallback */
 /* 000191: reduced motion stops the entrance, chunk and pulse animations too; the rule sits
 after every base animation rule so the later equal-specificity selectors cannot override it;
 000194: the details.pulse variants join it, only they outrank #m-log-text > * and .pulse */
-@media (prefers-reduced-motion: reduce) { .card.enter, .agent-card.enter, #modal:not(.hidden), #modal:not(.hidden) #m-box, #m-log:not(.hidden), #m-log-text > *, #m-log-text > .pulse, #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .card.enter, .agent-card.enter, .card-stats, #modal:not(.hidden), #modal:not(.hidden) #m-box, #m-log:not(.hidden), #m-log-text > *, #m-log-text > .pulse, #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { animation: none; } }
 /* 000194: under reduced motion the clip animation stops (above) and color: transparent would
 make the text vanish: the gradient drops and the solid color restores per block type */
 @media (prefers-reduced-motion: reduce) { #m-log-text > .pulse { background-image: none; color: var(--fg); } #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { background-image: none; color: var(--muted); } }
@@ -359,6 +361,7 @@ ${numLinkHtml}
 ${cardBaseHtml}
 ${cardHtml}
 ${buildShell}
+${sortedCol}
 ${syncBoard}
 ${logFixups}
 ${tabNames}
@@ -377,6 +380,9 @@ ${syncStatsLine}
 ${doctorCol}
 ${syncDoctorCards}
 ${syncCardStats}
+${statsKey}
+${applyCardStats}
+${mergeCardStats}
 ${refreshMs}
 // tabs: one per registered project, the active one renders that project's board
 function renderTabs() {
@@ -393,11 +399,38 @@ function switchTab(name) {
 }
 function activeBoard() { return boardOf(boards, active); }
 // fold choice keyed by state name, so the 5 s refresh keeps it
-function toggleCol(st) { const b = activeBoard(); if (b.expanded.has(st)) b.expanded.delete(st); else b.expanded.add(st); render(); }
+function toggleCol(st) { const b = activeBoard(); if (b.expanded.has(st)) b.expanded.delete(st); else b.expanded.add(st); render(); if (b.expanded.has(st)) queueStats(st); }
+// 000264: one batched lazy stats fetch per unfold for the newly shown cards past the fold the
+// payload's eager first-5 attach does not cover; done cards skip when their stats are known
+// (cached or applied), non-done cards refetch fresh at every unfold and never touch localStorage.
+// The response merges into the known stats and re-renders; a failure leaves the cards stats-less
+// until a later poll, and until #263 merges the 404 is a silent no-op
+function queueStats(st) {
+	const b = activeBoard();
+	const project = active;
+	const files = [];
+	for (const t of sortedCol(b.tasks, st).slice(VISIBLE)) {
+		if (statsInFlight.has(statsKey(project, t.file)) || (t.state === "done" && t.agents)) continue;
+		files.push(t.file);
+	}
+	if (!files.length) return;
+	const url = "/api/card-stats?files=" + files.map((f) => encodeURIComponent(f)).join(",") + projectParam();
+	for (const f of files) statsInFlight.add(statsKey(project, f));
+	fetch(url).then(r => r.ok ? r.json() : null).catch(() => null).then(stats => {
+		for (const f of files) statsInFlight.delete(statsKey(project, f));
+		if (!stats) return;
+		mergeCardStats(stats, b.tasks, statsKnown, localStorage, project);
+		render();
+	});
+}
 // one element per task file, kept across refreshes: an unchanged card keeps its node, so its
 // spinner animation and in-flight FLIP transform are never restarted
 const cardEls = new Map();
 let cols = null;
+// 000264: the lazily-known card stats, keyed per project and task (statsKey), and the card-stats
+// fetches in flight, deduped per unfold
+const statsKnown = Object.create(null);
+const statsInFlight = new Set();
 function makeCard(file) {
 	const el = document.createElement("div");
 	el.className = "card";
@@ -467,6 +500,9 @@ function render(skipFlip) {
 		el.style.transform = "";
 		old[el.dataset.file] = cardBox(el);
 	}
+	// 000264: the lazily-known stats land on the rows before the board pass, so the 5 s poll's
+	// agent-less cards 6+ never wipe revealed stats; the payload's eager first-5 agents win
+	applyCardStats(tab.tasks, statsKnown, localStorage, active);
 	syncBoard(cols, tab.tasks, tab.expanded, cardEls, makeCard, VISIBLE, document);
 	const now = {};
 	for (const el of cardEls.values()) now[el.dataset.file] = cardBox(el);
