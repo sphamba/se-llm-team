@@ -1,8 +1,8 @@
 ---
 name: "fix: popup agent cards take their board-column accent colors per role"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/275-role-card-colors"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "role-card-colors"
@@ -46,3 +46,14 @@ Out of scope: the board page's column palette itself, the selected-card base rul
 - Tests: red run confirmed at page.test.ts:283 (role-class pin) before the fix, green after. Scoped suite per the project mapping for src/webui/page.ts: the five webui group files (hub, board, logpane, agentlog, page), all exit 0. Deviation from the acceptance line: ran the scoped five-file webui run instead of full pnpm test.
 - Review (2026-10-18, ec03af9 at HEAD, no fixes, all requirements verified in the diff): (1) renderAgent (src/webui/page.ts:845) attaches the run's role class via the ROLE_CLS map (L805: splitter, developer, reviewer, merger, "live-tester" -> agent-splitter/agent-developer/agent-reviewer/agent-merger/agent-livetest), splitter keeps its marker. (2) Six per-role rest rules use the exact column hexes (developer #818cf8, reviewer #d97706, merger #c026d3, live-tester #0d9488, splitter #94a3b8, doctor #22c55e); the shared .agent-card background, border and hover stay untouched. (3) fetchSubs (L935) passes the run's role class next to agent-sub, plain "agent-sub" fallback for unmapped roles. (4) Doctor takes done #22c55e, splitter backlog #94a3b8; --doctor-fg/--doctor-bg-strong removed from all three theme blocks and grep over src/ exits 1, zero remaining consumers (spec-4 migration path complete). (5) All six .agent-<role>.agent-card-active variants carry border-color <role hex> + color-mix(in srgb, <hex> 20%, var(--panel)). (6) No per-role hover rule added; the suite pins !includes(".<role>:hover") for all six roles. board.test.ts column accents untouched (diff --stat).
 - Re-review totals: page.test.ts holds 277 asserts, +8 from the diff; pins updated in the file's string-pin style. Green scoped webui run recorded at ec03af9 with zero later commits, so the run lookup is settled - zero re-runs.
+
+## Live test (2026-10-18)
+
+- Hub-only browser test of merged HEAD ec03af9: hub serves the worktree (api/hub: pid 3278867, root fix/275-role-card-colors, commit ec03af953d09dd51acee8c24ffd36b5c13e451d4) on 127.0.0.1:4351 over a fixture board with one done task, one run log per role (splitter, developer, reviewer, live-tester, merger), one developer doctor log and one subagent transcript. Probe tally: 71 checks, 0 failed (/tmp/lt275/probe2.log).
+- Rest state, measured as computed styles on the popup cards: every run card carries its role class and takes the exact board column hex on its text and its check mark (splitter #94a3b8 = rgb(148, 163, 184), developer #818cf8, reviewer #d97706, merger #c026d3, live-tester #0d9488, doctor #22c55e). The shared .agent-card border and panel background are identical on all six cards.
+- Sub card: carries the run's role class next to agent-sub (agent-developer) and the developer color.
+- Selection: clicking each of the six cards adds .agent-card-active with the role border color and the color-mix 20% panel background, identical to a reference element built from the spec hex.
+- Hover: the role text color does not change and the background equals the shared --hover value on all six cards, so no per-role hover rule is observable.
+- Theme: all six text and check colors are identical in dark (data-theme="dark") and in the default light theme.
+- Assumptions: one run per role is enough for this change (multiple runs, labels and the log pane are untouched by the diff). The theme switch was set through documentElement.dataset.theme, the same property toggleTheme() writes.
+- Technical difficulty, no product impact: the first free port 4350 was taken by a concurrent live-test hub between the port scan and the launch, so the first hub process stood down (log "hub up null") and /health answered from the foreign hub. Relaunched on 4351 and re-preflighted /api/hub, /api/tasks, /api/task-history and /api/agent-log?sub=list before the browser run. The first probe run had 1 FAIL from a probe-script bug (a card object has no rgb field); patched and rerun green, no product finding.
