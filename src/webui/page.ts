@@ -213,6 +213,10 @@ card keeps the role-colored outline and a 20% panel mix via .agent-card-active *
 .agent-livetest { color: #0d9488; }
 .agent-livetest.agent-card-active { border-color: #0d9488; background: color-mix(in srgb, #0d9488 20%, var(--panel)); }
 .agent-livetest .check { color: #0d9488; }
+/* 000276: the sub, splitter and doctor cards read at 85% of the role cards' text, the name line
+at 0.75rem, the stats line at 0.625rem; the four role cards keep the base 0.875rem/0.75rem sizes */
+.agent-sub, .agent-splitter, .agent-doctor { font-size: 0.75rem; }
+.agent-sub .agent-stats, .agent-splitter .agent-stats, .agent-doctor .agent-stats { font-size: 0.625rem; }
 .check { color: var(--low-fg); margin-right: 5px; }
 .cross { color: var(--critical-fg); margin-right: 5px; }
 #m-agent { position: relative; z-index: 0; margin-bottom: 12px; }

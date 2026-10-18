@@ -152,7 +152,7 @@ assert.ok(logCss.includes("font-size: 0.9375rem") && !/font-size: 0\.(75|8125|87
 const sizeCounts = [...page.matchAll(/font-size: ([\d.]+)rem/g)].map((m) => m[1]);
 const gotSizes: Record<string, number> = {};
 for (const s of sizeCounts) gotSizes[s] = (gotSizes[s] ?? 0) + 1;
-assert.deepEqual(gotSizes, { "0.75": 4, "0.8125": 1, "0.875": 11, "0.9375": 4, "1.0625": 1, "1.125": 1 }, "every served font-size matches the rem mapping (12->0.75, 13->0.8125, 14->0.875, 15->0.9375, 17->1.0625, 18->1.125)");
+assert.deepEqual(gotSizes, { "0.625": 1, "0.75": 5, "0.8125": 1, "0.875": 11, "0.9375": 4, "1.0625": 1, "1.125": 1 }, "every served font-size matches the rem mapping (12->0.75, 13->0.8125, 14->0.875, 15->0.9375, 17->1.0625, 18->1.125)");
 // 204: mobile, zooming blocked and the root font size 15% smaller under 600px
 assert.ok(page.includes('<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">'), "the viewport meta blocks zooming on mobile");
 assert.ok(page.includes("@media (max-width: 600px) { html { font-size: 85%; } }"), "mobile screens render the root font size 15% smaller");
@@ -322,6 +322,11 @@ assert.ok(page.includes(".check { color: var(--low-fg); margin-right: 5px; }"), 
 assert.ok(page.includes('agentCardHtml("agent-doctor " + (d.alive ? "agent-live" : "agent-past")'), "doctor cards keep their agent-live/agent-past classes under the agent-doctor marker, so no unscoped per-variant rule sets a color on them");
 assert.ok(agentCardCss.includes("color: var(--link)") && agentCardCss.includes("border: 1px solid var(--border)") && agentCardCss.includes("background: color-mix(in srgb, var(--panel) 85%, transparent)"), "the unscoped .agent-card keeps gold text, grey outline and the main view's semi-transparent rest background for the run and sub cards");
 assert.ok(page.includes(".agent-card:hover { background: var(--hover); }") && page.includes(".agent-card-active { border-color: var(--link); background: color-mix(in srgb, var(--link) 20%, var(--panel)); }"), "the unscoped hover stays and the active rule mixes 20% link into the panel");
+// 000276: the sub, splitter and doctor cards read at 85% of the role cards' text, the name line
+// and the stats line alike; the four role cards keep the base sizes
+assert.ok(page.includes(".agent-sub, .agent-splitter, .agent-doctor { font-size: 0.75rem; }"), "the sub, splitter and doctor card names render at 0.75rem, 85% of the role cards' 0.875rem");
+assert.ok(page.includes(".agent-sub .agent-stats, .agent-splitter .agent-stats, .agent-doctor .agent-stats { font-size: 0.625rem; }"), "their stats lines drop to 0.625rem, 85% of the base 0.75rem");
+assert.ok(agentCardCss.includes("font-size: 0.875rem") && page.match(/\.agent-stats \{[^}]*\}/)![0].includes("font-size: 0.75rem"), "the base .agent-card and .agent-stats sizes stay, the four role cards keep 0.875rem names and 0.75rem stats");
 // 000194: the live pulse follows the viewed run's aliveness, the same signal the poll timer
 // reads, refreshed from pullLog after every payload and dropped on close
 assert.ok(page.includes("function markLiveLine()"), "the page wires the live block pulse");
