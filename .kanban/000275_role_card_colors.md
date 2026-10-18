@@ -1,8 +1,8 @@
 ---
 name: "fix: popup agent cards take their board-column accent colors per role"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "fix/275-role-card-colors"
 issuer: "user"
 complexity: "moderate"
 shortName: "role-card-colors"
@@ -40,3 +40,7 @@ Acceptance: node tests/webui/page.test.ts passes and pnpm test passes.
 Out of scope: the board page's column palette itself, the selected-card base rule beyond adding variants, and the popup height work of #274.
 
 # Notes
+
+- No-split decision (2026-10-18): runs as one moderate subtask. All 6 change items live in src/webui/page.ts - the CSS rules are one contiguous block (L187-211, L301-310) and the role-class call-sites are two lines in the same render chain (renderAgent L839, fetchSubs L929); all test work is pinned-string edits in one contiguous region (:283-:330) of the shared tests/webui/page.test.ts. Every cut shares either the CSS block or the test-pin region, and a code-vs-tests cut makes the test subtask assert strings that do not exist until the code merges (the 000272 string-pin failure mode). Count of change items is not parallelism; same family as 000264. Do not revisit unless the test pins move out of webui/page.test.ts.
+- Done (2026-10-18, ec03af9): src/webui/page.ts gains ROLE_CLS (splitter, developer, reviewer, merger, "live-tester" -> agent-splitter, agent-developer, agent-reviewer, agent-merger, agent-livetest); renderAgent attaches the run's role class and fetchSubs passes the run's role class to sub cards next to agent-sub. Per-role accent CSS: 18 literal-hex rules (rest, active 20% panel mix, check) for all six roles, same static hex in both themes: doctor #22c55e (done), splitter #94a3b8 (backlog), developer #818cf8 (doing), reviewer #d97706 (reviewing), merger #c026d3 (merging), livetest #0d9488 (live-testing). The now-unconsumed --doctor-fg and --doctor-bg-strong vars are gone from all three theme blocks (page.ts was their only consumer). Shared .agent-card base, hover and the var(--link) active fallback unchanged.
+- Tests: red run confirmed at page.test.ts:283 (role-class pin) before the fix, green after. Scoped suite per the project mapping for src/webui/page.ts: the five webui group files (hub, board, logpane, agentlog, page), all exit 0. Deviation from the acceptance line: ran the scoped five-file webui run instead of full pnpm test.
