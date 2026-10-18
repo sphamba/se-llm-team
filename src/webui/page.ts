@@ -81,14 +81,10 @@ export function refreshMs(t) {
 const DARK_VARS = `
 :root[data-theme="dark"] { --bg: #10141c; --fg: #bfbdb6; --panel: #141821; --border: #1b1f29; --heading: #bfbdb6; --muted: #5a6673; --faint: #5a6673; --soft: #bfbdb6; --hover: #1b1f29; --overlay: rgba(0, 0, 0, .6); --code-bg: #010102; --link: #e6b450;
 /* 000129: medium/critical hues widened (yellow / strong red) so the priority chips read apart; -bg tints match their fg */
---low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252;
-/* 000226: the doctor card's blue, the dark pair */
---doctor-fg: #59a7ff; --doctor-bg-strong: rgba(89, 167, 255, .28); }
+--low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252; }
 :root[data-theme="dark"] #theme { color: var(--link); border-color: var(--link); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #10141c; --fg: #bfbdb6; --panel: #141821; --border: #1b1f29; --heading: #bfbdb6; --muted: #5a6673; --faint: #5a6673; --soft: #bfbdb6; --hover: #1b1f29; --overlay: rgba(0, 0, 0, .6); --code-bg: #010102; --link: #e6b450;
---low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252;
-/* 000226: the doctor card's blue, the dark pair */
---doctor-fg: #59a7ff; --doctor-bg-strong: rgba(89, 167, 255, .28); }
+--low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252; }
 :root:not([data-theme="light"]) #theme { color: var(--link); border-color: var(--link); } }
 `;
 
@@ -109,9 +105,7 @@ export const PAGE = `<!doctype html>
 :root { --bg: #fcfcfc; --fg: #5c6166; --panel: #ffffff; --border: rgba(107, 125, 143, .12); --heading: #5c6166; --muted: #adaeb1; --faint: #adaeb1; --soft: #5c6166; --hover: rgba(233, 237, 242, .95); --overlay: rgba(15, 23, 42, .45); --code-bg: #ebeef0; --link: #f29718;
 --low-bg: rgba(134, 179, 0, .15); --low-fg: #86b300; --medium-bg: rgba(201, 151, 0, .15); --medium-fg: #c99700; --high-bg: rgba(250, 133, 50, .15); --high-fg: #fa8532; --critical-bg: rgba(230, 80, 80, .15); --critical-fg: #e65050;
 /* 000191: motion knobs, one place to retune the entrances, the chunk fade and the pulse loop; 000194: --exit runs the closes, --shine is the whiter band mix */
---enter: 200ms; --exit: 180ms; --fade: 150ms; --pulse: 2s; --shine: 45%;
-/* 000226: the doctor card's blue, the light pair */
---doctor-fg: #2f6fdd; --doctor-bg-strong: rgba(47, 111, 221, .24); }
+--enter: 200ms; --exit: 180ms; --fade: 150ms; --pulse: 2s; --shine: 45%; }
 ${DARK_VARS}
 html, body { height: 100%; }
 body { display: flex; flex-direction: column; margin: 0; background: var(--bg); color: var(--fg); font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
@@ -197,18 +191,28 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 #m-agent-btns { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
 #m-doctor { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-top: 8px; }
 #m-doctor:empty { display: none; }
-/* 000226: the doctor cards read blue in both themes, scoped to the .agent-doctor marker so the
-run buttons and the sub cards keep the link gold; 000230: the marker covers the cards in their
-analysed run's column and in the residual #m-doctor row alike; 000232: at rest only the text and
-check mark stay blue and the plain .agent-card outline and panel background show through, while
-the opened card keeps the blue outline and highlight via .agent-card-active */
-.agent-doctor { color: var(--doctor-fg); }
-.agent-doctor.agent-card-active { border-color: var(--doctor-fg); background: color-mix(in srgb, var(--doctor-fg) 20%, var(--panel)); }
-.agent-doctor .check { color: var(--doctor-fg); }
-/* 000247: the splitter cards read the same blue as the doctor cards */
-.agent-splitter { color: var(--doctor-fg); }
-.agent-splitter.agent-card-active { border-color: var(--doctor-fg); background: color-mix(in srgb, var(--doctor-fg) 20%, var(--panel)); }
-.agent-splitter .check { color: var(--doctor-fg); }
+/* 000275: run and sub cards read their role's board column accent, the same static hex in both
+themes (doctor done green, splitter backlog grey); at rest only the text and check mark take the
+role color and the plain .agent-card outline and panel background show through, while the opened
+card keeps the role-colored outline and a 20% panel mix via .agent-card-active */
+.agent-doctor { color: #22c55e; }
+.agent-doctor.agent-card-active { border-color: #22c55e; background: color-mix(in srgb, #22c55e 20%, var(--panel)); }
+.agent-doctor .check { color: #22c55e; }
+.agent-splitter { color: #94a3b8; }
+.agent-splitter.agent-card-active { border-color: #94a3b8; background: color-mix(in srgb, #94a3b8 20%, var(--panel)); }
+.agent-splitter .check { color: #94a3b8; }
+.agent-developer { color: #818cf8; }
+.agent-developer.agent-card-active { border-color: #818cf8; background: color-mix(in srgb, #818cf8 20%, var(--panel)); }
+.agent-developer .check { color: #818cf8; }
+.agent-reviewer { color: #d97706; }
+.agent-reviewer.agent-card-active { border-color: #d97706; background: color-mix(in srgb, #d97706 20%, var(--panel)); }
+.agent-reviewer .check { color: #d97706; }
+.agent-merger { color: #c026d3; }
+.agent-merger.agent-card-active { border-color: #c026d3; background: color-mix(in srgb, #c026d3 20%, var(--panel)); }
+.agent-merger .check { color: #c026d3; }
+.agent-livetest { color: #0d9488; }
+.agent-livetest.agent-card-active { border-color: #0d9488; background: color-mix(in srgb, #0d9488 20%, var(--panel)); }
+.agent-livetest .check { color: #0d9488; }
 .check { color: var(--low-fg); margin-right: 5px; }
 .cross { color: var(--critical-fg); margin-right: 5px; }
 #m-agent { position: relative; z-index: 0; margin-bottom: 12px; }
@@ -798,6 +802,8 @@ function ingest(html, where) {
 	else el.insertAdjacentHTML(where === "history" ? "afterbegin" : "beforeend", html);
 	logFixups(el, document);
 }
+// payload role to card marker class; the run card and its sub cards share the run's role class
+const ROLE_CLS = { splitter: "agent-splitter", developer: "agent-developer", reviewer: "agent-reviewer", merger: "agent-merger", "live-tester": "agent-livetest" };
 // one agent card: the role label, then a tokens/duration stats line (42k · 5m 12s); mark is the
 // live spinner or the past check, empty on a sub card
 function agentCardHtml(extraCls, attrs, label, tokens, duration, mark) {
@@ -836,7 +842,7 @@ function renderAgent(t, keep) {
 	for (const a of runs) count[a.role] = (count[a.role] || 0) + 1;
 	el.innerHTML = runs.map(a =>
 		'<div class="agent-col">' +
-		agentCardHtml((a.role === "splitter" ? "agent-splitter " : "") + (a.alive ? "agent-live" : a.status === "dead" ? "agent-dead" : "agent-past"), 'data-handle="' + esc(a.handle) + '"', agentLabel(a, count), a.tokens, a.duration, a.alive ? '<span class="spin"></span>' : a.status === "dead" ? '<span class="cross">✗</span>' : '<span class="check">✓</span>') +
+		agentCardHtml((ROLE_CLS[a.role] ? ROLE_CLS[a.role] + " " : "") + (a.alive ? "agent-live" : a.status === "dead" ? "agent-dead" : "agent-past"), 'data-handle="' + esc(a.handle) + '"', agentLabel(a, count), a.tokens, a.duration, a.alive ? '<span class="spin"></span>' : a.status === "dead" ? '<span class="cross">✗</span>' : '<span class="check">✓</span>') +
 		'<div class="agent-subs"></div></div>').join("");
 	// bind by dataset: a hand-written task file name can hold quotes or backslashes, which no
 	// amount of HTML escaping makes safe inside inline JS; 000191: only a genuinely new run's
@@ -926,7 +932,7 @@ function fetchSubs(gen, a, box) {
 		const prev = box.__sig === undefined ? null : new Set([...box.querySelectorAll(".agent-card")].map((c) => c.dataset.sub));
 		box.__sig = sig;
 		const html = subs.map(s =>
-			agentCardHtml("agent-sub", 'data-handle="' + esc(a.handle) + '" data-sub="' + s.index + '"', "Sub-" + a.role, s.tokens, s.duration, "")).join("");
+			agentCardHtml(ROLE_CLS[a.role] ? ROLE_CLS[a.role] + " agent-sub" : "agent-sub", 'data-handle="' + esc(a.handle) + '" data-sub="' + s.index + '"', "Sub-" + a.role, s.tokens, s.duration, "")).join("");
 		box.innerHTML = html;
 		for (const b of box.querySelectorAll(".agent-card")) {
 			b.onclick = () => openSubLog(b.dataset.handle, Number(b.dataset.sub));

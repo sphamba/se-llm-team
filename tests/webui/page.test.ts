@@ -280,7 +280,9 @@ makeSetBody(true, mobileBox, {})({ body: "mobile" });
 assert.equal(mobileBox.style.height, "120px", "the mobile full-screen sheet never gets an inline height");
 const ra = page.match(/function renderAgent\(t, keep\) \{[\s\S]*?\n\}/)![0];
 assert.ok(ra.includes('.agent-subs").replaceWith(box)'), "a refresh carries the fetched sub boxes over by handle");
-assert.ok(ra.includes('a.role === "splitter" ? "agent-splitter " : ""'), "the splitter run's card carries the agent-splitter marker class");
+assert.ok(ra.includes('ROLE_CLS[a.role] ? ROLE_CLS[a.role] + " " : ""'), "every run card carries its role class, the splitter run keeps agent-splitter");
+assert.ok(page.includes('const ROLE_CLS = { splitter: "agent-splitter", developer: "agent-developer", reviewer: "agent-reviewer", merger: "agent-merger", "live-tester": "agent-livetest" };'), "the role map names every pipeline role's marker class");
+assert.ok(fsSubs.includes('ROLE_CLS[a.role] ? ROLE_CLS[a.role] + " agent-sub" : "agent-sub"'), "sub cards carry their parent run's role class");
 // 000130: the keep refresh re-fetches only the live run's sub list, so a sub spawned after the
 // card was opened gets its button without re-opening the run; past runs' lists are never re-fetched
 assert.ok(ra.includes('if (live) fetchSubs(agentGen, live,') && ra.includes('.agent-col:last-child > .agent-subs'), "the keep refresh re-fetches only the live run's (last column's) sub list");
@@ -298,32 +300,24 @@ assert.ok(pollSrc.includes("const live = (!!liveRun && liveRun.handle === logSta
 assert.ok(pollSrc.includes('const liveDoctor = t && (t.doctors || []).find(d => d.alive);'), "pollLog's live check also matches a live doctors entry, so a live doctor log keeps polling");
 assert.ok(!pollSrc.includes("logState.sub == null"), "a sub view is no longer hard-wired non-live, which froze the pane after the first empty poll");
 assert.ok(pollSrc.includes("if (!live && logState.idle) {"), "a past run's log still stops the timer after the first empty poll");
-// 000226: the doctor cards read blue from the #m-doctor scope; all three theme blocks carry
-// the blue variables and the unscoped .agent-card rules keep their colors for the run columns
-// and the sub cards. 000232: at rest only the doctor text and check mark stay blue, the plain
-// outline and panel background show through
+// 000275: the run, sub, splitter and doctor cards read their role's board column accent, the
+// same static hex in both themes; the theme blocks carry no doctor variables anymore
 const lightVars = page.match(/:root \{ --bg: [^}]*\}/)![0];
 const darkVars = page.match(/:root\[data-theme="dark"\] \{ --bg: [^}]*\}/)![0];
 const mediaVars = page.match(/:root:not\(\[data-theme="light"\]\) \{ --bg: [^}]*\}/)![0];
-for (const [theme, block] of [["light", lightVars], ["dark", darkVars], ["prefers-dark", mediaVars]] as const) {
-	for (const v of ["--doctor-fg:", "--doctor-bg-strong:"]) assert.ok(block.includes(v), `the ${theme} theme block defines ${v}`);
-}
-assert.ok(!page.includes("--doctor-bg:"), "the unused --doctor-bg variable is gone from the theme blocks");
+assert.ok(!page.includes("--doctor-fg:") && !page.includes("--doctor-bg:") && !page.includes("--doctor-bg-strong:"), "the doctor variables are gone from the theme blocks");
 // 000240: the light hover is a near-opaque very light grey, so a hovered card stays clear
 // against the white panel; the dark hover keeps its opaque #1b1f29
 assert.ok(lightVars.includes("--hover: rgba(233, 237, 242, .95);"), `the light hover is the very light rgba(233, 237, 242, .95) (got ${lightVars.match(/--hover: [^;]+/)![0]})`);
 for (const [theme, block] of [["dark", darkVars], ["prefers-dark", mediaVars]] as const) {
 	assert.ok(block.includes("--hover: #1b1f29;"), `the ${theme} hover stays the opaque #1b1f29`);
 }
-assert.equal(lightVars.match(/--doctor-fg: (#[0-9a-f]{6})/)![1], "#2f6fdd", "the light doctor blue is the deeper #2f6fdd");
-assert.equal(darkVars.match(/--doctor-fg: (#[0-9a-f]{6})/)![1], "#59a7ff", "the dark doctor blue is the lighter #59a7ff");
-assert.ok(page.includes(".agent-doctor { color: var(--doctor-fg); }"), "the .agent-doctor rest state sets only the blue text, so the plain card outline and panel background show through, in their run's column and in the residual row alike");
-assert.ok(!page.includes(".agent-doctor:hover"), "the doctor card inherits the plain .agent-card hover, with no blue rest highlight");
-assert.ok(page.includes(".agent-doctor.agent-card-active { border-color: var(--doctor-fg); background: color-mix(in srgb, var(--doctor-fg) 20%, var(--panel)); }"), "the active doctor card keeps the blue outline and a 20% blue panel mix, never the base link/medium-bg pair");
-assert.ok(page.includes(".agent-doctor .check { color: var(--doctor-fg); }"), "the doctor card's checkmark reads the same blue as the card text");
-assert.ok(page.includes(".agent-splitter { color: var(--doctor-fg); }"), "the splitter card reads the doctor blue at rest");
-assert.ok(page.includes(".agent-splitter.agent-card-active { border-color: var(--doctor-fg); background: color-mix(in srgb, var(--doctor-fg) 20%, var(--panel)); }"), "the active splitter card keeps the blue outline and a 20% blue panel mix");
-assert.ok(page.includes(".agent-splitter .check { color: var(--doctor-fg); }"), "the splitter card's checkmark reads the same blue");
+for (const [role, hex] of [["agent-doctor", "#22c55e"], ["agent-splitter", "#94a3b8"], ["agent-developer", "#818cf8"], ["agent-reviewer", "#d97706"], ["agent-merger", "#c026d3"], ["agent-livetest", "#0d9488"]] as const) {
+	assert.ok(page.includes(`.${role} { color: ${hex}; }`), `the ${role} card reads the board column accent ${hex} at rest, only the text and check colored`);
+	assert.ok(page.includes(`.${role}.agent-card-active { border-color: ${hex}; background: color-mix(in srgb, ${hex} 20%, var(--panel)); }`), `the active ${role} card keeps the role-colored outline and a 20% ${hex} panel mix`);
+	assert.ok(page.includes(`.${role} .check { color: ${hex}; }`), `the ${role} card's checkmark reads the role color`);
+	assert.ok(!page.includes(`.${role}:hover`), `the ${role} card inherits the plain .agent-card hover, no per-role hover rule`);
+}
 assert.ok(page.includes(".check { color: var(--low-fg); margin-right: 5px; }"), "the unscoped .check keeps var(--low-fg) for the run cards' and sub cards' checkmarks");
 assert.ok(page.includes('agentCardHtml("agent-doctor " + (d.alive ? "agent-live" : "agent-past")'), "doctor cards keep their agent-live/agent-past classes under the agent-doctor marker, so no unscoped per-variant rule sets a color on them");
 assert.ok(agentCardCss.includes("color: var(--link)") && agentCardCss.includes("border: 1px solid var(--border)") && agentCardCss.includes("background: color-mix(in srgb, var(--panel) 85%, transparent)"), "the unscoped .agent-card keeps gold text, grey outline and the main view's semi-transparent rest background for the run and sub cards");
