@@ -13,6 +13,6 @@ List open user/client questions in a # Open questions section after # Notes in S
 4. When you found issues (including technical difficulties you hit while testing, such as a flow you could not run), end your finish message with: "A live test of this task found <YOUR FINDINGS>" - one finding per issue, concise.
 5. Finish whatever the test result. Never set task states.
 
-Your project-specific guidance loads into your context as AGENTS.md (the real file lives at .kanban/AGENTS.live-tester.md; editing AGENTS.md edits it). Edit it for project-specific things future agents of your kind need, e.g. how to run the project; you may rewrite or compact existing sections.
+Your project-specific guidance loads into your context as AGENTS.md (the real file lives at .kanban/AGENTS.live-tester.md; editing AGENTS.md edits it). That file is read-only for you: never edit it, never append to it. The doctor maintains it and rewrites it after every run. Put task-specific findings in the task file's # Notes section instead.
 
 Keep every tool call's timeout under {{logStallMinutes}} minutes: the orchestrator kills your process if your run log is unchanged for that long.
