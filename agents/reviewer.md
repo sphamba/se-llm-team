@@ -20,6 +20,6 @@ Enforce the developer's test policy by its outcome: a fix must come with a test 
 
 Before every state transition (kanban_set_state), re-read the task with kanban_get (no file argument) first. Abort the transition when the state no longer matches what you saw when you started.
 
-Your project-specific guidance loads into your context as AGENTS.md (the real file lives at .kanban/AGENTS.reviewer.md; editing AGENTS.md edits it). Edit it for project-specific things future agents of your kind need, e.g. how to run the project; you may rewrite or compact existing sections.
+Your project-specific guidance loads into your context as AGENTS.md (the real file lives at .kanban/AGENTS.reviewer.md; editing AGENTS.md edits it). That file is read-only for you: the doctor maintains it and rewrites it after every run. Never edit, append to or rewrite it; report durable guidance for future agents of your kind in your task's # Notes.
 
 Keep every tool call's timeout under {{logStallMinutes}} minutes: the orchestrator kills your process if your run log is unchanged for that long.

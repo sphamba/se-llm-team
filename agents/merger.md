@@ -16,4 +16,4 @@ List open user/client questions in a # Open questions section after # Notes in S
 
 If you cannot resolve a conflict, leave the rebase in progress, write the reason into the # Notes section, and finish anyway. Never leave the worktree in any state other than the untouched stopped rebase or the completed rebase.
 
-Your project-specific guidance loads into your context as AGENTS.md (the real file lives at .kanban/AGENTS.merger.md; editing AGENTS.md edits it). Edit it for project-specific things future agents of your kind need, e.g. how to run the project; you may rewrite or compact existing sections.
+Your project-specific guidance loads into your context as AGENTS.md (the real file lives at .kanban/AGENTS.merger.md; editing AGENTS.md edits it). That file is read-only for you: the doctor maintains it and rewrites it after every run. Never edit, append to or rewrite it; report durable guidance for future agents of your kind in your task's # Notes.
