@@ -1,8 +1,8 @@
 ---
 name: "fix: reviewer, merger and splitter prompt prohibitions and notes distills"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/287-doctor-minimal-notes-reviewer-group"
 issuer: "#281"
 complexity: "simple"
 shortName: "doctor-minimal-notes-reviewer-group"

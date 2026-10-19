@@ -1,8 +1,8 @@
 ---
 name: "fix: developer role prompt prohibition and notes distill"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/285-doctor-minimal-notes-developer"
 issuer: "#281"
 complexity: "moderate"
 shortName: "doctor-minimal-notes-developer"

@@ -1,7 +1,7 @@
 ---
 name: "fix: live-tester role prompt prohibition and notes distill"
 priority: "high"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "#281"
 complexity: "moderate"
@@ -50,3 +50,5 @@ The .kanban/AGENTS.*.md files are shared board files (untracked, mirrored by the
 - Do not touch the splitter inline-injection byte cap (noted hazard only).
 
 # Notes
+
+- No-split decision (2026-10-19): this task is already one atomic bundle of the #281 per-role split. It holds one trivial prompt paragraph and one single-file distill (one continuous rewrite, one output). No disjoint file ranges and no new-file-only seam exist, so no cut parallelizes. A prompt-vs-distill split adds a review, merge and live-test cycle for a one-paragraph change. Do not re-split this or the sibling role bundles (#285, #287); the per-role bundle is the bottom of the split.

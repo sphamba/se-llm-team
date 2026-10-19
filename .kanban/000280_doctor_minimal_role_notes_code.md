@@ -1,8 +1,8 @@
 ---
 name: "fix: doctor notes contract in prompt, config and starter"
 priority: "high"
-state: "to-do"
-worktree: ""
+state: "doing"
+worktree: "fix/280-doctor-minimal-role-notes-code"
 issuer: "#279"
 complexity: "moderate"
 shortName: "doctor-minimal-role-notes-code"
