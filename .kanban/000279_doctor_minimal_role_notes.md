@@ -1,54 +1,38 @@
 ---
 name: "fix: doctor keeps AGENTS role notes minimal and generic"
 priority: "high"
-state: "to-do"
+state: "backlog"
 worktree: ""
 issuer: "user"
-complexity: "moderate"
+complexity: "simple"
 shortName: "doctor-minimal-role-notes"
+blockedBy: "#280, #281"
 ---
 
 # Summary
-The doctor's prompt and implementation let .kanban/AGENTS.<role>.md grow unboundedly (live-tester is 98 KB). Fix: a written rule of max 20 bullets (configurable) rendered into the doctor prompt, full rewrite each doctor run, task-agnostic content only, dropped specifics deleted, the doctor as sole ongoing writer (role prompts forbid agents from editing the file), a new minimal starter, and a one-time distill reset of this repo's five role notes files.
+Verification-only parent for #280 (code: doctor prompt contract, roles.doctor.maxNotesBullets wiring, starter) and #281 (content: role prompt prohibitions, one-time distill of the five .kanban/AGENTS.*.md files). Verify the whole role-notes contract (max 20 bullets default 20, task-agnostic, doctor sole writer) once both pieces have landed.
 
 # Specs
-# Need
+# Verification
 
-The doctor (second pass of the post-run analysis) revises .kanban/AGENTS.<role>.md after every successful agent run, but nothing bounds the file's size or genericity: its prompt says only "compact it each run by merging duplicate guidance", the doctor must discover the file's size itself, role agents append to it during runs (all five shipped role prompts instruct it), and no cap exists anywhere. Result in this repo: AGENTS.live-tester.md 98,311 bytes / 239 lines, AGENTS.developer.md 56,623 bytes / 137 lines, AGENTS.reviewer.md 20,921, AGENTS.splitter.md 10,856, AGENTS.merger.md 2,163 — mostly append-only task-numbered war stories, measured one-task values and self-admitted stale notes. Every future spawn of these roles pays for this in tokens and can be misled by other tasks' specifics.
-
-# Decisions (grill-me interview 2026-10-19, all settled with the user)
-
-- Size bar: a written rule of at most 20 top-level bullets per role notes file. The number is configurable, default 20 (suggested config key roles.doctor.maxNotesBullets; exact placement idiomatic, developer's call).
-- Content bar: task-agnostic only. Allowed: durable repo knowledge (directory structure, build/test recipes, general shell traps, workflow tips). Dropped: anything task-specific (task-number citations #NNN, per-task recipes, measured per-task values, incident logs / war stories).
-- Dropped content: deleted outright, never archived (agent logs and .analysis.md reports remain the record).
-- Update model: the doctor fully rewrites the file every doctor run under both bars. No append discipline.
-- Enforcement: prompt rule only. The cap number is rendered into the doctor prompt from config; no orchestrator-side trim, no fail-and-retry.
-- Writers: the doctor is the sole ongoing writer of .kanban/AGENTS.<role>.md. Role agents must NOT modify their notes file. ensureRoleNotes keeps its one-time starter write when the file is missing.
-- One-time reset: this task distills this repo's five .kanban/AGENTS.*.md files to the new form.
-- Starter: the ensureRoleNotes starter text changes to state the new contract.
-- Splitter inline-injection E2BIG hardening (the uncapped pi --append-system-prompt path for role notes): OUT OF SCOPE, noted hazard only.
-
-# Changes
-
-1. agents/doctor.md — rewrite the role-file instruction paragraph: full rewrite authority each run; at most {{maxNotesBullets}} top-level bullets; keep only durable, task-agnostic guidance for the role (repo structure, build/test recipes, general traps); delete task-specific material outright, never archive; keep valid markdown. The no-roleFile behavior is unchanged (report only, write nothing).
-2. src/efficiency-analysis.ts (and the opts path feeding doctorPrompt) — read the configurable cap (default 20) and substitute it into the doctor prompt. renderTemplate leaves unknown placeholders literal, so wire the new placeholder properly. Update the shipped-prompt byte literal in tests/efficiency-analysis/doctor.test.ts, extend prompts.test.ts substitution coverage, and add a test for the config knob (default 20 and an override).
-3. agents/developer.md, agents/reviewer.md, agents/live-tester.md, agents/merger.md, agents/splitter.md — replace every sentence instructing the agent to edit or append the notes file with an explicit prohibition: the notes file is read-only for the role agent, the doctor maintains it. The splitter wording covers its inline-injection path (no AGENTS.md symlink in cwd).
-4. src/orchestrator/spawn.ts ensureRoleNotes — new starter text stating the contract, e.g. "# <role>: project guidance for future agents of this role. The doctor rewrites this file after every run; keep at most <N> durable, task-agnostic bullets (repo structure, build/test tips). Never edit this file as the role agent." Update any test that pins the starter.
-5. One-time reset in this checkout — distill each of .kanban/AGENTS.developer.md, AGENTS.live-tester.md, AGENTS.merger.md, AGENTS.reviewer.md, AGENTS.splitter.md to: at most 20 durable, task-agnostic bullets (repo map, build/test recipes, general traps); drop task numbers, per-task recipes, measured values, stale sections and the live-tester's in-file append-discipline header. Useful durable guidance survives; specifics die.
-
-# Constraints
-
-- Concurrent analyses may rewrite the file concurrently; last write wins, no locking (accepted: a lost rewrite is redone next run).
-- The doctor keeps reading the role file with its own tools; no file content injected into the prompt.
-- Grep the suites for byte-pins of any shipped prompt before rewording it (doctor.test.ts pins agents/doctor.md bytes).
-- Do not touch the splitter inline-injection byte cap.
-
-# Acceptance criteria (checkable)
+Verification-only parent: #280 lands the code half (agents/doctor.md contract rewrite, roles.doctor.maxNotesBullets wiring with default 20, ensureRoleNotes starter), #281 lands the content half (five role prompt prohibitions, one-time distill of the five .kanban/AGENTS.*.md files). Check the end-to-end contract once both land:
 
 - npm test passes (full suite).
-- tests/efficiency-analysis: updated doctor prompt pins pass; a test asserts the rendered doctor prompt carries the cap sentence with the configured number (default 20, plus an override via roles.doctor.maxNotesBullets).
-- grep over agents/*.md shows no sentence instructing role agents to edit/append their notes file; each of the five carries the prohibition.
-- In this checkout, each of the five .kanban/AGENTS.*.md files: bullet lines (grep -cE '^[[:space:]]*(-|\*|[0-9]+\.) ') at most 20, zero '#[0-9]' task citations, size at most 8192 bytes.
+- A test asserts the rendered doctor prompt carries the cap sentence with the configured number (default 20, plus an override via roles.doctor.maxNotesBullets).
 - ensureRoleNotes writes the new starter text for a missing file (unit assertion).
+- grep over agents/developer.md, agents/reviewer.md, agents/live-tester.md, agents/merger.md, agents/splitter.md shows no sentence instructing the role agent to edit or append its notes file; each of the five carries the read-only/doctor-maintains prohibition.
+- Each of the five .kanban/AGENTS.*.md files: bullet lines (grep -cE '^[[:space:]]*(-|\*|[0-9]+\.) ') at most 20, zero '#[0-9]' task citations, size at most 8192 bytes.
+- The splitter inline-injection byte cap is untouched.
 
 # Notes
+- Blocked: #280 (code) and #281 (content) are both in state to-do on the board, and main == HEAD (5bd5079) with no commits above the merge base, so neither half has landed. No code changes made: this is the verification-only parent.
+- Baseline scoped runs at this base, all exit 0: tests/efficiency-analysis/doctor.test.ts, tests/efficiency-analysis/prompts.test.ts, tests/orchestrator/spawn.test.ts.
+- Contract absent at this base, evidence:
+  - grep maxNotesBullets over src, tests and agents: no hits. agents/doctor.md carries no notes-cap sentence.
+  - src/orchestrator/spawn.ts:29-35 ensureRoleNotes still writes the old "append project-specific guidance" starter.
+  - Role prompts still instruct note edits: agents/developer.md:24 and agents/splitter.md:13.
+  - .kanban/AGENTS.*.md against the target (<= 8192 bytes, <= 20 bullet lines, 0 #[0-9] citations), measured through the worktree symlink as bytes/bullets/cites: developer 56623/104/52, live-tester 98311/165/452, reviewer 20921/67/0, splitter 11473/29/7, merger 2163/5/0.
+- Re-run this verification after #280 and #281 merge.
+
+# Open questions
+- Assumption: the five role-notes targets are the main-checkout .kanban/AGENTS.{developer,reviewer,live-tester,merger,splitter}.md files, read through the worktree symlink for the size and bullet counts above.

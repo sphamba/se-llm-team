@@ -1,7 +1,7 @@
 ---
 name: "fix: role prompt prohibitions and one-time notes distill"
 priority: "high"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "#279"
 complexity: "moderate"

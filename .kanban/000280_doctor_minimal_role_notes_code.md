@@ -1,7 +1,7 @@
 ---
 name: "fix: doctor notes contract in prompt, config and starter"
 priority: "high"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "#279"
 complexity: "moderate"
