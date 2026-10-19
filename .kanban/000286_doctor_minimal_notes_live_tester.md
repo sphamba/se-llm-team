@@ -1,8 +1,8 @@
 ---
 name: "fix: live-tester role prompt prohibition and notes distill"
 priority: "high"
-state: "live-testing"
-worktree: "fix/286-doctor-minimal-notes-live-tester"
+state: "done"
+worktree: ""
 issuer: "#281"
 complexity: "moderate"
 shortName: "doctor-minimal-notes-live-tester"
@@ -63,3 +63,24 @@ The .kanban/AGENTS.*.md files are shared board files (untracked, mirrored by the
 - Done (2026-10-19, commit 4145b49): verified the on-disk distill instead of redoing it. Between the 21:55 snapshot in the older note (10288 bytes) and this check, the file was trimmed again (mtime 22:01): 8187 bytes, 19 bullet lines, 0 task citations, so all three mechanical checks pass. Kernel verification against `git show 5531b6c` (98311 bytes): sections map cleanly (Codebase map absorbs the Orchestrator flow map; Canonical fixtures absorb Fixture shapes plus Canonical recipes; Report and board hygiene absorbs Real-board daemon hygiene), per-task recipes and the in-file append-discipline header are dropped, and 10 distinctive-phrase spot checks all trace to the original. No rewrite needed; touching it again would only risk clobbering a parallel trim. agents/live-tester.md paragraph replaced per spec, wording mirrored from the already-landed developer-prompt edit (98be333). Acceptance greps: 0 matches for the old sentence, doctor named as maintainer and file read-only for the role.
 
 - Review (2026-10-19, no fixes): prompt paragraph verified at agents/live-tester.md:17, the only diff hunk (1+/1-); old sentence 0 matches, new wording mirrors 98be333 verbatim (doctor named as maintainer, file read-only for the role agent, findings redirected to the task # Notes); commit 4145b49 carries only agents/live-tester.md, nothing under .kanban/ committed, hard boundary held (no doctor.md, analyst.md, src/ or tests/ touches). On-disk distill re-checked after the parallel-session warning and matches the Done record: 19 bullets (cap 20), grep -c '#[0-9]' 0, wc -c 8187 (cap 8192); original blob 5531b6c confirmed 98311 bytes. Tests: tests/plugin.test.ts exit 0 (total 1 suite, +0 from the diff; spec forbids test changes, acceptance is grep-based).
+
+## Live test (2026-10-19)
+
+- Merge identity: the Notes name no merge hashes for a `git show --stat <h1> <h2>` check, and the Done record names 4145b49, which is HEAD at task start. The root checkout `main` is also at 4145b49, so a pi session probe loads the merged prompt. The commit carries only `agents/live-tester.md` (1 file, +1/-1).
+
+- Usage test 1, real spawn path without the daemon. I called the merged `spawnAgent(root, cfg, "live-tester", task, worktreeCwd)` on a fixture with the real task-worktree shape, that is, a root repo, `.worktrees/fixture-task`, the `.kanban` link that `syncBoard` creates, and a copy of the real board notes. A fake pi agent logged argv and cwd. Check script tally: 22 PASS, 0 FAIL.
+  - The fake agent received `--approve --mode json ... -p <payload>`. The payload is byte-equal to `agents/live-tester.md` with `{{logStallMinutes}}` filled with the configured 60 minutes (S4).
+  - The payload carries the new sentence "That file is read-only for you: never edit it, never append to it.", names the doctor as maintainer, and redirects task-specific findings to the task file `# Notes`. Both old permission phrases are absent (S5 to S8).
+  - The worktree cwd `AGENTS.md` is a symlink to `.kanban/AGENTS.live-tester.md`, and the content that pi loads through it is byte-identical to the real board distill (S11, S12). The run log and the exit file appear as usual (S13, S14).
+
+- Usage test 2, a real pi session with the shipped prompt. One session ran with `pi -p --no-session --no-context-files --approve --no-mcp --thinking minimal` in a probe fixture whose `AGENTS.md` points at a copy of the real notes file. The agent made 4 tool calls (reads and one memory write) and 0 file edits. Both fixture files are md5-unchanged. It read SPECS.md, stated "AGENTS.md is doctor-maintained and read-only for me", saved the durable lesson to the repo Hindsight memory, and left the notes file and the task file alone.
+
+- Usage test 3, the notes file as the agent loads it. `wc -c` is 8187 (cap 8192), bullet lines are 19 (cap 20), the `#[0-9]` count is 0, the append-discipline header is absent, the markdown is valid (one H1 and six H2 sections), and the durable kernel is intact (run order, codebase map, canonical fixtures, Playwright discipline, shell traps, report and board hygiene).
+
+- Acceptance greps at the repo root. `grep -n "Edit it for project-specific" agents/live-tester.md` has no matches. "read-only for you" and "doctor maintains it" each match once.
+
+- Assumptions. (a) HEAD at task start is the merge, because the Notes name no merge hashes and the Done hash 4145b49 equals HEAD. (b) The spawn test calls `spawnAgent` directly with role `live-tester` and a worktree cwd, one layer below the pipeline sweep, because the diff does not touch the state machine. (c) The fixture copies the real board notes file, so the loaded content is the delivered artifact. (d) The pi probe uses `--no-context-files` per the role recipe, so the observed choices come from the `-p` payload.
+
+- Technical difficulty while testing. My first fixture worktree had no `.kanban` symlink, so the cwd `AGENTS.md` did not resolve and the read failed with ENOENT. The real pipeline creates that link in `syncBoard` (`src/orchestrator/board.ts`). I added it to the fixture and reran. This is a fixture gap and not a product defect.
+
+- Observation, not a defect. The new wording redirects task-specific findings only. A task-agnostic lesson has no named destination, so the probe agent used the repo Hindsight memory. The Specs do not forbid this, and the notes file stayed untouched. No behavior contradicted the task's stated assumptions.
