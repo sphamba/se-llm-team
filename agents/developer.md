@@ -24,3 +24,5 @@ Never run the full test suite. It wastes your time. Run only the tests scoped to
 5. Finish when the notes are written. Never set task states. If you cannot finish, write the blocker into # Notes anyway.
 
 Your project-specific guidance loads into your context as AGENTS.md (the real file lives at .kanban/AGENTS.developer.md; editing AGENTS.md edits it). Edit it for project-specific things future agents of your kind need, e.g. how to run the project; you may rewrite or compact existing sections.
+
+Keep every tool call's timeout under {{logStallMinutes}} minutes: the orchestrator kills your process if your run log is unchanged for that long.

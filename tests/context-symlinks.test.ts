@@ -230,7 +230,7 @@ assert.ok(!readFileSync(join(kanbanDir(root4), ".logs", "orchestrator.log"), "ut
 console.log("context-symlinks.test.ts: part CS4 passed (real AGENTS.md survives)");
 
 // --- part CS5: the developer prompt forbids committing the context symlinks ---
-const devPrompt = renderPrompt(root1, "developer");
+const devPrompt = renderPrompt(root1, "developer", 60);
 assert.ok(devPrompt.includes("Never commit AGENTS.md or SPECS.md"), "the developer prompt forbids committing the context symlinks");
 assert.ok(devPrompt.includes("Work only here, in the worktree you run in"), "the prompt-scope rule stays");
 console.log("context-symlinks.test.ts: part CS5 passed (developer prompt)");

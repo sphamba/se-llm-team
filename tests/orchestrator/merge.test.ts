@@ -438,11 +438,12 @@ assert.ok(promptAL.includes("git branch --show-current"), "the merger resolves i
 assert.ok(promptAL.includes("SPECS.md"), "the prompt names the cwd task file symlink");
 // the reviewer prompt: step 2 resolves the base branch from the project root checkout (the
 // one remaining {{ROOT}} use), no hardcoded main, and no absolute task-file or worktree path
-const promptRev = renderPrompt(rootAL, "reviewer");
+const promptRev = renderPrompt(rootAL, "reviewer", 60);
 assert.ok(promptRev.includes(`git -C ${rootAL} branch --show-current`), "the reviewer resolves the base branch from the project root checkout");
 assert.ok(!promptRev.includes("git diff main"), "the reviewer diffs no hardcoded main");
 assert.ok(!promptRev.includes(join(rootAL, ".kanban")) && !promptRev.includes(".worktrees"), "no absolute task-file or worktree path survives rendering");
 assert.ok(!promptRev.includes("{{"), "no placeholder survives rendering");
+assert.ok(promptRev.includes("under 60 minutes"), "the reviewer prompt carries the configured stall window");
 assert.ok(promptRev.includes("SPECS.md"), "the prompt names the cwd task file symlink");
 console.log("orchestrator.test.ts: ... + merger prompt conflict-only smoke passed");
 

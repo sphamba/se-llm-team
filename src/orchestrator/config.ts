@@ -10,7 +10,7 @@ const DEFAULT_BACKLOG_IDLE_MINUTES = 1;
 // per-task retry cooldown: failed-merge retry, respawn past the 5-death cap
 const DEFAULT_RETRY_IDLE_MINUTES = 1;
 // minutes a working agent's log may keep its size before the agent is assumed dead
-const DEFAULT_LOG_STALL_MINUTES = 10;
+const DEFAULT_LOG_STALL_MINUTES = 60;
 // global parallelism cap: tasks in a working state (doing, reviewing, merging, live-testing)
 // at once; 0 disables the cap
 const DEFAULT_MAX_PARALLEL = 0;

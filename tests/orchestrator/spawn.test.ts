@@ -434,6 +434,7 @@ appendFileSync(${JSON.stringify(join(rootAY, "argv.log"))}, JSON.stringify({ arg
 	const a = aySpawn.argv.slice(2);
 	assert.equal(a[0], "-p", "the prompt travels as the -p positional");
 	assert.ok(a[1].includes("Developer agent"), "the -p prompt is the role prompt");
+	assert.ok(a[1].includes("under 60 minutes"), "the developer prompt names the configured stall window");
 	for (const flag of ["--approve", "--mode", "--thinking", "--provider", "--append-system-prompt"]) assert.equal(a.indexOf(flag), -1, `${flag} stays out of the claude spawn argv`);
 	assert.deepEqual(a.slice(a.indexOf("--permission-mode"), a.indexOf("--permission-mode") + 2), ["--permission-mode", "bypassPermissions"]);
 	assert.deepEqual(a.slice(a.indexOf("--output-format"), a.indexOf("--output-format") + 2), ["--output-format", "stream-json"]);

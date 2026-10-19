@@ -11,13 +11,15 @@ import { log, logPath, nextRunIndex } from "./log.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-export function renderPrompt(root: string, role: string): string {
+export function renderPrompt(root: string, role: string, logStallMinutes: number): string {
 	// the agents dir sits two levels up from src/orchestrator/
 	let prompt = readFileSync(join(HERE, "..", "..", "agents", `${role}.md`), "utf8");
 	// the reviewer's base-branch resolution is the one remaining {{ROOT}} use: it diffs against
 	// the branch the project root checkout has checked out. The other roles carry no absolute
 	// path: the cwd SPECS.md and AGENTS.md symlinks give them the task and the role notes
 	if (role === "reviewer") prompt = prompt.replaceAll("{{ROOT}}", root);
+	// every role that names the stall window carries the daemon's configured minutes
+	prompt = prompt.replaceAll("{{logStallMinutes}}", String(logStallMinutes));
 	return prompt;
 }
 // per-role project notes: .kanban/AGENTS.<role>.md, created when missing with a one-line
@@ -222,7 +224,7 @@ export function spawnAgent(root: string, cfg: Config, role: string, task: Task, 
 	// --append-system-prompt), claude swaps in bypassPermissions and stream-json and carries
 	// the system prompt as one file ref
 	const llm = resolveLlm(root, cfg, role, task.complexity ?? "moderate");
-	const prompt = renderPrompt(root, role);
+	const prompt = renderPrompt(root, role, cfg.logStallMinutes);
 	const agentArgs = cfg.backend === "claude"
 		? claudeSpawnArgs(llm, prompt, claudeSystemPromptFile(root, name, role, projectPrompt))
 		: piSpawnArgs(llm, piPrompt, prompt);

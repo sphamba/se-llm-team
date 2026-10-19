@@ -163,7 +163,7 @@ assert.deepEqual(llmArgs(yDev.argv), [], "bad config values add no flags");
 y.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + bad llm config smoke passed");
 
-// --- part AP: the logStallMinutes config: a missing key keeps the default 10, a configured
+// --- part AP: the logStallMinutes config: a missing key keeps the default 60, a configured
 // value applies, an invalid value warns and keeps 10. loadConfig runs directly; the empty
 // temp HOME keeps the ambient user-level config out ---
 const rootAP = fixture();
@@ -174,13 +174,13 @@ mkdirSync(kanbanDir(rootAP), { recursive: true });
 const savedHomeAP = process.env.HOME;
 process.env.HOME = homeAP;
 try {
-	assert.equal(loadConfig(rootAP).logStallMinutes, 10, "a missing logStallMinutes key keeps the default 10");
+	assert.equal(loadConfig(rootAP).logStallMinutes, 60, "a missing logStallMinutes key keeps the default 60");
 	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ logStallMinutes: 0.05, backlogIdleMinutes: 0 }));
 	assert.equal(loadConfig(rootAP).logStallMinutes, 0.05, "a configured logStallMinutes applies");
 	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ logStallMinutes: "banana", backlogIdleMinutes: 0 }));
-	assert.equal(loadConfig(rootAP).logStallMinutes, 10, "a non-number logStallMinutes keeps 10");
+	assert.equal(loadConfig(rootAP).logStallMinutes, 60, "a non-number logStallMinutes keeps 60");
 	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ logStallMinutes: 0, backlogIdleMinutes: 0 }));
-	assert.equal(loadConfig(rootAP).logStallMinutes, 10, "logStallMinutes <= 0 keeps 10");
+	assert.equal(loadConfig(rootAP).logStallMinutes, 60, "logStallMinutes <= 0 keeps 60");
 	// roles.analyst.concurrency: a valid positive integer applies, an invalid value warns
 	// and stays unset, so the module default of 8 applies
 	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyst: { concurrency: 4 } } }));
