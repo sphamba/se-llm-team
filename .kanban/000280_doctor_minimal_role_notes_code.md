@@ -1,8 +1,8 @@
 ---
 name: "fix: doctor notes contract in prompt, config and starter"
 priority: "high"
-state: "live-testing"
-worktree: "fix/280-doctor-minimal-role-notes-code"
+state: "done"
+worktree: ""
 issuer: "#279"
 complexity: "moderate"
 shortName: "doctor-minimal-role-notes-code"
@@ -57,6 +57,19 @@ Do NOT touch: agents/developer.md, agents/reviewer.md, agents/live-tester.md, ag
 - src/orchestrator/spawn.ts starter now states the contract (doctor rewrites after every run, durable task-agnostic bullets, role agent never edits). Deliberate: the starter carries no bullet count, because the cap governs the doctor's rewrite and already travels in the doctor prompt; a number in the starter could contradict a configured cap until the first rewrite.
 - Coverage note: config.test.ts part AR runs the real analysis runner end to end (node src/analysis-run.ts with a stub agent, HOME isolated) and asserts the rendered doctor prompt carries "at most 20" with no config key and "at most 7" with roles.doctor.maxNotesBullets: 7. prompts.test.ts covers the option path (default 20, override 7). The tools.ts call site passes the identical expression as analysis-run.ts and has no dedicated end-to-end test (the real-spawn tool path cannot be stubbed in-process); covered by review only.
 - Commit: 195b440 in this worktree.
+
+## Live test (2026-10-19)
+
+- Scope: the doctor prompt contract and cap, the roles.doctor.maxNotesBullets parse, and the ensureRoleNotes starter. Real paths only: node src/analysis-run.ts (the argv the pipeline spawns after a finished run) and the MCP tool efficiency_analysis through node src/mcp.ts. A stub agent logged each argv and acted both passes. Fixture in /tmp/lt280.
+- Doctor prompt, no config key: 12/12 checks. The prompt carries "keep at most 20 top-level bullets", no literal {{maxNotesBullets}}, no unresolved placeholder, the full-rewrite, durable, and delete-outright rules, the unchanged no-roleFile sentence, and the absolute roleFile path.
+- Doctor prompt, roles.doctor.maxNotesBullets: 7: 12/12 checks. The prompt carries "at most 7".
+- Invalid value 0: the warning "invalid roles.doctor.maxNotesBullets 0, ignored (expected a positive integer)" appears in stdout and in .kanban/.logs/orchestrator.log, and the prompt falls back to 20. 12/12 checks.
+- MCP tool path: the knob reaches the doctor prompt there too ("at most 7", 12/12). That path passes no role or roleFile, so its doctor stays report-only. This is pre-existing behavior, not part of the change.
+- Starter: on a missing .kanban/AGENTS.developer.md the runner writes the one-line starter with the role header and all three contract elements. 6/6 checks.
+- Constraints: a 30-bullet role file stays byte-identical after the run (no orchestrator-side trim), and the prompt holds no role-file content and no starter text. 3/3 checks.
+- Technical difficulty: the first MCP attempt failed with "ENOENT ... agents/analyst.md" because the fixture project root had no agents/ dir. The tool path reads the prompt templates from the project root (ctx.cwd), unlike analysis-run which passes the package root. A fixture symlink to the checkout agents/ fixed it. Pre-existing behavior, out of scope.
+- Assumption: the stub agent cannot show whether a real doctor obeys the cap at rewrite time. The Specs acceptance names only the rendered prompt and the starter, so the test checks those.
+- No product findings.
 
 ## Review (195b440, re-review)
 - All five Changes settle from the diff: doctor.md final paragraph carries full-rewrite-each-run + {{maxNotesBullets}} cap + durable-task-agnostic-only + delete-outright-never-archive with the no-roleFile wording untouched (agents/doctor.md:8); AnalyseOptions.maxNotesBullets, default 20 in analyseLog, rendered into the values map (src/efficiency-analysis.ts:46,378,397,554); roles.doctor.maxNotesBullets parsed like the other per-role numbers, invalid warns and stays unset (src/orchestrator/config.ts:137-144); both analyseLog call sites pass cfg.roles.doctor?.maxNotesBullets (src/analysis-run.ts:38, src/tools.ts:336); ensureRoleNotes starter states all three contract elements (src/orchestrator/spawn.ts:31).
