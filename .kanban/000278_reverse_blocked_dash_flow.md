@@ -1,7 +1,7 @@
 ---
 name: "feat: reverse dash flow on blocked-task board links"
 priority: "low"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "user"
 complexity: "simple"

@@ -1,8 +1,8 @@
 ---
 name: "fix: 60-minute stall window and prompt sentences about tool-call timeouts"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/277-stall-window-60"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "stall-window-60"
