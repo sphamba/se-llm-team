@@ -1,8 +1,8 @@
 ---
 name: "fix: reviewer, merger and splitter prompt prohibitions and notes distills"
 priority: "high"
-state: "reviewing"
-worktree: "fix/287-doctor-minimal-notes-reviewer-group"
+state: "done"
+worktree: ""
 issuer: "#281"
 complexity: "simple"
 shortName: "doctor-minimal-notes-reviewer-group"
@@ -61,5 +61,22 @@ The .kanban/AGENTS.*.md files are shared board files (untracked, mirrored by the
 - Scoped check: `node tests/plugin.test.ts` exit 0 ("all assertions passed"). It is the only suite that covers agents/*.md; no test changes were needed.
 - Deliverable commit: 504a083, three files changed, one paragraph each. Nothing under src/, tests/, agents/doctor.md or agents/analyst.md changed.
 
-# Open questions
-- Assumption: the merger notes file satisfies "at most 20 bullet lines" as prose sections with 0 bullet lines; re-bullet it if the verifier reads the cap as demanding bullets.
+- Review (first review): total 2, +0 from the diff; all requirements pass, no fixes.
+- Prompt prohibitions verified against 504a083: agents/reviewer.md:23, agents/merger.md:19, agents/splitter.md:15 each name the doctor as maintainer, mark the notes file read-only for the role agent and redirect durable guidance to the task's # Notes; the splitter paragraph keeps the inline-injection path (no AGENTS.md symlink in cwd, notes ride the appended system prompt). Acceptance grep for the old wording returns no matches (exit 1).
+- Distill caps at review time: .kanban/AGENTS.reviewer.md 7848 B / 19 bullet lines / 0 citations, .kanban/AGENTS.merger.md 2262 B / 0 bullet lines (prose sections) / 0 citations, .kanban/AGENTS.splitter.md 6246 B / 10 bullet lines / 0 citations, all within the <=8192 B, <=20 bullet, 0-citation contract. Content is durable task-agnostic guidance: rules kept, war stories and task numbers gone; the splitter notes keep the prompt+notes-bundle pattern and the current tests/webui/ per-area layout.
+- Claim checks: 9673b45 confirms the splitter-notes layout correction (tests/webui.test.ts dropped, tests/webui/ area files added); no doctor rewrite landed after the developer's trim (reviewer file still 7848 B). Deliverable touches exactly the three owned agents/*.md, one paragraph each; no src/, tests/, doctor or analyst files.
+- Test union = tests/plugin.test.ts (coverage map: agents/*.md → plugin only; no test files in the diff): exit 0, all assertions passed. The spec's "no test changes" line holds: content-only prompt edits, no behavior change to cover.
+- Open question settled by the Specs: the bullet cap is an upper bound measured by grep -cE, so the merger file's 0 prose-section bullets satisfy "at most 20"; assumption holds, question removed.
+
+## Live test (2026-10-19)
+
+- Lane: daemon end-to-end with a fake agent (scratch bare origin, fresh clone at /tmp/lt287/root, isolated HOME, three fixture tasks) plus grep checks on the shipped board notes. Checker /tmp/lt287/check.mjs, tally 35 passed, 1 failed.
+- The merge is commit b4aa9f6 (the deliverable 504a083 rebased). Both carry the same 3-file, one-paragraph diff over agents/reviewer.md, agents/merger.md and agents/splitter.md.
+- The live prompts match the shipped files. The daemon shipped the reviewer (2678 B), merger (2730 B) and splitter (2367 B) prompts equal to the merged agents/*.md with the {{ROOT}} and {{logStallMinutes}} substitutions.
+- Each live prompt names the doctor as the notes-file maintainer, marks the file read-only for the role agent and sends durable guidance to the task's # Notes. The old wording ("Edit it for project-specific", "append what future agents") is absent, and the file-level acceptance grep returns no matches (exit 1).
+- The splitter inline-injection path holds live. The cwd is the project root, no AGENTS.md symlink is present, and the splitter notes ride the appended system prompt byte-exact (6246 B).
+- The reviewer and the merger reach their notes through the cwd AGENTS.md symlink (.kanban/AGENTS.reviewer.md and .kanban/AGENTS.merger.md) at the real worktree spawns, with the project AGENTS.md as the appended system prompt.
+- Finding: the shipped .kanban/AGENTS.reviewer.md is 8701 bytes (mtime 2026-10-19 22:27:52, sha 7445e45f5bba), over the task's 8192-byte cap. It stayed at 19 bullet lines and 0 citations. The other two files pass at report time (merger 2262 B / 0 bullets / 0 citations, splitter 6246 B / 10 bullets / 0 citations).
+- The reviewer notes breach comes from a sibling doctor rewrite after the review. The review-time value was 7848 B. The task Notes predicted this hazard, because the running daemon still holds the old doctor prompt, which has no byte cap before the code change of task 280. The file violates the byte bound only, never the bullet or the citation bound.
+- Assumptions: (1) the merged worktree checkout runs the daemon, so agents/*.md come from commit b4aa9f6. (2) The fixture copied the real shared-board notes files, so the delivery checks use the shipped content, and the source shas match the report-time shas. (3) "Read-only" is a prompt-level prohibition, and I verified the shipped wording, never an OS-level enforcement. (4) The fixture tasks are untracked and scoped to /tmp/lt287, so no real board task was touched.
+- No technical difficulty blocked a flow. The daemon log confirms the three spawns: reviewer for 000101, merger for 000102 after a real rebase conflict, splitter for 000103.

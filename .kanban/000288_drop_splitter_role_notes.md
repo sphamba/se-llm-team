@@ -1,12 +1,12 @@
 ---
 name: "fix: eliminate AGENTS.splitter.md; splitter runs on root AGENTS.md"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/288-drop-splitter-role-notes"
 issuer: "user"
 complexity: "simple"
 shortName: "drop-splitter-role-notes"
-blockedBy: "#280, #287"
+blockedBy: ""
 ---
 
 # Summary

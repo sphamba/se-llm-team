@@ -6,7 +6,7 @@ worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "doctor-minimal-role-notes"
-blockedBy: "#281"
+blockedBy: ""
 ---
 
 # Summary
