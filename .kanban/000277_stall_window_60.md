@@ -1,8 +1,8 @@
 ---
 name: "fix: 60-minute stall window and prompt sentences about tool-call timeouts"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "live-testing"
+worktree: "fix/277-stall-window-60"
 issuer: "user"
 complexity: "simple"
 shortName: "stall-window-60"
@@ -35,3 +35,25 @@ Tests:
 Out of scope: the stall-kill mechanism itself, the config key shape (logStallMinutes stays settable), the dead-pid bounce path, and the splitter/merger/doctor/analyst prompts.
 
 # Notes
+
+- Default `DEFAULT_LOG_STALL_MINUTES` 10 -> 60 (src/orchestrator/config.ts) and the README config-table row. config.test.ts part AP now pins 60 for the missing key and both invalid values (the invalid-value warnings are unchanged).
+- renderPrompt (src/orchestrator/spawn.ts) gained a required `logStallMinutes` parameter and an unconditional `{{logStallMinutes}}` replaceAll; the spawn call site passes `cfg.logStallMinutes`. agents/developer.md, agents/reviewer.md and agents/live-tester.md each got: "Keep every tool call's timeout under {{logStallMinutes}} minutes: the orchestrator kills your process if your run log is unchanged for that long." Splitter, merger, doctor and analyst prompts untouched.
+- New asserts: merge.test.ts renders the reviewer prompt with 60 and asserts "under 60 minutes"; spawn.test.ts asserts the real spawned developer prompt carries "under 60 minutes"; context-symlinks.test.ts passes the third argument.
+- Tests written first and confirmed red (config.test.ts: 10 !== 60; merge.test.ts: the reviewer prompt carried no stall window), then green. Scoped suites per policy (not the full `pnpm test`): tests/orchestrator/config.test.ts, poll.test.ts, merge.test.ts, spawn.test.ts, tests/context-symlinks.test.ts all exit 0. Commit bd61285.
+
+- Review at bd61285: config.ts:13 default 60; the invalid-value fallback (:153-157) reads DEFAULT_LOG_STALL_MINUTES and the warning text is unchanged (config.test.ts:211-212 pins it). README config row updated. config.test.ts AP pins 60 for the missing key and both invalid values.
+- poll.test.ts: part AN (:167) and part AO (:283) both pass explicit windows (5 and 2) to poll(), so no stall scenario runs against the default; liveness.ts:144 interpolates stallMinutes, so no exact log-line string needed updating. The spec's "part AN runs against the default window" premise is stale; the deviation the former Open-questions bullet recorded is confirmed, no behavior change, suite green.
+- Part 2: the three prompts carry the stall sentence; renderPrompt (src/orchestrator/spawn.ts:14) replaces {{logStallMinutes}} unconditionally and the call site (:227) passes cfg.logStallMinutes; every renderPrompt caller carries the third argument (merge.test.ts:441, context-symlinks.test.ts:233, grep-settled). Splitter, merger, doctor and analyst prompts untouched.
+- New asserts: merge.test.ts:441-446 renders the reviewer prompt with 60 and asserts "under 60 minutes" (the existing no-placeholder check covers the new token); spawn.test.ts:437 asserts the real spawned developer prompt carries "under 60 minutes".
+- Tests: union of 14 suites green - 5 settled from Notes at bd61285 (config, poll, merge, spawn, context-symlinks), 9 run now, all exit 0 (analysis, hub, log, daemon, promote, singleton, split, sweep, worktree). No fixes.
+
+## Live test (2026-10-19)
+
+- Scope: daemon e2e with an isolated fixture (`/tmp/lt277`, log `/tmp/lt277/run.log`). The fake `agent` records each spawned role's prompt. Three phases, 20 checks, 0 failed.
+- Default window: the fixture root config has no `logStallMinutes` key. The developer (to-do), reviewer (to-review) and live-tester (to-live-test) rendered prompts each carry the exact sentence "Keep every tool call's timeout under 60 minutes: the orchestrator kills your process if your run log is unchanged for that long." and no `{{...}}` token survives (the reviewer's `{{ROOT}}` render included). This proves the 60-minute default reaches the prompt. The splitter prompt carries no stall sentence and no token. The README config row shows 60.
+- Configured window: with `"logStallMinutes": 2` in the root config, the rendered role prompts carry "under 2 minutes" and never the 60-minute sentence.
+- Invalid value: with `"logStallMinutes": -3` the daemon logs `logStallMinutes -3 ignored: must be a positive number of minutes` and the rendered developer prompt falls back to the 60-minute sentence.
+- The stall-kill mechanism itself is out of scope per the Specs, so no stall window was waited out.
+- Assumptions: the checks assert the shipped sentence (the Specs allow refined wording); the fixture pre-creates the to-live-test worktree branch at HEAD so the merged-branch gate passes; `pollMinutes` 0.05 and `--rescan-seconds 1` keep the run fast.
+- No findings and no technical difficulties.
+
