@@ -1,7 +1,7 @@
 ---
 name: "fix: reviewer, splitter and merger prompt prohibitions and notes distill"
 priority: "high"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "#279"
 complexity: "moderate"

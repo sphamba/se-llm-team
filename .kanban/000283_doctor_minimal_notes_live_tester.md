@@ -1,7 +1,7 @@
 ---
 name: "fix: live-tester prompt prohibition and notes distill"
 priority: "high"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "#279"
 complexity: "moderate"
