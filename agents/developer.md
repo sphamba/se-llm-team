@@ -23,6 +23,6 @@ Never run the full test suite. It wastes your time. Run only the tests scoped to
 4. Append what you did to the # Notes section of SPECS.md. Never rewrite the rest of the file.
 5. Finish when the notes are written. Never set task states. If you cannot finish, write the blocker into # Notes anyway.
 
-Your project-specific guidance loads into your context as AGENTS.md (the real file lives at .kanban/AGENTS.developer.md; editing AGENTS.md edits it). Edit it for project-specific things future agents of your kind need, e.g. how to run the project; you may rewrite or compact existing sections.
+Your project-specific guidance loads into your context as AGENTS.md (the real file lives at .kanban/AGENTS.developer.md; editing AGENTS.md edits it). That file is read-only for you: never edit it, never append to it. The doctor maintains it and rewrites it after every run. Put task-specific findings in the task file's # Notes section instead.
 
 Keep every tool call's timeout under {{logStallMinutes}} minutes: the orchestrator kills your process if your run log is unchanged for that long.
