@@ -1,7 +1,7 @@
 ---
 name: "fix: doctor keeps AGENTS role notes minimal and generic"
 priority: "high"
-state: "doing"
+state: "reviewing"
 worktree: "fix/279-doctor-minimal-role-notes"
 issuer: "user"
 complexity: "simple"
@@ -34,6 +34,12 @@ Verification-only parent. Landed: #280 (code half: doctor contract, maxNotesBull
   - Role prompts still instruct note edits: agents/developer.md:24 and agents/splitter.md:13.
   - .kanban/AGENTS.*.md against the target (<= 8192 bytes, <= 20 bullet lines, 0 #[0-9] citations), measured through the worktree symlink as bytes/bullets/cites: developer 56623/104/52, live-tester 98311/165/452, reviewer 20921/67/0, splitter 11473/29/7, merger 2163/5/0.
 - Re-run this verification after #280 and #281 merge.
+- Verification run 2026-10-19T20:42Z, blocked on #288: worktree fast-forwarded to main b4aa9f6, so the evidence below is main's landed state. Landed: #280 (a1681b3) and #281 subtasks #285/#286/#287 (98be333, 4145b49, b4aa9f6). Board: #280 done, #281 live-testing. #288 still doing: branch fix/288-drop-splitter-role-notes has commit 2249c88 (merge-base b4aa9f6, 6 files, not an ancestor of main); main lacks the guard (ensureRoleNotes still called for every role: spawn.ts:211, analysis-run.ts:27) and agents/splitter.md:15 still names .kanban/AGENTS.splitter.md.
+- Green at b4aa9f6, scoped suites run sequentially, all exit 0: tests/orchestrator/config.test.ts, tests/efficiency-analysis/doctor.test.ts, tests/efficiency-analysis/prompts.test.ts, tests/orchestrator/spawn.test.ts, tests/orchestrator/analysis.test.ts, tests/tools.test.ts.
+- Cap sentence: agents/doctor.md:8 renders "keep at most {{maxNotesBullets}} top-level bullets"; tests/orchestrator/config.test.ts part AR (lines 258-305) asserts default 20 and override 7 reach the rendered prompt, and config.test.ts:200-226 validates a positive integer and warns on 0/2.5. Starter unit assertion at tests/orchestrator/spawn.test.ts:279-281 (rewrite-each-run, durable task-agnostic bullets, never edit as role agent).
+- Role prompts: `grep -n "Edit it for project-specific\|append what future agents"` over the five agents/*.md files = no matches. developer:26, reviewer:23, live-tester:16, merger:19 carry the read-only/doctor-maintains prohibition. splitter:15 is pre-#288 (still names the notes file).
+- Notes files measured once at 20:42Z (bullets/cites/bytes/sha256 first 12 hex): developer 20/0/8861/745c6dfdc5f6, reviewer 19/0/8189/ab7c815417c6, live-tester 20/0/8182/365074fc234c, merger 0/0/2262/50595bf2c28a; all within the <=20-bullet and 0-citation bars. AGENTS.splitter.md absent. No notes size/byte rule in agents/doctor.md or the starter, so the 8-10 KB sizes are not a fail (settled 2026-10-19 decision).
+- Remaining for the post-#288 pass: full `npm test`, a splitter spawn does not recreate .kanban/AGENTS.splitter.md (needs the `role !== "splitter"` guards in 2249c88), and the splitter paragraph rewritten to name no notes file and forbid writing any AGENTS file. No code changes in this run; no commit (no-diff verification).
 
 # Open questions
 

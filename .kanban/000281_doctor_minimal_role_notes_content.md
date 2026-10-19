@@ -1,8 +1,8 @@
 ---
 name: "fix: role prompt prohibitions and one-time notes distill"
 priority: "high"
-state: "live-testing"
-worktree: "fix/281-doctor-minimal-role-notes-content"
+state: "done"
+worktree: ""
 issuer: "#279"
 complexity: "simple"
 shortName: "doctor-minimal-role-notes-content"
@@ -43,16 +43,17 @@ Verification parent for the content half of #279, split by role weight into thre
 - Check 1 note: "The doctor" starts a sentence in developer.md:26 and live-tester.md:16. Reviewer, merger and splitter write "the doctor" after a colon. The meaning is the same, and the corrected check is case-insensitive.
 - Delivery PASS (`renderPrompt`, merged checkout): 26 of 26 assertions pass for the five roles. Every rendered payload carries the prohibition, names its own AGENTS.<role>.md file and the doctor, keeps the old edit instruction out, and leaves no `{{` placeholder. Payload sizes: developer 2355 B, reviewer 2692 B, live-tester 2445 B, merger 2730 B, splitter 2367 B.
 - Check 3 PASS: the union of the files touched by 98be333, 4145b49 and b4aa9f6 is exactly the five agents/*.md files. No agents/doctor.md, src/ or tests/ file is in the content commits. `git status --porcelain -- agents src tests` is empty.
-- Check 2 PARTIAL (one measurement batch, mtimes and sha256 recorded): bullets and task-number citations pass for the four present files, and the 8192-byte cap fails for two files.
-  - developer: bullets 20, cites 0, bytes 8861, mtime 22:36:54, sha 745c6dfdc5f6. FAIL bytes.
-  - reviewer: bullets 19, cites 0, bytes 8701, mtime 22:27:52, sha 7445e45f5bba. FAIL bytes.
-  - live-tester: bullets 17, cites 0, bytes 8190, mtime 22:32:07, sha 58f6fd7a697f. ok.
-  - merger: bullets 0, cites 0, bytes 2262, mtime 21:59:32, sha 50595bf2c28a. ok.
-  - splitter: file missing at 22:40:34. It was present at 22:37 (sha b9fbcc6044fb, mtime 22:03:10). Sibling #288 (drop splitter role notes, state doing) owns that deletion, and the recorded forward risk predicted it. The splitter leg is not measurable now, and it is not a #281 failure.
-- Rerun at 22:43 printed `TALLY check-content PASS=12 FAIL=1 SKIP=1`. Doctor rewrites at 22:41:16 and 22:42:29 moved reviewer (8701 -> 8189 B, sha ab7c815417c6) and live-tester (8190 -> 8182 B, sha 365074fc234c) back under the cap, while developer stayed at 8861 B. The byte criterion is not stable, and the wobble matches the recorded finding.
-- Script tallies verbatim: `TALLY check-content PASS=11 FAIL=2 SKIP=1` and `TALLY check-delivery PASS=26 FAIL=0`. The first run of check-content reported PASS=8 FAIL=6: three FAILs were case-sensitive doctor-phrase matches and three were integer errors on the missing file. The corrected script reports the tallies above, so the first run is a script bug, not a product result.
-- Root cause of the byte drift re-confirmed in the shipped files: agents/doctor.md caps only `{{maxNotesBullets}}` top-level bullets and has no byte rule. src/ has no role-notes byte cap (the only 8192 hit is the unrelated webui SCAN_WINDOW=81920). The byte cap is a one-time-distill gate, and the doctor rewrites drift the files over it again. The existing # Open questions entry still owns the decision.
-- Contradiction with a stated assumption: Specs check 2 expects five stable notes files that meet the byte cap. Two of the four present files are over it at test time, and the fifth file is gone. The first effect comes from the missing doctor byte rule, and the second from in-flight sibling #288.
+- Check 2 PASS under the current Specs (bullets and citations; byte sizes informational). Final measurement at 22:45:
+  - developer: bullets 20, cites 0, bytes 8861, mtime 22:36:54, sha 745c6dfdc5f6.
+  - reviewer: bullets 19, cites 0, bytes 8189, mtime 22:41:16, sha ab7c815417c6.
+  - live-tester: bullets 20, cites 0, bytes 8182, mtime 22:42:29, sha 365074fc234c.
+  - merger: bullets 0, cites 0, bytes 2262, mtime 21:59:32, sha 50595bf2c28a.
+  - splitter: file missing at 22:45:10. It was present at 22:37 (sha b9fbcc6044fb, mtime 22:03:10). Sibling #288 (drop splitter role notes, state doing) owns that deletion, and the recorded forward risk predicted it. The splitter leg is not measurable now, and it is not a #281 failure.
+- Specs changed during the test: the parent recorded the byte decision and removed the # Open questions entry at about 22:41. Before that update, the same check printed `TALLY check-content PASS=11 FAIL=2 SKIP=1` at 22:40, because the batch caught reviewer 8701 B (sha 7445e45f5bba) and live-tester 8190 B (sha 58f6fd7a697f) over the historical 8192 figure. Doctor rewrites at 22:41:16 and 22:42:29 then moved both files under the figure again, while developer stayed at 8861 B. The byte figure wobbles under doctor maintenance, and the recorded decision makes the byte figures informational only.
+- Script tallies verbatim, final run: `TALLY check-content PASS=13 FAIL=0 SKIP=1` and `TALLY check-delivery PASS=26 FAIL=0`. The first run of check-content reported PASS=8 FAIL=6: three FAILs were case-sensitive doctor-phrase matches and three were integer errors on the missing file. Those were script bugs, and the corrected scripts report the tallies above.
+- Doctor contract re-confirmed in the shipped files: agents/doctor.md caps only `{{maxNotesBullets}}` top-level bullets and carries no byte rule. src/ has no role-notes byte cap (the only 8192 hit is the unrelated webui SCAN_WINDOW=81920). The recorded byte decision makes this contract correct as merged.
+- Contradiction with a stated assumption: the Specs text at the start of this test expected the 8192-byte figure to hold. Two of the four present files were over it at 22:40. The parent settled that contradiction during the test by recording the byte figure as a one-time gate, so no #281 failure remains.
+- Forward dependency from the updated Specs: the splitter paragraph at HEAD (agents/splitter.md:15) still names .kanban/AGENTS.splitter.md and does not yet forbid writing any AGENTS file. #288 is state doing and not merged, so the updated splitter wording is not in this deliverable.
 - Assumptions: (1) The five notes files are the shared board files in the main checkout, reached through the worktree `.kanban` symlink, and the main checkout root SPECS.md points at #286, not this task. (2) The notes files are untracked, so no pre-distill version exists and check 2 is a point-in-time measurement. (3) The `renderPrompt` payload is the shipped role prompt, and its byte sizes differ from the file sizes because the placeholders (`{{logStallMinutes}}`, `{{ROOT}}`) are filled at render time.
 - No unit suite was run, per the live-tester role: the repo test suites belong to the developer and reviewer gates.
 

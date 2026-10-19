@@ -1,7 +1,7 @@
 ---
 name: "fix: eliminate AGENTS.splitter.md; splitter runs on root AGENTS.md"
 priority: "high"
-state: "doing"
+state: "to-review"
 worktree: "fix/288-drop-splitter-role-notes"
 issuer: "user"
 complexity: "simple"
@@ -64,5 +64,5 @@ The repo owner decided the splitter role must have no per-role notes at all: no 
 - Red-then-green probe before the fix: a splitter pi spawn carried --append-system-prompt and created .kanban/AGENTS.splitter.md; the claude system-prompt file held the splitter notes after the project part; `node src/analysis-run.ts <root> <missing>.log splitter` created the file. All of these flip green after the guards.
 - Scoped suites run one at a time, each exit 0: tests/orchestrator/log.test.ts, tests/orchestrator/analysis.test.ts, tests/orchestrator/spawn.test.ts (part AS "per-role project notes smoke passed" is in the log, so the four worktree roles are unchanged).
 - New pins: spawn.test.ts part AZ (no notes file, no --append-system-prompt, the root AGENTS.md is not a symlink while root SPECS.md still is, claude file = project part + "\n"); log.test.ts part AD (newestRunRole ignores .splitter.N.log and .splitter.N.log.gz); analysis.test.ts part AT6 (the runner creates no splitter notes file).
-- Board: .kanban/AGENTS.splitter.md deleted from the shared board; the four worktree roles' notes files stay. Mirror tip c80ce8a still carries the file; commitKanban rebuilds the whole-board tree from taskFiles on every create/done commit, so the next daemon board commit drops it, and reconcileBoard cannot restore it afterwards (the tip no longer has it). Until that commit lands, a daemon restart (fresh lastMirrorHash) or a splitter spawn by the not-yet-merged main checkout can bring the file back: re-check `git show refs/heads/meta/kanban:.kanban/AGENTS.splitter.md` after the merge.
+- Board: .kanban/AGENTS.splitter.md deleted from the shared board (the four worktree roles' notes files stay) and the drop landed on the mirror as commit 5275744 "kanban: drop the splitter role notes file": `git cat-file -e refs/heads/meta/kanban:.kanban/AGENTS.splitter.md` fails and the working tree has no such file. The daemon adopted the commit one sweep later (its log: "reconciled .kanban to 5275744...: 0 file(s) updated, 0 deleted"), so no later sweep materializes the file back. The mirror commit was made out of band through the repo's own commitKanban: leaving the drop to the next create/done commit would have lost the race at the #288 merge, where the daemon restarts (fresh lastMirrorHash) and materializes the old tip, and the following done commit would then fold the resurrected file back onto the mirror.
 - Boundary restated from the Specs (root SPECS.md untouched as instructed): the splitter bullet's inline-injection byte-cap hazard is moot for pi, its spawn now carries no --append-system-prompt at cwd = root.
