@@ -1,7 +1,7 @@
 ---
 name: "fix: doctor keeps AGENTS role notes minimal and generic"
 priority: "high"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "user"
 complexity: "moderate"
