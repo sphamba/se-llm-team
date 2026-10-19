@@ -232,7 +232,11 @@ assert.ok(page.includes("#relations { position: absolute; top: 0; left: 0; z-ind
 assert.match(page, /\.card \{ position: relative; z-index: 2;[^}]*background: color-mix\(in srgb, var\(--panel\) 85%, transparent\)/, "task cards stack above the relation lines with a semi-transparent background, so a line under a card shows through faintly in both themes");
 assert.ok(page.includes('setAttribute("pointer-events", "none")'), "the overlay is created non-interactive");
 assert.ok(page.includes("stroke-dasharray: 6 4"), "the relation paths render dashed");
-assert.ok(page.includes("@keyframes dashflow { to { stroke-dashoffset: -10; } }"), "dashes flow along the path, from the blocked task towards the blocker");
+assert.ok(page.includes("@keyframes dashflow { to { stroke-dashoffset: -10; } }"), "the shared keyframes keep their -10 offset; the board rule below reverses the playback direction");
+const boardRelCss = page.match(/#relations path \{([^}]*)\}/)?.[1] ?? "";
+const agentRelCss = page.match(/#agent-relations path \{([^}]*)\}/)?.[1] ?? "";
+assert.ok(boardRelCss.includes("animation-direction: reverse"), "the board's dash flow runs in reverse, away from the blocker towards the blocked card");
+assert.ok(!agentRelCss.includes("animation-direction: reverse"), "the detail dialog's agent-card connectors keep their original dash direction");
 assert.match(page, /@media \(prefers-reduced-motion: reduce\) \{ \.spin \{ animation: none; \} #relations path, #agent-relations path \{ animation: none; \} \}/, "reduced motion renders the relation paths static");
 // 000191 motion: the new keyframes and rules ship in the page css, and the second reduced-motion
 // rule stops the new animations without touching the spinner rule above

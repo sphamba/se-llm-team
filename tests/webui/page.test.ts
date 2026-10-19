@@ -668,7 +668,7 @@ assert.ok(page.includes("#m-agent { position: relative; z-index: 0; margin-botto
 const relSvgCss = page.match(/#agent-relations \{[^}]*\}/)![0];
 assert.ok(relSvgCss.includes("pointer-events: none") && relSvgCss.includes("z-index: 1"), "the relation SVG never intercepts card clicks and paints below the cards");
 const relPathCss = page.match(/#agent-relations path \{ fill[^}]*\}/)![0];
-assert.ok(relPathCss.replace("#agent-relations", "#relations") === boardPathCss, "the detail card's path style mirrors the board's #relations path exactly");
+assert.ok(relPathCss.replace("#agent-relations", "#relations") === boardPathCss.replace(" animation-direction: reverse;", ""), "the detail card's path style mirrors the board's #relations path apart from the board-only reversed dash flow");
 assert.ok(page.includes("#agent-relations path.relations-hot, #agent-relations path.relations-sel { stroke-opacity: .8; }"), "hover and selection raise a connected line to the board's hot opacity");
 assert.ok(page.includes("#relations path, #agent-relations path { animation: none; }"), "reduced motion stops the dashflow on the detail card's lines too");
 assert.ok(agentCardCss.includes("position: relative") && agentCardCss.includes("z-index: 2"), "the agent cards stack at z-index 2 above the lines, like the board's cards");

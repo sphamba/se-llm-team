@@ -131,7 +131,7 @@ paints them above the static .col/.pair containers and below the z-index-2 task 
 none so the card clicks pass through */
 #relations { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; }
 /* 000127: the low opacity keeps the lines a subtle hint behind the semi-transparent cards; hovering either connected card raises it (.relations-hot) */
-#relations path { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-opacity: .3; stroke-dasharray: 6 4; animation: dashflow 1s linear infinite; transition: stroke-opacity .15s ease; }
+#relations path { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-opacity: .3; stroke-dasharray: 6 4; animation: dashflow 1s linear infinite; transition: stroke-opacity .15s ease; animation-direction: reverse; }
 #relations path.relations-hot { stroke-opacity: .8; }
 @keyframes dashflow { to { stroke-dashoffset: -10; } }
 /* 000047: the middle columns stack as pairs, sized and gapped like the single columns */
