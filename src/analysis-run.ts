@@ -35,6 +35,7 @@ if (!root || !logArg || !role) {
 			doctorLlm: resolveLlm(root, cfg, "doctor", ""),
 			concurrency: cfg.roles.analyst?.concurrency,
 			mergeThreshold: cfg.roles.analyst?.mergeThreshold,
+			maxNotesBullets: cfg.roles.doctor?.maxNotesBullets,
 			role,
 			roleFile: join(root, ".kanban", `AGENTS.${role}.md`),
 			doctorLogPath: `${logArg.replace(/\.log(\.gz)?$/, "")}.doctor.log`,

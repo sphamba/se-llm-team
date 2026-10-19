@@ -28,7 +28,7 @@ Block summaries:
 5. [text] S: x
    Struggle: none
 
-Produce a markdown analysis report of pain points (struggle, wasted time, inefficiency) with block number references. The analysed log is one run of the "${role}" role agent of a kanban pipeline. Identify what the agent lost most of its time on (pain points), then revise the role guidance file at ${roleFile} so future runs of that role go more smoothly (a role file of none means there is no role file: do not write any file, produce the report only). You have full rewrite authority over the role file: compact it each run by merging duplicate guidance without losing unique rules, remove stale guidance, and keep it valid markdown guidance for the role.`;
+Produce a markdown analysis report of pain points (struggle, wasted time, inefficiency) with block number references. The analysed log is one run of the "${role}" role agent of a kanban pipeline. Identify what the agent lost most of its time on (pain points), then revise the role guidance file at ${roleFile} so future runs of that role go more smoothly (a role file of none means there is no role file: do not write any file, produce the report only). You have full rewrite authority over the role file: rewrite it in full each run, keep at most 20 top-level bullets, and keep it valid markdown guidance for the role. Keep only durable, task-agnostic guidance (repo structure, build/test recipes, general shell traps, workflow tips). Delete task-specific material (task-number citations, per-task recipes, measured per-task values, war stories) outright, never archive it.`;
 }
 async function testDoctorPromptWithRoleFile() {
 	// with roleFile the doctor prompt carries the role file path, names the role and asks
@@ -91,6 +91,29 @@ async function testDoctorPromptWithoutRoleFile() {
 		// the headless analyst isolation flags stay in the doctor argv
 		assert.deepEqual(doctorCalls[0].slice(0, 7), ["pi", "--approve", "--no-session", "--no-extensions", "--no-skills", "--mode", "json"]);
 		assert.equal(doctorCalls[0][7], "-p");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+async function testMaxNotesBulletsOverride() {
+	// an explicit maxNotesBullets overrides the default 20 in the rendered doctor prompt:
+	// the configured number renders, the placeholder never stays literal
+	const dir = fixtureDir("notescap");
+	try {
+		const logPath = join(dir, "x.log");
+		writeFileSync(logPath, SYNTHETIC);
+		const doctorCalls: string[][] = [];
+		await analyseLog(logPath, {
+			mergeThreshold: 10,
+			maxNotesBullets: 5,
+			runAnalyst: async () => "S: x\nStruggle: none",
+			runDoctor: argvRecorder(doctorCalls, "CAPPED"),
+		});
+		assert.equal(doctorCalls.length, 1);
+		const prompt = doctorCalls[0][doctorCalls[0].length - 1];
+		assert.ok(prompt.includes("keep at most 5 top-level bullets"), "the configured cap renders into the doctor prompt");
+		assert.ok(!prompt.includes("{{maxNotesBullets}}"), "the placeholder never stays literal");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -231,6 +254,7 @@ async function testDoctorLlm() {
 	await testDoctorLogPersistence();
 	await testRunDoctorInjection();
 	await testDoctorLlm();
+	await testMaxNotesBulletsOverride();
 	console.log("efficiency-analysis: doctor tests passed");
 } finally {
 	cleanupDirs();

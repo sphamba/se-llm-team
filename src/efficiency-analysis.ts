@@ -43,6 +43,7 @@ export interface AnalyseOptions {
 	runDoctor?: (argv: string[]) => Promise<string | null>; // defaults to the analyst runner with stream output persisted to doctorLogPath
 	role?: string; // the analysed run's kanban role, named in the doctor prompt with roleFile
 	roleFile?: string; // absolute path of the role file the doctor may revise; unset keeps the doctor report-only
+	maxNotesBullets?: number; // cap on top-level bullets in the doctor's role-notes rewrite, default 20
 	doctorLlm?: LlmConfig; // the doctor pass's resolved llm flags, default the analyst llm
 	doctorLogPath?: string; // where the doctor pass's stream output persists; unset keeps it in memory
 }
@@ -371,8 +372,9 @@ const PROMPT_CAP = 131_000;
 
 // The pass-2 prompt: agents/doctor.md with the run's dynamic parts substituted. Without a
 // roleFile the role file substitutes to the literal "none" and the template tells the
-// doctor not to write any file.
-function doctorPrompt(template: string, blocks: AnalysisBlock[], reports: BlockReport[], failedCount: number, mergedCount: number, roleFile?: string, role?: string): string {
+// doctor not to write any file. maxNotesBullets renders the role-notes rewrite cap; an
+// unwired placeholder would ship as literal text
+function doctorPrompt(template: string, blocks: AnalysisBlock[], reports: BlockReport[], failedCount: number, mergedCount: number, roleFile: string | undefined, role: string | undefined, maxNotesBullets: number): string {
 	const byType = { text: 0, thinking: 0, toolCall: 0 };
 	const perTool = new Map<string, number>();
 	for (const block of blocks) {
@@ -392,6 +394,7 @@ function doctorPrompt(template: string, blocks: AnalysisBlock[], reports: BlockR
 		roleFile: roleFile ?? "none",
 		// the role is named only with a role file, as before
 		role: roleFile ? (role ?? "") : "none",
+		maxNotesBullets: String(maxNotesBullets),
 	};
 	// render everything but the list, then budget the list so the whole prompt stays one
 	// argv element under the kernel cap
@@ -547,6 +550,8 @@ export async function analyseLog(logPath: string, opts: AnalyseOptions = {}): Pr
 	const doctorLlm = opts.doctorLlm ?? llm;
 	const concurrency = opts.concurrency ?? 8;
 	const mergeThreshold = opts.mergeThreshold ?? DEFAULT_MERGE_THRESHOLD;
+	// the role-notes bullet cap renders into the doctor prompt; the default applies here
+	const maxNotesBullets = opts.maxNotesBullets ?? 20;
 	const delay = opts.delay ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 	const run = opts.runAnalyst ?? ((argv: string[]) => spawnAnalyst(argv, dirname(logPath)));
 	const runDoctor = opts.runDoctor ?? ((argv: string[]) => spawnAnalyst(argv, dirname(logPath), opts.doctorLogPath));
@@ -581,7 +586,7 @@ export async function analyseLog(logPath: string, opts: AnalyseOptions = {}): Pr
 	// crash before the doctor pass never re-fires the orchestrator's spawn
 	if (opts.doctorLogPath) writeFileSync(opts.doctorLogPath, "");
 	// pass 2: one doctor call for the whole report, with a roleFile also revising it
-	const second = await callWithRetry(runDoctor, buildDoctorArgs(doctorPrompt(doctorTemplate, units.map((unit) => unit.block), reports, failedCount, mergedCount, opts.roleFile, opts.role)), delay);
+	const second = await callWithRetry(runDoctor, buildDoctorArgs(doctorPrompt(doctorTemplate, units.map((unit) => unit.block), reports, failedCount, mergedCount, opts.roleFile, opts.role, maxNotesBullets)), delay);
 	const analysis = second.answer === null ? `Analysis failed after ${RETRY_ATTEMPTS} attempts: ${second.reason}` : second.answer.trim();
 	const reportPath = reportPathFor(logPath);
 	writeFileSync(reportPath, renderReport(logPath, reports, analysis));

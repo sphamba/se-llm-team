@@ -274,7 +274,11 @@ const asSpawns = () =>
 for (const role of ["developer", "reviewer", "merger", "live-tester"]) {
 	const path = notesPathAS(role);
 	assert.ok(existsSync(path), `the ${role} notes file was created when missing`);
-	assert.ok(readFileSync(path, "utf8").includes(`# ${role}:`), "the starter header names the role");
+	const starter = readFileSync(path, "utf8");
+	assert.ok(starter.includes(`# ${role}:`), "the starter header names the role");
+	assert.ok(starter.includes("The doctor rewrites this file after every run"), "the starter states the rewrite-each-run contract");
+	assert.ok(starter.includes("durable, task-agnostic bullets"), "the starter states the durable task-agnostic bullet rule");
+	assert.ok(starter.includes("Never edit this file as the role agent"), "the starter forbids role-agent edits");
 	const spawns = asSpawns().filter((s) => s.role === role);
 	assert.ok(spawns.length > 0, `the ${role} ran`);
 	for (const s of spawns) {

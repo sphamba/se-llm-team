@@ -328,10 +328,11 @@ export const TOOLS: Record<string, ToolDef> = {
 			const absolutePath = resolve(root, params.path);
 			const cfg = loadConfig(root, ctx.defaultAgent);
 			// the role default applies, no complexity override. The in-flight cap and the merge
-			// threshold come from the role config, the module defaults apply when unset. The
-			// analyst and doctor run through the same backend as the spawned agents
+			// threshold come from the analyst role config, the doctor's bullet cap from the doctor
+			// role config; the module defaults apply when unset. The analyst and doctor run
+			// through the same backend as the spawned agents
 			try {
-				const result = await analyseLog(absolutePath, { root, agent: cfg.agent, backend: cfg.backend, llm: resolveLlm(root, cfg, "analyst", ""), doctorLlm: resolveLlm(root, cfg, "doctor", ""), concurrency: cfg.roles.analyst?.concurrency, mergeThreshold: cfg.roles.analyst?.mergeThreshold });
+				const result = await analyseLog(absolutePath, { root, agent: cfg.agent, backend: cfg.backend, llm: resolveLlm(root, cfg, "analyst", ""), doctorLlm: resolveLlm(root, cfg, "doctor", ""), concurrency: cfg.roles.analyst?.concurrency, mergeThreshold: cfg.roles.analyst?.mergeThreshold, maxNotesBullets: cfg.roles.doctor?.maxNotesBullets });
 				return ok(`${result.analysis}\n\nReport: ${result.reportPath}\nBlocks analysed: ${result.blockCount}`, result);
 			} catch (err) {
 				return ok(`Cannot analyse ${absolutePath}: ${(err as Error).message}`);

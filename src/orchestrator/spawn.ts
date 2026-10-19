@@ -22,14 +22,14 @@ export function renderPrompt(root: string, role: string, logStallMinutes: number
 	prompt = prompt.replaceAll("{{logStallMinutes}}", String(logStallMinutes));
 	return prompt;
 }
-// per-role project notes: .kanban/AGENTS.<role>.md, created when missing with a one-line
-// starter header; agents append their project's guidance (how to run, how to live-test) so
-// future agents of the role start faster. The AGENTS.md cwd symlink points here, so pi loads
-// the file from the session cwd at startup with no spawn flag
+// per-role project notes: .kanban/AGENTS.<role>.md, created when missing with a starter
+// header stating the notes contract: the doctor rewrites the file after every run, keeping
+// only durable, task-agnostic bullets, and the role agent never edits it. The AGENTS.md cwd
+// symlink points here, so pi loads the file from the session cwd at startup with no spawn flag
 export function ensureRoleNotes(root: string, role: string): string {
 	const path = roleNotesPath(root, role);
 	if (!existsSync(path)) {
-		writeFileSync(path, `# ${role}: append project-specific guidance for this role below (e.g. how to run the project, how to live-test) so future agents of your kind start faster.\n`);
+		writeFileSync(path, `# ${role}: project guidance for future agents of this role. The doctor rewrites this file after every run, keeping only durable, task-agnostic bullets (repo structure, build/test tips). Never edit this file as the role agent.\n`);
 	}
 	return path;
 }

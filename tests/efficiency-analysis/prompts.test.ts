@@ -17,7 +17,7 @@ async function testPromptFileSubstitution() {
 		const root = join(dir, "proj");
 		mkdirSync(join(root, "agents"), { recursive: true });
 		writeFileSync(join(root, "agents", "analyst.md"), "type={{blockType}} tool={{toolName}}| idx={{blockIndex}} keep={{mystery}}\n{{blockContent}}");
-		writeFileSync(join(root, "agents", "doctor.md"), "s={{stats}} m={{mergedCount}} f={{failedCount}} file={{roleFile}} role={{role}}\n{{reports}}");
+		writeFileSync(join(root, "agents", "doctor.md"), "s={{stats}} m={{mergedCount}} f={{failedCount}} file={{roleFile}} role={{role}} n={{maxNotesBullets}}\n{{reports}}");
 		const logPath = join(dir, "x.log");
 		writeFileSync(logPath, [textEnd("done"), toolCallEnd("tc1", "read", { path: "/x" })].join("\n"));
 		const prompts: string[] = [];
@@ -27,8 +27,14 @@ async function testPromptFileSubstitution() {
 		assert.equal(prompts[1], `type=toolCall tool= read| idx=2 keep={{mystery}}\nTool call read. Arguments:\n${JSON.stringify({ path: "/x" })}`);
 		assert.equal(
 			prompts[2],
-			"s=Blocks: 2 total (text 1, thinking 0, toolCall 1).\nTool calls per tool: read 1. m=0 f=0 file=/r/AGENTS.developer.md role=developer\n1. [text] S\n   Struggle: none\n2. [toolCall read] S\n   Struggle: none",
+			"s=Blocks: 2 total (text 1, thinking 0, toolCall 1).\nTool calls per tool: read 1. m=0 f=0 file=/r/AGENTS.developer.md role=developer n=20\n1. [text] S\n   Struggle: none\n2. [toolCall read] S\n   Struggle: none",
 		);
+		// an explicit maxNotesBullets overrides the default 20 at the use site; the placeholder
+		// never stays literal
+		const overrides: string[] = [];
+		await analyseLog(logPath, { root, mergeThreshold: 1, maxNotesBullets: 7, role: "developer", roleFile: "/r/AGENTS.developer.md", runAnalyst: promptRecorder(overrides), runDoctor: promptRecorder(overrides) });
+		assert.equal(overrides.length, 3, "the override run makes the same three calls");
+		assert.ok(overrides[2].endsWith("n=7\n1. [text] S\n   Struggle: none\n2. [toolCall read] S\n   Struggle: none"), "the configured maxNotesBullets renders");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

@@ -33,6 +33,7 @@ export interface LlmConfig {
 export interface RoleLlmConfig extends LlmConfig {
 	concurrency?: number;
 	mergeThreshold?: number;
+	maxNotesBullets?: number;
 	trivial?: LlmConfig;
 	simple?: LlmConfig;
 	moderate?: LlmConfig;
@@ -132,6 +133,14 @@ export function loadConfig(root: string, defaultAgent?: string): Config {
 			if (rawMergeThreshold !== undefined) {
 				if (typeof rawMergeThreshold === "number" && Number.isInteger(rawMergeThreshold) && rawMergeThreshold > 0) clean.mergeThreshold = rawMergeThreshold;
 				else log(root, `invalid roles.${role}.mergeThreshold ${JSON.stringify(rawMergeThreshold)}, ignored (expected a positive integer)`);
+			}
+			// the role-notes bullet cap for the doctor's rewrite: cleanLlm drops it, so it needs
+			// its own parse. A non-integer or non-positive value warns and stays unset, so the
+			// use-site default of 20 applies
+			const rawMaxNotesBullets = src.maxNotesBullets;
+			if (rawMaxNotesBullets !== undefined) {
+				if (typeof rawMaxNotesBullets === "number" && Number.isInteger(rawMaxNotesBullets) && rawMaxNotesBullets > 0) clean.maxNotesBullets = rawMaxNotesBullets;
+				else log(root, `invalid roles.${role}.maxNotesBullets ${JSON.stringify(rawMaxNotesBullets)}, ignored (expected a positive integer)`);
 			}
 			roles[role] = clean;
 		}

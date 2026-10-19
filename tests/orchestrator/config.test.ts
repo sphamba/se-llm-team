@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -197,6 +197,14 @@ try {
 	assert.equal(loadConfig(rootAP).roles.analyst?.mergeThreshold, undefined, "a non-positive roles.analyst.mergeThreshold stays unset");
 	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyst: { mergeThreshold: 2.5 } } }));
 	assert.equal(loadConfig(rootAP).roles.analyst?.mergeThreshold, undefined, "a non-integer roles.analyst.mergeThreshold stays unset");
+	// roles.doctor.maxNotesBullets: a valid positive integer applies, an invalid value warns
+	// and stays unset, so the use-site default of 20 applies
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { doctor: { maxNotesBullets: 30 } } }));
+	assert.equal(loadConfig(rootAP).roles.doctor?.maxNotesBullets, 30, "a valid roles.doctor.maxNotesBullets applies");
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { doctor: { maxNotesBullets: 0 } } }));
+	assert.equal(loadConfig(rootAP).roles.doctor?.maxNotesBullets, undefined, "a non-positive roles.doctor.maxNotesBullets stays unset");
+	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { doctor: { maxNotesBullets: 2.5 } } }));
+	assert.equal(loadConfig(rootAP).roles.doctor?.maxNotesBullets, undefined, "a non-integer roles.doctor.maxNotesBullets stays unset");
 	// backward compat: a pre-rename roles.analyser entry serves as roles.analyst when
 	// roles.analyst is absent, and is ignored when roles.analyst is present
 	writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ roles: { analyser: { concurrency: 6, mergeThreshold: 400 } } }));
@@ -214,6 +222,8 @@ assert.ok(orchLogAP().includes('invalid roles.analyst.concurrency 0, ignored (ex
 assert.ok(orchLogAP().includes('invalid roles.analyst.concurrency 2.5, ignored (expected a positive integer)'), "a non-integer roles.analyst.concurrency warned about");
 assert.ok(orchLogAP().includes('invalid roles.analyst.mergeThreshold 0, ignored (expected a positive integer)'), "a non-positive roles.analyst.mergeThreshold warned about");
 assert.ok(orchLogAP().includes('invalid roles.analyst.mergeThreshold 2.5, ignored (expected a positive integer)'), "a non-integer roles.analyst.mergeThreshold warned about");
+assert.ok(orchLogAP().includes('invalid roles.doctor.maxNotesBullets 0, ignored (expected a positive integer)'), "a non-positive roles.doctor.maxNotesBullets warned about");
+assert.ok(orchLogAP().includes('invalid roles.doctor.maxNotesBullets 2.5, ignored (expected a positive integer)'), "a non-integer roles.doctor.maxNotesBullets warned about");
 console.log("orchestrator.test.ts: ... + logStallMinutes config smoke passed");
 
 // --- part AQ: the maxParallel config: a missing key keeps the default 0 (no limit), a
@@ -244,3 +254,52 @@ assert.ok(orchLogAQ().includes("maxParallel -1 ignored: must be an integer >= 0"
 assert.ok(orchLogAQ().includes("maxParallel 2.5 ignored: must be an integer >= 0"), "a non-integer maxParallel warned about");
 assert.ok(!orchLogAQ().includes("maxParallel 0 ignored"), "maxParallel 0 is valid, no warning");
 console.log("orchestrator.test.ts: ... + maxParallel config smoke passed");
+
+// --- part AR: the roles.doctor.maxNotesBullets knob reaches the rendered doctor prompt
+// through the real analysis runner: node src/analysis-run.ts against a fixture root with a
+// stub agent (HOME isolated, so no ambient config leaks in). With no key the use-site
+// default 20 renders into the shipped agents/doctor.md; an override renders its value ---
+const rootAR = mkdtempSync(join(tmpdir(), "orch-notes-cap-"));
+cleaned.push(rootAR);
+const homeAR = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAR);
+mkdirSync(join(rootAR, ".kanban"), { recursive: true });
+const stubAR = join(rootAR, "argv-agent.cjs");
+writeFileSync(
+	stubAR,
+	`#!/usr/bin/env node
+const { appendFileSync } = require("node:fs");
+appendFileSync(${JSON.stringify(join(rootAR, "stub.argv.log"))}, JSON.stringify(process.argv) + "\\n");
+process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "OK" }] } }) + "\\n");
+`,
+);
+chmodSync(stubAR, 0o755);
+const runAR = (name: string) =>
+	execFileSync(process.execPath, [join(HERE, "../src/analysis-run.ts"), rootAR, join(rootAR, name), "developer"], {
+		env: { ...process.env, HOME: homeAR },
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+		timeout: 120000,
+	});
+const writeLogAR = (name: string) =>
+	writeFileSync(join(rootAR, name), JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "did the thing" }] } }) + "\n");
+const doctorPromptAR = () => {
+	const lines = readFileSync(join(rootAR, "stub.argv.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l) as string[]);
+	// the doctor call runs last and is the only one without the analyst tool isolation
+	const argv = lines.filter((a) => !a.includes("--no-tools")).at(-1)!;
+	return argv[argv.length - 1];
+};
+// default: no roles.doctor key, the use-site default 20 renders
+writeFileSync(join(kanbanDir(rootAR), "se-llm-team.json"), JSON.stringify({ agent: stubAR }));
+writeLogAR("one.log");
+runAR("one.log");
+let promptAR = doctorPromptAR();
+assert.ok(promptAR.includes("keep at most 20 top-level bullets"), `the default cap 20 renders: ...${promptAR.slice(-300)}`);
+assert.ok(!promptAR.includes("{{maxNotesBullets}}"), "the placeholder never stays literal");
+// override: roles.doctor.maxNotesBullets renders its value
+writeFileSync(join(kanbanDir(rootAR), "se-llm-team.json"), JSON.stringify({ agent: stubAR, roles: { doctor: { maxNotesBullets: 7 } } }));
+writeLogAR("two.log");
+runAR("two.log");
+promptAR = doctorPromptAR();
+assert.ok(promptAR.includes("keep at most 7 top-level bullets"), `the configured cap 7 renders: ...${promptAR.slice(-300)}`);
+console.log("orchestrator.test.ts: ... + maxNotesBullets through the analysis runner passed");
