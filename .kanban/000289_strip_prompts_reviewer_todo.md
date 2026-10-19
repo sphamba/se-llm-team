@@ -1,7 +1,7 @@
 ---
 name: "refactor: strip orchestration info from role prompts, reviewer to-do bounce"
 priority: "medium"
-state: "backlog"
+state: "done"
 worktree: ""
 issuer: "user"
 complexity: "moderate"
@@ -64,3 +64,45 @@ The user will run an A/B live comparison of old vs new prompts on another repo; 
 4. skills/se-llm-team/SKILL.md names all three reviewer outcomes.
 
 # Notes
+
+No split (splitter, 2026-10-20). Reasons: the pieces do not genuinely parallelize. All prompt edits funnel into one shared pin file (tests/orchestrator/spawn.test.ts, 556 lines) plus tests/orchestrator/split.test.ts, so parallel subtasks either conflict on merge or collapse into one sequential test pass. The prompt files are small (5-28 lines; most changes are one to three lines each), and the exact wording ("never change the task states", the bare AGENTS.md prohibition) must stay identical across files, which cross-subtask agents cannot coordinate. The SPECS Decisions section already records "One combined task". Per-subtask pipeline overhead (one review, one merge, one live test) exceeds the saved time. Durable guidance for future Splitters: before splitting, find the files that tests pin; if all pieces feed one shared test file, the task does not parallelize, split or no split. Also weigh SPECS Decisions that say "one combined task" as settled against a split.
+
+Developer, 2026-10-20 (worktree refactor/289-strip-prompts-reviewer-todo, commit a02480d):
+
+- All six Changes implemented. agents/developer.md and agents/live-tester.md: state ban reworded to "Never change the task states." and the AGENTS.md paragraph reduced to "Never edit AGENTS.md. Put task-specific findings in the task file's # Notes section instead." agents/merger.md and agents/reviewer.md: ban reworded (merger mid-sentence) and the AGENTS.md paragraph reduced to "Never edit, append to or rewrite AGENTS.md; report durable guidance for future agents of your kind in your task's # Notes." agents/splitter.md: final paragraph reduced to "Leave every AGENTS.md file untouched; ..." and the SPECS.md line lost its "(a symlink into the board)" parenthetical.
+- The splitter symlink-parenthetical removal is not named in Change 4 but acceptance criterion 3 requires it ("no 'symlink' outside the doctor file"), and the Decisions settle SPECS.md access as one line with no symlink explanation.
+- agents/reviewer.md gains step 7: work that does not fulfill the Specs moves the task back to to-do with kanban_set_state (no file argument) with the findings in # Notes, for the developer to redo; the step states it replaces the to-review and to-merge moves. Steps 5/6, the guard paragraph, the stall-kill line and all kept mechanics are unchanged. skills/se-llm-team/SKILL.md now names all three reviewer outcomes.
+- Tests: the merger prompt pin in merge.test.ts part AL follows the new wording, and part AL gained pins over all five rendered prompts (ban wording, no doctor narrative, no loading explanation, no .kanban/AGENTS path, shortened splitter paragraph, reviewer to-do outcome). The ban phrase is matched case-insensitively: developer/live-tester carry it sentence-initially ("Never change the task states."), the merger mid-sentence.
+- New daemon-path test: promote.test.ts part AA3. A reviewer stub bounces a simple task from reviewing to to-do; the daemon logs the to-do arrival, respawns the developer in the same worktree dir (both spawn lines carry the same cwd), and an untracked-marker snapshot written by the approving reviewer proves the worktree was reused, not re-checked out. The run then completes to done and the doneCleanup "merged <branch> for <task>" log line confirms the same branch carried the task through the merge.
+- Red-green order kept: the updated pins failed against the old prompts (merge.test.ts first failure: "the merger never changes the task states"), then the prompt edits turned both files green.
+- Scoped suites run, all exit 0: tests/orchestrator/merge.test.ts, promote.test.ts, split.test.ts, spawn.test.ts. The full suite was not run, per task policy.
+- Untouched per Constraints: .kanban/AGENTS.<role>.md, agents/doctor.md, src/orchestrator/spawn.ts, all code comments, and the pipeline.ts to-do-arrival code (the daemon path already resets the review streak and respawns from the ensured worktree).
+- Test-writing notes for future runs: fixture() creates no .kanban dir (mkdir before writing se-llm-team.json); a bounce-time marker snapshot duplicates the approve-time one (assert the approve-time snapshot only); the doneCleanup "merged" log line fires on the sweep after done, so waitFor the log line instead of asserting at the done transition.
+
+Reviewer, 2026-10-20 (worktree refactor/289-strip-prompts-reviewer-todo, commit a02480d, base main):
+
+- All six Changes hold in a02480d as the Notes describe: developer.md:24,26 and live-tester.md:14,16 carry "Never change the task states." plus the bare "Never edit AGENTS.md." paragraph; merger.md:5,19 rewords mid-sentence and drops the doctor narrative; splitter.md:3,15 loses the symlink parenthetical and ends on the shortened "Leave every AGENTS.md file untouched" paragraph; reviewer.md:20 gains step 7, the to-do bounce with findings in # Notes, beside the kept to-review/to-merge steps, guard paragraph and stall-kill line. Kept mechanics (SPECS.md one-liners, rebase sides, merged-commit rules) are outside the changed hunks, so untouched.
+- skills/se-llm-team/SKILL.md:18 names all three reviewer outcomes (acceptance criterion 4).
+- Acceptance criterion 3: grep over agents/*.md for "doctor maintains", "symlink", "loads into your context" returns zero matches, stricter than required (doctor.md matches none either).
+- Tests: merge.test.ts:433 follows the reworded merger ban and merge.test.ts:448-463 (part AL) pins the stripped wording for developer/merger/live-tester rendered prompts plus reviewer to-do outcome and shortened splitter paragraph; promote.test.ts:151-200 (part AA3) proves the daemon bounce path: reviewing -> to-do -> developer respawn with the same cwd on both spawn lines, approve-time marker snapshot "dev\ndev\n" proving worktree reuse, and the merged-branch log line. Old-pin grep: "never set a task state" has zero matches in tests/ and src/ (no lagging split copy).
+- Scoped suites, all exit 0: tests/plugin.test.ts (the coverage-map suite for agents/*.md and skills/), tests/orchestrator/merge.test.ts, tests/orchestrator/promote.test.ts; the AA3 smoke literal greps once in the promote log. Acceptance criterion 2 met. Acceptance criterion 1 names the repo-wide `pnpm test`: not run, per the no-repo-wide-suite policy; the scoped set above is the substitute.
+- Constraints hold: the diff touches exactly the 8 listed files, no spawn.ts, no agents/doctor.md, no code comments.
+- Verdict: pass, no fixes.
+
+## Live test (2026-10-20)
+
+Live-tester, worktree refactor/289-strip-prompts-reviewer-todo, merged commit a02480d. Run scripts and log: /tmp/289-live (setup.sh, fake-pi.mjs, drive.mjs, check.mjs, run.sh, run.log). The checker prints its own tally.
+
+Lanes run. The change is prompt content plus spawn delivery, so the run used greps on the shipped files and a direct spawn fixture with a fake pi agent.
+
+- Content lane: the five changed prompts and skills/se-llm-team/SKILL.md. The five prompts carry no "doctor" or "symlink" wording and no AGENTS.md loading explanation. developer and live-tester carry "Never change the task states." and "Never edit AGENTS.md.". The merger reads "never change the task states" and keeps the rebase mechanics (--continue, --ours, --theirs, never start a rebase). The splitter carries the shortened "Leave every AGENTS.md file untouched" paragraph and keeps both state moves. The reviewer carries step 7, the to-do bounce with findings in # Notes, beside steps 5 and 6, the re-read guard and the stall-kill line. SKILL.md names all three reviewer outcomes.
+- Delivery lane: one fixture root, one task worktree, five real spawnAgent calls (developer, reviewer, live-tester, merger in the worktree, splitter at the root) with a fake pi agent that captures argv, cwd, the -p payload and the cwd symlink targets at startup. Each payload equals renderPrompt(root, role, 30) byte for byte, and no placeholder survives. AGENTS.md links .kanban/AGENTS.<role>.md for the four non-splitter roles and SPECS.md links the task file. The splitter runs at the root with no AGENTS.md link and no AGENTS.splitter.md file. The pi argv keeps the --approve --mode json -p shape.
+
+Final tally: check tally: PASS 79 FAIL 0
+
+Assumptions made while I designed the tests:
+
+- A fixture cannot prove that a live model obeys the new reviewer step 7. The run tested the step as shipped content and as delivered payload. The daemon code that consumes a to-do arrival (pipeline.ts) is outside this diff, so the run did not repeat that daemon path: the task's promote.test.ts part AA3 covers it and the policy excludes unit suites.
+- One capture per role, in sequence, because the daemon repoints the cwd AGENTS.md one role at a time. Five parallel spawns race that symlink (fixture learning, not a finding).
+
+No findings. No observed behavior contradicts the task's stated assumptions. No open user or client questions.
