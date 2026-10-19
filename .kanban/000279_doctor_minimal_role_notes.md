@@ -1,8 +1,8 @@
 ---
 name: "fix: doctor keeps AGENTS role notes minimal and generic"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/279-doctor-minimal-role-notes"
 issuer: "user"
 complexity: "simple"
 shortName: "doctor-minimal-role-notes"
@@ -13,16 +13,17 @@ blockedBy: ""
 Verification-only parent for #280 (code: doctor prompt contract, roles.doctor.maxNotesBullets wiring, starter) and #281 (content: role prompt prohibitions, one-time distill of the five .kanban/AGENTS.*.md files). Verify the whole role-notes contract (max 20 bullets default 20, task-agnostic, doctor sole writer) once both pieces have landed.
 
 # Specs
-# Verification
+# Verification (re-baselined 2026-10-19)
 
-Verification-only parent: #280 lands the code half (agents/doctor.md contract rewrite, roles.doctor.maxNotesBullets wiring with default 20, ensureRoleNotes starter), #281 lands the content half (five role prompt prohibitions, one-time distill of the five .kanban/AGENTS.*.md files). Check the end-to-end contract once both land:
+Verification-only parent. Landed: #280 (code half: doctor contract, maxNotesBullets wiring, starter), #281 (content half: #285 developer, #286 live-tester, #287 reviewer/merger/splitter). In flight: #288 (splitter: deletes .kanban/AGENTS.splitter.md, guards recreation, rewrites the agents/splitter.md closing paragraph). Check the end-to-end contract once #288 lands:
 
 - npm test passes (full suite).
 - A test asserts the rendered doctor prompt carries the cap sentence with the configured number (default 20, plus an override via roles.doctor.maxNotesBullets).
 - ensureRoleNotes writes the new starter text for a missing file (unit assertion).
-- grep over agents/developer.md, agents/reviewer.md, agents/live-tester.md, agents/merger.md, agents/splitter.md shows no sentence instructing the role agent to edit or append its notes file; each of the five carries the read-only/doctor-maintains prohibition.
-- Each of the five .kanban/AGENTS.*.md files: bullet lines (grep -cE '^[[:space:]]*(-|\*|[0-9]+\.) ') at most 20, zero '#[0-9]' task citations, size at most 8192 bytes.
-- The splitter inline-injection byte cap is untouched.
+- grep over the five agents/*.md prompts shows no sentence instructing the role agent to edit or append a notes file; the four worktree roles carry the read-only/doctor-maintains prohibition; the splitter paragraph (per #288) names no notes file and forbids writing any AGENTS file.
+- The four .kanban/AGENTS.{developer,reviewer,live-tester,merger}.md files: bullet lines (grep -cE '^[[:space:]]*(-|\*|[0-9]+\.) ') at most 20 and zero '#[0-9]' task citations. .kanban/AGENTS.splitter.md does not exist (deleted by #288) and is not recreated by a splitter spawn.
+- Byte-cap decision (recorded 2026-10-19): the 8192-byte figure was a one-time-distill acceptance gate, not an ongoing invariant. The settled size bar is the bullet cap the doctor maintains (user decision, #279 interview). Do not add a byte rule to the doctor prompt or the starter; do not fail verification over 8-10 KB notes files that meet the bullet and citation bars.
+- The splitter inline-injection byte-cap hazard is moot for pi once #288 lands (no inline injection): do not re-check it.
 
 # Notes
 - Blocked: #280 (code) and #281 (content) are both in state to-do on the board, and main == HEAD (5bd5079) with no commits above the merge base, so neither half has landed. No code changes made: this is the verification-only parent.
@@ -35,4 +36,4 @@ Verification-only parent: #280 lands the code half (agents/doctor.md contract re
 - Re-run this verification after #280 and #281 merge.
 
 # Open questions
-- Assumption: the five role-notes targets are the main-checkout .kanban/AGENTS.{developer,reviewer,live-tester,merger,splitter}.md files, read through the worktree symlink for the size and bullet counts above.
+
