@@ -1,8 +1,8 @@
 ---
 name: "fix: eliminate AGENTS.splitter.md; splitter runs on root AGENTS.md"
 priority: "high"
-state: "to-review"
-worktree: "fix/288-drop-splitter-role-notes"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "drop-splitter-role-notes"
@@ -66,3 +66,21 @@ The repo owner decided the splitter role must have no per-role notes at all: no 
 - New pins: spawn.test.ts part AZ (no notes file, no --append-system-prompt, the root AGENTS.md is not a symlink while root SPECS.md still is, claude file = project part + "\n"); log.test.ts part AD (newestRunRole ignores .splitter.N.log and .splitter.N.log.gz); analysis.test.ts part AT6 (the runner creates no splitter notes file).
 - Board: .kanban/AGENTS.splitter.md deleted from the shared board (the four worktree roles' notes files stay) and the drop landed on the mirror as commit 5275744 "kanban: drop the splitter role notes file": `git cat-file -e refs/heads/meta/kanban:.kanban/AGENTS.splitter.md` fails and the working tree has no such file. The daemon adopted the commit one sweep later (its log: "reconciled .kanban to 5275744...: 0 file(s) updated, 0 deleted"), so no later sweep materializes the file back. The mirror commit was made out of band through the repo's own commitKanban: leaving the drop to the next create/done commit would have lost the race at the #288 merge, where the daemon restarts (fresh lastMirrorHash) and materializes the old tip, and the following done commit would then fold the resurrected file back onto the mirror.
 - Boundary restated from the Specs (root SPECS.md untouched as instructed): the splitter bullet's inline-injection byte-cap hazard is moot for pi, its spawn now carries no --append-system-prompt at cwd = root.
+- Review: pass, no fixes. Diff total 6 files, +112 -10 (commit 2249c88); all Notes claims hold on check: guards at src/orchestrator/spawn.ts:214 and src/analysis-run.ts:29 use `role !== "splitter"` and leave the four worktree roles' paths untouched; agents/splitter.md:15 has no write/append/create/edit/rewrite verb near AGENTS; .kanban/AGENTS.splitter.md is absent from the working tree and from refs/heads/meta/kanban (cat-file -e exit 128). Pins land as claimed: tests/orchestrator/spawn.test.ts:494 (part AZ: no notes file, no --append-system-prompt, root AGENTS.md not a symlink while SPECS.md still is, claude file = project part + newline), tests/orchestrator/log.test.ts:148 (part AD: newestRunRole ignores .splitter.N.log plain and .gz, splitter-only slug returns null), tests/orchestrator/analysis.test.ts:388 (part AT6: the runner creates no splitter notes file on a missing log). Test union exit 0 across 22 suites: all 13 tests/orchestrator/ (part AS included), 7 tests/efficiency-analysis/ suites, tests/plugin.test.ts, tests/context-symlinks.test.ts; the three new smoke lines grep 1-for-1 in the fresh run logs. No open questions; the out-of-band mirror commit 5275744 is documented in Notes with its race rationale.
+
+## Live test (2026-10-19)
+
+Tested merged commit 2249c88 on the task worktree. Real usage paths only. No unit suite ran. Fixture: /tmp/lt288 (setup.sh reruns it), run log /tmp/lt288/run.log.
+
+Three lanes, tallies quoted from the run:
+
+- Lane A (content + board/mirror + real sweep), check-lane-a.sh: `TALLY pass=11 fail=0 skip=0`. agents/splitter.md has no write verb near AGENTS and states the no-notes channel. `.kanban/AGENTS.splitter.md` is absent from the shared board. The mirror lacks it at the drop commit 5275744 and at the later board commit a0e1ce9 (the next mirror commit after the drop, "done 000281"), which still carries the four worktree role notes. The real daemon log shows the adoption sweep: `[2026-10-19T20:45:21.327Z] reconciled .kanban to 5275744...: 0 file(s) updated, 0 deleted`, and the file is absent after many later sweeps.
+- Lane B (the real spawnAgent with fake agents), check.mjs: `TALLY pass=24 fail=0 skip=0`. pi splitter at cwd = root: no --append-system-prompt and no --append-system-prompt-file, the -p payload equals agents/splitter.md byte for byte, no .kanban/AGENTS.splitter.md, root AGENTS.md stays a regular file while SPECS.md is the task symlink. claude splitter: one --append-system-prompt-file whose content equals the project root AGENTS.md plus one newline, no splitter notes file. Control pi developer in a task worktree: the role notes file is created, AGENTS.md is the role-notes symlink, the project AGENTS.md rides inline, the -p payload equals agents/developer.md. The four worktree roles are unchanged.
+- Lane C (the real analysis-run.ts CLI, missing-log differential), check-analysis.sh: `TALLY pass=4 fail=0 skip=0`. splitter: exit 1, no .kanban/AGENTS.splitter.md. developer control: exit 1, its notes file is created, so the guard is role-specific and the call is live.
+
+Assumptions:
+
+- The direct spawnAgent fixture is the same code path the daemon uses, so the guard result carries to the pipeline. No daemon was started against a fixture because the changed code is not daemon-only.
+- The analysis differential uses a missing log. That run reaches the guarded ensureRoleNotes call and stops before any LLM call, so the check is causal and costs no tokens.
+
+No observed behavior contradicts the task's stated assumptions. No open questions.
