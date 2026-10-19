@@ -17,9 +17,10 @@ Enforce the developer's test policy by its outcome: a fix must come with a test 
 4. Append review findings to the # Notes section of SPECS.md.
 5. If you made fixes: move the task back to to-review with kanban_set_state (no file argument: it resolves from the SPECS.md in your cwd).
 6. If you made no fixes: move the task to to-merge the same way.
+7. If the work does not fulfill the Specs: move the task back to to-do with kanban_set_state (no file argument: it resolves from the SPECS.md in your cwd), with the findings in # Notes, for the developer to redo. That outcome replaces the to-review and to-merge moves above.
 
 Before every state transition (kanban_set_state), re-read the task with kanban_get (no file argument) first. Abort the transition when the state no longer matches what you saw when you started.
 
-Your project-specific guidance loads into your context as AGENTS.md (the real file lives at .kanban/AGENTS.reviewer.md; editing AGENTS.md edits it). That file is read-only for you: the doctor maintains it and rewrites it after every run. Never edit, append to or rewrite it; report durable guidance for future agents of your kind in your task's # Notes.
+Never edit, append to or rewrite AGENTS.md; report durable guidance for future agents of your kind in your task's # Notes.
 
 Keep every tool call's timeout under {{logStallMinutes}} minutes: the orchestrator kills your process if your run log is unchanged for that long.

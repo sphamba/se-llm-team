@@ -148,6 +148,56 @@ assert.equal(
 aa2.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + to-do re-entry review counter reset smoke passed");
 
+// --- part AA3: a reviewer bounce to to-do respawns the developer on the existing worktree and
+// branch: the to-do arrival runs startTodo, ensureWorktree reuses the ensured worktree (no
+// re-checkout), and the pipeline completes through the second reviewer's approval ---
+const rootAA3 = fixture();
+cleaned.push(rootAA3);
+mkdirSync(kanbanDir(rootAA3), { recursive: true });
+// stub: the developer drops an untracked marker into its worktree (no commit), the reviewer
+// bounces the task to to-do on its first run and approves on the second; the approve run
+// snapshots the untracked marker outside the worktree: only a reused worktree carries the
+// first developer's untracked file plus the second one's append into that snapshot (a
+// re-checkout would lose the untracked file)
+const bounceStub = join(rootAA3, "bounce-agent.cjs");
+writeFileSync(
+	bounceStub,
+	`#!/usr/bin/env node
+const { appendFileSync, existsSync, readFileSync, writeFileSync } = require("node:fs");
+const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
+const file = "SPECS.md";
+let front = "";
+try { front = readFileSync(file, "utf8"); } catch {}
+if (!front.match(/^state: /m)) process.exit(0);
+if (prompt.includes("Reviewer agent")) {
+	if (!existsSync(".bounced")) {
+		writeFileSync(".bounced", "1");
+		writeFileSync(file, front.replace(/^state: .*/m, 'state: "to-do"'));
+	} else {
+		appendFileSync(${JSON.stringify(join(rootAA3, "marker-snapshot.txt"))}, readFileSync(".marker", "utf8"));
+		writeFileSync(file, front.replace(/^state: .*/m, 'state: "to-merge"'));
+	}
+	process.exit(0);
+}
+if (prompt.includes("Developer agent")) appendFileSync(".marker", "dev\\n");
+`,
+);
+chmodSync(bounceStub, 0o755);
+writeFileSync(join(kanbanDir(rootAA3), "se-llm-team.json"), JSON.stringify({ agent: bounceStub, pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+const taskAA3 = createTask(rootAA3, { name: "feat: bounce back", summary: "Reviewer bounce respawn smoke", specs: "n/a", complexity: "simple" });
+setState(rootAA3, taskAA3, "to-do");
+const aa3 = await runDaemon(rootAA3);
+await waitFor(() => parseTask(rootAA3, taskAA3.file).state === "done", 90000, "the bounced task completed on its reused worktree", aa3.output);
+assert.equal(aa3.output().split("spawned developer").length - 1, 2, "the developer respawned after the reviewer bounce");
+const wtAA3 = `feat/${parseInt(taskAA3.file, 10)}-bounce-back`;
+for (const line of aa3.output().split("\n").filter((l) => l.includes("spawned developer") && l.includes(taskAA3.file))) {
+	assert.ok(line.includes(`(cwd=${join(rootAA3, ".worktrees", wtAA3)})`), "each developer run used the task's worktree dir");
+}
+assert.equal(readFileSync(join(rootAA3, "marker-snapshot.txt"), "utf8"), "dev\ndev\n", "the approve-time snapshot holds both developers' markers: the worktree was reused, not recreated");
+await waitFor(() => aa3.output().includes(`merged ${wtAA3} for ${taskAA3.file}`), 15000, "the reused branch carried the task through the merge", aa3.output);
+aa3.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + reviewer to-do bounce respawn smoke passed");
+
 // --- part AH: the blockedBy gate holds a task with a blocker that still blocks; a ghost ref is
 // ignored; when the blocker stops blocking the daemon drops the ref and promotes in the sweep ---
 const rootAH = fixture();

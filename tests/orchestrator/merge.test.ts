@@ -430,7 +430,7 @@ assert.ok(promptAL.includes("Merger agent"), "prompt is the merger's");
 assert.ok(promptAL.includes("resolve the conflicts"), "the merger only resolves conflicts");
 assert.ok(promptAL.includes("conclude the replayed commit with git rebase --continue"), "the merger concludes with git rebase --continue");
 assert.ok(promptAL.includes("never start a rebase or merge yourself"), "the merger starts no merge");
-assert.ok(promptAL.includes("never set a task state"), "the merger sets no state");
+assert.ok(promptAL.includes("never change the task states"), "the merger never changes the task states");
 assert.ok(promptAL.includes("run the full test suite in your worktree"), "the merger runs the full suite after the replay");
 assert.ok(!promptAL.includes(rootAL) && !promptAL.includes(wtAL), "no absolute path survives rendering");
 assert.ok(!promptAL.includes("{{"), "no placeholder survives rendering");
@@ -445,6 +445,22 @@ assert.ok(!promptRev.includes(join(rootAL, ".kanban")) && !promptRev.includes(".
 assert.ok(!promptRev.includes("{{"), "no placeholder survives rendering");
 assert.ok(promptRev.includes("under 60 minutes"), "the reviewer prompt carries the configured stall window");
 assert.ok(promptRev.includes("SPECS.md"), "the prompt names the cwd task file symlink");
+// the stripped prompts: only the state setters (splitter, reviewer) keep state knowledge,
+// developer/merger/live-tester carry only the ban; no doctor narrative, no AGENTS.md loading
+// explanation and no role-notes path anywhere
+for (const [role, prompt] of [["developer", renderPrompt(rootAL, "developer", 60)], ["merger", promptAL], ["live-tester", renderPrompt(rootAL, "live-tester", 60)]] as const) {
+	assert.ok(prompt.toLowerCase().includes("never change the task states"), `the ${role} prompt bans changing the task states`);
+	assert.ok(!prompt.includes("doctor maintains"), `the ${role} prompt carries no doctor-maintains sentence`);
+	assert.ok(!prompt.includes("loads into your context"), `the ${role} prompt carries no AGENTS.md loading explanation`);
+	assert.ok(!prompt.includes(".kanban/AGENTS"), `the ${role} prompt names no role-notes path`);
+}
+assert.ok(promptRev.includes("does not fulfill the Specs") && promptRev.includes("move the task back to to-do"), "the reviewer prompt carries the to-do outcome");
+assert.ok(!promptRev.includes("doctor maintains"), "the reviewer prompt carries no doctor-maintains sentence");
+assert.ok(!promptRev.includes("loads into your context") && !promptRev.includes(".kanban/AGENTS"), "the reviewer prompt carries no loading explanation or role-notes path");
+const promptSplitAL = renderPrompt(rootAL, "splitter", 60);
+assert.ok(promptSplitAL.includes("Leave every AGENTS.md file untouched"), "the splitter AGENTS.md paragraph is the shortened form");
+assert.ok(!promptSplitAL.includes("loads from your cwd") && !promptSplitAL.includes("no per-role notes file"), "the splitter drops the guidance-loading explanation");
+assert.ok(!promptSplitAL.includes("symlink"), "the splitter prompt explains no symlink");
 console.log("orchestrator.test.ts: ... + merger prompt conflict-only smoke passed");
 
 // --- part AU: 000189 two conflicted to-merge tasks, one merger at a time. The second
