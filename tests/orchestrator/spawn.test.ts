@@ -490,3 +490,67 @@ appendFileSync(${JSON.stringify(join(rootAY, "argv.log"))}, JSON.stringify({ arg
 }
 cleanupAll(rootAY);
 console.log("orchestrator.test.ts: ... + claude backend spawn smoke passed");
+
+// --- part AZ: the splitter has no role notes: its spawn on a fresh fixture creates no
+// .kanban/AGENTS.splitter.md, carries no --append-system-prompt (pi loads the project's
+// root AGENTS.md natively) and leaves the project's own root AGENTS.md in place (no
+// role-notes symlink at the root); the claude system-prompt file degrades to the project
+// part alone ---
+const rootAZ = fixture();
+cleaned.push(rootAZ);
+const homeAZ = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAZ);
+mkdirSync(kanbanDir(rootAZ), { recursive: true });
+const projectAZ = "# project guidance: answer in ASD-STE100\n";
+writeFileSync(join(rootAZ, "AGENTS.md"), projectAZ);
+const stubAZ = join(rootAZ, "az-agent.cjs");
+writeFileSync(
+	stubAZ,
+	`#!/usr/bin/env node
+const { appendFileSync } = require("node:fs");
+appendFileSync(${JSON.stringify(join(rootAZ, "argv.log"))}, JSON.stringify(process.argv) + "\\n");
+`,
+);
+chmodSync(stubAZ, 0o755);
+const savedHomeAZ = process.env.HOME;
+process.env.HOME = homeAZ;
+let cfgAZ: ReturnType<typeof loadConfig>;
+let cfgClaudeAZ: ReturnType<typeof loadConfig>;
+try {
+	cfgAZ = loadConfig(rootAZ);
+	cfgClaudeAZ = loadConfig(rootAZ, "claude");
+} finally {
+	process.env.HOME = savedHomeAZ;
+}
+cfgAZ.agent = stubAZ;
+cfgClaudeAZ.agent = stubAZ;
+const azArgv = () =>
+	readFileSync(join(rootAZ, "argv.log"), "utf8")
+		.trim()
+		.split("\n")
+		.filter(Boolean)
+		.map((l) => JSON.parse(l) as string[]);
+const azSplitters = () => azArgv().filter((a) => (a[a.indexOf("-p") + 1] ?? "").includes("Splitter agent"));
+const azTodo = (name: string) => {
+	const task = createTask(rootAZ, { name, summary: "Splitter notes smoke", specs: "n/a", complexity: "moderate" });
+	setState(rootAZ, task, "to-do");
+};
+azTodo("feat: splitter no notes");
+rescan(rootAZ, cfgAZ);
+await waitFor(() => existsSync(join(rootAZ, "argv.log")), 10000, "the pi splitter stub recorded its argv", () => "");
+const piSplitAZ = azSplitters().at(-1)!;
+assert.equal(piSplitAZ.indexOf("--append-system-prompt"), -1, "the splitter spawn carries no inline injection: pi loads the root AGENTS.md natively");
+assert.ok(!existsSync(join(kanbanDir(rootAZ), "AGENTS.splitter.md")), "a splitter spawn creates no .kanban/AGENTS.splitter.md");
+assert.ok(!lstatSync(join(rootAZ, "AGENTS.md")).isSymbolicLink(), "the project's own root AGENTS.md stays in place: no role-notes symlink at the root");
+assert.ok(lstatSync(join(rootAZ, "SPECS.md")).isSymbolicLink(), "the splitter cwd still links the task file");
+// claude: the concatenated system-prompt file degrades to the project part alone
+azTodo("feat: splitter no notes claude");
+rescan(rootAZ, cfgClaudeAZ);
+await waitFor(() => azSplitters().length > 1, 10000, "the claude splitter stub recorded its argv", () => "");
+const claudeSplitAZ = azSplitters().at(-1)!;
+const promptFileIdxAZ = claudeSplitAZ.indexOf("--append-system-prompt-file");
+assert.ok(promptFileIdxAZ !== -1, "the claude splitter spawn carries the system-prompt file");
+assert.equal(readFileSync(claudeSplitAZ[promptFileIdxAZ + 1], "utf8"), `${projectAZ}\n`, "the file holds the project part alone, no splitter notes");
+assert.ok(!existsSync(join(kanbanDir(rootAZ), "AGENTS.splitter.md")), "the claude splitter spawn created no role notes file");
+cleanupAll(rootAZ);
+console.log("orchestrator.test.ts: ... + splitter no-notes spawn smoke passed");

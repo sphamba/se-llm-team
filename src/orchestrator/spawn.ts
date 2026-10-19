@@ -51,7 +51,8 @@ export function ensureContextSymlinks(root: string, cwd: string, taskFile: strin
 	repointContextSymlink(root, join(cwd, "SPECS.md"), join(".kanban", taskFile));
 	// the Splitter runs at the project root, where a role-notes symlink would shadow the
 	// project's own AGENTS.md and poison the projectAgentsPrompt read of every later spawn:
-	// no AGENTS.md link at the root, the notes ride the appended system prompt instead
+	// no AGENTS.md link at the root; the splitter has no notes file and runs on its shipped
+	// prompt plus the project's own root AGENTS.md
 	if (cwd === root) return;
 	// a target project's own tracked AGENTS.md sits where the role-notes symlink must go:
 	// skip-worktree hides the replacement from git status (an untracked file cannot be marked;
@@ -208,15 +209,17 @@ export function spawnAgent(root: string, cfg: Config, role: string, task: Task, 
 	const fd = openSync(logPath(root, `${slug}.${role}.${nextRunIndex(root, slug, role)}`), "a");
 	// one exit file per task at a time: a stale one from a previous run would read as this run's code
 	clearExitFile(root, name);
-	ensureRoleNotes(root, role);
+	// the splitter has no role notes: its guidance is the shipped prompt plus the project's
+	// own root AGENTS.md, so no .kanban/AGENTS.splitter.md is ever created for it
+	if (role !== "splitter") ensureRoleNotes(root, role);
 	// the cwd symlinks give the session its task (SPECS.md) and role guidance (AGENTS.md) at startup
 	ensureContextSymlinks(root, cwd, task.file, role);
 	// hide both context paths from git status, so a blanket git add never commits them
 	ensureInfoExclude(root, cwd);
 	// the project's own AGENTS.md rides as an appended system prompt: the cwd AGENTS.md is the
 	// role-notes symlink, so the project's own instructions would otherwise never load. At the
-	// project root (the Splitter) there is no AGENTS.md symlink: pi's cwd chain loads the
-	// project's own file, so only the role notes ride the appended element
+	// project root (the Splitter) there is no AGENTS.md symlink and no role notes: pi's cwd
+	// chain loads the project's own file, so the appended element is omitted there
 	const projectPrompt = projectAgentsPrompt(root);
 	const piPrompt = cwd === root ? readRoleNotes(root, role) : projectPrompt;
 	// per-backend argv from the resolved provider/model/thinking triple: pi keeps the

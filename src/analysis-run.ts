@@ -23,8 +23,10 @@ if (!root || !logArg || !role) {
 	// back to the .gz replacement
 	const logPath = existsSync(logArg) ? logArg : `${logArg}.gz`;
 	try {
-		// the doctor revises the role file, so it must exist even when no agent spawn created it
-		ensureRoleNotes(root, role);
+		// the doctor revises the role file, so it must exist even when no agent spawn created
+		// it; the splitter has no role notes, so an analysis for it (unreachable from the
+		// pipeline today) can never recreate the file
+		if (role !== "splitter") ensureRoleNotes(root, role);
 		await analyseLog(logPath, {
 			// the shipped prompt files travel with the package: a per-project agents dir would
 			// fail every unattended analysis for projects without the files

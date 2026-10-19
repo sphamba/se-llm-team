@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { gunzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { kanbanDir } from "../../src/kanban.ts";
 import { compactFinishedLogs, compactLogLine, nextRunIndex } from "../../src/orchestrator.ts";
+import { newestRunRole } from "../../src/orchestrator/log.ts";
 import { fixture, cleaned } from "../helpers.ts";
 
 // --- part AB: the compactor drops the moderate drop list, keeps the read path byte-for-byte ---
@@ -143,3 +144,18 @@ writeFileSync(join(kanbanDir(rootAC), ".pids", `${slugRunAC}.developer.0.analysi
 assert.equal(compactFinishedLogs(rootAC).files, 0, "a live analysis's doctor log stays plain");
 assert.equal(readFileSync(logAC(`${slugRunAC}.developer.0.doctor.log`), "utf8"), "doctor live\n", "the live analysis's doctor.log is untouched");
 console.log("orchestrator.test.ts: ... + retro sweep smoke passed");
+
+// --- part AD: the splitter is never analysed: its run log never matches the slug's newest
+// counted role, so a splitter-only log fires no analysis and a newer splitter log never
+// shadows the real role's log ---
+const rootAD = fixture();
+cleaned.push(rootAD);
+const logsAD = join(kanbanDir(rootAD), ".logs");
+mkdirSync(logsAD, { recursive: true });
+writeFileSync(join(logsAD, "000999_splitter_log.developer.0.log"), "{}\n");
+writeFileSync(join(logsAD, "000999_splitter_log.splitter.0.log"), "{}\n");
+assert.equal(newestRunRole(rootAD, "000999_splitter_log"), "developer", "a newer splitter log never becomes the run role");
+writeFileSync(join(logsAD, "000999_splitter_log.splitter.1.log.gz"), gzipSync(Buffer.from("{}\n")));
+assert.equal(newestRunRole(rootAD, "000999_splitter_log"), "developer", "a compacted splitter log never counts either");
+assert.equal(newestRunRole(rootAD, "000998_splitter_only"), null, "a splitter-only slug has no analysable role");
+console.log("orchestrator.test.ts: ... + splitter log exclusion smoke passed");

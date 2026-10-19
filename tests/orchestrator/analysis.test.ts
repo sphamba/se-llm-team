@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, execSync } from "node:child_process";
+import { spawn, execSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +9,7 @@ import { loadConfig, poll } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline.ts";
 import { pidAlive, pidPath } from "../../src/pid.ts";
 import { exitFilePath, spawnRunAnalysis } from "../../src/orchestrator/spawn.ts";
-import { fixture, waitFor, cleanupAll, cleaned } from "../helpers.ts";
+import { fixture, waitFor, cleanupAll, cleaned, HERE } from "../helpers.ts";
 
 // --- part AT2: the auto-run analysis: every successful agent run (exit 0) spawns the
 // detached analyst+doctor runner (spawnRunAnalysis) exactly once, with skip paths for
@@ -384,3 +384,20 @@ try {
 }
 cleanupAll(rootAT5, homeAT5);
 console.log("orchestrator.test.ts: ... + one failed analysis attempt per run passed");
+
+// --- part AT6: the splitter has no role notes and no analysis: the detached runner leaves
+// .kanban/AGENTS.splitter.md absent even when it is asked for a splitter role ---
+const rootAT6 = fixture();
+cleaned.push(rootAT6);
+const homeAT6 = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAT6);
+mkdirSync(kanbanDir(rootAT6), { recursive: true });
+const runAT6 = spawnSync(
+	process.execPath,
+	[join(HERE, "..", "src", "analysis-run.ts"), rootAT6, join(kanbanDir(rootAT6), ".logs", "000999_splitter_log.splitter.0.log"), "splitter"],
+	{ env: { ...process.env, HOME: homeAT6 }, encoding: "utf8" },
+);
+assert.notEqual(runAT6.status, 0, "the runner exits non-zero on the missing log");
+assert.ok(!existsSync(join(kanbanDir(rootAT6), "AGENTS.splitter.md")), "a splitter analysis creates no role notes file");
+cleanupAll(rootAT6, homeAT6);
+console.log("orchestrator.test.ts: ... + splitter analysis creates no role notes passed");
