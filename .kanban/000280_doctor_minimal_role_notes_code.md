@@ -1,7 +1,7 @@
 ---
 name: "fix: doctor notes contract in prompt, config and starter"
 priority: "high"
-state: "doing"
+state: "live-testing"
 worktree: "fix/280-doctor-minimal-role-notes-code"
 issuer: "#279"
 complexity: "moderate"
@@ -49,3 +49,19 @@ Do NOT touch: agents/developer.md, agents/reviewer.md, agents/live-tester.md, ag
 - ensureRoleNotes writes the new starter text for a missing file (unit assertion).
 
 # Notes
+
+- Tests first (fix policy): all four touched suites failed on the new asserts before the change (doctor byte pins, prompts substitution, config knob, spawn starter); green after the change. Suites run: tests/efficiency-analysis/doctor.test.ts, tests/efficiency-analysis/prompts.test.ts, tests/orchestrator/config.test.ts, tests/orchestrator/spawn.test.ts.
+- agents/doctor.md final paragraph replaced with three sentences: full rewrite each run, at most {{maxNotesBullets}} top-level bullets plus valid markdown, keep only durable task-agnostic guidance (repo structure, build/test recipes, general shell traps, workflow tips), delete task-specific material (task-number citations, per-task recipes, measured per-task values, war stories) outright, never archive. The no-roleFile wording is untouched. Both byte pins in tests/efficiency-analysis/doctor.test.ts updated to the new rendering with the default 20.
+- src/efficiency-analysis.ts: AnalyseOptions.maxNotesBullets (default 20 applied in analyseLog next to the other defaults), rendered into doctorPrompt's values map.
+- src/orchestrator/config.ts parses roles.doctor.maxNotesBullets like concurrency/mergeThreshold (positive integer, invalid warns and stays unset); both analyseLog call sites pass cfg.roles.doctor?.maxNotesBullets (src/analysis-run.ts, src/tools.ts efficiency_analysis).
+- src/orchestrator/spawn.ts starter now states the contract (doctor rewrites after every run, durable task-agnostic bullets, role agent never edits). Deliberate: the starter carries no bullet count, because the cap governs the doctor's rewrite and already travels in the doctor prompt; a number in the starter could contradict a configured cap until the first rewrite.
+- Coverage note: config.test.ts part AR runs the real analysis runner end to end (node src/analysis-run.ts with a stub agent, HOME isolated) and asserts the rendered doctor prompt carries "at most 20" with no config key and "at most 7" with roles.doctor.maxNotesBullets: 7. prompts.test.ts covers the option path (default 20, override 7). The tools.ts call site passes the identical expression as analysis-run.ts and has no dedicated end-to-end test (the real-spawn tool path cannot be stubbed in-process); covered by review only.
+- Commit: 195b440 in this worktree.
+
+## Review (195b440, re-review)
+- All five Changes settle from the diff: doctor.md final paragraph carries full-rewrite-each-run + {{maxNotesBullets}} cap + durable-task-agnostic-only + delete-outright-never-archive with the no-roleFile wording untouched (agents/doctor.md:8); AnalyseOptions.maxNotesBullets, default 20 in analyseLog, rendered into the values map (src/efficiency-analysis.ts:46,378,397,554); roles.doctor.maxNotesBullets parsed like the other per-role numbers, invalid warns and stays unset (src/orchestrator/config.ts:137-144); both analyseLog call sites pass cfg.roles.doctor?.maxNotesBullets (src/analysis-run.ts:38, src/tools.ts:336); ensureRoleNotes starter states all three contract elements (src/orchestrator/spawn.ts:31).
+- Constraints hold: prompt rule only (no trim or retry code in the diff), role file never injected into the prompt, splitter byte cap untouched.
+- Stale-pin grep ("compact it each run", "append project-specific guidance") over tests/: zero matches, no lagging split-area copies.
+- Suite union (efficiency-analysis claude/commands/doctor/merge/parse/pipeline/prompts, orchestrator analysis/config/spawn, mcp/extension/tools/plugin, fixed from the coverage map + diff --stat): 14/14 exit=0 on the current tree, 12 fast in parallel then config and spawn serial. Notes' green runs carry no positional sha, so the union re-run stands as the verdict.
+- Acceptance criteria: the cap sentence renders with default 20 and override 7 end to end through the real runner (config.test.ts part AR), the option path asserts default 20 / override 7 with the placeholder never literal (doctor.test.ts testMaxNotesBulletsOverride, prompts.test.ts), the new starter text is unit-asserted (spawn.test.ts part AS, `# ${role}:` prefix kept). Full npm test not run: reviewer scope is the union, which covers every touched file per the coverage map.
+- No fixes, no open questions.

@@ -52,3 +52,14 @@ The .kanban/AGENTS.*.md files are shared board files (untracked, mirrored by the
 - Do not touch the splitter inline-injection byte cap (out of scope, noted hazard only).
 
 # Notes
+- Prompt edits: agents/reviewer.md:23, agents/merger.md:19, agents/splitter.md:15. Each guidance paragraph now names the doctor as the notes-file maintainer and the file as read-only for the role agent ("That file is read-only for you: the doctor maintains it and rewrites it after every run. Never edit, append to or rewrite it; report durable guidance for future agents of your kind in your task's # Notes."). The splitter wording keeps the inline-injection path: no AGENTS.md symlink in its cwd, the notes ride the appended system prompt.
+- Acceptance grep `grep -n "Edit it for project-specific\|append what future agents" agents/reviewer.md agents/merger.md agents/splitter.md` returns no matches (exit 1).
+- One-time distills of the three shared board notes files (untracked, not part of the deliverable commit):
+  - .kanban/AGENTS.reviewer.md: 20921 to 8100 bytes, 67 to 20 bullet lines, 0 citations. I wrote a 8153-byte / 19-bullet distill, then the file was rewritten twice (mtimes 22:07:06 and 22:09:15), matching reviewer doctor runs for sibling tasks. The final version keeps my run shape, recon commands, checks, test union/order/triage/policy and coverage map, adds lessons from its analysed run, and sits exactly at the 20-bullet cap. The doctor owns this file, so it may change again; the running daemon still has the old doctor prompt (no cap enforcement in src/), so the 20-bullet shape is the doctor's own compaction.
+  - .kanban/AGENTS.splitter.md: 30 to 10 bullet lines, 12015 to 6246 bytes, 3 to 0 citations. Kept the symlink/kanban-argument mechanics and the parallel-split patterns; dropped per-task split stories. Corrected the stale tests/webui.test.ts references to the current tests/webui/ per-area layout (the old file was dropped in commit 9673b45).
+  - .kanban/AGENTS.merger.md: 5 to 0 bullet lines (prose sections), 2163 to 2262 bytes, 0 citations. Dropped the append-discipline header; kept inspect-once, rebase sides, GPG failure recovery, the test recipe and the SPECS.md symlink mechanics.
+- Scoped check: `node tests/plugin.test.ts` exit 0 ("all assertions passed"). It is the only suite that covers agents/*.md; no test changes were needed.
+- Deliverable commit: 504a083, three files changed, one paragraph each. Nothing under src/, tests/, agents/doctor.md or agents/analyst.md changed.
+
+# Open questions
+- Assumption: the merger notes file satisfies "at most 20 bullet lines" as prose sections with 0 bullet lines; re-bullet it if the verifier reads the cap as demanding bullets.

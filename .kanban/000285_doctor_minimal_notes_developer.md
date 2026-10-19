@@ -1,8 +1,8 @@
 ---
 name: "fix: developer role prompt prohibition and notes distill"
 priority: "high"
-state: "doing"
-worktree: "fix/285-doctor-minimal-notes-developer"
+state: "done"
+worktree: ""
 issuer: "#281"
 complexity: "moderate"
 shortName: "doctor-minimal-notes-developer"
@@ -50,3 +50,19 @@ The .kanban/AGENTS.*.md files are shared board files (untracked, mirrored by the
 - Do not touch the splitter inline-injection byte cap (noted hazard only).
 
 # Notes
+- Replaced the notes-guidance paragraph in agents/developer.md (commit 98be333): the paragraph now says .kanban/AGENTS.developer.md is read-only for the role agent, the doctor maintains it and rewrites it after every run, and task-specific findings go to the task file's # Notes. The AGENTS.md symlink mechanics sentence is kept. Diff is 1 insertion, 1 deletion. No other lines touched.
+- Found the notes-file distill already satisfied on disk: .kanban/AGENTS.developer.md is 6710 bytes / 33 lines (SPECS recorded 56623 bytes / 137 lines at task creation), with 4 sections of durable, task-agnostic guidance. Left it unchanged.
+- Acceptance greps pass from the repo root: "Edit it for project-specific" returns 0 matches in agents/developer.md. Notes file: 18 bullet lines (cap 20), 0 '#[0-9]' citations, 6710 bytes (cap 8192). Nothing staged or committed under .kanban/ (board file, untracked). No test changes made, per Specs.
+- Review at 98be333: commit touches only the developer.md guidance paragraph (1+/1-); new text names the doctor as maintainer, file read-only for the role agent, symlink mechanics wording kept. On-disk greps re-verified (18 bullets, 0 task citations, 6710 bytes); a read of .kanban/AGENTS.developer.md confirms durable task-agnostic guidance (build/test recipes, suite layout, shell traps, task-file bookkeeping), no war stories. Open question settled: the on-disk distill satisfies the mechanical contract, no rewrite needed. tests/plugin.test.ts exit=0 (the diff's only covered suite).
+
+## Live test (2026-10-19)
+
+- Setup: a fixture board and an isolated HOME. The merged daemon ran from this worktree (commit 98be333) with a fake agent that records each spawn. A probe task in state to-do made the daemon spawn the Developer role through the normal pipeline. The prompt check printed "12 checks, 0 failed". The daemon stopped from its own pidfile, and no fixture process is left.
+- Prompt delivery (pass): the captured -p payload is byte-identical to this worktree's agents/developer.md with the single {{logStallMinutes}} placeholder replaced by the configured 60. It holds the new prohibition, names the doctor as the maintainer and rewriter, and routes task findings to the task file's # Notes. The old wording ("Edit it for project-specific" and the rewrite-or-compact sentence) is absent.
+- Role context (pass): the developer cwd is the task worktree. The AGENTS.md link points to .kanban/AGENTS.developer.md and the SPECS.md link points to the probe task file. Both links resolve at agent startup, so the role agent loads the distilled notes file.
+- Acceptance greps (22:12): "Edit it for project-specific" gives 0 matches in agents/developer.md. The notes file has 20 bullet lines (cap 20), 0 '#[0-9]' citations (cap 0), and 8182 bytes (cap 8192, sha256 84368204, mtime 22:08:36).
+- Finding: the notes file does not hold the byte cap while other pipeline runs rewrite it. At the start of this live test (21:58:15) the file was 8455 bytes, over the 8192 cap, with 20 bullets and 0 citations. Routine doctor rewrites caused this: this task's developer doctor rewrote the file to 17 bullets and 7074 bytes, then the developer doctor of sibling task #279 added 3 bullets to the same shared role file, which gave the 8455-byte state. At 22:08:36 the developer doctor of sibling task #280 rewrote the file to 8182 bytes, back under the cap. The one-time-distill caps are a point-in-time property only. The doctor analysis for this task reports "Role file updated: 7074 bytes (limit 8192), 17 bullets (limit 20).", and those numbers do not match the file at that time (8455 bytes, 20 bullets).
+- Assumptions: the fake agent replaces a real pi session because the change is prompt text. The fake records the exact argv that the daemon builds, so the test uses the real spawn path and no API calls. The notes file is a shared live board file that concurrent tasks rewrite, so the measurements carry a timestamp and a sha256. The fixture daemon ran the merged code from this worktree, so the rendered prompt came from this worktree's agents/developer.md.
+- Technical note: the first check run read the worktree AGENTS.md and SPECS.md links after the daemon had cleared them, because the fake agent exits at once. The fake agent now records the links at startup. This was a check-script timing bug, not a product finding.
+
+

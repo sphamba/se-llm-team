@@ -1,8 +1,8 @@
 ---
 name: "fix: live-tester role prompt prohibition and notes distill"
 priority: "high"
-state: "to-do"
-worktree: ""
+state: "live-testing"
+worktree: "fix/286-doctor-minimal-notes-live-tester"
 issuer: "#281"
 complexity: "moderate"
 shortName: "doctor-minimal-notes-live-tester"
@@ -52,3 +52,14 @@ The .kanban/AGENTS.*.md files are shared board files (untracked, mirrored by the
 # Notes
 
 - No-split decision (2026-10-19): this task is already one atomic bundle of the #281 per-role split. It holds one trivial prompt paragraph and one single-file distill (one continuous rewrite, one output). No disjoint file ranges and no new-file-only seam exist, so no cut parallelizes. A prompt-vs-distill split adds a review, merge and live-test cycle for a one-paragraph change. Do not re-split this or the sibling role bundles (#285, #287); the per-role bundle is the bottom of the split.
+
+- No-split note, second splitter session (2026-10-19): same decision. Adds facts from board forensics that change the developer job:
+  - The stale first decomposition of #281 (#282, #283, #284, duplicate file ownership) was already deleted at 21:53 by a parallel session. The canonical set is #285, #286, #287. No board repair pending.
+  - .kanban/AGENTS.live-tester.md was rewritten at 21:55 by an out-of-scope session (bash write; no #286 developer had run): 98311 -> 10288 bytes. Quality is good and matches this spec's kernel; 19 bullet lines and zero task citations pass, but wc -c 10288 FAILS the 8192 cap.
+  - Developer job: verify the on-disk distill against the original, then trim to at most 8192 bytes without losing the kernel. Redo only if verification fails. Full pre-distill original: git show 5531b6c:.kanban/AGENTS.live-tester.md (98311 bytes; last meta/kanban snapshot before the rewrite).
+  - A parallel session was still alive at 21:56 (the deleted duplicate #283's splitter log ended mid-run). Re-check the file immediately before your edit. Touch only AGENTS.live-tester.md.
+  - agents/live-tester.md is untouched. Do the paragraph edit as specced.
+
+- Done (2026-10-19, commit 4145b49): verified the on-disk distill instead of redoing it. Between the 21:55 snapshot in the older note (10288 bytes) and this check, the file was trimmed again (mtime 22:01): 8187 bytes, 19 bullet lines, 0 task citations, so all three mechanical checks pass. Kernel verification against `git show 5531b6c` (98311 bytes): sections map cleanly (Codebase map absorbs the Orchestrator flow map; Canonical fixtures absorb Fixture shapes plus Canonical recipes; Report and board hygiene absorbs Real-board daemon hygiene), per-task recipes and the in-file append-discipline header are dropped, and 10 distinctive-phrase spot checks all trace to the original. No rewrite needed; touching it again would only risk clobbering a parallel trim. agents/live-tester.md paragraph replaced per spec, wording mirrored from the already-landed developer-prompt edit (98be333). Acceptance greps: 0 matches for the old sentence, doctor named as maintainer and file read-only for the role.
+
+- Review (2026-10-19, no fixes): prompt paragraph verified at agents/live-tester.md:17, the only diff hunk (1+/1-); old sentence 0 matches, new wording mirrors 98be333 verbatim (doctor named as maintainer, file read-only for the role agent, findings redirected to the task # Notes); commit 4145b49 carries only agents/live-tester.md, nothing under .kanban/ committed, hard boundary held (no doctor.md, analyst.md, src/ or tests/ touches). On-disk distill re-checked after the parallel-session warning and matches the Done record: 19 bullets (cap 20), grep -c '#[0-9]' 0, wc -c 8187 (cap 8192); original blob 5531b6c confirmed 98311 bytes. Tests: tests/plugin.test.ts exit 0 (total 1 suite, +0 from the diff; spec forbids test changes, acceptance is grep-based).

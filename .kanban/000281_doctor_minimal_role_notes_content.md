@@ -6,22 +6,19 @@ worktree: ""
 issuer: "#279"
 complexity: "simple"
 shortName: "doctor-minimal-role-notes-content"
-blockedBy: "#285, #286, #287"
+blockedBy: "#287"
 ---
 
 # Summary
-Verification-only parent for the content half of #279, split three ways: #285 (developer role: prompt prohibition + notes distill), #286 (live-tester role: prompt prohibition + notes distill), #287 (reviewer, merger, splitter: three prompt prohibitions + three notes distills). Verify the full content contract (five read-only/doctor-maintains prohibitions, five distilled notes files) once all three land. Code half is #280.
+Verification parent for the content half of #279, split by role weight into three subtasks with disjoint file ownership: #285 (developer), #286 (live-tester), #287 (reviewer, merger, splitter). Each subtask owns its role prompt prohibition plus that role's one-time notes distill. Verify the landed contract across all five roles once the pieces have merged. The doctor/code half is task #280.
 
 # Specs
-# Verification
+# Verification (after #285, #286 and #287 merge)
 
-Verification-only parent: #285, #286 and #287 each pair one role's prompt prohibition with that role's one-time notes distill. Once all three land, check the content contract end to end:
-
-- grep -n "Edit it for project-specific\|append what future agents" over agents/developer.md, agents/reviewer.md, agents/live-tester.md, agents/merger.md, agents/splitter.md returns no matches; each of the five carries the prohibition (names the doctor as the maintainer and the file as read-only for the role agent; the splitter one covers the inline-injection path).
-- For each of the five .kanban/AGENTS.developer.md, .kanban/AGENTS.live-tester.md, .kanban/AGENTS.reviewer.md, .kanban/AGENTS.merger.md, .kanban/AGENTS.splitter.md: grep -cE '^[[:space:]]*(-|\*|[0-9]+\.) ' is at most 20; grep -c '#[0-9]' is 0; wc -c is at most 8192.
-- The merged deliverable diff touches only the five agents/*.md files (one guidance paragraph each); nothing under src/, tests/, agents/doctor.md or agents/analyst.md changed.
-- The splitter inline-injection byte cap is untouched.
+- grep -n "Edit it for project-specific\|append what future agents" over the five agents/developer.md, agents/reviewer.md, agents/live-tester.md, agents/merger.md, agents/splitter.md files returns no matches; each of the five carries the prohibition (names the doctor as the maintainer and the file as read-only for the role agent); the splitter wording covers its inline-injection path (no AGENTS.md symlink in cwd, the notes ride the appended system prompt, still read-only).
+- For each of the five .kanban/AGENTS.<role>.md: grep -cE '^[[:space:]]*(-|\*|[0-9]+\.) ' is at most 20; grep -c '#[0-9]' is 0; wc -c is at most 8192.
+- agents/doctor.md, src/ and tests/ carry no changes from the content subtasks: the merged deliverable commits touch only the five agents/*.md files.
 
 # Notes
 
-# Notes
+- Concurrent-splitter race repair (2026-10-19): a parallel session had also decomposed this parent as #282 (developer), #283 (live-tester), #284 (reviewer/merger/splitter), issuer #279, no worktrees, no developers. This decomposition (#285, #286, #287) is canonical: the blockers above, #287 in doing with a developer. The duplicate tasks were deleted; no work was lost. Do not re-create them.
