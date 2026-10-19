@@ -1,8 +1,8 @@
 ---
 name: "fix: doctor keeps AGENTS role notes minimal and generic"
 priority: "high"
-state: "live-testing"
-worktree: "fix/279-doctor-minimal-role-notes"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "doctor-minimal-role-notes"
@@ -54,4 +54,21 @@ Verification-only parent. Landed: #280 (code half: doctor contract, maxNotesBull
 - Notes files measured once this pass through the worktree symlink: bullets developer 20, reviewer 20, live-tester 20, merger 0; cites 0 each (bar: <=20 bullets, 0 #[0-9] citations). .kanban/AGENTS.splitter.md absent.
 - Suites: 21 scoped suites all exit 0 — 13 tests/orchestrator/ (analysis/hub/log parallel; config, daemon, merge, poll, promote, singleton, spawn, split, sweep, worktree serial), 7 tests/efficiency-analysis/, tests/context-symlinks. The Specs' full `npm test` was not run (repo-wide suite is banned; the scoped set covers the 2249c88 diff). No code changes this run; no commit.
 - Open question removed: #288 landed, so the blockedBy re-promote loop it asked about ends here; the Specs gate is satisfied and this pass is green.
+
+## Live test (2026-10-19)
+
+- Lane: direct spawn-path fixture (`spawnAgent` with a fake pi agent) plus one real `src/analysis-run.ts` end-to-end run with the same fake agent, from the merged checkout at 2249c88 (HEAD == main). The repo test suites are not part of this live test. Fixture and scripts: `/tmp/279/fx` (`setup.sh`, `run-spawn.mjs`, `run-analysis.mjs`, `check-content.sh`, `run.sh`), run log `/tmp/279/run.log`.
+- Spawn lane, `TALLY spawn: 28 pass, 0 fail`.
+  - The `-p` payload equals `agents/<role>.md` byte for byte (known placeholders filled) for developer, reviewer, live-tester, merger and splitter.
+  - `ensureRoleNotes` writes the new starter text for a missing file for the four worktree roles.
+  - A splitter spawn creates no `.kanban/AGENTS.splitter.md`, leaves the project root `AGENTS.md` a real file and gets no `--append-system-prompt` flag.
+  - The worktree `AGENTS.md` link re-points to `.kanban/AGENTS.<role>.md` at each spawn, `SPECS.md` points at the task file, and the project root `AGENTS.md` rides as the appended system prompt.
+- Analysis lane, `TALLY analysis: 12 pass, 0 fail`. Two real analysis-run.ts runs on a plain fixture log: the doctor prompt carries "keep at most 20 top-level bullets" by default and "keep at most 7" with `roles.doctor.maxNotesBullets: 7`, with no literal `{{maxNotesBullets}}`, and it names the role file and the role.
+- Content lane, `TALLY content: 12 pass, 1 fail, 0 skip`. `agents/doctor.md` carries the cap sentence once. No prompt carries the old notes-edit instruction. The four worktree prompts carry the read-only/doctor-maintains prohibition. The splitter paragraph names no notes file and forbids every AGENTS write. `.kanban/AGENTS.splitter.md` is absent. The one fail: `.kanban/AGENTS.reviewer.md` measures 22 any-indent bullet lines (20 top-level plus 2 nested sub-bullets) against the Specs pattern `grep -cE '^[[:space:]]*(-|\*|[0-9]+\.) '` with the bar of at most 20. The doctor contract says "top-level bullets" and that count is exactly 20. developer 20, live-tester 20 and merger 0 pass, each with 0 `#[0-9]` citations.
+- Wobble: the reviewer file was 20 bullets at the 21:04Z pass. The current 22 any-indent count comes from the doctor rewrite at 23:07:42 (this task's reviewer analysis). The file is doctor-maintained, so a sibling can rewrite it again.
+- No byte rule was applied, per the settled 2026-10-19 decision.
+- Assumptions: the fixture isolates HOME and XDG_CONFIG_HOME, so the global config cannot change the agent or the cap. The fake agent stands in for pi, so model output quality is out of scope. The fixture task file stays untracked, as for the daemon lanes.
+- Fixture learning, not a finding: the first setup deleted its own script directory, and the first spawn tally checked the three later starters before their spawns. Both were fixture bugs, fixed in place.
+- `RUN TALLY spawn=0 analysis=0 content=1 (0=green)`.
+- No code changes this run. No commit (verification-only parent, no diff).
 
