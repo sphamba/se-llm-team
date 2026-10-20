@@ -1,8 +1,8 @@
 ---
 name: "feat: reviewer prompt says use subagents"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "live-testing"
+worktree: "feat/293-reviewer-prompt-says"
 issuer: "user"
 complexity: "trivial"
 ---
@@ -32,3 +32,7 @@ This task is filed BEFORE the README task (000... docs: describe the tool and ag
 - Only agents/reviewer.md and the reviewer pin in tests/orchestrator/merge.test.ts change. No notes file, no skill, no code.
 
 # Notes
+- Added step 3 to agents/reviewer.md: "For research or parallel sub-work, use subagents." (developer wording verbatim). Renumbered the following steps 4-8. Moved no other line; the state steps and the test-policy sentence are unchanged.
+- Extended the rendered reviewer prompt pin in tests/orchestrator/merge.test.ts part AL with the exact sentence.
+- complexity: trivial, so no test-first run was done; the required pin was part of the Specs and is added.
+- Scoped suites green, each exit 0: tests/orchestrator/merge.test.ts, promote.test.ts, spawn.test.ts. Full suite not run per repo policy.
