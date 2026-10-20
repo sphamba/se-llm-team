@@ -553,6 +553,8 @@ export function promoteBacklog(root: string, tasks: Task[], backlogIdleMinutes =
 			try {
 				const path = join(kanbanDir(root), file);
 				const mtimeMs = statSync(path).mtimeMs;
+				// a future mtime (clock skew) never ages: it would hold the gate shut for the whole skew
+				if (mtimeMs > Date.now()) continue;
 				// the daemon's own writes are not board activity: a blocker reaching done must
 				// still promote its dependents in the same sweep
 				if (isSelfWrite(path, mtimeMs)) continue;

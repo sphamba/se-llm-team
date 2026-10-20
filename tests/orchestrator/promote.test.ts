@@ -647,3 +647,20 @@ assert.ok(!bb.output().includes("promotion deferred"), "the open gate logged no 
 assert.notEqual(parseTask(rootBB, idleBB.file).state, "backlog", "the idle board task left backlog");
 bb.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + idle board stall probe smoke passed");
+
+// --- part BC (296): a future task-file mtime (clock skew) must not hold the quiet gate shut.
+// A future mtime is not board activity: clamping it to Date.now() every sweep would keep
+// reading as fresh and never open, so the gate skips future files when it finds the newest ---
+const rootBC = fixture();
+cleaned.push(rootBC);
+mkdirSync(kanbanDir(rootBC), { recursive: true });
+const skewedBC = createTask(rootBC, { name: "feat: skewed mtime", summary: "Clamp gate mtime", specs: "n/a" });
+const futureBC = new Date(Date.now() + 3_600_000);
+utimesSync(join(kanbanDir(rootBC), skewedBC.file), futureBC, futureBC);
+assert.equal(promoteBacklog(rootBC, listAll(rootBC), 0.01).length, 1, "a future mtime does not defer promotion past the window");
+assert.equal(parseTask(rootBC, skewedBC.file).state, "to-do", "the future-mtime task promoted on the next sweep");
+const logBCPath = join(kanbanDir(rootBC), ".logs", "orchestrator.log");
+const logBC = existsSync(logBCPath) ? readFileSync(logBCPath, "utf8") : "";
+assert.ok(!/promotion deferred, newest task write -\d+s ago/.test(logBC), "the defer log shows no negative age");
+cleanupAll(rootBC);
+console.log("orchestrator.test.ts: ... + future gate mtime smoke passed");
