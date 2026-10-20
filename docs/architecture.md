@@ -27,7 +27,7 @@ The daemon watches `.kanban/` and rescans every 10 s. The `orchestrator_poke` to
 - **live-testing**: the Live-tester runs the merged commit like a user.
 - **done**: the daemon removes the worktree and the merged branch. It commits the task file.
 
-A successful finish moves the task forward for the developer, merger, and live-tester. The Reviewer sets its own state. A crash moves the task back one step. A log that does not grow for `logStallMinutes` counts as a crash. After 5 respawns, the daemon waits `retryIdleMinutes` before the next spawn.
+A successful finish moves the developer to to-review and the live-tester to done. A merger returns the task to to-merge. The Reviewer sets its own state. A crash moves the task back one step. A log that does not grow for `logStallMinutes` counts as a crash. After 5 respawns, the daemon waits `retryIdleMinutes` before the next spawn.
 
 A task file with conflict markers stays untouched. The daemon spawns no agent and writes nothing for it until the merger or the user resolves the conflict.
 

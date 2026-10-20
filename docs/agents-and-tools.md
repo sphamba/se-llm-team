@@ -20,7 +20,7 @@ The Merger runs the full test suite after it concludes the rebase.
 
 Agent logs live in `.kanban/.logs/`. The web UI renders them readably. The orchestrator reads the role prompt from `agents/` in its own checkout at each spawn. A prompt fix on a task branch applies only after that branch merges.
 
-Agents append notes to the task file directly. On a successful finish, the orchestrator moves the task forward: developer to to-review, merger to to-merge, live-tester to done. The Reviewer sets its own states: to-merge on approval, to-review after fixes, to-do on a Specs violation. The Live-tester ends with a finish message that reports its findings. It creates no task and moves no state. A Doctor pass follows every successful run of the developer, reviewer, merger, and live-tester. It rewrites that role's notes file.
+Agents append notes to the task file directly. On a successful finish, the orchestrator moves the developer to to-review and the live-tester to done. A merger returns the task to to-merge. The Reviewer sets its own states: to-merge on approval, to-review after fixes, to-do on a Specs violation. The Live-tester ends with a finish message that reports its findings. It creates no task and moves no state. A Doctor pass follows every successful run of the developer, reviewer, merger, and live-tester. It rewrites that role's notes file.
 
 ## Tools
 
