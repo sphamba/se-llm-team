@@ -1,8 +1,8 @@
 ---
 name: "feat: reviewer prompt says use subagents"
 priority: "high"
-state: "live-testing"
-worktree: "feat/293-reviewer-prompt-says"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "trivial"
 ---
@@ -36,3 +36,26 @@ This task is filed BEFORE the README task (000... docs: describe the tool and ag
 - Extended the rendered reviewer prompt pin in tests/orchestrator/merge.test.ts part AL with the exact sentence.
 - complexity: trivial, so no test-first run was done; the required pin was part of the Specs and is added.
 - Scoped suites green, each exit 0: tests/orchestrator/merge.test.ts, promote.test.ts, spawn.test.ts. Full suite not run per repo policy.
+
+## Live test (2026-10-20)
+
+Lane: prompt delivery, daemon e2e with a fake agent. No browser and no served page, because the change touches only the reviewer prompt.
+
+Fixture: isolated git repo at `/tmp/lt293/root`, one task in `to-review` with complexity `moderate`, a `node` fake agent set as `agent` in `.kanban/se-llm-team.json`. The daemon ran from the merged checkout with `--no-webui` and a fixture `XDG_CONFIG_HOME`. Port 4242 was never used. The real hub stayed on pid 164752 and still serves commit a3f4412.
+
+Real path exercised: `node src/orchestrator.ts --root <fixture>` moved the task `to-review` -> `reviewing`, made the worktree, and spawned the reviewer. The fake agent captured the spawn argv, its cwd and the `-p` prompt.
+
+Result: `bash run.sh` exit 0. Last printed tally: `CHECK_TALLY pass=13 fail=0`. Two reruns gave the same 13/13 checks.
+
+Checks that passed:
+- The delivered reviewer prompt contains `For research or parallel sub-work, use subagents.` exactly once.
+- The sentence is step 3. The steps are 1 to 8 in order, each keeps its original content, and the old `3. Fix mistakes directly` is gone.
+- No `{{...}}` placeholder remains. `{{ROOT}}` renders to the fixture root and `{{logStallMinutes}}` renders to `60`.
+- The delivered prompt is byte-equal to `agents/reviewer.md` after the two placeholder substitutions (2775 bytes each).
+- The prompt arrived as the `-p` argv element. The reviewer cwd is the task worktree.
+- The daemon wrote `state: reviewing` and the `worktree:` field to the fixture task.
+
+Assumptions:
+- The fixture `agent` override is the production spawn path for the prompt. The fake agent only records argv, so the test proves delivery, not that a real model obeys the sentence.
+- Only the reviewer prompt was spawned. Other prompts were not exercised, because they are outside the change scope and their source bytes did not change.
+- `logStallMinutes` stayed at the default 60, so the placeholder check pins that value.

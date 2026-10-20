@@ -1,8 +1,8 @@
 ---
 name: "fix: poke bypasses the backlog quiet gate and gate deferrals become observable"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/295-poke-forces-promotion"
 issuer: "user"
 complexity: "moderate"
 shortName: "poke-forces-promotion"
@@ -58,3 +58,17 @@ With the defer logging from this task, run the live daemon and try to reproduce:
 - On this repo after merge: file a throwaway-grade check is not required; the next PM create+poke cycle must promote in seconds, visible in .kanban/.logs/orchestrator.log.
 
 # Notes
+
+## No-split decision (Splitter)
+
+Kept as one task, not split.
+
+- Bug 1 is one flag threaded through one call chain: `watch` -> `scheduleSweep` -> `sweep` -> `rescan` -> `promoteBacklog`. That is 2 source files (`src/orchestrator/main.ts`, `src/orchestrator/pipeline.ts`) plus a log line. There is no second lane to fill.
+- Bug 2 cannot run in parallel. It needs the bug 1 defer log and the merged code to reproduce on a live daemon. As its own subtask it would be blocked by bug 1, so it would grow pipeline overhead (review, merge, live test) with zero time saved, and it would fight bug 1 for the same lines of `pipeline.ts`.
+- Bug 2 is mostly an investigation. If the fixture cannot reproduce the stall, the outcome is a finding written on this task, not a second code change. A subtask needs a worktree and a full pipeline for that, which is too much for the value.
+
+Guidance for future splitters of this board:
+
+- Do not split a "fix X, then use the fix to chase Y" task. The chase is follow-up work on the same files, not a parallel lane.
+- `promoteBacklog` has a third call site: `src/orchestrator/liveness.ts` (poll path). The developer must keep the gate there. Only the poke watch path is forced. Do not add `force` to the poll call.
+- The promotion tests live in `tests/orchestrator/promote.test.ts` and `tests/orchestrator/sweep.test.ts`.
