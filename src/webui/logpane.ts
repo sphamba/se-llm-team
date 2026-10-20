@@ -85,6 +85,47 @@ export const inline = (s) => s
 	.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
 	.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
 
+// 000299: the text a record adds to a chunk's pending markdown run, null when it adds none; every
+// content block must be text, so a record that also carries a tool call or a thinking block is
+// never swept into a held-back line
+function runText(line: string): string | null {
+	let rec: Record<string, any>;
+	try {
+		rec = JSON.parse(line);
+	} catch {
+		return null;
+	}
+	if (!rec || typeof rec !== "object") return null;
+	if (rec.type === "message_update") {
+		const ev = rec.assistantMessageEvent;
+		return ev?.type === "text_delta" ? String(ev.delta ?? "") : null;
+	}
+	const msg = rec.message;
+	const blocks = rec.type === "assistant" || (rec.isSidechain === true && msg?.role === "assistant") ? msg?.content : [];
+	let text = "";
+	for (const b of Array.isArray(blocks) ? blocks : []) {
+		if (b?.type !== "text" || typeof b.text !== "string") return null;
+		text += b.text;
+	}
+	return text || null;
+}
+
+// 000299: the records at the end of a window whose line has not closed yet, so the line continues
+// in a record the window does not hold: init and poll hold them back (payload), a history chunk
+// renders them as one paragraph (renderLogChunk). 0 when the last text record closes its line, and
+// 0 when the run reaches the window start: a line that began before the window has no record
+// boundary to report, so it renders as before
+export function openRun(lines: string[]): number {
+	let n = 0;
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const t = runText(lines[i]);
+		if (t === null || t.endsWith("\n")) return n;
+		if (t.includes("\n")) return 0; // the line starts inside this record: hold nothing, no duplicate
+		n++;
+	}
+	return 0;
+}
+
 // GFM pipe-table branch: a header row plus a separator row of dashes/colons opens a table; cells
 // split on unescaped pipes (a \| escape stays in its cell), the separator colons set the
 // alignment, a ragged row normalizes to the header count, and each cell renders through inline().
@@ -115,16 +156,21 @@ export function md(src) {
 		if (line.includes("|") && sep !== undefined && TABLE_SEP.test(sep)) {
 			const head = tableCells(line), align = tableCells(sep).map(tableAlign);
 			const cell = (tag, text, k) => "<" + tag + (k ? "" : ' class="md-pin"') + (align[k] ?? "") + ">" + inline(text) + "</" + tag + ">";
-			html += '<div class="md-table-wrap"><table><thead><tr>';
-			head.forEach((c, k) => (html += cell("th", c, k)));
-			html += "</tr></thead><tbody>";
+			let tbl = "<table><thead><tr>";
+			head.forEach((c, k) => (tbl += cell("th", c, k)));
+			tbl += "</tr></thead><tbody>";
 			for (i += 2; i < lines.length && lines[i].includes("|"); i++) {
 				const row = tableCells(lines[i]);
-				html += "<tr>";
-				for (let k = 0; k < head.length; k++) html += cell("td", row[k] ?? "", k);
-				html += "</tr>";
+				tbl += "<tr>";
+				for (let k = 0; k < head.length; k++) tbl += cell("td", row[k] ?? "", k);
+				tbl += "</tr>";
 			}
-			html += "</tbody></table></div>";
+			tbl += "</tbody></table>";
+			// 000299: a row run that reaches the end of the input leaves the table open, so the client
+			// absorbs the rows a later chunk appends to it; the dialog renders md with no following
+			// siblings, so the marker is inert there
+			const open = lines.slice(i).every((l) => !l.trim());
+			html += '<div class="md-table-wrap"' + (open ? ' data-open="tbl"' : "") + ">" + tbl + "</div>";
 			i--; // the loop step lands on the first line after the table
 			continue;
 		}
@@ -149,6 +195,13 @@ export function renderLogChunk(text: string): string {
 	};
 	const lines = text.split("\n");
 	lines.pop(); // split's last element is the trailing-newline sentinel or a byte-split partial record, not content
+	// 000299: a run of records whose text carries no newline yet ends mid-line, so it cannot be a
+	// table row: it leaves md()'s input and renders as one paragraph, and the table before it ends at
+	// its last complete row. Ceiling: a row split mid-row across a history page boundary still
+	// renders as two fragment paragraphs; upgrade path: line-aware page boundaries that carry the
+	// render state across pages.
+	const hold = openRun(lines);
+	const held = hold ? lines.splice(lines.length - hold, hold) : [];
 	const seenTools = new Set<string>();
 	// tool blocks opened in this chunk, keyed by toolCallId: a tool_execution_end for an id here
 	// fills the block, an id from an earlier chunk renders the joinable span the client resolves
@@ -331,7 +384,14 @@ export function renderLogChunk(text: string): string {
 			// claude partial-message deltas duplicate the assistant/user records that follow
 		}
 	}
-	flush();
+	if (held.length) {
+		// the run left md()'s input, so the table ends at its last complete row: its open marker goes,
+		// else the client would absorb the partial line as a row
+		const rest = md(pending).replace(' data-open="tbl"', "");
+		pending = "";
+		if (rest) out.push(rest);
+		out.push(md(held.map((l) => runText(l) ?? "").join("")));
+	} else flush();
 	if (cont) out[contIdx] = '<span class="lg-cont">' + esc(cont) + "</span>";
 	if (think !== null) out[thinkIdx] = thinkHtml(true); // the block continues into the next chunk
 	for (const t of tools.values()) out[t.idx] = toolHtml(t);
@@ -396,5 +456,38 @@ export function logFixups(el, doc) {
 		pre.textContent = s.textContent;
 		d.append(sum, pre);
 		s.replaceWith(d);
+	}
+	// 000299: a table still open at the end of its chunk (data-open=tbl) absorbs the row paragraphs
+	// that follow it in another chunk: a row streamed in a later poll, or the older chunk's body rows
+	// after a scroll-up prepends it above rows already in the pane. A pipe paragraph becomes a row on
+	// the head's column count and alignment, its html inserted as rendered; the first other sibling
+	// stops the absorb and closes the table, while a run that ends the pane leaves it open for the
+	// next poll. Every name here is local: the page ships this function as source.
+	for (const w of el.querySelectorAll(".md-table-wrap")) {
+		if (w.dataset.open !== "tbl") continue;
+		const table = w.querySelector("table");
+		const tbody = table.querySelector("tbody");
+		const align = [];
+		for (const th of table.querySelectorAll("th")) align.push(th.style.textAlign ? ' style="text-align:' + th.style.textAlign + '"' : "");
+		// the row a paragraph becomes: split on unescaped pipes (a \| escape stays inside its cell,
+		// like md's tableCells), pad or clip to the head's count, pin the first column as md does
+		const rowHtml = (html) => {
+			const cells = html.replace(/\\\|/g, "\u0001").split("|").map((c) => c.trim().replace(/\u0001/g, "|"));
+			if (cells.length > 1 && cells[0] === "") cells.shift();
+			if (cells.length > 1 && cells[cells.length - 1] === "") cells.pop();
+			let row = "<tr>";
+			for (let k = 0; k < align.length; k++) row += "<td" + (k ? "" : ' class="md-pin"') + (align[k] ?? "") + ">" + (cells[k] ?? "") + "</td>";
+			return row + "</tr>";
+		};
+		let sib = w.nextElementSibling;
+		while (sib && sib.tagName === "P" && sib.textContent.includes("|")) {
+			const next = sib.nextElementSibling;
+			const tr = doc.createElement("tr");
+			tr.innerHTML = rowHtml(sib.innerHTML);
+			tbody.appendChild(tr);
+			sib.remove();
+			sib = next;
+		}
+		if (sib) delete w.dataset.open; // a non-row sibling closes the table
 	}
 }

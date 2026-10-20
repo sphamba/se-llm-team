@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { getTask, kanbanDir, listAll, PRIORITY_RANK, splitFrontmatter, STATES, taskFiles, taskNum, taskSlug, type Task } from "../kanban.ts";
 import { agentAlive } from "../pid.ts";
-import { AGENT_ROLE, LOG_LINES, LOG_ROLES, renderLogChunk } from "./logpane.ts";
+import { AGENT_ROLE, LOG_LINES, LOG_ROLES, openRun, renderLogChunk } from "./logpane.ts";
 
 // the served payloads: per-task board rows (taskPayload) and the chunked agent-log reader
 // (agentLogPayload) over run logs, subagent transcripts and per-file usage stats
@@ -749,6 +749,8 @@ export async function agentLogPayload(root: string, q: URLSearchParams): Promise
 		}
 	}
 	let next = tail;
+	// the cap on a held-back mid-line run (000299): past it the fragment renders as a paragraph
+	const HOLD_MAX = 1 << 20;
 	try {
 		const window = (start: number, end: number): [string, number] => {
 			if (full === null) return readRange(target, start, end);
@@ -774,6 +776,23 @@ export async function agentLogPayload(root: string, q: URLSearchParams): Promise
 				// head lands mid-record: drop the partial head line, only whole records render
 				const nl = text.indexOf("\n");
 				text = nl === -1 ? "" : text.slice(nl + 1);
+			}
+			// 000299: a poll or init window that ends mid-line holds that line's records back instead of
+			// rendering a partial table row: the tail reports the record boundary before them, so the next
+			// poll re-reads them and the line renders whole, exactly once (000084's rule, one level down).
+			// A before=1 history page keeps them and renders the fragment paragraph instead (000299 S4).
+			if (q.get("before") !== "1") {
+				const recs = text.split("\n");
+				const partial = recs.pop() ?? "";
+				const run = recs.slice(recs.length - openRun(recs));
+				const bytes = run.reduce((n, l) => n + Buffer.byteLength(l) + 1, 0);
+				// ceiling: a held run over 1 MiB flushes as a paragraph, so a stream that never closes its
+				// line cannot stall the pane forever; upgrade path: render the partial row with a marker the
+				// client replaces in place when the row completes
+				if (bytes && bytes <= HOLD_MAX) {
+					text = recs.slice(0, recs.length - run.length).join("\n") + "\n" + partial;
+					next = boundary - bytes;
+				}
 			}
 			text = renderLogChunk(text);
 			if (text || head === 0 || !walk) break;

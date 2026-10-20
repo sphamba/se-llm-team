@@ -200,6 +200,28 @@ assert.equal(splitLog.tail, (JSON.stringify({ type: "session", id: "s" }) + "\n"
 writeFileSync(logFile, JSON.stringify({ type: "session", id: "s" }) + "\n" + bigRecord + "\n");
 assert.ok((await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${splitLog.tail}`)).json()).text.includes("zzz"), "the record renders whole once its newline arrives");
 
+// 000299: a poll or init window whose last text record carries no newline holds that line's
+// records back instead of rendering a partial row; the tail reports the boundary before them, so
+// the next poll re-reads them and the line renders whole, exactly once (000084's rule, one level
+// down). A before=1 history page keeps the fragment: it renders as a paragraph, no open marker
+const deltaRow = (t: string) => JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: t } }) + "\n";
+const tableHead = deltaRow("| a | b |\n| --- | --- |\n| 1 | 2 |\n");
+const tableCut = deltaRow("| 3 | 4");
+writeFileSync(logFile, tableHead + tableCut);
+const cutInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.ok(!cutInit.text.includes("3"), "init holds the unterminated line back");
+assert.ok(cutInit.text.includes('<div class="md-table-wrap" data-open="tbl">'), "the table renders with the open marker, so the line can join it later");
+assert.equal(cutInit.tail, tableHead.length, "the tail sits on the record boundary before the held records");
+writeFileSync(logFile, tableHead + tableCut + deltaRow(" |\n"));
+const cutPoll = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${cutInit.tail}`)).json();
+assert.equal(cutPoll.text, "<p>| 3 | 4 |</p>", "the next poll renders the held line whole, exactly once");
+const cutAgain = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${cutPoll.tail}`)).json();
+assert.equal(cutAgain.text, "", "the held line is not served twice");
+const cutHist = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${(tableHead + tableCut).length}&before=1`)).json();
+assert.equal(cutHist.head, 0);
+assert.ok(cutHist.text.endsWith("<p>| 3 | 4</p>"), "a history page keeps the mid-line cut as a fragment paragraph");
+assert.ok(!cutHist.text.includes("data-open"), "the history page's table takes no open marker, the pane never absorbs the fragment");
+
 // 000166: an init window on a log mid-thinking holds the still-open block whole from its
 // thinking_start as one open Thinking block (never a delta-run orphan span); the later delta
 // polls' spans join it client-side and the cross-window thinking_end serves the closing span

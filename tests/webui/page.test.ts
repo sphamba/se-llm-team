@@ -190,9 +190,81 @@ const servedMd = new Function(
 const servedTable = servedMd("| a | b |\n| --- | --- |\n| 1 | 2 |");
 assert.equal(
 	servedTable,
-	'<div class="md-table-wrap"><table><thead><tr><th class="md-pin">a</th><th>b</th></tr></thead><tbody><tr><td class="md-pin">1</td><td>2</td></tr></tbody></table></div>',
+	'<div class="md-table-wrap" data-open="tbl"><table><thead><tr><th class="md-pin">a</th><th>b</th></tr></thead><tbody><tr><td class="md-pin">1</td><td>2</td></tr></tbody></table></div>',
 	"the served md renders a GFM table body with the wrapper, thead and pinned first cells",
 );
+// 000299: the served logFixups merges a cut table across chunks. The older chunk (header,
+// separator, one body row, still open) prepends above the row paragraphs the newer chunk already
+// left in the pane, and the pane fixes absorb them into the table as rows
+const lfStart = script.indexOf("function logFixups(el, doc) {");
+assert.ok(lfStart >= 0, "the page serves the logFixups pass");
+const lfEnd = script.indexOf("\n}\n", lfStart);
+assert.ok(lfEnd > lfStart, "the served logFixups function closes");
+const servedLogFixups = new Function("CSS", script.slice(lfStart, lfEnd + 2) + "; return logFixups;")() as (el: any, doc: any) => void;
+class FixEl {
+	tag: string;
+	className = "";
+	innerHTML = "";
+	textContent = "";
+	dataset: Record<string, string> = {};
+	style: Record<string, string> = {};
+	children: FixEl[] = [];
+	parent: FixEl | null = null;
+	classList = { contains: (cls: string) => this.className.split(/\s+/).includes(cls) };
+	constructor(tag: string) { this.tag = tag; }
+	get tagName() { return this.tag.toUpperCase(); }
+	sibling(step: number): FixEl | null { const p = this.parent; return p ? p.children[p.children.indexOf(this) + step] ?? null : null; }
+	get previousElementSibling() { return this.sibling(-1); }
+	get nextElementSibling() { return this.sibling(1); }
+	querySelectorAll(sel: string): FixEl[] {
+		const out: FixEl[] = [];
+		const walk = (n: FixEl) => { for (const c of n.children) { if (fixMatches(c, sel)) out.push(c); walk(c); } };
+		walk(this);
+		return out;
+	}
+	querySelector(sel: string): FixEl | null { return this.querySelectorAll(sel)[0] ?? null; }
+	appendChild(c: FixEl): FixEl { if (c.parent) c.remove(); c.parent = this; this.children.push(c); return c; }
+	append(...cs: FixEl[]) { for (const c of cs) this.appendChild(c); }
+	prepend(c: FixEl) { this.children.unshift(c); c.parent = this; }
+	remove() { const p = this.parent; if (p) p.children.splice(p.children.indexOf(this), 1); this.parent = null; }
+	replaceWith(c: FixEl) { const p = this.parent; if (!p) return; p.children[p.children.indexOf(this)] = c; c.parent = p; this.parent = null; }
+}
+const fixMatches = (c: FixEl, sel: string) => {
+	const m = sel.match(/^(?:([a-z]+))?(?:\.([\w-]+))?(?:\[data-([\w-]+)(?:="([^"]*)")?\])?$/);
+	if (!m) return c.tag === sel;
+	const [, tag, cls, attr, val] = m;
+	return (!tag || c.tag === tag) && (!cls || c.classList.contains(cls)) && (attr === undefined || (val !== undefined ? c.dataset[attr] === val : attr in c.dataset));
+};
+(globalThis as any).CSS ??= { escape: (s: string) => s };
+const fixDoc = { createElement: (tag: string) => new FixEl(tag) };
+const fixEl = (tag: string) => new FixEl(tag);
+const fixPane = new FixEl("div");
+const paneRow = (html: string) => { const p = fixEl("p"); p.innerHTML = html; p.textContent = html; fixPane.appendChild(p); return p; };
+paneRow("| 1 | 2 |");
+paneRow("| 3 | 4 |");
+const prose = paneRow("Done.");
+const olderWrap = fixEl("div");
+olderWrap.className = "md-table-wrap";
+olderWrap.dataset.open = "tbl";
+const olderTable = fixEl("table");
+const olderHead = fixEl("thead");
+const olderHeadRow = fixEl("tr");
+for (const text of ["a", "b"]) { const th = fixEl("th"); th.textContent = text; th.style.textAlign = ""; olderHeadRow.appendChild(th); }
+olderHead.appendChild(olderHeadRow);
+const olderBody = fixEl("tbody");
+const olderRow = fixEl("tr");
+for (const text of ["1", "2"]) { const td = fixEl("td"); td.textContent = text; olderRow.appendChild(td); }
+olderBody.appendChild(olderRow);
+olderTable.append(olderHead, olderBody);
+olderWrap.appendChild(olderTable);
+fixPane.prepend(olderWrap);
+servedLogFixups(fixPane, fixDoc);
+assert.equal(olderBody.children.length, 3, "the served pass absorbs both row paragraphs into the older chunk's table");
+assert.equal(olderBody.children[1].innerHTML, '<tr><td class="md-pin">1</td><td>2</td></tr>', "the first absorbed row renders the exact md() row markup");
+assert.equal(olderBody.children[2].innerHTML, '<tr><td class="md-pin">3</td><td>4</td></tr>', "the second absorbed row joins it");
+assert.deepEqual(fixPane.children.map((c) => c.tag), ["div", "p"], "the absorbed paragraphs leave the pane, the prose after them stays");
+assert.equal(fixPane.children[1], prose, "the non-row sibling keeps its node");
+assert.ok(!("open" in olderWrap.dataset), "the prose closes the table, so the marker clears");
 // #291 a markdown table scrolls inside its own wrapper and the leftmost column pins left
 assert.ok(page.includes(".md-table-wrap { overflow-x: auto; }"), "a markdown table gets its own horizontal scroll container, never the markdown block");
 assert.ok(page.includes(".md-table-wrap th, .md-table-wrap td { white-space: nowrap; text-align: left;"), "table cells stay on one line and a bare --- column is left, past the UA th centering");

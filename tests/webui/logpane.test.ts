@@ -6,15 +6,20 @@ class LogEl {
 	tag: string;
 	className = "";
 	textContent = "";
+	innerHTML = "";
+	style: Record<string, string> = {};
 	dataset: Record<string, string> = {};
 	children: LogEl[] = [];
 	parent: LogEl | null = null;
 	classList = { contains: (cls: string) => this.className.split(/\s+/).includes(cls) };
 	constructor(tag: string) { this.tag = tag; }
-	get previousElementSibling(): LogEl | null {
+	get tagName(): string { return this.tag.toUpperCase(); }
+	sibling(step: number): LogEl | null {
 		const p = this.parent;
-		return p ? p.children[p.children.indexOf(this) - 1] ?? null : null;
+		return p ? p.children[p.children.indexOf(this) + step] ?? null : null;
 	}
+	get previousElementSibling(): LogEl | null { return this.sibling(-1); }
+	get nextElementSibling(): LogEl | null { return this.sibling(1); }
 	querySelectorAll(sel: string): LogEl[] {
 		const out: LogEl[] = [];
 		const walk = (n: LogEl) => {
@@ -278,17 +283,17 @@ assert.ok(thinkMd.includes('<details class="lg-think"><summary>Thinking</summary
 // normalized to the header count; cell text goes through inline() after esc()
 assert.equal(
 	md("| a | b |\n| --- | --- |\n| 1 | 2 |"),
-	'<div class="md-table-wrap"><table><thead><tr><th class="md-pin">a</th><th>b</th></tr></thead><tbody><tr><td class="md-pin">1</td><td>2</td></tr></tbody></table></div>',
+	'<div class="md-table-wrap" data-open="tbl"><table><thead><tr><th class="md-pin">a</th><th>b</th></tr></thead><tbody><tr><td class="md-pin">1</td><td>2</td></tr></tbody></table></div>',
 	"a GFM pipe table renders as a wrapper > table with thead/tbody and a pinned first column",
 );
 assert.equal(
 	md("| l | c | r |\n| :-- | :-: | --: |\n| 1 | 2 | 3 |"),
-	'<div class="md-table-wrap"><table><thead><tr><th class="md-pin">l</th><th style="text-align:center">c</th><th style="text-align:right">r</th></tr></thead><tbody><tr><td class="md-pin">1</td><td style="text-align:center">2</td><td style="text-align:right">3</td></tr></tbody></table></div>',
+	'<div class="md-table-wrap" data-open="tbl"><table><thead><tr><th class="md-pin">l</th><th style="text-align:center">c</th><th style="text-align:right">r</th></tr></thead><tbody><tr><td class="md-pin">1</td><td style="text-align:center">2</td><td style="text-align:right">3</td></tr></tbody></table></div>',
 	"the separator colons set per-column alignment: bare is left, :--: center, --: right",
 );
 assert.equal(
 	md("| a | b | c |\n| --- | --- | --- |\n| 1 |\n| 1 | 2 | 3 | 4 |"),
-	'<div class="md-table-wrap"><table><thead><tr><th class="md-pin">a</th><th>b</th><th>c</th></tr></thead><tbody><tr><td class="md-pin">1</td><td></td><td></td></tr><tr><td class="md-pin">1</td><td>2</td><td>3</td></tr></tbody></table></div>',
+	'<div class="md-table-wrap" data-open="tbl"><table><thead><tr><th class="md-pin">a</th><th>b</th><th>c</th></tr></thead><tbody><tr><td class="md-pin">1</td><td></td><td></td></tr><tr><td class="md-pin">1</td><td>2</td><td>3</td></tr></tbody></table></div>',
 	"a short row pads with empty cells and a long row clips to the header count",
 );
 assert.equal(
@@ -298,17 +303,17 @@ assert.equal(
 );
 assert.equal(
 	md("| **b** | `c` | [l](u) |\n| --- | --- | --- |"),
-	'<div class="md-table-wrap"><table><thead><tr><th class="md-pin"><b>b</b></th><th><code>c</code></th><th><a href="u" target="_blank" rel="noopener">l</a></th></tr></thead><tbody></tbody></table></div>',
+	'<div class="md-table-wrap" data-open="tbl"><table><thead><tr><th class="md-pin"><b>b</b></th><th><code>c</code></th><th><a href="u" target="_blank" rel="noopener">l</a></th></tr></thead><tbody></tbody></table></div>',
 	"cell content renders through inline(): bold, code and links work inside a cell",
 );
 assert.equal(
 	md("| a<b | c&d |\n| --- | --- |\n| \"q\" | 'x' |"),
-	'<div class="md-table-wrap"><table><thead><tr><th class="md-pin">a&lt;b</th><th>c&amp;d</th></tr></thead><tbody><tr><td class="md-pin">&quot;q&quot;</td><td>&#39;x&#39;</td></tr></tbody></table></div>',
+	'<div class="md-table-wrap" data-open="tbl"><table><thead><tr><th class="md-pin">a&lt;b</th><th>c&amp;d</th></tr></thead><tbody><tr><td class="md-pin">&quot;q&quot;</td><td>&#39;x&#39;</td></tr></tbody></table></div>',
 	"HTML metacharacters in a cell are escaped before inline() applies markup",
 );
 assert.equal(
 	md("| a \\| b | c |\n| --- | --- |"),
-	'<div class="md-table-wrap"><table><thead><tr><th class="md-pin">a | b</th><th>c</th></tr></thead><tbody></tbody></table></div>',
+	'<div class="md-table-wrap" data-open="tbl"><table><thead><tr><th class="md-pin">a | b</th><th>c</th></tr></thead><tbody></tbody></table></div>',
 	"an escaped pipe stays inside its cell instead of splitting the row",
 );
 assert.equal(
@@ -316,3 +321,102 @@ assert.equal(
 	"<pre><code>| a | b |\n| --- | --- |\n</code></pre>",
 	"a table inside a fenced block stays pre/code, never a rendered table",
 );
+
+// #299 open-table merge, server half: a table whose row run reaches the end of the input is
+// marked open, so the client can absorb the rows a later chunk appends to it; any content after
+// the table closes it, and a chunk that ends mid-line splits that line off and drops the marker
+assert.equal(
+	md("| a | b |\n| --- | --- |\n| 1 | 2 |"),
+	'<div class="md-table-wrap" data-open="tbl"><table><thead><tr><th class="md-pin">a</th><th>b</th></tr></thead><tbody><tr><td class="md-pin">1</td><td>2</td></tr></tbody></table></div>',
+	"a table that runs to the end of the input stays open",
+);
+assert.ok(!md("| a | b |\n| --- | --- |\n| 1 | 2 |\nafter the table").includes("data-open"), "a paragraph after the table closes it");
+assert.ok(!md("| a | b |\n| --- | --- |\n| 1 | 2 |\n```\nfence\n```").includes("data-open"), "a fence after the table closes it too");
+assert.ok(!md("```\n| a | b |\n| --- | --- |\n```").includes("data-open"), "a table inside a fence never opens");
+const tableDelta = (t: string) => JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: t } });
+const wholeTable = renderLogChunk(tableDelta("| a | b |\n| --- | --- |\n| 1 | 2 |\n") + "\n");
+assert.ok(wholeTable.includes('data-open="tbl"'), "a chunk whose line closed keeps the table open for the next chunk's rows");
+const cutTable = renderLogChunk(tableDelta("| a | b |\n| --- | --- |\n| 1 | 2 |\n") + "\n" + tableDelta("| 3 | 4") + "\n");
+assert.ok(cutTable.includes('<tbody><tr><td class="md-pin">1</td><td>2</td></tr></tbody>'), "the table ends at its last complete row");
+assert.ok(!cutTable.includes("data-open"), "a trailing line with no newline leaves md()'s input, so the table takes no open marker");
+assert.ok(cutTable.endsWith("<p>| 3 | 4</p>"), "the trailing run renders as its own paragraph");
+
+// #299 open-table merge, client half: a table marked open absorbs the row paragraphs that follow
+// it into its tbody, on the head's column count and alignment, and the pane scan covers both
+// insert orders; a non-row sibling stops the absorb and closes the table, while a run that
+// absorbs its last sibling leaves it open for the next poll's rows
+const logTable = (cols: string[][]) => {
+	const wrap = new LogEl("div");
+	wrap.className = "md-table-wrap";
+	wrap.dataset.open = "tbl";
+	const table = new LogEl("table");
+	const headRow = new LogEl("tr");
+	const thead = new LogEl("thead");
+	for (const [text, align] of cols) {
+		const th = new LogEl("th");
+		th.textContent = text;
+		th.style.textAlign = align;
+		headRow.appendChild(th);
+	}
+	thead.appendChild(headRow);
+	const tbody = new LogEl("tbody");
+	table.append(thead, tbody);
+	wrap.appendChild(table);
+	return { wrap, tbody };
+};
+const logRow = (html: string) => {
+	const p = new LogEl("p");
+	p.innerHTML = html;
+	p.textContent = html;
+	return p;
+};
+const cols = [["a", ""], ["b", "center"], ["c", "right"]];
+const closedPane = new LogEl("div");
+const closedTable = logTable(cols);
+closedPane.appendChild(closedTable.wrap);
+closedPane.appendChild(logRow("| 1 | 2 |"));
+closedPane.appendChild(logRow("| 3 |"));
+closedPane.appendChild(logRow("| 1 | 2 | 3 | 4 |"));
+closedPane.appendChild(logRow("after the table"));
+logFixups(closedPane, logDoc);
+assert.equal(closedTable.tbody.children.length, 3, "every pipe paragraph after the open table becomes a row");
+assert.equal(
+	closedTable.tbody.children[0].innerHTML,
+	'<tr><td class="md-pin">1</td><td style="text-align:center">2</td><td style="text-align:right"></td></tr>',
+	"a short row pads to the head's columns and copies each column's alignment",
+);
+assert.equal(
+	closedTable.tbody.children[1].innerHTML,
+	'<tr><td class="md-pin">3</td><td style="text-align:center"></td><td style="text-align:right"></td></tr>',
+	"a one-cell row pads the rest empty",
+);
+assert.equal(
+	closedTable.tbody.children[2].innerHTML,
+	'<tr><td class="md-pin">1</td><td style="text-align:center">2</td><td style="text-align:right">3</td></tr>',
+	"a long row clips to the head's column count",
+);
+assert.deepEqual(closedPane.children.map((c) => c.tag), ["div", "p"], "the absorbed paragraphs leave the pane, the non-row sibling stays");
+assert.equal(closedPane.children[1].innerHTML, "after the table", "the non-row sibling is left untouched");
+assert.ok(!("open" in closedTable.wrap.dataset), "a non-row sibling stops the absorb and clears the marker");
+const openPane = new LogEl("div");
+const openTable = logTable([["a", ""], ["b", ""]]);
+openPane.appendChild(openTable.wrap);
+openPane.appendChild(logRow("| 5 | 6 |"));
+logFixups(openPane, logDoc);
+assert.equal(openPane.children.length, 1);
+assert.equal(openTable.tbody.children.length, 1, "the last sibling absorbs too");
+assert.equal(openTable.wrap.dataset.open, "tbl", "a run that absorbs its last sibling keeps the table open for the next poll");
+logFixups(openPane, logDoc);
+assert.equal(openTable.tbody.children.length, 1, "a repeat pass over the same pane absorbs nothing twice");
+const raggedPane = new LogEl("div");
+const raggedTable = logTable([["a", ""], ["b", ""]]);
+raggedPane.appendChild(raggedTable.wrap);
+raggedPane.appendChild(logRow("| x \\| y | z |"));
+logFixups(raggedPane, logDoc);
+assert.equal(raggedTable.tbody.children[0].innerHTML, '<tr><td class="md-pin">x | y</td><td>z</td></tr>', "an escaped pipe stays inside its cell, like the server-side table split");
+const escapedPane = new LogEl("div");
+const escapedTable = logTable([["a", ""], ["b", ""]]);
+escapedPane.appendChild(escapedTable.wrap);
+escapedPane.appendChild(logRow("| <b>bold</b> | &lt;img&gt; |"));
+logFixups(escapedPane, logDoc);
+assert.equal(escapedTable.tbody.children[0].innerHTML, '<tr><td class="md-pin"><b>bold</b></td><td>&lt;img&gt;</td></tr>', "the cell html goes in as it renders, never escaped a second time");
