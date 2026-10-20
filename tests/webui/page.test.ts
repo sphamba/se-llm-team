@@ -177,7 +177,8 @@ assert.ok(page.includes("button { font-family: inherit; }"), "buttons inherit th
 assert.ok(page.includes(String(md)), "the page runs the tested md renderer for task bodies and log text");
 // #291 a markdown table scrolls inside its own wrapper and the leftmost column pins left
 assert.ok(page.includes(".md-table-wrap { overflow-x: auto; }"), "a markdown table gets its own horizontal scroll container, never the markdown block");
-assert.ok(page.includes(".md-table-wrap th, .md-table-wrap td { white-space: nowrap;"), "table cells stay on one line");
+assert.ok(page.includes(".md-table-wrap th, .md-table-wrap td { white-space: nowrap; text-align: left;"), "table cells stay on one line and a bare --- column is left, past the UA th centering");
+assert.ok(page.includes("#m-log-text .md-table-wrap .md-pin { background: var(--code-bg); }"), "the log-pane pinned column matches the pane background, not the dialog panel");
 assert.ok(page.includes(".md-table-wrap .md-pin { position: sticky; left: 0;"), "the leftmost column pins left with a static right border as the cue");
 assert.ok(page.includes("#m-log-text pre { font: inherit;"), "log block bodies inherit the sans serif font");
 assert.ok(page.includes("#m-log-text pre { font: inherit; margin: 0; padding: 0; white-space: pre-wrap; overflow-wrap: break-word; }"), "expanded log block bodies wrap to the container width");

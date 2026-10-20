@@ -309,8 +309,10 @@ content height; the class drops at the transition end, and reduced motion keeps 
 one line, and the leftmost column pins left with a static right border as the cue */
 .md-table-wrap { overflow-x: auto; }
 .md-table-wrap table { border-collapse: collapse; }
-.md-table-wrap th, .md-table-wrap td { white-space: nowrap; padding: 3px 10px; border-bottom: 1px solid var(--border); }
+.md-table-wrap th, .md-table-wrap td { white-space: nowrap; text-align: left; padding: 3px 10px; border-bottom: 1px solid var(--border); }
 .md-table-wrap .md-pin { position: sticky; left: 0; background: var(--panel); border-right: 1px solid var(--border); }
+/* the log pane sits on the code background, not the dialog panel, so its pinned column matches the pane */
+#m-log-text .md-table-wrap .md-pin { background: var(--code-bg); }
 /* one accent color per column, in pipeline order */
 .c-backlog { --ac: #94a3b8; }
 .c-to-do { --ac: #60a5fa; }
