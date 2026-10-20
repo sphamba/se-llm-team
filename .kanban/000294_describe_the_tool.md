@@ -1,8 +1,8 @@
 ---
 name: "docs: describe the tool and agent chain in the README"
 priority: "medium"
-state: "merging"
-worktree: "docs/294-describe-the-tool"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 blockedBy: ""
@@ -95,3 +95,49 @@ Second review pass (re-review of the fix commit, `main...HEAD`, 2 commits):
 - Tests: `node tests/plugin.test.ts` exit 0. No suite pins the docs content.
 - Non-blocking notes from the first pass stand: the 13th tool `efficiency_analysis` is not in the tools paragraph, the dashboard config path is only in README.md:95, and the Mermaid chain shows the merger for every task.
 - No fixes made. No open user or client questions. `# Open questions` stays absent.
+
+Merge pass:
+
+- Rebase onto `c0c33be` stopped once, on `docs/architecture.md`. The other three files replayed cleanly. The second pick `docs: correct the merger state move` applied without a conflict.
+- Base side (ours) carried the long prose plus the new fact from `a11bf3a`: a poke scan bypasses the backlog quiet gate. Task side (theirs) carried the short rewrite that the Specs ask for.
+- Resolution: kept the task side for `docs/architecture.md`, because the Specs name this file and require one short line per state. Added the base fact back as two short sentences: "A poke scan bypasses the backlog quiet window. A poke is the PM's signal to schedule now."
+- Checked the other task-side claims against the current code: the Splitter gate (`SPLITTER_COMPLEXITIES`), the reviewer cap, `logStallMinutes`, `retryIdleMinutes`, and the 1 s refresh with a live agent or doctor all hold.
+- Full suite: `npm test` exit 0. All scoped suites passed.
+- Durable guidance for future mergers: for a docs rewrite over a base docs patch, take the task rewrite and re-add the base's new fact in one short sentence. Do not take the base prose wholesale, or the rewrite is lost.
+- No open user or client questions.
+
+## Live test (2026-10-20)
+
+Lane: docs artifact only. The four files are the user interface, so there is no daemon, hub, port or fixture state. I read them as a reader does and rendered the diagram in headless Chromium with mermaid 11.16. Served commit `cd8c0c7`, worktree clean. No test suite was run.
+
+| Claim | Check | Result |
+| --- | --- | --- |
+| README:3 is the 1-2 sentence intro (skill, deterministic orchestrator, kanban pipeline of headless agents) | line 3, sentence count, four ideas | pass, 2 sentences |
+| Six agent bullets in timeline order, each linking an existing prompt | parse bullets, check targets | pass |
+| Mermaid flow renders, with board, chain, two subagent nodes, four doctor nodes, no state labels | parse, then `mermaid.render` in Chromium | pass, 15 nodes, 17 edge paths, no page errors |
+| `## Setup` follows the intro block | position check | pass, line 33 |
+| Config table keeps shape and all option names | 13 rows against `c0c33be:README.md` and the parse sites | pass, 0 lost |
+| architecture.md keeps its headings, exact 10 states, one bullet per state | compare with `STATES` in `src/kanban.ts` | pass |
+| agents-and-tools.md fixes the two stale facts | text against `agents/live-tester.md` and `agents/reviewer.md` | pass |
+| Every relative link and anchor resolves | 21 local links | pass |
+| Skim: short sentences | max words per prose sentence | pass, max 22 words, 234 sentences |
+| Each role links its `agents/<role>.md` prompt in agents-and-tools.md | link scan | FAIL, Doctor missing |
+
+Controls, same run: a fixture with a broken link and a bad anchor was flagged 2/2. An invalid mermaid source failed to render. A 41-word fixture sentence was flagged.
+
+Finding:
+
+- `docs/agents-and-tools.md:23` names the Doctor pass but does not link `agents/doctor.md`. The other five roles have prompt links, and README.md:10 links the Doctor. The page links the `agents/` directory, so the prompt is reachable in two clicks. This is a minor deviation from "Link each role to its `agents/<role>.md` file."
+
+Assumptions:
+
+- GitHub rendering was emulated with local mermaid 11.16 and Chromium, not github.com. The block has the mermaid fence, parses, and renders, which covers the acceptance claim.
+- The readability limit is 30 words per sentence, a proxy for "short sentences". The longest sentence is 22 words, so the check passes with margin.
+- External links were not fetched. The four files contain none.
+- The config table was compared with the pre-rewrite README at `c0c33be` for option-name retention, and with `src/orchestrator/config.ts` and `src/webui/page.ts` for validity.
+- No user or client questions are open. `# Open questions` stays absent.
+
+Last tally: `TALLY 25/26 checks passed, 1 failed`.
+
+Cleanup: no processes started and no ports used. `git status --porcelain` stayed empty.
+
