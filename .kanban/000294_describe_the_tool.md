@@ -1,7 +1,7 @@
 ---
 name: "docs: describe the tool and agent chain in the README"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "docs/294-describe-the-tool"
 issuer: "user"
 complexity: "moderate"
@@ -58,3 +58,14 @@ Why:
 - Two or three review, merge and live-test cycles for a prose change cost more than the wall clock saved.
 
 Durable guidance for future Splitters: a docs rewrite does not parallelize by file when the files share the same facts. Split a docs task only when the pieces touch disjoint fact sets, for example install and setup prose in one piece and a new document that no other file links to in another.
+
+Developer pass:
+
+- Rewrote README.md, docs/architecture.md, docs/agents-and-tools.md and docs/development.md. Commit subject: `docs: make the README and docs concise`.
+- README now has the 2-sentence intro, the six agent bullets with per-role prompt links, the Mermaid `flowchart TD` chain with subagents under developer and reviewer and four doctor nodes, then `## Setup`. Setup, Using it, MCP, Configuration and Documentation prose were trimmed. The config table keeps every row and option name with shorter Meaning cells.
+- architecture.md keeps the Board, Orchestrator and Web dashboard sections and gives each of the 10 states one short line. It adds the splitter step, the reviewer state decisions, the board report, the mirror push and the hub election as short paragraphs.
+- agents-and-tools.md adds the Splitter and the Doctor, links every role to its prompt, fixes the two stale facts (live-tester finish message and no PM task creation, reviewer writes its own states), and lists all 12 tools including `kanban_mark_processed`.
+- development.md is tightened and now says the Splitter runs at the project root, not in the task worktree.
+- No docs content test exists and README is only a fixture in tests. No new test was added. Scoped check: `node tests/plugin.test.ts` passed. A one-off link checker found no broken relative links and parsed both JSON examples.
+- Independent fact check found and fixed four inaccuracies before the commit: the removed claim that pi `skills` settings entries are toggles (they are skill paths), the task slug cap for a supplied `shortName` (5 words), the optional `shortName`/`blockedBy` frontmatter and optional `# Open questions`, and the worktree creation order after the Splitter. It also found the Splitter cwd contradiction in development.md.
+- No open user or client questions.
