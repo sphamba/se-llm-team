@@ -69,7 +69,7 @@ Start pi in a project and run the `se-llm-team` skill. In Claude Code, run `/se-
 
 ## MCP server (Claude Code)
 
-Claude Code sessions get the same 12 kanban and orchestrator tools through a zero-dependency stdio MCP server. Node >= 24 runs the `.ts` entry directly, so there is no install step. The plugin starts the server through `.mcp.json`. Without the plugin, register it manually:
+Claude Code sessions get the same kanban and orchestrator tools through a zero-dependency stdio MCP server. Node >= 24 runs the `.ts` entry directly, so there is no install step. The plugin starts the server through `.mcp.json`. Without the plugin, register it manually:
 
 ```sh
 node /path/to/se-llm-team/src/mcp.ts

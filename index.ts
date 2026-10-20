@@ -137,7 +137,7 @@ export default function (pi: ExtensionAPI) {
 			/* no report watching in this session */
 		}
 	};
-	// the 12 tools are deferred, so every session needs the built-in tool_search to declare them
+	// the tools are deferred, so every session needs the built-in tool_search to declare them
 	// on demand. setActiveTools throws during factory loading ("Extension runtime not initialized"),
 	// so activation happens in this handler, which fires after the runtime binds. Additive and
 	// idempotent: setActiveTools replaces the active set, so spread and check before adding.
