@@ -87,18 +87,18 @@ export const inline = (s) => s
 
 // GFM pipe-table branch: a header row plus a separator row of dashes/colons opens a table; cells
 // split on unescaped pipes (a \| escape stays in its cell), the separator colons set the
-// alignment, a ragged row normalizes to the header count, and each cell renders through inline()
-const TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
-const tableCells = (line) => {
-	const cells = line.replace(/\\\|/g, "\u0001").split("|").map((c) => c.trim().replace(/\u0001/g, "|"));
-	// a leading or trailing pipe delimits the row, it never opens an empty cell
-	if (cells.length > 1 && cells[0] === "") cells.shift();
-	if (cells.length > 1 && cells[cells.length - 1] === "") cells.pop();
-	return cells;
-};
-const tableAlign = (c) => (c.startsWith(":") && c.endsWith(":") ? ' style="text-align:center"' : c.endsWith(":") ? ' style="text-align:right"' : "");
-
+// alignment, a ragged row normalizes to the header count, and each cell renders through inline().
+// The helpers live inside md so the page's injected function source carries every name it reads.
 export function md(src) {
+	const TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+	const tableCells = (line) => {
+		const cells = line.replace(/\\\|/g, "\u0001").split("|").map((c) => c.trim().replace(/\u0001/g, "|"));
+		// a leading or trailing pipe delimits the row, it never opens an empty cell
+		if (cells.length > 1 && cells[0] === "") cells.shift();
+		if (cells.length > 1 && cells[cells.length - 1] === "") cells.pop();
+		return cells;
+	};
+	const tableAlign = (c) => (c.startsWith(":") && c.endsWith(":") ? ' style="text-align:center"' : c.endsWith(":") ? ' style="text-align:right"' : "");
 	let html = "", list = false, fence = false;
 	const closeList = () => { if (list) { html += "</ul>"; list = false; } };
 	const lines = esc(src).split("\n");

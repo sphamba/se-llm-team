@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask, getTask, setState } from "../../src/kanban.ts";
 import { startHub } from "../../src/hub.ts";
-import { agentRowSig, agentStatsText, boardOf, curve, doctorCol, logFixups, md, mergeBoards, refreshMs, syncAgentStats, syncDoctorCards, syncStatsLine } from "../../src/webui.ts";
+import { agentRowSig, agentStatsText, boardOf, curve, doctorCol, logFixups, mergeBoards, refreshMs, syncAgentStats, syncDoctorCards, syncStatsLine } from "../../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the logpane module
 import { esc } from "../../src/webui/logpane.ts";
 
@@ -174,7 +174,25 @@ const monoSelectors = monoRule.slice(0, monoRule.indexOf("{")).split(",").map((s
 assert.ok(monoSelectors.includes("#m-log-text code") && monoSelectors.includes("#m-log-text pre code"), "inline code and fenced code stay in the log-pane monospace selector");
 assert.ok(!monoSelectors.includes("#m-log-text pre"), "the Thinking prose and the tool args/output pres are not inside the monospace selector, they stay Inter");
 assert.ok(page.includes("button { font-family: inherit; }"), "buttons inherit the page font instead of the UA Arial default");
-assert.ok(page.includes(String(md)), "the page runs the tested md renderer for task bodies and log text");
+// #292 the served md must run: a String(md) presence assert cannot prove the browser has every
+// name the renderer reads, so extract the served definitions and run them on a table body
+const script = page.match(/<script>([\s\S]*?)<\/script>/)![1];
+const mdStart = script.indexOf("function md(src) {");
+assert.ok(mdStart >= 0, "the page serves the md renderer for task bodies and log text");
+const mdEnd = script.indexOf("\n}\n", mdStart);
+assert.ok(mdEnd > mdStart, "the served md function closes");
+const servedMd = new Function(
+	script.match(/const esc = .*;\n/)![0] +
+	script.match(/const inline = [\s\S]*?;\n/)![0] +
+	script.slice(mdStart, mdEnd + 2) +
+	"; return md;",
+)() as (s: string) => string;
+const servedTable = servedMd("| a | b |\n| --- | --- |\n| 1 | 2 |");
+assert.equal(
+	servedTable,
+	'<div class="md-table-wrap"><table><thead><tr><th class="md-pin">a</th><th>b</th></tr></thead><tbody><tr><td class="md-pin">1</td><td>2</td></tr></tbody></table></div>',
+	"the served md renders a GFM table body with the wrapper, thead and pinned first cells",
+);
 // #291 a markdown table scrolls inside its own wrapper and the leftmost column pins left
 assert.ok(page.includes(".md-table-wrap { overflow-x: auto; }"), "a markdown table gets its own horizontal scroll container, never the markdown block");
 assert.ok(page.includes(".md-table-wrap th, .md-table-wrap td { white-space: nowrap; text-align: left;"), "table cells stay on one line and a bare --- column is left, past the UA th centering");
