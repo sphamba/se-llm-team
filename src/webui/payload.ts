@@ -249,8 +249,8 @@ async function doctorHistory(root: string, t: Task, files: string[]): Promise<Ag
 // rebuild the log path from the handle: the task must exist on the board and the handle must be
 // `<slug>.<role>` or `<slug>.<role>.<n>` for a role the orchestrator actually writes, or a doctor
 // log handle `<slug>.<role>.<n>.doctor` for the analysed run, so a raw client-supplied path can
-// never reach the fs
-function agentLogPath(root: string, handle: string): string | null {
+// never reach the fs; the slug rides along for the liveness check (the pid file is per task)
+function agentLogPath(root: string, handle: string): { path: string; slug: string } | null {
 	const m = handle.match(/^(.+)\.(splitter|developer|reviewer|live-tester|merger|doctor)(?:\.(\d+))?$/);
 	if (!m) return null;
 	let slug = m[1];
@@ -262,7 +262,7 @@ function agentLogPath(root: string, handle: string): string | null {
 		slug = dm[1];
 	}
 	if (!taskFiles(root).includes(`${slug}.md`)) return null;
-	return runLogPath(join(kanbanDir(root), ".logs"), handle);
+	return { path: runLogPath(join(kanbanDir(root), ".logs"), handle), slug };
 }
 
 // pi's background Agent tool writes each subagent transcript under this dir and names it in the
@@ -690,8 +690,9 @@ export async function taskHistory(root: string, num: number) {
 // `sub=list` lists the handle's subagent transcripts, `sub=<n>` serves the n-th of them through
 // the same chunked payload; no matching record is an empty list, not an error
 export async function agentLogPayload(root: string, q: URLSearchParams): Promise<string | null> {
-	const log = agentLogPath(root, q.get("file") ?? "");
-	if (!log) return null;
+	const found = agentLogPath(root, q.get("file") ?? "");
+	if (!found) return null;
+	const log = found.path;
 	const sub = q.get("sub");
 	if (sub === "list") {
 		const subs = await subagentLogs(log);
@@ -751,6 +752,11 @@ export async function agentLogPayload(root: string, q: URLSearchParams): Promise
 	let next = tail;
 	// the cap on a held-back mid-line run (000299): past it the fragment renders as a paragraph
 	const HOLD_MAX = 1 << 20;
+	// 000299: hold an open line back only while its run is alive, because only a live run can write
+	// the newline that closes it. Ceiling: liveness is per task slug, so a killed run's log polled
+	// while another run of the task is alive still waits; upgrade path: read the run's own .dead
+	// marker, or its newest-run index, the way agentHistory decides the live run
+	const alive = agentAlive(root, found.slug);
 	try {
 		const window = (start: number, end: number): [string, number] => {
 			if (full === null) return readRange(target, start, end);
@@ -780,8 +786,10 @@ export async function agentLogPayload(root: string, q: URLSearchParams): Promise
 			// 000299: a poll or init window that ends mid-line holds that line's records back instead of
 			// rendering a partial table row: the tail reports the record boundary before them, so the next
 			// poll re-reads them and the line renders whole, exactly once (000084's rule, one level down).
-			// A before=1 history page keeps them and renders the fragment paragraph instead (000299 S4).
-			if (q.get("before") !== "1") {
+			// A poll whose window is the open line reports its own offset, so the hold spans polls without
+			// rendering a fragment. A before=1 history page, and a run that is gone, keep them and render
+			// the fragment paragraph instead (000299 S4).
+			if (q.get("before") !== "1" && alive) {
 				const recs = text.split("\n");
 				const partial = recs.pop() ?? "";
 				const run = recs.slice(recs.length - openRun(recs));
@@ -790,7 +798,8 @@ export async function agentLogPayload(root: string, q: URLSearchParams): Promise
 				// line cannot stall the pane forever; upgrade path: render the partial row with a marker the
 				// client replaces in place when the row completes
 				if (bytes && bytes <= HOLD_MAX) {
-					text = recs.slice(0, recs.length - run.length).join("\n") + "\n" + partial;
+					const rest = recs.slice(0, recs.length - run.length);
+					text = (rest.length ? rest.join("\n") + "\n" : "") + partial;
 					next = boundary - bytes;
 				}
 			}

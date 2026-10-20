@@ -111,10 +111,10 @@ function runText(line: string): string | null {
 }
 
 // 000299: the records at the end of a window whose line has not closed yet, so the line continues
-// in a record the window does not hold: init and poll hold them back (payload), a history chunk
-// renders them as one paragraph (renderLogChunk). 0 when the last text record closes its line, and
-// 0 when the run reaches the window start: a line that began before the window has no record
-// boundary to report, so it renders as before
+// in a record the window does not hold: init and poll hold them back (payload) while the run is
+// alive, a history chunk or a finished run renders them as one paragraph (renderLogChunk). 0 when
+// the last text record closes its line, and 0 when a record carries a complete line before the open
+// one: holding that record would repeat a line already rendered
 export function openRun(lines: string[]): number {
 	let n = 0;
 	for (let i = lines.length - 1; i >= 0; i--) {
@@ -123,7 +123,7 @@ export function openRun(lines: string[]): number {
 		if (t.includes("\n")) return 0; // the line starts inside this record: hold nothing, no duplicate
 		n++;
 	}
-	return 0;
+	return n;
 }
 
 // GFM pipe-table branch: a header row plus a separator row of dashes/colons opens a table; cells
@@ -470,7 +470,9 @@ export function logFixups(el, doc) {
 		const align = [];
 		for (const th of table.querySelectorAll("th")) align.push(th.style.textAlign ? ' style="text-align:' + th.style.textAlign + '"' : "");
 		// the row a paragraph becomes: split on unescaped pipes (a \| escape stays inside its cell,
-		// like md's tableCells), pad or clip to the head's count, pin the first column as md does
+		// like md's tableCells), pad or clip to the head's count, pin the first column as md does.
+		// Ceiling: the split runs on the rendered html, so a cell whose own markup carries a pipe
+		// cannot be told from a cell delimiter; upgrade path: carry the row's raw line
 		const rowHtml = (html) => {
 			const cells = html.replace(/\\\|/g, "\u0001").split("|").map((c) => c.trim().replace(/\u0001/g, "|"));
 			if (cells.length > 1 && cells[0] === "") cells.shift();

@@ -207,6 +207,8 @@ assert.ok((await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${splitL
 const deltaRow = (t: string) => JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: t } }) + "\n";
 const tableHead = deltaRow("| a | b |\n| --- | --- |\n| 1 | 2 |\n");
 const tableCut = deltaRow("| 3 | 4");
+// the hold needs a live run: only a live run can write the newline that closes the line
+writeFileSync(join(root, ".kanban", ".pids", `${slug}.pid`), String(process.pid));
 writeFileSync(logFile, tableHead + tableCut);
 const cutInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
 assert.ok(!cutInit.text.includes("3"), "init holds the unterminated line back");
@@ -221,6 +223,26 @@ const cutHist = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${(
 assert.equal(cutHist.head, 0);
 assert.ok(cutHist.text.endsWith("<p>| 3 | 4</p>"), "a history page keeps the mid-line cut as a fragment paragraph");
 assert.ok(!cutHist.text.includes("data-open"), "the history page's table takes no open marker, the pane never absorbs the fragment");
+// a row still streaming keeps the hold across polls, not just the init window: every poll of the
+// open line reports the same offset, so no fragment row renders, and the closed line lands whole
+writeFileSync(logFile, tableHead + deltaRow("| 3 "));
+const streamInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.equal(streamInit.tail, tableHead.length, "init holds the open row and points at its first record");
+writeFileSync(logFile, tableHead + deltaRow("| 3 ") + deltaRow("| 4 "));
+const streamHeld = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${streamInit.tail}`)).json();
+assert.equal(streamHeld.text, "", "a poll whose window is the open row holds it, never a fragment");
+assert.equal(streamHeld.tail, streamInit.tail, "the held poll reports the same offset, so nothing renders twice");
+writeFileSync(logFile, tableHead + deltaRow("| 3 ") + deltaRow("| 4 ") + deltaRow("|\n"));
+const streamDone = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${streamHeld.tail}`)).json();
+assert.equal(streamDone.text, "<p>| 3 | 4 |</p>", "the row lands whole, exactly once, after a mid-row poll");
+assert.equal((await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${streamDone.tail}`)).json()).text, "", "the whole row is not served a second time");
+// a run that is gone never writes the newline that closes its line: the fragment renders as a
+// paragraph, so the pane loses nothing and a past run's log still stops polling
+rmSync(join(root, ".kanban", ".pids", `${slug}.pid`));
+writeFileSync(logFile, tableHead + tableCut);
+const deadInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.ok(deadInit.text.endsWith("<p>| 3 | 4</p>"), "a finished run's open line renders as a fragment paragraph instead of holding forever");
+assert.ok(!deadInit.text.includes("data-open"), "the fragment takes no open marker, so the pane never absorbs it as a row");
 
 // 000166: an init window on a log mid-thinking holds the still-open block whole from its
 // thinking_start as one open Thinking block (never a delta-run orphan span); the later delta
