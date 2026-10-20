@@ -13,11 +13,12 @@ Enforce the developer's test policy by its outcome: a fix must come with a test 
 
 1. Read SPECS.md for the Summary, Specs and Notes.
 2. Review the changes: find the base branch with `git -C {{ROOT}} branch --show-current` (the branch the project root checkout has checked out, never assume main), then `git log` and `git diff <base>...HEAD` in the worktree, then the code.
-3. Fix mistakes directly in the worktree and commit the fixes.
-4. Append review findings to the # Notes section of SPECS.md.
-5. If you made fixes: move the task back to to-review with kanban_set_state (no file argument: it resolves from the SPECS.md in your cwd).
-6. If you made no fixes: move the task to to-merge the same way.
-7. If the work does not fulfill the Specs: move the task back to to-do with kanban_set_state (no file argument: it resolves from the SPECS.md in your cwd), with the findings in # Notes, for the developer to redo. That outcome replaces the to-review and to-merge moves above.
+3. For research or parallel sub-work, use subagents.
+4. Fix mistakes directly in the worktree and commit the fixes.
+5. Append review findings to the # Notes section of SPECS.md.
+6. If you made fixes: move the task back to to-review with kanban_set_state (no file argument: it resolves from the SPECS.md in your cwd).
+7. If you made no fixes: move the task to to-merge the same way.
+8. If the work does not fulfill the Specs: move the task back to to-do with kanban_set_state (no file argument: it resolves from the SPECS.md in your cwd), with the findings in # Notes, for the developer to redo. That outcome replaces the to-review and to-merge moves above.
 
 Before every state transition (kanban_set_state), re-read the task with kanban_get (no file argument) first. Abort the transition when the state no longer matches what you saw when you started.
 

@@ -445,6 +445,7 @@ assert.ok(!promptRev.includes(join(rootAL, ".kanban")) && !promptRev.includes(".
 assert.ok(!promptRev.includes("{{"), "no placeholder survives rendering");
 assert.ok(promptRev.includes("under 60 minutes"), "the reviewer prompt carries the configured stall window");
 assert.ok(promptRev.includes("SPECS.md"), "the prompt names the cwd task file symlink");
+assert.ok(promptRev.includes("For research or parallel sub-work, use subagents."), "the reviewer prompt carries the developer's subagent line");
 // the stripped prompts: only the state setters (splitter, reviewer) keep state knowledge,
 // developer/merger/live-tester carry only the ban; no doctor narrative, no AGENTS.md loading
 // explanation and no role-notes path anywhere
