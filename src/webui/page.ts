@@ -152,7 +152,7 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .num { color: var(--faint); margin-right: 4px; }
 .num-link { color: var(--link); cursor: pointer; }
 .num-link:hover { text-decoration: underline; }
-.spin { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border: 2px solid var(--border); border-top-color: var(--fg); border-radius: 50%; vertical-align: -1px; animation: spin .9s linear infinite; }
+.spin { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border: 2px solid var(--border); border-top-color: var(--fg); border-radius: 50%; vertical-align: 0px; animation: spin .9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } #relations path, #agent-relations path { animation: none; } }
 .chip { font-size: 0.75rem; padding: 1px 7px; border-radius: 999px; background: var(--border); color: var(--soft); }
