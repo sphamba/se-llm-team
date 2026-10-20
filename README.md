@@ -11,23 +11,23 @@ One skill turns your coding-agent session into the Project manager. A non-LLM de
 
 ```mermaid
 flowchart TD
-    PM["Project manager (skill)"] --> Board["Kanban board"]
-    Board --> Orchestrator["Orchestrator (non-LLM)"]
-    Orchestrator --> Splitter["Splitter"]
-    Splitter --> Developer["Developer"]
-    Developer --> Reviewer["Reviewer"]
-    Reviewer --> Merger["Merger"]
-    Merger --> LiveTester["Live-tester"]
-    Developer --> DevSubagents["Subagents"]
-    Reviewer --> ReviewerSubagents["Subagents"]
-    Developer -.-> DevDoctor["Doctor"]
-    Reviewer -.-> ReviewerDoctor["Doctor"]
-    Merger -.-> MergerDoctor["Doctor"]
-    LiveTester -.-> LiveTesterDoctor["Doctor"]
-    DevDoctor --> RoleNotes["Role notes"]
-    ReviewerDoctor --> RoleNotes
-    MergerDoctor --> RoleNotes
-    LiveTesterDoctor --> RoleNotes
+    PM["Project manager (SKILL)"] --> Board
+    Board["Kanban board (WebUI)"] --> Orchestrator
+    subgraph Orchestrator["Orchestrator (daemon)"]
+        direction LR
+        Splitter --> Developers
+        Developers --> Reviewers
+        Reviewers --> Merger
+        Merger --> LiveTester["Live-tester"]
+    end
+    subgraph Developers
+        direction TB
+        Developer --> SubDevelopers["Subagents"]
+    end
+    subgraph Reviewers
+        direction TB
+        Reviewer --> SubReviewers["Subagents"]
+    end
 ```
 
 ## Setup
