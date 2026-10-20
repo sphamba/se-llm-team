@@ -112,7 +112,7 @@ The config is optional. It lives in `$XDG_CONFIG_HOME/se-llm-team/se-llm-team.js
 | `agent` | `pi` | Agent backend the orchestrator spawns: `pi` or `claude`. Any other value names a custom executable. |
 | `pollMinutes` | `1` | Agent liveness poll interval. |
 | `logStallMinutes` | `60` | An agent whose log does not grow for this many minutes is assumed dead. The task bounces back one state. |
-| `maxParallel` | `0` | Maximum tasks in a working state at once. 0 means no limit. |
+| `maxParallel` | `0` | Maximum tasks in a working state at once. 0 means no limit. When the cap binds, higher-priority tasks start first. |
 | `provider` | unset | LLM provider for the pi backend. It requires `model` and claude ignores it. |
 | `model` | unset | LLM model or pattern. |
 | `thinking` | unset | Reasoning level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |

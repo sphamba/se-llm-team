@@ -664,3 +664,73 @@ const logBC = existsSync(logBCPath) ? readFileSync(logBCPath, "utf8") : "";
 assert.ok(!/promotion deferred, newest task write -\d+s ago/.test(logBC), "the defer log shows no negative age");
 cleanupAll(rootBC);
 console.log("orchestrator.test.ts: ... + future gate mtime smoke passed");
+
+// --- part BD (300): priority orders the state pass under the cap. Cap 1 with a low-priority
+// to-review task created first and a critical to-do task created second: the critical
+// developer takes the slot, the low reviewer waits, and it starts once the slot frees ---
+const rootBD = fixture();
+cleaned.push(rootBD);
+const homeBD = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeBD);
+mkdirSync(kanbanDir(rootBD), { recursive: true });
+const savedHomeBD = process.env.HOME;
+process.env.HOME = homeBD;
+let cfgBD: ReturnType<typeof loadConfig>;
+try {
+	cfgBD = loadConfig(rootBD);
+} finally {
+	process.env.HOME = savedHomeBD;
+}
+cfgBD.backlogIdleMinutes = 0;
+cfgBD.maxParallel = 1;
+cfgBD.agent = deadStub(rootBD);
+// low first by name, moderate so the reviewer spawn is not skipped by the simple cap
+const lowBD = createTask(rootBD, { name: "fix: low review waits", priority: "low", complexity: "moderate", summary: "Priority order smoke", specs: "n/a" });
+setState(rootBD, lowBD, "to-review");
+// critical second by name, simple so the developer starts without a Splitter pass
+const criticalBD = createTask(rootBD, { name: "feat: critical todo first", priority: "critical", complexity: "simple", summary: "Priority order smoke", specs: "n/a" });
+setState(rootBD, criticalBD, "to-do");
+rescan(rootBD, cfgBD);
+assert.equal(parseTask(rootBD, criticalBD.file).state, "doing", "the critical developer took the only slot");
+assert.ok(existsSync(pidPath(rootBD, taskSlug(criticalBD.file))), "the critical developer pid file exists");
+assert.equal(parseTask(rootBD, lowBD.file).state, "to-review", "the low-priority reviewer waits at the cap");
+assert.ok(!existsSync(pidPath(rootBD, taskSlug(lowBD.file))), "the low-priority reviewer did not spawn at the cap");
+setState(rootBD, criticalBD, "done");
+rescan(rootBD, cfgBD);
+assert.equal(parseTask(rootBD, lowBD.file).state, "reviewing", "the low-priority reviewer starts once the slot frees");
+assert.ok(existsSync(pidPath(rootBD, taskSlug(lowBD.file))), "the low-priority reviewer pid file exists");
+cleanupAll(rootBD);
+console.log("orchestrator.test.ts: ... + priority orders the pipeline under the cap smoke passed");
+
+// --- part BE (300): equal priorities keep creation order: two same-priority to-do tasks at
+// cap 1, the older one starts first, the younger waits for the free slot ---
+const rootBE = fixture();
+cleaned.push(rootBE);
+const homeBE = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeBE);
+mkdirSync(kanbanDir(rootBE), { recursive: true });
+const savedHomeBE = process.env.HOME;
+process.env.HOME = homeBE;
+let cfgBE: ReturnType<typeof loadConfig>;
+try {
+	cfgBE = loadConfig(rootBE);
+} finally {
+	process.env.HOME = savedHomeBE;
+}
+cfgBE.backlogIdleMinutes = 0;
+cfgBE.maxParallel = 1;
+cfgBE.agent = deadStub(rootBE);
+const olderBE = createTask(rootBE, { name: "feat: older same tier", priority: "high", complexity: "simple", summary: "Priority tie smoke", specs: "n/a" });
+setState(rootBE, olderBE, "to-do");
+const youngerBE = createTask(rootBE, { name: "feat: younger same tier", priority: "high", complexity: "simple", summary: "Priority tie smoke", specs: "n/a" });
+setState(rootBE, youngerBE, "to-do");
+rescan(rootBE, cfgBE);
+assert.equal(parseTask(rootBE, olderBE.file).state, "doing", "the older same-priority task took the slot");
+assert.ok(existsSync(pidPath(rootBE, taskSlug(olderBE.file))), "the older same-priority developer pid file exists");
+assert.equal(parseTask(rootBE, youngerBE.file).state, "to-do", "the younger same-priority task waits at the cap");
+assert.ok(!existsSync(pidPath(rootBE, taskSlug(youngerBE.file))), "the younger same-priority developer did not spawn at the cap");
+setState(rootBE, olderBE, "done");
+rescan(rootBE, cfgBE);
+assert.equal(parseTask(rootBE, youngerBE.file).state, "doing", "the younger same-priority task starts once the slot frees");
+cleanupAll(rootBE);
+console.log("orchestrator.test.ts: ... + same-priority creation order smoke passed");

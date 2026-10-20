@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { isSelfWrite, kanbanDir, getTask, listAll, setState, setWorktree, taskFiles, taskSlug, updateAttrs, ROLE_NOTES_RE, type Task } from "../kanban.ts";
+import { isSelfWrite, kanbanDir, getTask, listAll, PRIORITY_RANK, setState, setWorktree, taskFiles, taskSlug, updateAttrs, ROLE_NOTES_RE, type Task } from "../kanban.ts";
 import { agentAlive, agentPid, clearPid, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP, REVIEWER_RUN_CAP, type Config } from "./config.ts";
 import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, newestRunRole, readCounter } from "./log.ts";
@@ -342,7 +342,11 @@ export function rescan(root: string, cfg: Config, force = false): void {
 			log(root, `error handling ${task.file} (create): ${err instanceof Error ? err.message : err}`);
 		}
 	}
-	for (const task of tasks) {
+	// priority-first state pass: critical, high, medium, low, with creation order (the name
+	// sort from taskFiles) inside a tier. Array.prototype.sort is stable, so equal ranks keep
+	// that order without a second key
+	const ordered = [...tasks].sort((a, b) => (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4));
+	for (const task of ordered) {
 		try {
 			// a conflicted file parses bogus values (duplicate keys resolve last-wins, the merged-in
 			// side wins); rewriting or acting on it would resolve the merge with stale state, so

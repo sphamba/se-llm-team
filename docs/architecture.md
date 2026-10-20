@@ -14,7 +14,7 @@ States: backlog, to-do, doing, to-review, reviewing, to-merge, merging, to-live-
 
 `src/orchestrator.ts` is a non-LLM daemon. Start it with the `orchestrator_start` tool, or run `node src/orchestrator.ts --root <project>`. One daemon runs per project. Its lockfile is `.kanban/.orchestrator.lock`.
 
-The daemon watches `.kanban/` and rescans every 10 s. The `orchestrator_poke` tool touches `.kanban/.poke` for an immediate scan. A poke scan bypasses the backlog quiet window. A poke is the PM's signal to schedule now.
+The daemon watches `.kanban/` and rescans every 10 s. The `orchestrator_poke` tool touches `.kanban/.poke` for an immediate scan. A poke scan bypasses the backlog quiet window. A poke is the PM's signal to schedule now. Under the `maxParallel` cap the orchestrator starts higher-priority tasks first, with creation order inside a priority.
 
 - **backlog**: the daemon promotes tasks whose blockers are satisfied and whose `# Open questions` section is empty. A board-wide quiet window (`backlogIdleMinutes`, default 1) waits for the board to stay untouched. When a blocker reaches done, to-live-test, or live-testing, the daemon drops its ref.
 - **to-do**: for moderate and complex tasks, the daemon spawns a Splitter at the project root. When the Splitter leaves the task in to-do, the daemon creates the worktree `.worktrees/<type>/<num>-<short-slug>` and spawns a Developer. Simple and trivial tasks skip the Splitter and start with the worktree. The daemon sets the task to doing before it starts the Developer.
