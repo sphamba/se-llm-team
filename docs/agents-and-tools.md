@@ -15,6 +15,7 @@ The orchestrator also reads the project root's `AGENTS.md`. When it exists and i
 | Reviewer | the task worktree | [agents/reviewer.md](../agents/reviewer.md) |
 | Merger | the task worktree | [agents/merger.md](../agents/merger.md) |
 | Live-tester | the task worktree | [agents/live-tester.md](../agents/live-tester.md) |
+| Doctor | the task worktree | [agents/doctor.md](../agents/doctor.md) |
 
 The Merger runs the full test suite after it concludes the rebase.
 
@@ -24,7 +25,7 @@ Agents append notes to the task file directly. On a successful finish, the orche
 
 ## Tools
 
-The PM session gets 12 kanban and orchestrator tools: `kanban_list`, `kanban_get`, `kanban_create`, `kanban_update`, `kanban_set_state`, `kanban_set_worktree`, `kanban_delete`, `kanban_mark_processed`, `orchestrator_start`, `orchestrator_status`, `orchestrator_stop`, and `orchestrator_poke`.
+The PM session gets 13 kanban and orchestrator tools: `kanban_list`, `kanban_get`, `kanban_create`, `kanban_update`, `kanban_set_state`, `kanban_set_worktree`, `kanban_delete`, `kanban_mark_processed`, `orchestrator_start`, `orchestrator_status`, `orchestrator_stop`, `orchestrator_poke`, and `efficiency_analysis` (the run-analysis tool that turns one agent log into a markdown report, see [src/tools.ts:316](../src/tools.ts)).
 
 `kanban_get`, `kanban_update`, and `kanban_set_state` take an optional `file`. When omitted, the task resolves from the session cwd through the `SPECS.md` symlink. With no `SPECS.md` in the cwd, the tool reports `no task; pass the file name or run from a worktree with SPECS.md`.
 
