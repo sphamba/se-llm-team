@@ -76,18 +76,34 @@ interface ToolBlock {
 	fail: string | null;
 }
 
-// minimal Markdown renderer for the board subset (headings, lists, code fences, inline code, bold,
-// links, paragraphs), shared by task-card bodies and the agent log text; esc() runs before markup
-// applies, so rendered text can never inject tags; ceiling: swap for a full renderer when the
-// subset grows
+// minimal Markdown renderer for the board subset (headings, lists, code fences, GFM pipe tables,
+// inline code, bold, links, paragraphs), shared by task-card bodies and the agent log text; esc()
+// runs before markup applies, so rendered text can never inject tags; ceiling: swap for a full
+// renderer when the subset grows
 export const inline = (s) => s
 	.replace(/`([^`]+)`/g, "<code>$1</code>")
 	.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
 	.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+// GFM pipe-table branch: a header row plus a separator row of dashes/colons opens a table; cells
+// split on unescaped pipes (a \| escape stays in its cell), the separator colons set the
+// alignment, a ragged row normalizes to the header count, and each cell renders through inline()
+const TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+const tableCells = (line) => {
+	const cells = line.replace(/\\\|/g, "\u0001").split("|").map((c) => c.trim().replace(/\u0001/g, "|"));
+	// a leading or trailing pipe delimits the row, it never opens an empty cell
+	if (cells.length > 1 && cells[0] === "") cells.shift();
+	if (cells.length > 1 && cells[cells.length - 1] === "") cells.pop();
+	return cells;
+};
+const tableAlign = (c) => (c.startsWith(":") && c.endsWith(":") ? ' style="text-align:center"' : c.endsWith(":") ? ' style="text-align:right"' : "");
+
 export function md(src) {
 	let html = "", list = false, fence = false;
 	const closeList = () => { if (list) { html += "</ul>"; list = false; } };
-	for (const line of esc(src).split("\n")) {
+	const lines = esc(src).split("\n");
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
 		if (line.trim().slice(0, 3) === "```") { closeList(); fence = !fence; html += fence ? "<pre><code>" : "</code></pre>"; continue; }
 		if (fence) { html += line + "\n"; continue; }
 		const h = line.match(/^(#{1,6}) (.+)$/);
@@ -95,6 +111,23 @@ export function md(src) {
 		const li = line.match(/^[-*] (.+)$/);
 		if (li) { if (!list) { html += "<ul>"; list = true; } html += "<li>" + inline(li[1]) + "</li>"; continue; }
 		closeList();
+		const sep = lines[i + 1];
+		if (line.includes("|") && sep !== undefined && TABLE_SEP.test(sep)) {
+			const head = tableCells(line), align = tableCells(sep).map(tableAlign);
+			const cell = (tag, text, k) => "<" + tag + (k ? "" : ' class="md-pin"') + (align[k] ?? "") + ">" + inline(text) + "</" + tag + ">";
+			html += '<div class="md-table-wrap"><table><thead><tr>';
+			head.forEach((c, k) => (html += cell("th", c, k)));
+			html += "</tr></thead><tbody>";
+			for (i += 2; i < lines.length && lines[i].includes("|"); i++) {
+				const row = tableCells(lines[i]);
+				html += "<tr>";
+				for (let k = 0; k < head.length; k++) html += cell("td", row[k] ?? "", k);
+				html += "</tr>";
+			}
+			html += "</tbody></table></div>";
+			i--; // the loop step lands on the first line after the table
+			continue;
+		}
 		if (line.trim()) html += "<p>" + inline(line) + "</p>";
 	}
 	closeList();

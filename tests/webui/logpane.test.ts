@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { logFixups, renderLogChunk } from "../../src/webui.ts";
+import { logFixups, md, renderLogChunk } from "../../src/webui.ts";
 
 // minimal element stub for the log-pane fixups: only the DOM surface logFixups touches
 class LogEl {
@@ -272,3 +272,47 @@ const thinkMd = renderLogChunk([
 	JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "**Plan**\n- step one" } }),
 ].join("\n") + "\n");
 assert.ok(thinkMd.includes('<details class="lg-think"><summary>Thinking</summary><pre><p><b>Plan</b></p><ul><li>step one</li></ul></pre></details>'), "a thinking body containing markdown renders through md() inside the lg-think details");
+
+// #291 GFM pipe tables: a header row plus a |---| separator row renders as a wrapper > table with
+// a pinned first column, per-column alignment from the separator colons and ragged rows
+// normalized to the header count; cell text goes through inline() after esc()
+assert.equal(
+	md("| a | b |\n| --- | --- |\n| 1 | 2 |"),
+	'<div class="md-table-wrap"><table><thead><tr><th class="md-pin">a</th><th>b</th></tr></thead><tbody><tr><td class="md-pin">1</td><td>2</td></tr></tbody></table></div>',
+	"a GFM pipe table renders as a wrapper > table with thead/tbody and a pinned first column",
+);
+assert.equal(
+	md("| l | c | r |\n| :-- | :-: | --: |\n| 1 | 2 | 3 |"),
+	'<div class="md-table-wrap"><table><thead><tr><th class="md-pin">l</th><th style="text-align:center">c</th><th style="text-align:right">r</th></tr></thead><tbody><tr><td class="md-pin">1</td><td style="text-align:center">2</td><td style="text-align:right">3</td></tr></tbody></table></div>',
+	"the separator colons set per-column alignment: bare is left, :--: center, --: right",
+);
+assert.equal(
+	md("| a | b | c |\n| --- | --- | --- |\n| 1 |\n| 1 | 2 | 3 | 4 |"),
+	'<div class="md-table-wrap"><table><thead><tr><th class="md-pin">a</th><th>b</th><th>c</th></tr></thead><tbody><tr><td class="md-pin">1</td><td></td><td></td></tr><tr><td class="md-pin">1</td><td>2</td><td>3</td></tr></tbody></table></div>',
+	"a short row pads with empty cells and a long row clips to the header count",
+);
+assert.equal(
+	md("| a | b |\n| c | d |"),
+	"<p>| a | b |</p><p>| c | d |</p>",
+	"a block of pipe lines without a separator row stays paragraphs",
+);
+assert.equal(
+	md("| **b** | `c` | [l](u) |\n| --- | --- | --- |"),
+	'<div class="md-table-wrap"><table><thead><tr><th class="md-pin"><b>b</b></th><th><code>c</code></th><th><a href="u" target="_blank" rel="noopener">l</a></th></tr></thead><tbody></tbody></table></div>',
+	"cell content renders through inline(): bold, code and links work inside a cell",
+);
+assert.equal(
+	md("| a<b | c&d |\n| --- | --- |\n| \"q\" | 'x' |"),
+	'<div class="md-table-wrap"><table><thead><tr><th class="md-pin">a&lt;b</th><th>c&amp;d</th></tr></thead><tbody><tr><td class="md-pin">&quot;q&quot;</td><td>&#39;x&#39;</td></tr></tbody></table></div>',
+	"HTML metacharacters in a cell are escaped before inline() applies markup",
+);
+assert.equal(
+	md("| a \\| b | c |\n| --- | --- |"),
+	'<div class="md-table-wrap"><table><thead><tr><th class="md-pin">a | b</th><th>c</th></tr></thead><tbody></tbody></table></div>',
+	"an escaped pipe stays inside its cell instead of splitting the row",
+);
+assert.equal(
+	md("```\n| a | b |\n| --- | --- |\n```"),
+	"<pre><code>| a | b |\n| --- | --- |\n</code></pre>",
+	"a table inside a fenced block stays pre/code, never a rendered table",
+);

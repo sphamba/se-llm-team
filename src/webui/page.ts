@@ -305,6 +305,12 @@ content height; the class drops at the transition end, and reduced motion keeps 
 /* 000153: only inline and fenced code render monospace; the Thinking prose and the tool args/output pres are not code, so the bare #m-log-text pre stays outside this selector and inherits the Inter page font */
 #m-log-text code, #m-log-text pre code, #m-body code, #m-body pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
 #m-body a { color: var(--link); }
+/* #291 md() tables in the dialog and the log pane: the wrapper scrolls on its own, cells stay on
+one line, and the leftmost column pins left with a static right border as the cue */
+.md-table-wrap { overflow-x: auto; }
+.md-table-wrap table { border-collapse: collapse; }
+.md-table-wrap th, .md-table-wrap td { white-space: nowrap; padding: 3px 10px; border-bottom: 1px solid var(--border); }
+.md-table-wrap .md-pin { position: sticky; left: 0; background: var(--panel); border-right: 1px solid var(--border); }
 /* one accent color per column, in pipeline order */
 .c-backlog { --ac: #94a3b8; }
 .c-to-do { --ac: #60a5fa; }
