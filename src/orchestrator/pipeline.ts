@@ -319,7 +319,7 @@ function janitorPids(root: string, tasks: Task[]): void {
 }
 
 
-export function rescan(root: string, cfg: Config): void {
+export function rescan(root: string, cfg: Config, force = false): void {
 	// root-cause fix ordering: a snapshot commit must never be built from a tree that lacks
 	// branch-only files, so an external mirror-head move is materialized before boardStatus
 	// reads and before any commitKanban
@@ -454,7 +454,7 @@ export function rescan(root: string, cfg: Config): void {
 	// promoteBacklog re-checks its gates on a fresh board read before setState
 	const current = listAll(root);
 	dropDoneBlockers(root, current);
-	const promoted = promoteBacklog(root, current, cfg.backlogIdleMinutes);
+	const promoted = promoteBacklog(root, current, cfg.backlogIdleMinutes, force);
 	// the PM report: the sweep schedules first, then one report covers the tasks that moved to
 	// done in this sweep (detected against the pre-loop snapshot, so a done move this sweep made
 	// is this sweep's transition) plus what it scheduled
@@ -525,6 +525,10 @@ export function dropDoneBlockers(root: string, tasks: Task[]): void {
 	}
 }
 
+// the deferral episode is per root and logs once on the open -> deferred flip: sweeps run every
+// few seconds, so per-sweep logging would flood the log
+const deferredRoots = new Set<string>();
+
 // promotion is event-driven: every sweep and every poll promotes EVERY schedulable backlog
 // task, not one per idle window. A board-wide PM quiet window (backlogIdleMinutes) gates it:
 // the PM may still be creating or chaining a batch of tasks, so any fresh task-file mtime
@@ -533,12 +537,14 @@ export function dropDoneBlockers(root: string, tasks: Task[]): void {
 // same-sweep unblock (#211). Unchained tasks promote and run as parallel lanes the moment a
 // lane frees; the blockedBy chain (the PM encodes it at creation) serializes what must
 // serialize. Returns the promoted tasks (state to-do), the report's Scheduled section; exported
-// for the tests
-export function promoteBacklog(root: string, tasks: Task[], backlogIdleMinutes = 0): Task[] {
+// for the tests. force skips the quiet window: a poke is the PM's explicit "I am done editing,
+// schedule now"
+export function promoteBacklog(root: string, tasks: Task[], backlogIdleMinutes = 0, force = false): Task[] {
 	// board-wide on purpose: one quiet gate for the whole board, so a fresh task file created
 	// or chained mid-batch defers everything. 0 disables the wait
-	if (backlogIdleMinutes > 0) {
+	if (backlogIdleMinutes > 0 && !force) {
 		let newest = 0;
+		let newestFile = "";
 		for (const file of taskFiles(root)) {
 			// role notes (AGENTS.<role>.md) are daemon-written board mirror files, not tasks:
 			// ensureRoleNotes writes a fresh one at the first agent spawn, and that write must
@@ -550,13 +556,24 @@ export function promoteBacklog(root: string, tasks: Task[], backlogIdleMinutes =
 				// the daemon's own writes are not board activity: a blocker reaching done must
 				// still promote its dependents in the same sweep
 				if (isSelfWrite(path, mtimeMs)) continue;
-				newest = Math.max(newest, mtimeMs);
+				if (mtimeMs > newest) {
+					newest = mtimeMs;
+					newestFile = file;
+				}
 			} catch {
 				/* vanished between readdir and stat: not the newest */
 			}
 		}
-		if (Date.now() - newest < backlogIdleMinutes * 60_000) return [];
+		if (Date.now() - newest < backlogIdleMinutes * 60_000) {
+			if (!deferredRoots.has(root)) {
+				deferredRoots.add(root);
+				log(root, `promotion deferred, newest task write ${Math.round((Date.now() - newest) / 1000)}s ago (${newestFile})`);
+			}
+			return [];
+		}
 	}
+	// the gate opened (or a forced sweep skipped it): the episode is over, the next deferral logs
+	deferredRoots.delete(root);
 	const promoted: Task[] = [];
 	for (const task of tasks) {
 		// conflicted files parse bogus state values: never promotable

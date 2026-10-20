@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, execSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskNum, taskSlug, updateTask } from "../../src/kanban.ts";
@@ -570,3 +570,80 @@ rescan(rootAY, cfgAY);
 assert.equal(parseTask(rootAY, queuedAY.file).state, "to-do", "the queued task stays to-do while the cap holds");
 cleanupAll(rootAY);
 console.log("orchestrator.test.ts: ... + maxParallel backlog queue smoke passed");
+
+// --- part AZ (295): a poke-forced sweep bypasses the board-wide quiet gate, a plain sweep
+// keeps it, and the deferral logs once per episode, not once per sweep ---
+const rootAZ = fixture();
+cleaned.push(rootAZ);
+const homeAZ = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeAZ);
+mkdirSync(kanbanDir(rootAZ), { recursive: true });
+const savedHomeAZ = process.env.HOME;
+process.env.HOME = homeAZ;
+let cfgAZ: ReturnType<typeof loadConfig>;
+try {
+	cfgAZ = loadConfig(rootAZ);
+} finally {
+	process.env.HOME = savedHomeAZ;
+}
+cfgAZ.backlogIdleMinutes = 1;
+cfgAZ.agent = deadStub(rootAZ);
+const gatedAZ = createTask(rootAZ, { name: "feat: poked task", summary: "Poke forces promotion", specs: "n/a" });
+const orchLogAZ = () => readFileSync(join(kanbanDir(rootAZ), ".logs", "orchestrator.log"), "utf8");
+rescan(rootAZ, cfgAZ);
+assert.equal(parseTask(rootAZ, gatedAZ.file).state, "backlog", "a plain sweep after the fresh PM write defers");
+assert.match(orchLogAZ(), new RegExp(`promotion deferred, newest task write \\d+s ago \\(${gatedAZ.file}\\)`), "the deferral log names the newest task file and its age");
+rescan(rootAZ, cfgAZ);
+assert.equal(orchLogAZ().split("promotion deferred").length - 1, 1, "the deferral logs once per episode, not once per sweep");
+rescan(rootAZ, cfgAZ, true);
+assert.equal(parseTask(rootAZ, gatedAZ.file).state, "to-do", "the forced sweep promotes past the window");
+assert.ok(orchLogAZ().includes(`promoting ${gatedAZ.file} to to-do`), "the forced promotion logs");
+// the gate opening ends the episode: a fresh PM write after it logs a new deferral
+const secondAZ = createTask(rootAZ, { name: "feat: poked task two", summary: "Poke forces promotion", specs: "n/a" });
+rescan(rootAZ, cfgAZ);
+assert.equal(parseTask(rootAZ, secondAZ.file).state, "backlog", "the new fresh write defers again");
+assert.equal(orchLogAZ().split("promotion deferred").length - 1, 2, "the second episode logs its own deferral");
+cleanupAll(rootAZ);
+console.log("orchestrator.test.ts: ... + poke-forced promotion past the quiet gate smoke passed");
+
+// --- part BA (295): daemon path: a PM create followed by a poke promotes in seconds, not
+// after the whole one minute gate window the sweep timer would wait out ---
+const rootBA = fixture();
+cleaned.push(rootBA);
+mkdirSync(kanbanDir(rootBA), { recursive: true });
+writeFileSync(join(kanbanDir(rootBA), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootBA), pollMinutes: 0.01, backlogIdleMinutes: 1 }));
+const pokedBA = createTask(rootBA, { name: "feat: poked from the daemon", summary: "Poke forces promotion", specs: "n/a" });
+const ba = await runDaemon(rootBA);
+await waitFor(() => ba.output().includes("promotion deferred"), 30000, "the daemon defers the fresh PM write", ba.output);
+// the poke exactly as orchestrator_poke makes it: rm then create, so fs.watch fires
+const pokeBA = join(kanbanDir(rootBA), ".poke");
+try {
+	unlinkSync(pokeBA);
+} catch {
+	/* first poke */
+}
+closeSync(openSync(pokeBA, "a"));
+const pokedAtBA = Date.now();
+await waitFor(() => ba.output().includes(`promoting ${pokedBA.file} to to-do`), 20000, "the poke forces the promotion", ba.output);
+assert.ok(Date.now() - pokedAtBA < 30_000, "the poke promoted well inside the one minute gate window");
+assert.equal(ba.output().split("promotion deferred").length - 1, 1, "the deferral logged once for the episode, not per one second sweep");
+assert.notEqual(parseTask(rootBA, pokedBA.file).state, "backlog", "the poked task left backlog");
+ba.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + daemon poke-forced promotion smoke passed");
+
+// --- part BB (295 bug 2 probe): with the gate open and no further board activity at all, a
+// schedulable backlog task promotes on the daemon's own sweep; the fixture attempt at the
+// 20 hour stall (#293) ---
+const rootBB = fixture();
+cleaned.push(rootBB);
+mkdirSync(kanbanDir(rootBB), { recursive: true });
+writeFileSync(join(kanbanDir(rootBB), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootBB), pollMinutes: 0.01, backlogIdleMinutes: 1 }));
+const idleBB = createTask(rootBB, { name: "feat: idle board task", summary: "Stall probe", specs: "n/a" });
+const agedBB = new Date(Date.now() - 120_000);
+utimesSync(join(kanbanDir(rootBB), idleBB.file), agedBB, agedBB);
+const bb = await runDaemon(rootBB);
+await waitFor(() => bb.output().includes(`promoting ${idleBB.file} to to-do`), 30000, "an idle board with an open gate promotes", bb.output);
+assert.ok(!bb.output().includes("promotion deferred"), "the open gate logged no deferral");
+assert.notEqual(parseTask(rootBB, idleBB.file).state, "backlog", "the idle board task left backlog");
+bb.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + idle board stall probe smoke passed");

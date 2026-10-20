@@ -10,6 +10,10 @@ import { compactFinishedLogs, log } from "./log.ts";
 import { rescan } from "./pipeline.ts";
 import { poll } from "./liveness.ts";
 
+// the PM's explicit "I am done editing, schedule now": a watch event for this file runs the
+// sweep with the backlog quiet gate bypassed
+const POKE_FILE = ".poke";
+
 function acquireLock(root: string): boolean {
 	const lock = join(kanbanDir(root), ".orchestrator.lock");
 	mkdirSync(kanbanDir(root), { recursive: true });
@@ -90,7 +94,7 @@ export function main(argv: string[]): void {
 	log(root, `orchestrator started (root=${root}, agent=${cfg.agent}, backend=${cfg.backend}, poll=${pollMinutes}min, rescan=${rescanSeconds}s)`);
 	bootstrapBoard(root);
 
-	const sweep = () => {
+	const sweep = (force = false) => {
 		reapIfTaskEnded();
 		// lock self-heal: an external cleanup or an acquire race can drop the lock mid-life;
 		// without this the daemon runs lockless forever and status/stop report "not running"
@@ -101,12 +105,20 @@ export function main(argv: string[]): void {
 				process.exit(0);
 			}
 		}
-		rescan(root, cfg);
+		rescan(root, cfg, force);
 	};
 	let scheduled: NodeJS.Timeout | undefined;
-	const scheduleSweep = () => {
+	// a forced sweep stays forced while it waits out the debounce: a task event arriving after a
+	// poke must not downgrade it to a gated one
+	let forced = false;
+	const scheduleSweep = (force = false) => {
+		forced ||= force;
 		clearTimeout(scheduled);
-		scheduled = setTimeout(sweep, 500);
+		scheduled = setTimeout(() => {
+			const f = forced;
+			forced = false;
+			sweep(f);
+		}, 500);
 	};
 	const stop = () => {
 		clearInterval(scheduled);
@@ -128,7 +140,7 @@ export function main(argv: string[]): void {
 	const timer = setInterval(sweep, rescanSeconds * 1000);
 	const poller = setInterval(() => poll(root, cfg.logStallMinutes, Date.now(), cfg.backlogIdleMinutes), pollMinutes * 60 * 1000);
 	try {
-		const w = watch(kanbanDir(root), scheduleSweep);
+		const w = watch(kanbanDir(root), (_event, filename) => scheduleSweep(filename === POKE_FILE));
 		w.on("error", (err) => log(root, `fs.watch error, polling only: ${err instanceof Error ? err.message : err}`));
 		process.on("exit", () => w.close());
 	} catch (err) {
