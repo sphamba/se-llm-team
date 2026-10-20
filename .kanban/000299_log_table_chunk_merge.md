@@ -1,8 +1,8 @@
 ---
 name: "fix: log pane merges cut tables and streams rows live"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "fix/299-log-table-chunk-merge"
 issuer: "user"
 complexity: "moderate"
 shortName: "log-table-chunk-merge"
@@ -62,3 +62,17 @@ T4. Live test: fixture log with (a) a table cut at the init head boundary, botto
 - If docs/architecture.md describes per-chunk log rendering, add one short sentence about the open-table merge and the holdback. Check first; do not pad.
 
 # Notes
+
+- No split (2026-10-21): this is one protocol, not two workstreams. The open-table marker (S1) and the row absorb (C1/C2) are the two halves of one contract, and neither half shows the user symptom alone: marker without absorb still leaves the rows as paragraphs, absorb without marker never fires. A server subtask and a client subtask would each fail its own live test (T4) and only the parent could verify the fix. All pieces except the S3 holdback edit src/webui/logpane.ts, and both halves would add asserts to tests/webui/logpane.test.ts, on top of the shared element stub at lines 4-87 that the absorb tests must extend (row build, alignment styles, following-sibling walk). The change is roughly 60 source lines over 3 files, so one review, one merge and one live test costs less than two.
+- C3 needs no page.ts change: ingest inserts then runs logFixups (page.ts:810-815), and pullLog reads scrollHeight after ingest returns (page.ts:1062-1067), so the absorb already precedes the history scroll compensation. Keep the absorb as a pass inside logFixups.
+- Injection constraint, the #292 failure mode: page.ts ships `${md}` (page.ts:364) and `${logFixups}` (page.ts:382) as function source, so neither may read a module-scope name. Define the absorb's table helpers inside logFixups (the way md keeps its table helpers inside itself) and take everything else from the injected doc or a browser global already in use there (CSS.escape).
+- Scan the whole pane on every insert: after a history prepend the open table is the new fragment and the paragraphs are the old ones, while on a poll the table is old and the paragraphs are new. A pass over el (as the existing logFixups passes do) covers both orders; a pass over only the inserted nodes does not.
+- Test baseline: tests/webui/{logpane,agentlog,page}.test.ts are separate area files (no monolith), and `pnpm test` runs them serially. Extend the existing 000292 served-page md harness in page.test.ts rather than adding a second harness.
+- Fixed 2026-10-21 (one change, 3 source files, ~110 lines with comments): `md()` sets `data-open="tbl"` when the table's row run reaches the end of its input (trailing blank lines count as the end), `renderLogChunk` splits the trailing run of records whose text has no newline off `md()`'s input, renders that run as one paragraph and strips the marker, `logFixups` absorbs the following pipe paragraphs into an open table (pad or clip to the thead count, copy each th `text-align`, keep the `\|` escape, insert the rendered html as it is), and `payload.ts` holds that run back on init and poll windows with the tail reported at the record boundary before it, capped at 1 MiB.
+- Spec conflict, `# Acceptance` is the arbiter: the spec line said the absorb always clears the marker, it does not. The absorb clears the marker only when a non-row sibling stops it. A run that absorbs the pane's last sibling leaves the table open, because otherwise a table streamed one row per poll merges only once and "streamed rows render as rows as they arrive" fails. Recorded test: "a run that absorbs its last sibling keeps the table open for the next poll".
+- `md()` keeps its one-parameter signature. `tests/webui/page.test.ts` extracts the served renderer by the exact string `function md(src) {`, so `renderLogChunk` strips ` data-open="tbl"` from the rest's html with a string replace instead of a second parameter.
+- No `page.ts` change, C3 confirmed: `ingest` inserts, then runs `logFixups`, and `pullLog` reads `scrollHeight` only after `ingest` returns (`page.ts:810-815`, `1062-1067`).
+- No `docs/architecture.md` change: a grep of that file for `per-chunk`, `log pane`, `logpane`, `renderLogChunk` and `chunk` finds nothing, so no section describes per-chunk log rendering.
+- Ceilings kept and named in the code: a `before=1` page that ends mid-line keeps the fragment paragraph and takes no marker (S4), a row cut mid-row at a history page boundary still renders as two fragment paragraphs, a run that reaches the window start renders as before because it has no record boundary to report, and a held run over 1 MiB flushes as a paragraph (guard comment names the upgrade path).
+- Tests, red first: the three suites failed on the new asserts before the fix. `tests/webui/logpane.test.ts` pins the marker open and closed (paragraph, fence, fence-wrapped table), the `renderLogChunk` split and marker strip, and the absorb on both pane orders, ragged rows, alignment copy, the `\|` escape, no second escape, and the stop plus clear. `tests/webui/agentlog.test.ts` pins the init holdback, its record-boundary tail, the next poll rendering the line whole once, an empty poll after it, and a `before=1` control with the fragment paragraph. `tests/webui/page.test.ts` extends the 000292 harness and runs the served `logFixups` over a purpose-built stub with the older chunk prepended above row paragraphs already in the pane.
+- Suites run serially, all green: `tests/webui/logpane.test.ts`, `tests/webui/agentlog.test.ts`, `tests/webui/page.test.ts`, plus `tests/webui/board.test.ts` and `tests/webui/hub.test.ts` for the shared barrel.
