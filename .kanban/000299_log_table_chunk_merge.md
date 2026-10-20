@@ -1,8 +1,8 @@
 ---
 name: "fix: log pane merges cut tables and streams rows live"
 priority: "high"
-state: "live-testing"
-worktree: "fix/299-log-table-chunk-merge"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "log-table-chunk-merge"
@@ -97,3 +97,32 @@ T4. Live test: fixture log with (a) a table cut at the init head boundary, botto
 - Tests, run serially, one exit each: `tests/webui/agentlog.test.ts` exit 0, `tests/webui/logpane.test.ts` exit 0, `tests/webui/page.test.ts` exit 0. The union stands as the first review built it: the delta touches neither `hub.ts` nor `kanban.ts`, so the `board` and `hub` runs recorded there still apply.
 - Acceptance, first review evidence plus this delta: symptom (a) rides the client absorb over history pages, which the gate never reaches, so it holds for every role. Symptoms (b) and (c) hold for developer, reviewer and live-tester runs, and for merger and splitter runs they stay at today's fragment behaviour (finding above). The `docs/architecture.md` check stands from the first review.
 - `# Open questions` stays empty: no user decision is open. The role gap above is technical and has its upgrade path named.
+
+## Live test (2026-10-21)
+
+Lane: hub-only fixture root (no git, no daemon), the served page from the merged tree in headless Chromium, plus a control page from the parent commit `dc09fc0` over an identical fixture. Result: 45 of 45 checks pass, driver exit 0.
+
+Assumptions:
+- The user path is the real clicks: board card, then run card, then the log pane, then scroll up. The driver clicks the served DOM buttons. It does not call `openLog` or `logFixups` directly.
+- The fixture task `000001-logtable` is in state `doing` and has three developer logs. A live `sleep` pid sits in `.pids/000001-logtable.pid`, because S3 holds an open line only while the run is alive.
+- `LOG_LINES` is 100. The cut-table fixture has 134 content lines, so the init window is 100 body rows and the 100-line history page starts at the table header.
+- The poll cadence is 1000 ms. A row that arrives under 3500 ms counts as within the cadence.
+
+Claim, printed proof, control:
+
+| Claim | Merged proof (printed) | Control proof on `dc09fc0` |
+| --- | --- | --- |
+| A. A table cut by the init head boundary merges on scroll-up (S1, C1) | init: 0 tables, 100 pipe paragraphs. After the scroll-up prepend: tbody 130 rows, 0 pipe paragraphs, marker `tbl` stays | init: 0 tables, 100 pipe paragraphs. After the prepend: tbody 30 rows, 100 paragraphs stay, no marker |
+| B. A streamed row renders as a row within the 1 s cadence (C1, C2) | beta arrives at 991 ms as a `<tr>` with cells `beta`, `2`, the head's right alignment copied. Gamma arrives at 976 ms, 3 rows, 0 pipe paragraphs | beta arrives at 990 ms as a pipe paragraph with the row text. The table stays at 1 row |
+| C. A row split mid-record renders whole once (S3, S2) | init holds it: no `beta`, no `done`, 1 row, marker `tbl`. The close renders 2 rows with cells `beta`, `done`, `shipped`, center and right alignment, still 2 rows after 1.6 s, 0 stray paragraphs | init: 2 rows, the fragment row has cells `beta`, `done`, empty. The close keeps 2 rows and leaves a stray paragraph with the row text |
+
+Checks that matter:
+- A: the absorbed last row has the exact cell texts `row-130`, `ok`, `n-130`, computed `text-align` center and right, and the first cell class `md-pin`. The history page had 30 rows and the init had 100 paragraphs, so 130 rows prove the merge.
+- B: the absorbed `td` takes `text-align: right` from the second `th`. No pipe paragraph stays.
+- C: the poll window that closed the row served it whole and once. A later poll did not repeat it.
+
+Technical difficulties:
+- First run had 3 failures, all checker bugs, fixed before the tally. The control pane stops its log timer on the first empty poll, so a control wait keyed on `<tr>` rows timed out and the second append never polled. The sleep-exit probe read the pid before the process died. The fix waits on the rendered text for the control and polls the pid for exit. The rerun had 0 failures.
+- Not exercised: a splitter or merger run that streams a row across polls. The fixture used the developer role only. The re-review of `6683c6e` records that this case stays at the fragment behaviour, because the liveness gate reads the per-slug pid file. This test did not repeat that probe.
+
+Cleanup: both hub pids exited (`alive:false`), both ports show no listener in `ss -ltn`, and the fixture sleep pid is gone. `git status --short` in the worktree is clean.
