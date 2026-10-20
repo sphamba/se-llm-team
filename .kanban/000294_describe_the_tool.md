@@ -1,7 +1,7 @@
 ---
 name: "docs: describe the tool and agent chain in the README"
 priority: "medium"
-state: "reviewing"
+state: "merging"
 worktree: "docs/294-describe-the-tool"
 issuer: "user"
 complexity: "moderate"
@@ -69,3 +69,29 @@ Developer pass:
 - No docs content test exists and README is only a fixture in tests. No new test was added. Scoped check: `node tests/plugin.test.ts` passed. A one-off link checker found no broken relative links and parsed both JSON examples.
 - Independent fact check found and fixed four inaccuracies before the commit: the removed claim that pi `skills` settings entries are toggles (they are skill paths), the task slug cap for a supplied `shortName` (5 words), the optional `shortName`/`blockedBy` frontmatter and optional `# Open questions`, and the worktree creation order after the Splitter. It also found the Splitter cwd contradiction in development.md.
 - No open user or client questions.
+
+Review pass (reviewer, `main...HEAD`, 2 commits):
+
+- Files: README.md, docs/architecture.md, docs/agents-and-tools.md, docs/development.md. Diff stat 109 insertions, 72 deletions. Tree was clean at the start.
+- Writing rules: a one-off scanner found no prose sentence over 28 words, no parenthetical chain and no em dash. A relative-link checker over the four files found zero broken links.
+- README structure: the 2-sentence intro is README.md:3, the six agent bullets with per-role prompt links are :5-10, and the `flowchart TD` is :12. It has the board node, the plain chain, subagent nodes under the developer and reviewer, four doctor nodes that feed `Role notes`, and no state labels. `## Setup` is :33. The Mermaid block is fenced and every node label is quoted, so the syntax is valid by inspection. It was not rendered on GitHub here, because that belongs to the live test.
+- Config table: all 13 rows and every option name are kept. Defaults match src/orchestrator/config.ts:7-24,86,197-201 and src/webui/page.ts:9-10. Commands and paths are unchanged (README.md:95).
+- docs/architecture.md: the Board, Orchestrator and Web dashboard headings are kept. The state list is exact at :11, and each state has one bullet at :16-27. The Splitter gate (moderate and complex, cwd = project root) matches src/orchestrator/pipeline.ts:30,56. The worktree creation after the Splitter, and the `doing` set before the Developer spawn, match :59-68. The reviewer cap matches :374-390. The rebase in to-merge and `merging` on a stopped rebase match :183,198,207. The report, mirror and hub election claims match src/orchestrator/report.ts:79-81, src/orchestrator/board.ts:13,117 and src/hub.ts:383,496.
+- One inaccuracy found and fixed: both docs called the merger's state move "forward", but merging -> to-merge is one step back (src/orchestrator/liveness.ts:16-19). docs/architecture.md:30 and docs/agents-and-tools.md:23 now say the developer goes to to-review, the live-tester to done, and a merger returns the task to to-merge. Commit `1cca374`.
+- docs/agents-and-tools.md: the two stale facts are fixed. The live-tester ends with a finish message and creates nothing (agents/live-tester.md:13-14). The reviewer sets its own states (agents/reviewer.md:19-21). Every role links to its agents/<role>.md file. The Splitter gets only the SPECS.md link at the project root (src/orchestrator/spawn.ts:51-56). All 12 listed tools exist in `TOOLS` (src/tools.ts:65). The doctor pass claim matches src/orchestrator/liveness.ts:213-216 and src/analysis-run.ts:42.
+- docs/development.md: the pnpm pin matches package.json:6-7. `tests/efficiency-analysis/helpers.ts` exists. The test glob matches package.json:8.
+- Tests: `node tests/plugin.test.ts` exit 0. No docs content pin exists, and README is only a fixture at tests/helpers.ts:25. No suite covers the docs themselves.
+- Non-blocking: the PM session also gets a 13th tool, `efficiency_analysis` (src/tools.ts:316). The tools paragraph (docs/agents-and-tools.md:27) and the "12" count leave it out. This is accurate for the stated kanban and orchestrator subset, but the tool is undocumented.
+- Non-blocking: the Web dashboard section (docs/architecture.md:40-42) no longer names the config file path. The path is now only in README.md:95.
+- Non-blocking: the Mermaid chain shows Reviewer -> Merger -> Live-tester for every task. The merger runs only on a rebase conflict, and the Merger bullet at README.md:8 states this.
+- No open user or client questions. `# Open questions` stays absent because the Specs answer every question that came up.
+
+Second review pass (re-review of the fix commit, `main...HEAD`, 2 commits):
+
+- Fix commit `1cca374` changes one line in docs/architecture.md:30 and one line in docs/agents-and-tools.md:23. Both now say the orchestrator moves the developer to to-review and the live-tester to done, and that a merger returns the task to to-merge.
+- Claim check: `src/orchestrator/liveness.ts:19` maps `merging` with a successful finish to `to-merge`. `src/orchestrator/pipeline.ts:215` sets to-live-test after the merge sweep. The fix is correct.
+- Writing rules: the new sentences are short and have no parenthetical chain. The other lines of the four files are unchanged since the first pass.
+- README structure, Mermaid block, config table and state list are unchanged since the first pass, and their evidence stands.
+- Tests: `node tests/plugin.test.ts` exit 0. No suite pins the docs content.
+- Non-blocking notes from the first pass stand: the 13th tool `efficiency_analysis` is not in the tools paragraph, the dashboard config path is only in README.md:95, and the Mermaid chain shows the merger for every task.
+- No fixes made. No open user or client questions. `# Open questions` stays absent.
