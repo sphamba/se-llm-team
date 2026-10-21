@@ -1,8 +1,8 @@
 ---
 name: "fix: skip the state-pass create retry for a create that already landed"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/322-create-retry-once"
+state: "done"
+worktree: ""
 issuer: "#315"
 complexity: "simple"
 shortName: "create-retry-once"
@@ -61,3 +61,36 @@ Tests: `node tests/orchestrator/spawn.test.ts` exit=1 at HEAD and exit=1 at base
 - Non-blocking: acceptance 2 (3 green runs) and 3 (`pnpm test`) are not measurable until #321 lands, and the full suite is the live tester's gate.
 - Nit: `commitKanban` returns true for an identical tree (`src/orchestrator/board.ts:61`), so a second new file that landed under the first file's whole-board create commit enters `created` without its own create subject; multi-create sweeps still emit one create subject. Upgrade path: a separate task for per-file create events.
 
+
+## Live test (2026-10-21)
+
+Lane: daemon e2e with fixture state. One driver (`/tmp/lt322/driver.mjs`) runs the merged tree and the archived control `HEAD^`. A fake agent exits 0 at once. The daemon runs with `--rescan-seconds 1 --poll-minutes 0.01`. Raw results are in `/tmp/lt322/{merged,base}/result.json`, daemon logs in `/tmp/lt322/{merged,base}/daemon.log`.
+
+Fixture: task A `000001_alpha.md` waits in `to-live-test` and is already on `refs/heads/meta/kanban`. Task B `000002_beta.md` arrives in the same state before the daemon starts. Sweep one creates B. The state pass writes `to-merge` into A's file, then retries B's create. Log lines: `000001_alpha.md: no worktree, moving to to-merge for the orchestrator merge` then `000002_beta.md: no worktree, moving to to-merge for the orchestrator merge`.
+
+| # | Claim | Printed proof (merged) | Control (base HEAD^) |
+| --- | --- | --- | --- |
+| C0 | the state pass writes A's state mid-sweep, before B's retry (Specs Problem, stale sweep-start map) | `actual=true expected=true PASS` 000001_alpha.md on disk=to-merge | `actual=true expected=true PASS` 000001_alpha.md on disk=to-merge |
+| C1 | one `kanban: create <new file>` subject per landed create (Specs Problem: "this produces two `kanban: create 000002...` subjects") | `actual=1 expected=1 PASS` subjects=[kanban: create 000002_beta.md \| kanban: create 000001_alpha.md] | `actual=2 expected=2 PASS` subjects=[kanban: create 000002_beta.md \| kanban: create 000002_beta.md \| kanban: create 000001_alpha.md] |
+| C2 | no create commit carries another task's state change (Specs Problem: "its diff carries another task's state change") | `actual=0 expected=0 PASS` diffs= | `actual=1 expected=1 PASS` diffs=ba9908d->6431316:[.kanban/000001_alpha.md] |
+| C3 | whole-board tree strategy unchanged (Specs Change: "Do not change ... the whole-board tree strategy") | `actual=2 expected=2 PASS` files=[.kanban/000001_alpha.md,.kanban/000002_beta.md] | `actual=2 expected=2 PASS` files=[.kanban/000001_alpha.md,.kanban/000002_beta.md] |
+| C4 | commit labels unchanged (Specs Change: "Do not change ... the commit labels") | `actual=0 expected=0 PASS` unknown=[] | `actual=0 expected=0 PASS` unknown=[] |
+| C5 | the retry gate exists (Specs Change: "Track the files whose pass-one create commit succeeded") | `actual=1 expected=1 PASS` | `actual=0 expected=0 PASS` |
+| C6 | the bare retry is gone (Specs Change: "Keep the retry for a create whose pass-one commit failed") | `actual=0 expected=0 PASS` | `actual=1 expected=1 PASS` |
+| C7 | task diff holds only the two named files (Specs Acceptance) | `actual=match expected=match PASS` | no control cell (scope claim) |
+
+Assumptions:
+
+- The driver writes the seed commit for A with the plumbing that `commitKanban` uses (hash-object, mktree, commit-tree, update-ref). Without the seed, pass one creates A and B in one sweep, B gets no create subject at all (the `commitKanban` identical-tree early return), and the retry cannot show.
+- A and B are `medium`/`simple`, so the state pass keeps creation order and A's write lands before B's retry.
+- Both tasks have no worktree, so the `to-live-test` branch writes `to-merge` on disk and spawns no agent.
+- The control is the archived parent `f90f233` (`HEAD^`). Its `pipeline.ts` holds the bare retry (C6) and no gate (C5).
+- The scope row uses `HEAD^..HEAD`. `b7596fc..HEAD` lists 6 files, because that base predates the unrelated webui commit `f90f233`.
+- The driver reads the mirror one 700 ms settling pause after A's write, inside one rescan period.
+
+Not exercised:
+
+- A create whose pass-one commit fails and then succeeds in the state pass. No deterministic failure injection exists inside one sweep.
+- `tests/orchestrator/spawn.test.ts` and `pnpm test`. The live test does not run test suites.
+
+Findings: none. The merged tree removes the second create subject, and it keeps the retry, the whole-board tree and the commit labels.

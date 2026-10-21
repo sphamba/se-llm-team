@@ -1,7 +1,7 @@
 ---
 name: "feat: hold a task on a user blocker in the daemon gates"
 priority: "medium"
-state: "reviewing"
+state: "to-live-test"
 worktree: "feat/319-user-blocker-hold-daemon"
 issuer: "#318"
 complexity: "moderate"
@@ -98,5 +98,12 @@ Review of ed99f3b (first pass): fix 30a425f scopes one false doc claim; code and
 - Nit: the to-live-test guard at `:538` sits before the unmerged-branch requeue, one step earlier than the Specs anchor. That is stricter and matches "keeps its source state", so no change. Upgrade path: move it after the requeue only if a held task must still be corrected to to-merge.
 - Nit: the reviewer guard reads the sweep snapshot at `:511`, not a fresh read like `startTodo` at `:146`. A hold written mid-sweep lands on the next sweep, which cannot race a spawn inside one sweep. Upgrade path: re-read there too if a same-sweep release must take effect.
 
+## Reviewer pass (2)
 
+Re-review of 30a425f: the docs fix holds, so no code change and the Specs are met.
+- `skills/se-llm-team/SKILL.md:33` now reads "blockedBy gates promotion ... A `user` ref ... holds the task at every stage start, so a held task starts no stage", which matches `src/kanban.ts:370` `hasUserHold` and its six call sites in `src/orchestrator/pipeline.ts` (`:148`, `:254`, `:337`, `:511`, `:538`, `:629`).
+- The fix is one line in one file: `git show 30a425f --stat` prints `skills/se-llm-team/SKILL.md | 2 +-`, and no test or source file changed since ed99f3b, so the pass-1 findings stand.
+- One `rg` over `skills agents docs` for "gates every stage", "gates promotion" and "starts no stage" prints only the two correct lines at `skills/se-llm-team/SKILL.md:18` and `:33`, so the false claim does not remain anywhere else.
+- Tests: plugin exit=0, blockedby exit=0, promote exit=0, split exit=0, sweep exit=0, merge exit=0, integration exit=0.
+- Note: `tests/orchestrator/spawn.test.ts` is red at base with and without this diff (developer base probe). It sits outside this change set, and the repo-wide gate belongs to the integration ladder, so it does not block this card.
 

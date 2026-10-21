@@ -1,7 +1,7 @@
 ---
 name: "test: cover the integration hook failure contract and the live-test overlap"
 priority: "low"
-state: "to-do"
+state: "doing"
 worktree: "test/323-integration-hook-tests"
 issuer: "#315"
 complexity: "simple"

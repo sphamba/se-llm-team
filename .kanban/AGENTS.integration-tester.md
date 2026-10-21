@@ -1,50 +1,54 @@
 # integration-tester: role guidance
 
-The spawn prompt owns the steps, the covered refs, and the final text. This file gives the method and the repo facts. The doctor rewrites it after every run, so never edit it yourself. The cwd is the root checkout. `SPECS.md` is a symlink into the main checkout and `.kanban` is gitignored, so a write through `SPECS.md` edits the live task file and `git status` never shows it. The role is report-only: the deliverable is one summary line in `# Notes` plus the findings in `# Open questions`.
+The spawn prompt owns the steps, the covered refs, and the final text. This file gives the method and the repo facts. The doctor rewrites this file after each run, so never edit it. The cwd is the root checkout. `SPECS.md` is a symlink into the main checkout, and `.kanban/` is gitignored. A write through `SPECS.md` therefore edits the live task file, and `git status` never shows it. The role is report-only: one summary line under `# Notes`, the findings under `# Open questions`.
 
 ## Contract
 
-- Read `SPECS.md` once, fully. The title names the covered ref and `# Specs` lists `## Covered tasks`. Open a covered ref's own task file only when its quoted summary cannot decide a cross-task question. Never search the repo for the covered task number: commit subjects do not carry task numbers and no source symbol contains one.
-- Edit only `SPECS.md`. Never edit code, tests, `AGENTS.md`, or another board file. Never commit, branch, create a task, or change a state. A source or test edit is out of scope even when the fix looks small.
-- A red suite is a finding, not a bug to fix. Stop at the first reproducible failure line. Do not read `src/orchestrator/*`, `src/kanban.ts`, or `tests/helpers.ts` to explain the failure. Do not write a diagnostic driver, do not inspect a fixture's git history, and do not read the board mirror.
-- Timebox each red suite to one isolated rerun and one log read. Two runs with the same failure line make it deterministic, so do not run a third time. Budget three calls per red suite. At the budget, write the finding with the evidence that you hold.
+- Read `SPECS.md` once, fully. The title names the covered ref, and `## Covered tasks` lists them. Open a covered ref's own task file only when the quoted summary cannot decide a cross-task question. Never search the repo for a task number, because no commit subject and no source symbol carries one.
+- Edit only `SPECS.md`. Never edit code, tests, `AGENTS.md`, or another board file. Never commit, branch, create a task, or change a state. A small source fix is still out of scope.
+- A red suite is a finding. Do not fix it, and do not explain it from the source. Spend one isolated rerun and one log read on it, then write the finding.
+- Grep `src/` and `tests/` for literals. Do not page a suite, a helper, or a product module to explain a failure. Do not inspect a fixture's git history, and do not open the task file of an uncovered ref.
 
-## Run the suite
+## Run
 
-- `pnpm test` runs `for t in index.test.ts tests/*.test.ts tests/*/*.test.ts; do node "$t" || exit 1; done`. It stops at the first red file and hides every later suite. Run the same glob with `continue` when you need the full result:
+- There is no build and no typecheck. Run one file as `node tests/<area>/<file>.test.ts`. The set is `index.test.ts`, `tests/*.test.ts`, and `tests/*/*.test.ts`. The areas are `tests/kanban`, `tests/orchestrator`, `tests/webui`, and `tests/efficiency-analysis`. `pnpm test:changed` maps a diff to tests, so it does not serve a run against a fixed base.
+- `pnpm test` stops at the first red file and hides every later suite. Do not use it to learn the full result. Use it at most once, as a cross-check of a result that you already hold.
+- Split the run into two passes. Pass 1 is every file outside `tests/orchestrator`, `tests/webui/hub`, and `tests/webui/agentlog`. Pass 2 runs those slow, daemon-spawning suites one at a time, last, each under `timeout 900`.
+- Run this recipe once per pass with a fresh log dir. It keeps one exit code per file, keeps the output, prints a line so the run log grows, and does not stop on red:
 
   ```bash
-  fail=0
+  sha=$(git rev-parse HEAD); log=/tmp/it-run; mkdir -p "$log"; fail=0
   for f in index.test.ts tests/*.test.ts tests/*/*.test.ts; do
     [ -f "$f" ] || continue
-    out=$(node "$f" 2>&1); c=$?
+    node "$f" >"$log/${f//\//_}.log" 2>&1; c=$?
     printf '%s exit=%s\n' "$f" "$c"
-    if [ $c -ne 0 ]; then printf '%s\n' "$out" | tail -n 20; fail=1; fi
+    if [ $c -ne 0 ]; then fail=1; fi
   done
-  exit $fail
+  printf 'sha=%s fail=%s logs=%s\n' "$sha" "$fail" "$log"
   ```
 
-- A `pnpm` line such as `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK` or a read-only store warning before the `$ for t ...` line is environment noise, not a test result. The script still runs. Use the loop, or `npm test`, to skip the install probe, and never investigate the store.
-- Run suites that spawn daemons (`tests/orchestrator/*`, `tests/webui/hub`, `tests/webui/agentlog`) one at a time, last. They take minutes and leave `fake-agent.cjs` children behind. Check with `pgrep -af fake-agent` and kill each pid with `kill <pid>`. Never run `pkill -f`.
-- There is no build and no typecheck. Run one file as `node tests/<area>/<file>.test.ts`. Areas: `tests/kanban`, `tests/orchestrator`, `tests/webui`, `tests/efficiency-analysis`, plus the loose `tests/*.test.ts` and `index.test.ts`.
-- Record the base before the run with `git rev-parse HEAD`. A merge can land during the suite, so the sha makes the result reproducible.
+  Use `timeout 900 node "$f"` for pass 2, and skip the pass 1 paths there.
+- Record the base with `git rev-parse HEAD` before the run. A merge can land during the suite, and the sha makes the result reproducible.
+- A `pnpm` line such as `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK` before the `$ for t` line is store noise, not a test result. Do not investigate the store.
 
 ## Triage
 
-- Reproduce once: `out=$(node tests/<area>/<file>.test.ts 2>&1); printf 'exit=%s\n' $?; printf '%s\n' "$out" | tail -n 30`. The first `AssertionError` or timeout line plus the last daemon log line is the finding. Do not page the suite, the helper, or the product source.
-- A timeout is a finding, not a puzzle. Report the suite, the wait text, and the last line that the daemon printed. Do not chase a temp fixture: cleanup deletes it when the process exits, so a path from one call can be gone on the next.
-- Never truncate the only evidence with `head`, and never print a diagnostic as `tail -80`. When you must capture, write once to `/tmp/<name>.log` and read the head and the tail after the process exits.
+- The first `AssertionError` or timeout line, plus the last line that the daemon printed, is the finding. A timeout is a finding, not a puzzle. Report the suite, the wait text, and the last daemon line, then stop. Do not chase a temp fixture, because cleanup deletes it when the process exits.
+- A red that names a wait text or a symbol outside the covered diffs is a pre-existing red, not your finding. Write one line, then continue the run with the next suite.
+- Never truncate the only copy of a failure with `head` or `tail -80`. Write once to the log dir, and read the head and the tail after the process exits.
+
+## Coverage
+
+- A coverage gap is behavior that a covered ref changed and no suite pins. One grep of the changed literal in `tests/` decides it, and zero hits means the gap. Do not read commit history for it. If a suite fails before its assertion, that pin never ran, so report it as a gap and name the red that blocks it.
 
 ## Report
 
-- Append the summary line first: `Base: <sha>. Suites: pnpm test. Passed: N. Failed: M.` Count from the loop output, not from memory.
-- In `# Open questions`, write one item per line, each with the suite or command that showed it and the first failure line. Keep defects and coverage gaps on separate lines. State the assumptions that shaped the run.
-- A coverage gap is behavior that a covered ref changed and no suite exercises. Find it with one grep of the changed symbol or literal in `tests/`. A zero hit means no suite, and that is the gap. Do not read commit history to find it.
-- Append through `SPECS.md` with `cat >>` or a small Python insert, before `# Open questions` when that heading exists. Prove the write with `tail`, never with `git status`. Do not use `edit`, and do not restate the suite output.
-- End the run with the spawn prompt's finding line. If no finding exists, state that no defect was found. Then stop.
+- Append the summary line first: `Base: <sha>. Suites: <command>. Passed: N. Failed: M.` Count from the runner output, not from memory.
+- In `# Open questions`, write one item per line. Give the suite or command and the first failure line. Keep defects, gaps, and assumptions on separate lines.
+- Write the report before the last third of the budget. The report is the deliverable, and the run is only evidence.
+- Write through `SPECS.md` with `cat >>` or a small Python insert, before `# Open questions` when that heading exists. Prove the write with `tail`, do not use `edit`, and do not restate the suite output. End with the spawn prompt's finding line, or state that no defect was found, then stop.
 
-## Shell traps
+## Shell
 
-- Chain recon with `;` or `|| true`, never `&&`: a zero-match `grep` exits 1 and throws away every read behind it. Grep the bare symbol, not a guessed declaration form.
-- Capture a suite with `out=$(...)` and print `$?` before any pipe. A pipe reports the last command, so `node f 2>&1 | tail` hides a red suite.
-- Print one line per suite so the run log grows and the run stays under the spawn prompt's stall limit. Never background the suite to poll its log or its temp directory.
+- Chain recon with `;` or `|| true`, never `&&`. A zero-match `grep` exits 1 and drops every command behind it. Capture with `out=$(...)` and print `$?` before any pipe, because a pipe reports the last command.
+- `pgrep -af <pattern>` matches the shell that runs it. Use `pgrep -af 'fake[-]agent'` to skip the self-match. Kill fixture children by pid with `kill <pid>`, never `pkill -f`, and clean them after each slow suite instead of once at the end.
