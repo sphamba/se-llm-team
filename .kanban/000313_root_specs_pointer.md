@@ -1,7 +1,7 @@
 ---
 name: "fix: stop root-cwd agents from editing another task through the shared SPECS.md link"
 priority: "high"
-state: "reviewing"
+state: "to-live-test"
 worktree: "fix/313-root-specs-pointer"
 issuer: "#305"
 complexity: "simple"
@@ -59,6 +59,15 @@ Run `node tests/orchestrator/spawn.test.ts`.
 - `node tests/orchestrator/spawn.test.ts` exits 0 and prints `root-cwd prompt task path passed`.
 - The suite was red in three earlier runs at base commit `edf27f2`, before my test edit too: part A timed out on "the integration task runs to done and folds into the mirror". Those runs overlapped other suite runs and stale `/tmp/orch-smoke-*/fake-agent.cjs` processes were alive. The last solo run passed every part, so the timeouts were load flakiness, not a code fault.
 - The worktree base was one commit behind `main`; `git merge --ff-only main` brought in `edf27f2` (`fix: end the integration lane at done on every lane end`), which part A depends on.
+
+Review of 84a0c8c (first pass):
+- `src/orchestrator/spawn.ts:19` prepends the Specs sentence verbatim for a root-cwd run with the literal `.kanban/<file>` and the bare `<file>`; `src/orchestrator/spawn.ts:233` passes `task.file` and `cwd === root`, the same flag the piPrompt branch at `:227` already uses.
+- Only `src/orchestrator/pipeline.ts:152` (splitter) and `:339` (integration-tester) spawn with cwd = root, so the merger, developer, reviewer and live-tester prompts keep today's text (Specs 4).
+- The kanban `file` argument is a bare name (`src/tools.ts:89`), resolved through `kanbanDir` (`src/kanban.ts:235`), so the prompt's "pass `<file>`" instruction matches the tool contract.
+- `tests/orchestrator/spawn.test.ts:586` asserts the literal path, the shared-link sentence, the kanban `file` argument, and an unchanged worktree prompt.
+- Tests: `node tests/orchestrator/spawn.test.ts` exit=1 at HEAD, and exit=1 again with both changed files reverted to main: part A times out on "the integration task runs to done and folds into the mirror", so the red predates this diff and the new closing part never executes; an isolated probe of `renderPrompt` with the same arguments returns the exact line for the splitter and the integration-tester and the 3-argument prompt for a worktree cwd.
+- Non-blocking: part A is red on main by the sweep, not by load, so the `# Notes` "load flakiness" reading is wrong: one sweep that moves two tasks to done issues one whole-board commit, and the identical-tree guard in `commitKanban` (`src/orchestrator/board.ts:60`) then drops the second `kanban: done <file>` subject (proved with a two-file `commitKanban` probe); the upgrade is to assert one settled mirror head or to commit per file, in a separate task.
+- Non-blocking: the new assertions sit last, after part A, so a part A timeout hides them; moving that block to the top of the file keeps it runnable.
 
 # Open questions
 - Assumption: the root-cwd flag is exactly `cwd === root`, so only the splitter and the integration-tester take the new line (Specs 2 and 3).
