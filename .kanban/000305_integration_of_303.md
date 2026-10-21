@@ -1,5 +1,5 @@
 ---
-name: "test: integration of #303, #304"
+name: "test: integration of #303, #304, #309"
 priority: "low"
 state: "to-integration-test"
 worktree: ""
@@ -9,7 +9,7 @@ shortName: "integration-of-303"
 ---
 
 # Summary
-Integration test of the merged base branch after #303, #304.
+Integration test of the merged base branch after #303, #304, #309.
 
 # Specs
 Perform integration testing following the merge of:
@@ -18,6 +18,8 @@ Perform integration testing following the merge of:
   In the task detail dialog, change the sub and doctor curve multiplier from 3 to 2.5, so the largest left approach is 150px instead of 180px. The nearest-5px rounding, the 8px floor, the 0.35 span ratio and the x2 cap stay as they are.
 - #304 fix: keep agent card links visible when they curve outside the agent area
   The dialog's connector SVG clips its own strokes at the agent area box, so run-chain bows and left-edge drops are cut. Let the SVG paint outside its box, keep it under the log pane, drop the x2 cap in dropCurve so left-edge cards get the long approach, and stop the dialog card from growing a horizontal scrollbar.
+- #309 refactor: rebuild the integration Specs body from the board
+  Generate the integration task Specs as a `## Own task` section followed by a `## Covered tasks` section with one `### #<num> <name>` heading and a quoted summary per ref, and rebuild that whole body from the board on append. Remove `integrationBullet` and the tail-line parsing in `integrationBullets`. Reword the three docs that describe the old bullet-per-ref shape.
 
 Run the project test script in the root checkout.
 Report defects and coverage gaps in `# Open questions`.

@@ -1,7 +1,7 @@
 ---
 name: "refactor: scope the covered task summaries in generated integration Specs"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "refactor/308-scope-covered-summaries"
 issuer: "#301"
 complexity: "simple"
@@ -55,3 +55,17 @@ Guidance for future Splitters:
 - A piece that only updates pinned test fixtures is not its own subtask. The fixture updates belong to the task that changes the shape, because splitting them leaves the shape change unbuildable.
 - Do not mark a piece `moderate` only because the parent was. Each piece was judged on its own: #309 has the exact target body in its spec and a test gate, so it is `simple`; #310 carries escaping and fence-interaction edge cases with no exact expected HTML, so it is `moderate` and gets its own Splitter pass.
 - Cwd `SPECS.md` in the main checkout is shared mutable state: a sibling Splitter spawned for a subtask repoints it. Pass `file` explicitly on every kanban call that targets this task, and edit `.kanban/000308_scope_covered_summaries.md` directly for notes.
+
+## Verification result (developer)
+
+- The worktree branch started at `d381ad8`, before both blockers. `git merge --ff-only main` in this worktree brought in #309 (`1b785f2`) and #310 (`cf34d85`), no merge commit.
+- `node tests/orchestrator/integration.test.ts`, `node tests/webui/logpane.test.ts`, `node tests/webui/page.test.ts`: exit 0 each. Full `pnpm test` left to the live tester.
+- Throwaway seam probe (`tests/scratch-308-seam.ts` plus a copy of the pre-#310 `logpane.ts` as `src/webui/logpane-old-308.ts`; both deleted after the run). It generated two refs through `ensureIntegrationTask`, then a third after a board-side rename and summary rewrite, and fed the same Specs text to `md`:
+  - Shape: `## Own task` before `## Covered tasks`, both level 2; one `### #<num> <name>` entry per ref in ascending order; the first-sentence ref list equals the heading ref order; every summary line is quoted; no indentation, no bullets; a blank summary line is a lone `>`.
+  - Render: one `<blockquote>` per summary, no `&gt;` in the HTML, `<h2>`/`<h3>` as expected, the lone `>` is a paragraph break inside one blockquote, no `<h1>`.
+  - `replaceSections` seam: the raw file has exactly `# Summary`, `# Specs`, `# Notes` top-level; both `##` headings round-trip inside `task.specs`; re-covering a queued ref leaves the file byte-identical.
+  - Board-driven append: the board-side rename and summary rewrite appear in the rebuilt body and the old summary text is gone.
+  - Field contract: name `test: integration of #1, #2`, shortName from the first ref, priority low, complexity simple, issuer auto, generated notes, no blockedBy, no worktree, state to-integration-test.
+- Log pane: `renderLogChunk` source is unchanged (the `d381ad8..HEAD` diff touches only `md`), and a corpus of prose, table, fence, heading and bullet chunks renders byte-identically to the pre-#310 renderer. A log line starting with `> ` does change, because `renderLogChunk` shares `md`: before `<p>&gt; quoted log line</p>`, now `<blockquote><p>quoted log line</p></blockquote>`. So the What-to-check line "renderLogChunk output for a quote-containing log stays as it was" cannot hold together with the dialog blockquote change (#310's contract says keep the log pane identical). Not fixed: it is #310's scope, and escaping the log pane would break the dialog quote rendering. Non-quote log branches are unaffected.
+- Leftover: `tests/orchestrator/integration.test.ts:246` still says "one bullet per ref" in the part-3 comment. That file is #309's, not changed here.
+- No source, test, or doc edit. The worktree is clean after removing the scratch files, so there is nothing to commit beyond the fast-forward.
