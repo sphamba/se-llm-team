@@ -383,13 +383,19 @@ const rootAR2 = fixture();
 cleaned.push(rootAR2);
 mkdirSync(kanbanDir(rootAR2), { recursive: true });
 const gatedAR2 = createTask(rootAR2, { name: "feat: gated task", summary: "Backlog idle gate", specs: "n/a" });
-// a small window: the freshly written task file is younger than the window, promotion defers
-assert.equal(promoteBacklog(rootAR2, listAll(rootAR2), 0.05).length, 0, "a fresh task file defers promotion within the window");
+// a 5 min window: no test-runner stall can age the freshly written task file past it, so
+// promotion defers (#305, #307: a 3 s window lost this race under load). The mtime is pinned
+// 1 s back: the gate skips a sub-millisecond mtime above its floored Date.now() (clock-skew
+// guard, part BC), so a file written in the current millisecond would read as future and open
+// the gate
+const freshAR2 = new Date(Date.now() - 1_000);
+utimesSync(join(kanbanDir(rootAR2), gatedAR2.file), freshAR2, freshAR2);
+assert.equal(promoteBacklog(rootAR2, listAll(rootAR2), 5).length, 0, "a fresh task file defers promotion within the window");
 assert.equal(parseTask(rootAR2, gatedAR2.file).state, "backlog", "the gated task stays in backlog");
-// aging the task file past the window: promotion fires (0.05 min = 3 s < 10 s)
-const agedAR2 = new Date(Date.now() - 10_000);
+// aging the task file past the window: promotion fires (5 min < 10 min)
+const agedAR2 = new Date(Date.now() - 600_000);
 utimesSync(join(kanbanDir(rootAR2), gatedAR2.file), agedAR2, agedAR2);
-assert.equal(promoteBacklog(rootAR2, listAll(rootAR2), 0.05).length, 1, "the aged task promotes past the window");
+assert.equal(promoteBacklog(rootAR2, listAll(rootAR2), 5).length, 1, "the aged task promotes past the window");
 assert.equal(parseTask(rootAR2, gatedAR2.file).state, "to-do", "the gated task promoted after the window");
 // a window of 0 disables the wait: a just-created task promotes immediately
 const nowAR2 = createTask(rootAR2, { name: "feat: zero-window task", summary: "Backlog idle gate", specs: "n/a" });
@@ -398,7 +404,7 @@ assert.equal(parseTask(rootAR2, nowAR2.file).state, "to-do", "the zero-window ta
 // the daemon's own writes are not board activity (211): a setState rewrite (a state transition,
 // a blocker drop) must not re-arm the gate, or every done move defers its dependents by a window
 setState(rootAR2, nowAR2, "backlog");
-assert.equal(promoteBacklog(rootAR2, listAll(rootAR2), 0.05).length, 1, "a self-write does not re-arm the gate");
+assert.equal(promoteBacklog(rootAR2, listAll(rootAR2), 5).length, 1, "a self-write does not re-arm the gate");
 assert.equal(parseTask(rootAR2, nowAR2.file).state, "to-do", "the task with only self-written files promoted");
 cleanupAll(rootAR2);
 console.log("orchestrator.test.ts: ... + backlog idle gate smoke passed");
@@ -410,14 +416,17 @@ const rootAR3 = fixture();
 cleaned.push(rootAR3);
 mkdirSync(kanbanDir(rootAR3), { recursive: true });
 const gatedAR3 = createTask(rootAR3, { name: "feat: aged behind a role note", summary: "Role notes are not activity", specs: "n/a" });
-const agedAR3 = new Date(Date.now() - 10_000);
+const agedAR3 = new Date(Date.now() - 600_000);
 utimesSync(join(kanbanDir(rootAR3), gatedAR3.file), agedAR3, agedAR3);
 writeFileSync(join(kanbanDir(rootAR3), "AGENTS.developer.md"), "# developer:\n");
-assert.equal(promoteBacklog(rootAR3, listAll(rootAR3), 0.05).length, 1, "a fresh role note does not defer promotion");
+assert.equal(promoteBacklog(rootAR3, listAll(rootAR3), 5).length, 1, "a fresh role note does not defer promotion");
 assert.equal(parseTask(rootAR3, gatedAR3.file).state, "to-do", "the aged task promoted despite the fresh role note");
 // a fresh real task file beside the same role note still defers: the gate skips notes only
 const freshAR3 = createTask(rootAR3, { name: "feat: fresh beside a role note", summary: "Role notes are not activity", specs: "n/a" });
-assert.equal(promoteBacklog(rootAR3, listAll(rootAR3), 0.05).length, 0, "a fresh task file still defers promotion within the window");
+// pinned just back from now, as in part AR2: a same-millisecond mtime would read as future
+const freshAtAR3 = new Date(Date.now() - 1_000);
+utimesSync(join(kanbanDir(rootAR3), freshAR3.file), freshAtAR3, freshAtAR3);
+assert.equal(promoteBacklog(rootAR3, listAll(rootAR3), 5).length, 0, "a fresh task file still defers promotion within the window");
 assert.equal(parseTask(rootAR3, freshAR3.file).state, "backlog", "the fresh task stays gated");
 cleanupAll(rootAR3);
 console.log("orchestrator.test.ts: ... + role notes are not idle-gate activity smoke passed");
@@ -428,7 +437,7 @@ console.log("orchestrator.test.ts: ... + role notes are not idle-gate activity s
 const rootAR4 = fixture();
 cleaned.push(rootAR4);
 mkdirSync(kanbanDir(rootAR4), { recursive: true });
-writeFileSync(join(kanbanDir(rootAR4), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAR4), pollMinutes: 0.01, backlogIdleMinutes: 0.05 }));
+writeFileSync(join(kanbanDir(rootAR4), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAR4), pollMinutes: 0.01, backlogIdleMinutes: 5 }));
 // an empty temp HOME keeps the ambient user-level config out of loadConfig, as in part AP
 const homeAR4 = mkdtempSync(join(tmpdir(), "orch-home-"));
 cleaned.push(homeAR4);
@@ -436,7 +445,7 @@ const savedHomeAR4 = process.env.HOME;
 process.env.HOME = homeAR4;
 const cfgAR4 = loadConfig(rootAR4);
 process.env.HOME = savedHomeAR4;
-assert.equal(cfgAR4.backlogIdleMinutes, 0.05, "the fixture config carries the nonzero window");
+assert.equal(cfgAR4.backlogIdleMinutes, 5, "the fixture config carries the nonzero window");
 // the #197 fixture: a to-merge task with nothing to merge (no worktree, no branch) plus a
 // dependent backlog task; sweepToMerge sets the blocker done and dropDoneBlockers drops the
 // dependent's satisfied ref in the same sweep
@@ -444,8 +453,8 @@ const blockerAR4 = createTask(rootAR4, { name: "fix: merged task", summary: "Mer
 setState(rootAR4, blockerAR4, "to-merge");
 const dependentAR4 = createTask(rootAR4, { name: "feat: unblocked next", summary: "Unblocked", specs: "n/a", blockedBy: `#${taskNum(blockerAR4.file)}` });
 // the setup writes are PM writes: age them past the window, so the only fresh mtimes the
-// sweep leaves behind are the daemon's own (0.05 min = 3 s < 10 s)
-const agedAR4 = new Date(Date.now() - 10_000);
+// sweep leaves behind are the daemon's own (5 min < 10 min)
+const agedAR4 = new Date(Date.now() - 600_000);
 for (const f of [blockerAR4.file, dependentAR4.file]) utimesSync(join(kanbanDir(rootAR4), f), agedAR4, agedAR4);
 rescan(rootAR4, cfgAR4);
 assert.equal(parseTask(rootAR4, blockerAR4.file).state, "done", "the to-merge task with nothing to merge went done");
@@ -458,13 +467,16 @@ assert.ok(reportAR4.includes(`- ${dependentAR4.name} (${dependentAR4.file}): to-
 // a genuinely external (PM) board edit still defers promotion: a raw write, as a hand edit
 // or another process would make it, re-arms the gate
 const candidateAR4 = createTask(rootAR4, { name: "feat: gated next", summary: "Gated", specs: "n/a" });
-const agedCandidateAR4 = new Date(Date.now() - 10_000);
+const agedCandidateAR4 = new Date(Date.now() - 600_000);
 utimesSync(join(kanbanDir(rootAR4), candidateAR4.file), agedCandidateAR4, agedCandidateAR4);
 writeFileSync(join(kanbanDir(rootAR4), candidateAR4.file), readFileSync(join(kanbanDir(rootAR4), candidateAR4.file), "utf8").replace("# Notes\n", "# Notes\n\nPM note.\n"));
-assert.equal(promoteBacklog(rootAR4, listAll(rootAR4), 0.05).length, 0, "an external PM edit defers promotion within the window");
+// pinned just back from now, as in part AR2: a same-millisecond mtime would read as future
+const freshAtAR4 = new Date(Date.now() - 1_000);
+utimesSync(join(kanbanDir(rootAR4), candidateAR4.file), freshAtAR4, freshAtAR4);
+assert.equal(promoteBacklog(rootAR4, listAll(rootAR4), 5).length, 0, "an external PM edit defers promotion within the window");
 assert.equal(parseTask(rootAR4, candidateAR4.file).state, "backlog", "the externally edited task stays in backlog");
 // aged past the window, the poll path promotes too (the gate's second call site)
-const agedAgainAR4 = new Date(Date.now() - 10_000);
+const agedAgainAR4 = new Date(Date.now() - 600_000);
 utimesSync(join(kanbanDir(rootAR4), candidateAR4.file), agedAgainAR4, agedAgainAR4);
 poll(rootAR4, cfgAR4.logStallMinutes, Date.now(), cfgAR4.backlogIdleMinutes);
 assert.equal(parseTask(rootAR4, candidateAR4.file).state, "to-do", "the poll path promotes past the window");
