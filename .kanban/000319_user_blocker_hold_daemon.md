@@ -1,8 +1,8 @@
 ---
 name: "feat: hold a task on a user blocker in the daemon gates"
 priority: "medium"
-state: "live-testing"
-worktree: "feat/319-user-blocker-hold-daemon"
+state: "done"
+worktree: ""
 issuer: "#318"
 complexity: "moderate"
 shortName: "user-blocker-hold-daemon"
@@ -107,3 +107,66 @@ Re-review of 30a425f: the docs fix holds, so no code change and the Specs are me
 - Tests: plugin exit=0, blockedby exit=0, promote exit=0, split exit=0, sweep exit=0, merge exit=0, integration exit=0.
 - Note: `tests/orchestrator/spawn.test.ts` is red at base with and without this diff (developer base probe). It sits outside this change set, and the repo-wide gate belongs to the integration ladder, so it does not block this card.
 
+
+## Live test (2026-10-21)
+
+Lane: daemon e2e with a fixture board and a fake agent, plus the docs lane with no process. No test suite ran. One driver (`/tmp/lt319/driver.mjs`, `run.sh`) ran on both trees with one label argument. Merged tree `41ad23b` is 30 of 30. The pre-fix control (`git archive HEAD^^`, commit `d51a72e`) is 13 of 30, and every hold claim flips there.
+
+Tree proof: `git log --oneline -1` prints `41ad23b docs(skill): scope the stage-start gate to the user hold token`. `grep -n hasUserHold src` prints `src/kanban.ts:370` and the six gate sites in `src/orchestrator/pipeline.ts` (`:632`, `:148`, `:514`, `:254`, `:541`, `:337`). `git diff --stat HEAD^^..HEAD` lists 12 files, and none of them is under `src/webui/` or `tests/webui/`, so the Out of scope line holds.
+
+Driver setup: a git fixture root (`main` ahead of a `ctrlmerge` branch, `holdlive` at an ancestor of `main`), 13 tasks from `createTask`/`setState`/`updateAttrs`, one held task per gate plus a control task beside it. Config: `backlogIdleMinutes: 0`, `pollMinutes: 0.05`, no `maxParallel` cap, `SE_LLM_TEAM_NO_WEBUI=1`, fixture `HOME` and `XDG_CONFIG_HOME`. The daemon ran with `--rescan-seconds 1` from the tree under test. The fake agent writes one capture line (role, task file, cwd, pid) and stays alive, so no state cascades. The driver stops the daemon and then kills every agent pid the board can name. `CLEANUP savedPids=7 stillAlive=[]` on the merged tree, `savedPids=11 stillAlive=[]` on the control.
+
+| id | claim (printed actual value) | merged tree | pre-fix control |
+| --- | --- | --- | --- |
+| id | claim (printed actual value) | merged tree | pre-fix control |
+| --- | --- | --- | --- |
+| C16 | doc needles present | 9 PASS | 0 FAIL |
+| C17 | doc links resolve | 11/11 PASS | 11/11 PASS |
+| C1 | backlog hold keeps backlog | backlog PASS | doing FAIL |
+| C2 | mixed hold: state | backlog PASS | doing FAIL |
+| C2 | mixed hold: blockedBy after auto-drop | user PASS | user PASS |
+| C3 | control backlog promotes | promoted PASS | promoted PASS |
+| C4 | to-do splitter hold: state | to-do PASS | to-do PASS |
+| C4 | to-do splitter hold: no splitter pid | false PASS | true FAIL |
+| C5 | to-do developer hold: state | to-do PASS | doing FAIL |
+| C5 | to-do developer hold: no developer pid | false PASS | true FAIL |
+| C6 | control to-do starts the developer | doing,true PASS | doing,true PASS |
+| C7 | to-review hold: state | to-review PASS | reviewing FAIL |
+| C7 | to-review hold: no reviewer pid | false PASS | true FAIL |
+| C7 | to-review hold: no armed marker | false PASS | true FAIL |
+| C8 | to-merge hold: state | to-merge PASS | done FAIL |
+| C8 | to-merge hold: no merger pid | false PASS | false PASS |
+| C8 | to-merge hold: no merge-attempted marker | false PASS | false PASS |
+| C8 | to-merge hold: no branch left behind | (empty) PASS | (empty) PASS |
+| C8 | to-merge hold: no worktree created | false PASS | false PASS |
+| C9 | control to-merge merged | true,true PASS | true,true PASS |
+| C10 | to-live-test hold: state | to-live-test PASS | live-testing FAIL |
+| C10 | to-live-test hold: no live-tester pid | false PASS | true FAIL |
+| C10 | to-live-test hold: no worktree created | false PASS | true FAIL |
+| C11 | to-integration-test hold: state | to-integration-test PASS | integration-testing FAIL |
+| C12 | control takes the single integration slot | integration-testing,true PASS | to-integration-test,true FAIL |
+| C12 | integration slug file names the control | 000013_ctrl_int PASS | 000012_hold_int FAIL |
+| C13 | no held lane spawned an agent | 0 PASS | 3 FAIL |
+| C14 | released to-do starts the splitter | true PASS | true PASS |
+| C14 | released to-do keeps to-do | to-do PASS | to-do PASS |
+| C15 | released backlog promotes | promoted PASS | promoted PASS |
+
+Reading of the table: a merged PASS with a control FAIL is the change claim. C3, C6, C9, C14, C15 and C17 are keep-green rows and pass on both trees. `C2 blockedBy` is keep-green on purpose: `dropDoneBlockers` is unchanged by the task, so it keeps `user` in both trees and the state row carries the change claim.
+
+Printed spawn capture on the merged tree: `developer` for `feat/7-ctrl-todo-dev` and `feat/4-ctrl-backlog`, `integration-tester` for `000013_ctrl_int.md`, `live-tester` for `.worktrees/ctrlmerge`. No held task appears. On the control the same capture lists 3 held lanes (the splitter for `000005_hold_todo_split.md`, the reviewer in `.worktrees/holdreview`, the integration-tester for `000012_hold_int.md`).
+
+Assumptions that shaped the checks:
+- The driver writes the fixture with `createTask`, `setState` and `updateAttrs` from `src/kanban.ts`. That is the write path the PM's `kanban_update` tool uses. No real PM agent ran.
+- The release step is one `updateAttrs(fresh, { blockedBy: "" })` on the held backlog task and on the held to-do task. That is the PM's release path. The first rescan after it starts the Splitter and promotes the backlog task.
+- The fake agent stays alive for 180 s. The run ends after about 15 s, so no agent exit changes a state under an assertion.
+- `backlogIdleMinutes: 0` disables the board quiet window. The Specs do not cover that window, and a 1 minute default would hide the promotion gate.
+- The to-merge control branch is one commit behind `main` and has no conflict. On the control tree the held to-merge task reads `nothing to merge, set done`, because its worktree branch did not exist yet. The task still advanced, so the control cell is a true FAIL. No rebase conflict was set up.
+- The integration lane claim uses the global `integration-tester` pid and its `.slug` file, which the Specs name as the single slot.
+
+Not exercised:
+- The Merger spawn on a stopped rebase. The fixture has no conflict, so no merger agent starts in either tree. The held to-merge task leaves no branch, no worktree, no merger pid and no marker, and the base branch does not move for it.
+- `spawnRunAnalysis`, which the Specs leave unguarded. No run wrote an exit code 0 while a task sat in to-merge, so it never fired.
+- The `user` token written by a live PM agent through the MCP `kanban_update` tool, and the card marker in the web UI (Out of scope, sibling task #320).
+- The task's own test files and `scripts/test-changed.mjs`. Live test rules forbid a suite run.
+
+No finding. Each Specs gate holds on the merged tree, the control tree shows the difference, and the docs carry the new wording. Two harness bugs came up and were fixed inside one cycle: the host git config signs commits (the fixture sets `commit.gpgsign false`), and the to-merge control expectation now accepts the follow-on live-test state that a 1 s rescan reaches.
