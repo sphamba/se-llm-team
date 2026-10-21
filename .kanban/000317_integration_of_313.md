@@ -1,7 +1,7 @@
 ---
 name: "test: integration of #313"
 priority: "low"
-state: "to-integration-test"
+state: "done"
 worktree: ""
 issuer: "auto"
 complexity: "simple"

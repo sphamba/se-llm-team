@@ -1,58 +1,63 @@
 ---
 name: "feat: hold a task on a user blocker at every stage start"
 priority: "medium"
-state: "to-do"
-worktree: ""
+state: "backlog"
+worktree: "feat/318-user-blocker-hold"
 issuer: "user"
-complexity: "moderate"
+complexity: "simple"
 shortName: "user-blocker-hold"
+blockedBy: "#319, #320"
 ---
 
 # Summary
-Allow `blockedBy` to carry the literal token `user` in addition to task refs. A held task does not start any stage (backlog to to-do, to-do splitter and developer, to-review, to-merge, to-live-test, to-integration-test); a running agent finishes its current stage and the next gate stops it. The PM adds and removes the token on request, and the board card of a held task gets a 6-on/4-off dashed top/right/bottom border with the solid 3px left accent kept.
+Verification of the user-blocker hold after #319 (daemon gates and docs) and #320 (card border) land. Check the token end to end on a real board: a held task starts no stage, releasing it restarts the path cleanly, and the card carries the 6-on/4-off dashed border.
 
 # Specs
-## Token
+## Check after the pieces land
 
-`Task.blockedBy` stays a comma-joined string (`src/kanban.ts:37`, parsed at `:191`, serialized at `:286-289`). A ref whose trimmed value equals `user` (case-insensitive) is a hold. It may mix with task refs (`user, #42`): the task waits for the user AND for every ref, and the refs keep their old meaning. `user` alone is valid.
+Both subtasks are done when this task runs, so check the joined behaviour on the merged base branch.
 
-Only the PM writes or removes `user`; no code adds it. `dropDoneBlockers` (`src/orchestrator/pipeline.ts:630-663`) must keep it (it already does, because `parseInt("user")` is NaN and the filter keeps the ref); pin that with a test. `blockedNums` (`src/kanban.ts:370-377`) and `assertNoBlockCycle` (`:383-392`) already ignore it; leave them alone. Other non-numeric refs stay ignored as today (ghost refs); do not add validation that rejects them.
-
-## Gates
-
-Add one shared predicate for the daemon (for example `hasUserHold(blockedBy)` in `src/kanban.ts`). Skip a held task at each site below. The task stays in its source state and the scan considers the next eligible task, so one hold does not stall the lane. Do not kill a running agent and do not revert its state.
-
-- backlog to to-do: `blockedByUndone` (`src/orchestrator/pipeline.ts:614-621`) returns true when `user` is present; `promoteBacklog` (`:679`, gate calls `:723` and `:730`).
-- to-do (splitter and developer): `startTodo` (`src/orchestrator/pipeline.ts:137`) re-reads at `:144-145`; put the check right after `:145`, before the splitter branch at `:146`. This blocks both the Splitter (`:152`) and the developer fallthrough (`:155-157`) and writes no splitter marker, so removing the token restarts the path cleanly with the splitter first.
-- to-review to reviewing: the reviewer spawn at `src/orchestrator/pipeline.ts:514` (after `ensureWorktree` `:498`, before `:519`).
-- to-merge to merging: `sweepToMerge` before the worktree/rebase side effects at `:267`/`:278` (the guard region is `:238-248`; the merge spawn is `:293`). Do not guard inside `spawnAgent` alone, or a stopped rebase stays without a merger.
-- to-live-test to live-testing: the live-tester spawn at `src/orchestrator/pipeline.ts:536`.
-- to-integration-test to integration-testing: the integration-tester spawn at `src/orchestrator/pipeline.ts:331`, before `writeMergerSlug` at `:338`.
-- Do NOT hold `spawnRunAnalysis` (`src/orchestrator/spawn.ts:274`, called from `liveness.ts:200`, `:229`, `pipeline.ts:235`): it analyses a finished run log, writes no board state, and holding it would lose the analysis.
-
-## UI
-
-`src/webui/board.ts` `syncBoard` (`:440-490`) toggles a `user-hold` class on the card element for every shown task when the token is present, so a poll adds and removes the border live. Preserve the one-shot `enter` class. `cardBaseHtml` needs no change; the outer element class is set in `src/webui/page.ts:449`.
-
-CSS in `src/webui/page.ts`: the held card's 1px top/right/bottom border becomes dashed with the `#relations path` pattern (`stroke-dasharray: 6 4`, `page.ts:134`; test `tests/webui/board.test.ts:246`), 6px on and 4px off. Keep the 3px `border-left: 3px solid var(--ac)`, the 1px border color, the 6px radius and the sizes. The dashed border is static (no animation). A plain `border-style: dashed` does not meet the 6/4 requirement; use a pseudo-element with repeating-linear-gradient or an SVG, clipped by the 6px radius. The `.card:hover { background: ... }` shorthand must not wipe the dashed layers.
-
-The detail dialog `blockedBy` row (`src/webui/page.ts:698-706`) already prints `user` as plain escaped text with no link and must stay that way. `relationPaths` (`src/webui/board.ts:237-257`) must keep drawing no line for `user`.
-
-## PM workflow and docs
-
-The PM adds `user` with `kanban_update`, preserving the existing refs (for example `user, #42`), and on release removes only the `user` token and keeps the refs. The PM may use the grill-me interview when the request is ambiguous; no code path is needed.
-
-Reword `skills/se-llm-team/SKILL.md:18` (state order), `:33` ("blockedBy only gates promotion"), `:37` ("never edit blockedBy after creation"), `docs/architecture.md:19-20` (promotion/auto-drop and the to-do splitter bullet), `docs/agents-and-tools.md:7` and `:13` (splitter at the root), and `agents/splitter.md:9-11` (the splitter must not run on a held task; the hold check is before the splitter branch).
-
-## Tests
-
-- `tests/kanban/blockedby.test.ts`: a `user` ref parses and round-trips; `user, #42` is kept verbatim; the cycle guard ignores it.
-- `tests/orchestrator/promote.test.ts`: a backlog task with `user` stays; with `user, #42` stays; `dropDoneBlockers` keeps `user` while dropping a done `#42`; after `kanban_update` removes `user`, the task promotes.
-- One case per gate: splitter/developer (`tests/orchestrator/split.test.ts:13`, `:40`, fixtures in `tests/helpers.ts:70-85`), reviewer, merger, live-tester, integration-tester. Each asserts the source state is kept and no agent pid/marker is written, and for the single-slot merger and integration lanes that the next eligible task still runs.
-- Web UI: the `user-hold` class and the 6/4 CSS rule in `tests/webui/page.test.ts`; `relationPaths` ignores `user` and `blockedRow` prints it plain in `tests/webui/board.test.ts`. The user checks the dashed border by hand; no browser test.
+- One predicate: `hasUserHold` exists once in `src/kanban.ts`, all six daemon gates in `src/orchestrator/pipeline.ts` call it, and no gate re-implements the token test.
+- Token semantics: `user` alone and `user, #42` both parse, round-trip and hold; `dropDoneBlockers` keeps `user` while dropping a satisfied ref; `blockedNums` and `assertNoBlockCycle` still ignore it; no new validation rejects other ghost refs.
+- Gates end to end on a scratch project: a held backlog task stays in backlog; a held to-do task of moderate complexity reaches neither the Splitter nor the Developer and writes no splitter marker; a held to-review, to-merge, to-live-test and to-integration-test task keeps its state, writes no pid or marker, and the next eligible task in the single-slot merger and integration lanes still runs. Removing the token starts the path at the splitter for a moderate task.
+- No running agent is killed and no state is reverted by a hold.
+- `spawnRunAnalysis` is not held.
+- Web UI: `syncBoard` toggles `user-hold` on every pass, the CSS rule keeps the 6px-on/4px-off dashes with the 3px left accent, the 6px radius and the sizes, hover does not wipe the dashes, `relationPaths` draws no line for `user`, and the dialog row prints it plain.
+- Docs state the rule: `skills/se-llm-team/SKILL.md`, `docs/architecture.md`, `docs/agents-and-tools.md` and `agents/splitter.md`.
+- Scoped suites pass: `node scripts/test-changed.mjs`.
 
 ## Out of scope
 
-No migration of existing task files. No auto-removal of `user`. No kill of a running agent. No relation line for `user`. No change to issuer, priority or complexity. No new validation of other non-numeric refs.
+No new feature work. A defect found here is a new task, not an edit to this one.
 
 # Notes
+
+- Split on 2026-10-10 into #319 (token, `hasUserHold`, the six daemon gates, kanban and orchestrator tests, docs, `agents/splitter.md`) and #320 (the `user-hold` card class, the 6-on/4-off dashed border, the webui tests). The two lanes share no file, so they run as parallel lanes; the parent waits on both and verifies the joined behaviour.
+- Splitter guidance for this repo: split by file set, never by test file. A test belongs with the code it asserts, and two lanes that touch one test file conflict at the merge. The daemon gates all live in `src/orchestrator/pipeline.ts`, so they are one lane however many state pairs they cover.
+- `src/webui/board.ts` is shipped by interpolating `String(fn)` into the page, so a helper a browser-side function calls must be interpolated too. Keep such checks inline instead, or the client breaks while the node test still passes.
+- A task is marked moderate only when its lane is honest about it: the reviewer cap is 1 pass for simple and 2 for moderate, and the splitter runs again on moderate and complex children. A child that cannot split further carries a `## Split scope` line that says so.
+
+## Blocked: the blockers are not merged
+
+Verification-only run. No source, test or doc change. This notes block is the deliverable.
+
+State of the blockers:
+
+- `000319_user_blocker_hold_daemon.md` has `state: "to-do"`.
+- `000320_user_blocker_hold_card.md` has `state: "to-do"`.
+- `HEAD` and `main` are both `84a0c8c`, so the worktree base is current. The base branch does not hold either piece.
+
+Probes on the base commit, all negative:
+
+- `grep -rn 'hasUserHold' src/` gives no match. The predicate does not exist.
+- `grep -rn 'user-hold\|userHold' src/ docs/ skills/ agents/` gives no match. No daemon gate, no `syncBoard` toggle, no CSS rule and no doc line exists.
+- `grep -rn 'dashed' src/webui/` matches only two unrelated relation-line comments in `page.ts`.
+- `grep -rn "'user'" src/kanban.ts` matches only the `issuer` field, which is not the blocker token.
+
+The Specs premise "Both subtasks are done when this task runs" is false. Each check line under "Check after the pieces land" depends on a piece that is absent, so no line can be made red or green. There is no defect to report and no edit to make.
+
+`node scripts/test-changed.mjs` was not run. With no change against `main` the changed set is empty, so it would prove nothing about the Specs.
+
+Action for the board: keep this task out of `to-do` until #319 and #320 both reach `done`. Re-run it on the merged base after that point.
+
+Method finding: a `blockedBy` pair did not stop this task from being promoted and spawned while both blockers sat in `to-do`. The hold check in the board promotion path does not cover this case, or the edge was dropped. `src/kanban.ts` owns `blockedBy` parsing and `promoteBacklog` gates the promotion.

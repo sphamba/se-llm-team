@@ -1,7 +1,7 @@
 ---
 name: "feat: mark a user-held task card with a dashed border"
 priority: "medium"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "#318"
 complexity: "moderate"
@@ -47,3 +47,15 @@ Do not touch `src/kanban.ts`, `src/orchestrator/*` or `tests/kanban/*`, `tests/o
 Do not split further. The class toggle, the CSS rule and their tests land together in one worktree.
 
 # Notes
+- 2026-10-21 Splitter (no split, #320): No split. The "Split scope" section forbids it, and the code agrees. The `user-hold` class toggle in `syncBoard` (`src/webui/board.ts`) and the dashed pseudo-element rule in `src/webui/page.ts` are one UI change. The two suites pin the same class and the same style block, so no test goes green before both parts exist. A cut between the class and the CSS would add one review, one merge and one live test for no parallel gain. The sibling #319 owns the daemon half, so the work is already parallelized.
+- Guidance for future Splitter agents (from #320): a "Split scope" section written by the parent Splitter is binding. Do not split a task that the parent already sliced unless the Specs contradict the section. Name the shared files and suites that make a cut sequential, so the next pass can check the reasoning. Omit the kanban tool `file` argument: the tools resolve the cwd `SPECS.md` symlink, and `file: SPECS.md` looks for a task of that name and fails.
+## Splitter pass: no split (verified)
+
+The decision above stands after a code check. Complexity stays moderate and the task stays in to-do.
+
+- `relationPaths` (`src/webui/board.ts:241`) already skips `user`: `parseInt("user", 10)` is `NaN`, so the blocker lookup finds no task. No edit.
+- `blockedRow` (`src/webui/page.ts:698`) already prints `user` as plain escaped text: `taskByNum` returns `undefined` for it. No edit.
+- `.card` (`src/webui/page.ts:145`) carries the base border, the radius and the size, and `.card:hover` (`:146`) is a `background` shorthand. The dashes must sit on a pseudo-element so the hover shorthand cannot wipe them.
+- `syncBoard` (`src/webui/board.ts:439`) sets no `className` after creation, so `classList.toggle("user-hold", ...)` keeps the one-shot `enter` class safe.
+
+Guidance for the next Splitter pass: keep the token test inline in `syncBoard`. A new helper in `board.ts` needs a new source-interpolation site in `page.ts`, and an unshipped helper throws in the browser on the first poll.
