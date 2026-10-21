@@ -226,12 +226,14 @@ at 0.75rem, the stats line at 0.625rem; the four role cards keep the base 0.875r
 /* 000237: the detail card's relation lines, behind the cards: the agent area is the svg's offset
 parent and its own stacking context (z-index 0), so the z-index-2 agent cards stay under the
 sticky #m-head while the svg (z-index 1) paints under them; pointer-events none lets the card
-clicks through, the canvas fills the area, the paths carry the geometry */
-#agent-relations { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+clicks through, the canvas fills the area, the paths carry the geometry; 000304: the layer paints
+outside the area box, bounded by the dialog card's border */
+#agent-relations { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; overflow: visible; }
 #agent-relations path { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-opacity: .3; stroke-dasharray: 6 4; animation: dashflow 1s linear infinite; transition: stroke-opacity .15s ease; }
 #agent-relations path.relations-hot, #agent-relations path.relations-sel { stroke-opacity: .8; }
-/* 000152: the pane grows to 70vh so long logs show more content */
-#m-log { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 70vh; overflow: auto; }
+/* 000152: the pane grows to 70vh so long logs show more content; 000304: its own layer keeps it
+above the connector svg */
+#m-log { position: relative; z-index: 2; margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); max-height: 70vh; overflow: auto; }
 #m-log.hidden { display: none; }
 /* 000191: the pane fades and rises on open */
 #m-log:not(.hidden) { animation: logIn var(--enter) ease-out; }
@@ -287,7 +289,7 @@ make the text vanish: the gradient drops and the solid color restores per block 
 containing block, so #m-box drops its top padding and #m-head carries it (else the header pins 18px
 down and scrolled text peeks above it); its own bottom padding keeps 10px clearance under the title
 while content scrolls */
-#m-box { background: var(--panel); border-radius: 10px; padding: 0 18px 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow: auto; }
+#m-box { background: var(--panel); border-radius: 10px; padding: 0 18px 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow-y: auto; overflow-x: hidden; }
 /* 000246: the detail arrival grows the modal from the loading height pinned by openTask to the
 content height; the class drops at the transition end, and reduced motion keeps the instant resize */
 #m-box.grow { transition: height var(--enter) ease-out; }
@@ -742,9 +744,9 @@ function hotAgentRelations(handle, on) {
 		if (p.dataset.from === handle || p.dataset.to === handle) p.classList.toggle("relations-hot", on);
 }
 // the vertical connector: out of the run card's bottom edge heading down, into the sub or doctor
-// card's left side heading right; the departure scales with the vertical span and the horizontal
-// approach is 2.5 times the span-scaled base, rounded to the nearest 5px, then the space left of the
-// card caps it last, so the control point never lands left of the area and the approach never clips
+// card's left side heading right; the departure scales with the vertical span, and the left
+// approach is 2.5 times the span-scaled base, rounded to the nearest 5px, uncapped, so a card at
+// the area's left edge sweeps outside and the svg paints it outside the area
 function dropCurve(from, to) {
 	const x1 = from.x + from.w / 2;
 	const y1 = from.y + from.h;
@@ -752,7 +754,7 @@ function dropCurve(from, to) {
 	const y2 = to.y + to.h / 2;
 	const v = Math.max(8, Math.min((y2 - y1) * 0.5, 60));
 	const base = Math.max(8, Math.min(Math.abs(x1 - x2) * 0.35, 60));
-	const d = Math.min(5 * Math.round((2.5 * base) / 5), x2);
+	const d = 5 * Math.round((2.5 * base) / 5);
 	return "M " + x1 + " " + y1 + " C " + x1 + " " + (y1 + v) + ", " + (x2 - d) + " " + y2 + ", " + x2 + " " + y2;
 }
 // 000237 the detail card's relation lines, behind the cards in #m-agent: one dashed connector per

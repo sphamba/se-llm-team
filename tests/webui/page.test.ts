@@ -577,6 +577,11 @@ assert.ok(pollDetailSrc.indexOf("fetch(detailUrl(modalFile))") < pollDetailSrc.i
 assert.ok(openTaskSrc.includes('<div class="empty"><span class="spin"></span>Loading task details…</div>'), "000246: the loading placeholder pairs the spinner with the label");
 assert.ok(page.includes("#m-box.grow { transition: height var(--enter) ease-out; }"), "000246: the grow is a CSS height transition, no library");
 assert.ok(page.includes("@media (prefers-reduced-motion: reduce) { #m-box.grow { transition: none; } }"), "000246: reduced motion turns the grow off");
+// 000304 the connector layer paints outside the agent area, bounded by the dialog card
+const cssRule = (sel: string) => (page.match(new RegExp("(?:^|\\n)" + sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " \\{[^}]*\\}")) ?? [""])[0];
+assert.ok(cssRule("#agent-relations").includes("overflow: visible"), "the connector svg no longer clips its own strokes at the agent area box");
+assert.ok(cssRule("#m-log").includes("position: relative; z-index: 2;"), "the log pane gets its own layer above the connector svg");
+assert.ok(cssRule("#m-box").includes("overflow-y: auto; overflow-x: hidden"), "the dialog card clips the strokes at its border and never grows a horizontal scrollbar");
 assert.ok(openTaskSrc.includes('box.classList.add("grow")') && openTaskSrc.includes('box.style.height = box.offsetHeight + "px"'), "000246: openTask pins the loading height");
 assert.ok(openTaskSrc.indexOf('classList.remove("hidden")') < openTaskSrc.indexOf("box.offsetHeight"), "000246: the pin runs after the un-hide, a hidden box measures zero");
 assert.ok(/if \(!d\) \{[\s\S]*?box\.style\.height = ""[\s\S]*?Task details failed to load/.test(openTaskSrc), "000246: a failed fetch unpins the modal before the error shows, so it never grows");
@@ -790,21 +795,21 @@ assert.equal([...page.matchAll(/b\.onmouseenter = \(\) => hotAgentRelations\(b\.
 assert.ok(page.includes('for (const path of document.querySelectorAll("#agent-relations path"))'), "markActiveAgent also toggles the selection highlight on the connected lines");
 // 000237/000238/000302 run against the served source: the drop leaves the run card's bottom edge
 // heading down and enters the sub or doctor card's left side heading right; the horizontal approach
-// is 2.5 times the span-scaled base, rounds it to 5px, then the space left of the card caps it last
+// is 2.5 times the span-scaled base, rounded to 5px and uncapped, so the SVG paints it outside the area
 const relDrop = new Function(page.match(/function dropCurve\(from, to\) \{[\s\S]*?\n\}/)![0] + "; return dropCurve;")();
 const dropPath = relDrop({ x: 0, y: 0, w: 200, h: 40 }, { x: 0, y: 44, w: 200, h: 30 });
 assert.ok(dropPath.startsWith("M 100 40 C"), "the drop leaves the run card's bottom edge at its center");
 assert.ok(dropPath.endsWith(", 0 59"), "the drop enters the sub card's left side at its vertical middle");
 const dropSeg = dropPath.match(/C (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+)$/)!;
 assert.ok(Number(dropSeg[1]) === 100 && Number(dropSeg[2]) === 49.5, "the departure control sits below the bottom edge at today's half-span, so the line heads down");
-assert.ok(Number(dropSeg[3]) === 0 && Number(dropSeg[4]) === 59, "the x2 cap lands last, so a card flush with the area's left edge takes no run-in and the arrival control sits on the edge");
+assert.ok(Number(dropSeg[3]) === -90 && Number(dropSeg[4]) === 59, "the approach is uncapped, so a card flush with the area's left edge takes the full 90px run-in and the arrival control sits left of the edge");
 assert.equal(relDrop({ x: 0, y: 0, w: 200, h: 40 }, { x: 300, y: 44, w: 200, h: 30 }), "M 100 40 C 100 49.5, 150 59, 300 59", "a card with space to its left gets the base capped at 60px, 2.5 times to 150px and rounded to 5px");
-// the six pinned spans: base 8, 20, 35, 60, then the two x2 caps that beat the old 8px floor
+// the six pinned spans: base 8, 20, 35, 60, then the two left-edge cards that took the old x2 cap
 const relDropD = (x1, x2) => {
 	const m = relDrop({ x: x1 - 100, y: 0, w: 200, h: 40 }, { x: x2, y: 44, w: 200, h: 30 }).match(/C -?[\d.]+ (-?[\d.]+), (-?[\d.]+) -?[\d.]+, -?[\d.]+ -?[\d.]+$/)!;
 	return x2 - Number(m[2]);
 };
-for (const [x1, x2, d] of [[100, 123, 20], [100, 157, 50], [100, 200, 90], [100, 300, 150], [240, 40, 40], [100, 6, 6]])
+for (const [x1, x2, d] of [[100, 123, 20], [100, 157, 50], [100, 200, 90], [100, 300, 150], [240, 40, 150], [100, 6, 80]])
 	assert.equal(relDropD(x1, x2), d, "a " + Math.abs(x1 - x2) + "px span with " + x2 + "px of space left of the card gets a " + d + "px approach");
 // 000237 run the served draw against a stub agent area: two run columns with run 2 wrapped below
 // run 1, two subs under run 1, one doctor card in the residual #m-doctor row. The wrap must not
@@ -864,8 +869,8 @@ assert.ok(drawn[0].includes('data-from="t.dev.0"') && drawn[0].includes('data-to
 const chainSeg = drawn[0].match(/d="M (-?[\d.]+) (-?[\d.]+) C (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+)"/)!;
 assert.ok(chainSeg[1] === "200" && chainSeg[2] === "20", "the chain leaves the first run card's right edge");
 assert.ok(chainSeg[7] === "0" && chainSeg[8] === "170", "the chain enters the wrapped run card's left edge: the wrap does not break the pair");
-assert.ok(drawn[1].includes('data-from="t.dev.0"') && drawn[1].includes('data-to="t.dev.0"') && drawn[1].includes('d="M 100 40 C 100 49.5, 0 59, 0 59"'), "a sub's drop line runs from its run card's bottom edge into its left side");
-assert.ok(drawn[3].includes('data-to="t.dev.0.doctor"') && drawn[3].includes('d="M 100 40 C 100 100, 0 215, 0 215"'), "a doctor card in the residual row still drops from its analysed run's card");
+assert.ok(drawn[1].includes('data-from="t.dev.0"') && drawn[1].includes('data-to="t.dev.0"') && drawn[1].includes('d="M 100 40 C 100 49.5, -90 59, 0 59"'), "a sub's drop line runs from its run card's bottom edge into its left side");
+assert.ok(drawn[3].includes('data-to="t.dev.0.doctor"') && drawn[3].includes('d="M 100 40 C 100 100, -90 215, 0 215"'), "a doctor card in the residual row still drops from its analysed run's card");
 relHotApply = null;
 relDraw();
 assert.equal(relMarks, 1, "the rewrite is html-gated: an unchanged redraw neither rewrites nor re-runs markActiveAgent");
