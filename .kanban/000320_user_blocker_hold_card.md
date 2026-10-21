@@ -1,7 +1,7 @@
 ---
 name: "feat: mark a user-held task card with a dashed border"
 priority: "medium"
-state: "reviewing"
+state: "doing"
 worktree: "feat/320-user-blocker-hold-card"
 issuer: "#318"
 complexity: "moderate"
@@ -60,3 +60,31 @@ The decision above stands after a code check. Complexity stays moderate and the 
 Guidance for the next Splitter pass: keep the token test inline in `syncBoard`. A new helper in `board.ts` needs a new source-interpolation site in `page.ts`, and an unshipped helper throws in the browser on the first poll.
 
 - Durable guidance for future Splitter agents: read the `## Split scope` section first, because a parent Splitter that already sliced the work makes a second split duplicate work. The root `SPECS.md` symlink is shared by root-cwd spawns, so edit the `.kanban/<file>.md` path directly and pass that file name to the kanban tools.
+
+Review of 84a0c8c (first pass): there is no work to review. `git diff b7596fc...HEAD` is empty and `git status --short` is clean, so the worktree sits on the base commit, and this task file carried no reviewer block before this pass.
+
+- `rg -n 'user-hold' src tests` has no match, and `src/webui/board.ts:439` `syncBoard` is unchanged, so no card ever gets the class.
+- `src/webui/page.ts:145` `.card` is unchanged: no `.card.user-hold` rule and no dashed pseudo-element. `page.ts:134` still holds the only `stroke-dasharray: 6 4`.
+- `tests/webui/board.test.ts` and `tests/webui/page.test.ts` hold no `user-hold` assertion, so neither item of the `## Tests` section exists.
+- Tests: start/exit=0 `tests/webui/board.test.ts`, start/exit=0 `tests/webui/page.test.ts`, `node scripts/test-changed.mjs` printed "no modifications, nothing to run". The tree is green at base, so this is missing work and not a red suite.
+- Nothing for #320 exists on any branch: `git grep -c 'user-hold'` returns no match on `main`, `feat/318-user-blocker-hold`, `feat/319-user-blocker-hold-daemon` and `feat/320-user-blocker-hold-card`. The Developer pass ended before its first commit, so the redo starts from the Specs and there is no partial diff to keep.
+
+## Splitter pass 3: no split after the failed Developer pass (2026-10-21)
+
+No split. State, complexity and worktree stay as they are, and the task stays in to-do.
+
+The first Developer run added no code (see the review note above), so this pass checked if the redo should fan out. It must not:
+
+- `## Split scope` says "Do not split further". The class toggle and the CSS rule are one UI change in one worktree.
+- The two halves do not parallelize. `rg -n 'user-hold' src tests` finds no match, so both halves start from zero. The `syncBoard` toggle (`src/webui/board.ts:439`) and the `.card.user-hold` rule (`src/webui/page.ts:145`) are about 10 lines in total. Two subtasks would add one review, one merge and one live test for no gain in wall-clock time.
+- The tests do not separate. `tests/webui/board.test.ts` asserts the class, `tests/webui/page.test.ts` asserts the rule text, but the page test needs the class name that the board toggle emits. A green suite needs both halves.
+- The work is already parallel with #319 (daemon, now in reviewing), and the parent #318 waits on #319 and #320 together.
+
+Code check for the Developer redo:
+
+- `src/webui/page.ts:145` `.card` has `border: 1px solid var(--border); border-left: 3px solid var(--ac); border-radius: 6px`. `:146` `.card:hover` sets only `background`, so a pseudo-element keeps the dashes safe. The base rule has no dashed style yet.
+- `src/webui/page.ts:134` `#relations path` still holds the only `stroke-dasharray: 6 4`. Use that rhythm for the 6/4 dashes.
+- `src/webui/board.ts:439` `syncBoard` sets no `className` after creation, so `el.classList.toggle("user-hold", ...)` leaves the one-shot `enter` class alone.
+- `relationPaths` (`board.ts:241`) and `blockedRow` (`page.ts:698`) already handle `user` as plain text. No edit there.
+
+Guidance for future Splitter agents on this repo: read `## Split scope` before you weigh a split, then run the code check. A yes-split here must also name the worktree of each subtask, because the parent worktree stays with the parent.

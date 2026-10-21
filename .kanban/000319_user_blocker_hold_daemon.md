@@ -1,7 +1,7 @@
 ---
 name: "feat: hold a task on a user blocker in the daemon gates"
 priority: "medium"
-state: "reviewing"
+state: "to-do"
 worktree: "feat/319-user-blocker-hold-daemon"
 issuer: "#318"
 complexity: "moderate"
@@ -56,3 +56,14 @@ No migration of existing task files. No auto-removal of `user`. No kill of a run
 Do not split further. The predicate, the six gate sites and their per-gate tests land together in one pipeline file and one worktree.
 
 # Notes
+
+Review of 84a0c8c (first pass, empty committed diff): HEAD is an ancestor of main b7596fc, so the only work in the worktree is 5 uncommitted test-file edits and the feature itself is absent.
+- `src/kanban.ts:369` `blockedNums` is untouched and still private: `rg -n hasUserHold src` prints nothing, so the shared predicate does not exist.
+- `src/orchestrator/pipeline.ts:614` `blockedByUndone` still reads task refs only, and the six gates are unguarded at `:137` `startTodo`, `:220` `sweepToMerge`, `:329` `sweepToIntegrationTest`, `:520` reviewer spawn and `:546` live-tester spawn.
+- `git diff main...HEAD --stat` is empty, so `## Docs` is untouched: `skills/se-llm-team/SKILL.md`, `docs/architecture.md`, `docs/agents-and-tools.md` and `agents/splitter.md` keep the old wording.
+- `git status --short` lists only `tests/kanban/blockedby.test.ts` and `tests/orchestrator/{merge,promote,split,sweep}.test.ts`, all uncommitted.
+- Tests: `node scripts/test-changed.mjs` exit=1, halted at merge.test.ts:611 "the held task stays in to-merge"; blockedby exit=1, SyntaxError "does not provide an export named 'hasUserHold'"; promote exit=1 at :752 "a user hold holds every promotion" (2 !== 0); split exit=1 at :170; sweep exit=1 at :392.
+- Keep the five test cases: they match the Specs test list, so commit them with the implementation. Rebase onto main b7596fc first, because the branch sits on the stale 84a0c8c and the Specs line anchors came from a newer tree.
+- `tests/orchestrator/promote.test.ts:420` ("a fresh task file still defers promotion within the window") failed in one of two runs and sits before this task's case: a pre-existing timing flake under load, recorded for a separate task, not this one.
+- Nit: the uncommitted merge/split/sweep cases never ran against an implementation, so their own assertions are unverified. Re-check the branch-at-HEAD setup in merge part UH3 when the guard lands.
+

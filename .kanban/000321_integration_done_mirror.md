@@ -1,8 +1,8 @@
 ---
 name: "fix: assert the integration done state on the mirror tip, not a done commit"
 priority: "high"
-state: "live-testing"
-worktree: "fix/321-integration-done-mirror"
+state: "done"
+worktree: ""
 issuer: "#315"
 complexity: "simple"
 shortName: "integration-done-mirror"
@@ -41,3 +41,36 @@ Run from the repo root in the worktree:
 - `git diff --stat` shows only `tests/orchestrator/spawn.test.ts`.
 
 # Notes
+
+## Live test (2026-10-21)
+
+Lane: no process for the test file content, plus a mirror probe through the production `commitKanban` at `src/orchestrator/board.ts:32`. Driver `/tmp/321-lt/driver.mjs`, runs `/tmp/321-lt/run-merged.log` and `/tmp/321-lt/run-control.log`. Merged tree `84a0c8c`, control `HEAD^` = `edf27f2`, extracted with `git archive HEAD^`.
+
+The merged tree does not contain the change. The branch `fix/321-integration-done-mirror` has 0 commits above `main` (`git log main..fix/321-integration-done-mirror` is empty), `tests/orchestrator/spawn.test.ts` is identical to `main`, and the task file records no `Commit` bullet. Line 46 still reads `return !!f && mirrorSubjects(rootA).includes(\`kanban: done ${f}\`);`. The merge commit `84a0c8c` is the #313 root-prompt change, which also touches `src/orchestrator/spawn.ts`. The control fails in the same way as the merged tree, so the merged tree has no change to test.
+
+| Check | Claim (Specs line) | Printed proof, merged `84a0c8c` | Control `edf27f2` |
+| --- | --- | --- | --- |
+| C1 | Change 1: the integration wait checks the mirror tip content | `actual=no showTip(rootA, f) line in the integration wait`, FAIL | same output, FAIL |
+| C2 | Change 1: the old integration done-subject check is gone | `actual=1 mirrorSubjects(...) checks in the integration wait expected=0`, FAIL | same output, FAIL |
+| C3 | Change 4: one comment above the wait names the snapshot and the absorbed fold | `actual=// the integration stage opens its own task after the live test: let that task reach done and its // fold-in commit land too, so the board mirror settles before its commit log is compared`, FAIL | same output, FAIL |
+| C4 | Change 3: keep the covered task `taskClean()` wait on its done subject | `const taskClean = () => mirrorSubjects(rootA).includes(\`kanban: done ${taskA.file}\`);`, PASS | PASS |
+| C5 | Change 2: import `showTip` from `../helpers.ts` | `import { HERE, fixture, mirrorSubjects, showTip, roleStub, argvStub, llmArgs, runDaemon, waitFor, cleanupAll, daemons, cleaned } from "../helpers.ts";`, PASS | PASS |
+| C6 | Acceptance 3: the merge diff shows only the spawn test | `files=["src/orchestrator/spawn.ts","tests/orchestrator/spawn.test.ts"] production="src/orchestrator/spawn.ts"`, FAIL | no git metadata, SKIP |
+| C7 | Problem: a higher-priority fold absorbs the integration done commit and the tip still holds done | `fold=true subjects=1 intDoneSubject=false tipHasDone=true second=true`, PASS | PASS |
+| C8 | Change 1 predicate: `showTip` returns the file content, and null for a missing file | `landed=true intDoneSubject=true tipHasDone=true missing=null`, PASS | PASS |
+
+Findings:
+
+- The Specs change is absent from the merged tree. C1, C2, C3 and C6 fail. The integration wait is still the subject check that the Problem section says times out.
+- The acceptance criteria cannot pass while the change is absent. The wait at line 46 is unchanged.
+- The mirror premise holds. C7 shows `commitKanban` skip a same-tree done commit, and `showTip` return `state: "done"` at the tip. The predicate named in Change 1 is correct.
+
+Not exercised: `node tests/orchestrator/spawn.test.ts` in 3 consecutive runs, and `pnpm test`. The live tester must not run a `*.test.ts` file or the test suite, so the acceptance criteria are measured through the file content and the mirror probe only.
+
+Assumptions that shaped the checks:
+
+- The mirrored scenario used two `createTask` tasks in a temporary git root, `setState` to done in one snapshot, then `commitKanban` with the whole board file list, like `src/orchestrator/pipeline.ts:562`.
+- The control is `HEAD^`, not `main`.
+- The merged worktree holds the merged commit. It holds `84a0c8c`, which is the tree before this task's change.
+
+Contradiction with the task's stated assumptions: the worktree does not hold the merged #321 change, and the branch carries no commit of its own.

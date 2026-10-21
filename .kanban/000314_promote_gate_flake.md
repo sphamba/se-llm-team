@@ -1,7 +1,7 @@
 ---
 name: "fix: make the backlog idle gate test independent of a 3 s wall clock"
 priority: "medium"
-state: "to-live-test"
+state: "live-testing"
 worktree: "fix/314-promote-gate-flake"
 issuer: "#305"
 complexity: "simple"
