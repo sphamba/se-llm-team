@@ -1,7 +1,7 @@
 ---
 name: "fix: stop root-cwd agents from editing another task through the shared SPECS.md link"
 priority: "high"
-state: "to-live-test"
+state: "live-testing"
 worktree: "fix/313-root-specs-pointer"
 issuer: "#305"
 complexity: "simple"
