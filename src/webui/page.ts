@@ -144,6 +144,13 @@ none so the card clicks pass through */
 /* 000124: positioned above the z-index-1 relation lines; the semi-transparent background lets a line passing under the card show through faintly (no --card var, --panel is the card's base color in both themes) */
 .card { position: relative; z-index: 2; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--border); border-left: 3px solid var(--ac); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
 .card:hover { background: color-mix(in srgb, var(--hover) 85%, transparent); }
+/* 000320: a task held by the user blockedBy token: the 1px top, right and bottom border turns dashed
+at the relation lines' 6-on/4-off rhythm. A plain border-style: dashed cannot do 6/4, so the dashes
+paint on a pseudo-element, which .card:hover's background shorthand cannot wipe; the border colors go
+transparent so the size, the 3px left accent and the 6px radius stay (the negative insets reach the
+border box from the padding box an absolute child is placed in) */
+.card.user-hold { border-top-color: transparent; border-right-color: transparent; border-bottom-color: transparent; }
+.card.user-hold::after { content: ""; position: absolute; inset: -1px -1px -1px -3px; border-radius: 6px; pointer-events: none; background: repeating-linear-gradient(90deg, var(--border) 0 6px, transparent 6px 10px) left top / 100% 1px no-repeat, repeating-linear-gradient(90deg, var(--border) 0 6px, transparent 6px 10px) left bottom / 100% 1px no-repeat, repeating-linear-gradient(0deg, var(--border) 0 6px, transparent 6px 10px) right top / 1px 100% no-repeat; }
 /* 000191: genuinely new cards fade and rise in once at insertion; syncBoard adds .enter only at
 creation and the page drops it on animationend, so a poll or a reorder never replays it */
 .card.enter { animation: cardIn var(--enter) ease-out; }

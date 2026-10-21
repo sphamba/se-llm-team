@@ -10,6 +10,7 @@ import { PRIORITY_RANK } from "../../src/kanban.ts";
 import { boardOf, buildShell, cardBaseHtml, cardHtml, curve, flipDiff, LAYOUT, mergeBoards, numLinkHtml, pairLayout, relationPaths, spinnerHtml, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats } from "../../src/webui.ts";
 // 000264: not re-exported by the webui barrel (pre-#263 merge): import directly from the board module
 import { applyCardStats, makeStatsQueue, mergeCardStats, sortedCol, statsKey } from "../../src/webui/board.ts";
+import { esc } from "../../src/webui/logpane.ts";
 import { PAGE } from "../../src/webui/page.ts";
 
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-merge", "merging", "to-live-test", "live-testing", "to-integration-test", "integration-testing", "done"];
@@ -78,6 +79,15 @@ class El {
 		return c;
 	}
 	remove(): void { const p = this.parent; if (p) p.children.splice(p.children.indexOf(this), 1); this.parent = null; }
+	// 000320: the held-card pass reads classList.toggle only
+	classList = {
+		toggle: (cls: string, on: boolean) => {
+			const set = new Set(this.className.split(" ").filter(Boolean));
+			if (on) set.add(cls);
+			else set.delete(cls);
+			this.className = [...set].join(" ");
+		},
+	};
 }
 const boardEl = new El("main");
 const cols: Record<string, any> = buildShell(boardEl, { createElement: (tag: string) => new El(tag) });
@@ -635,6 +645,31 @@ assert.ok(PAGE.includes("statsQueue.enqueueCol(active, b.tasks, st, VISIBLE)"), 
 assert.ok(PAGE.includes("queueExpanded()"), "each poll re-queues the already-expanded columns");
 assert.ok(PAGE.includes("statsIn var(--fade) ease-out"), "the stats entrance animates");
 assert.ok(PAGE.includes(".card-stats, #modal:not(.hidden)"), "reduced motion turns the stats entrance off");
+
+// 000320: a task whose blockedBy carries the `user` token (`user` alone, any case, or mixed with
+// task refs) is held: syncBoard toggles the user-hold class on its card on every pass, so a poll
+// adds and removes it live, while the one-shot entrance class stays untouched
+const heldTask = (file: string, blockedBy: string) => ({ file, name: "feat: h", priority: "low", state: "backlog", updated: 1, blockedBy });
+sync([heldTask("000031_h.md", "user"), heldTask("000032_i.md", "USER, #42"), heldTask("000033_j.md", "#42")]);
+const heldOf = (file: string) => els.get(file)!.className.split(" ");
+assert.ok(heldOf("000031_h.md").includes("user-hold"), "a `user` blockedBy marks the card held");
+assert.ok(heldOf("000032_i.md").includes("user-hold"), "the token ignores case and mixes with task refs");
+assert.ok(!heldOf("000033_j.md").includes("user-hold"), "a task ref alone leaves the card unheld");
+assert.ok(heldOf("000031_h.md").includes("enter"), "the held card keeps its entrance class");
+sync([heldTask("000031_h.md", ""), heldTask("000032_i.md", "USER, #42"), heldTask("000033_j.md", "#42")]);
+assert.ok(!heldOf("000031_h.md").includes("user-hold"), "the next pass drops the class once the token is gone");
+assert.ok(heldOf("000032_i.md").includes("user-hold"), "a still-held card stays held");
+assert.equal(els.get("000031_h.md")!.className, "card enter", "the toggle neither replays nor loses the one-shot entrance class");
+
+// a held ref draws no relation line and prints as plain escaped text in the detail card
+assert.equal(relationPaths([{ file: "000002_b.md", state: "to-do", blockedBy: "user" }], rectOf).length, 0, "a `user` ref draws no relation line");
+const blockedRowOf = new Function("esc", "numLinkHtml", "taskByNum", page.match(/function blockedRow\(t\) \{[\s\S]*?\n\}/)![0] + "; return blockedRow;")(
+	esc,
+	numLinkHtml,
+	(ref: string) => (ref === "#42" ? { file: "000042_x.md" } : undefined),
+) as (t: any) => string;
+assert.equal(blockedRowOf({ blockedBy: "user" }), "<div><span>blockedBy</span>user</div>", "the `user` ref prints as plain escaped text");
+assert.equal(blockedRowOf({ blockedBy: "user, #42" }), '<div><span>blockedBy</span>user, <span class="num-link" data-task="000042_x.md">#42</span></div>', "a held ref mixes with a linked task ref");
 
 
 ui.close();

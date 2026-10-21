@@ -457,6 +457,9 @@ export function syncBoard(cols, tasks, expanded, els, make, visible, doc) {
 				el.className += " enter";
 				els.set(t.file, el);
 			}
+			// 000320: the `user` blockedBy token holds the task, so the toggle runs every pass: a poll adds
+			// and removes the dashed outline live, and the one-shot "enter" class stays untouched
+			el.classList.toggle("user-hold", String(t.blockedBy || "").split(",").some((r) => r.trim().toLowerCase() === "user"));
 			const html = cardHtml(t, st);
 			if (el.__html !== html) {
 				const base = cardBaseHtml(t, st);
