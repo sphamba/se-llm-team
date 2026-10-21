@@ -1,12 +1,12 @@
 ---
 name: "fix: skip the state-pass create retry for a create that already landed"
 priority: "medium"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "#315"
 complexity: "simple"
 shortName: "create-retry-once"
-blockedBy: "#321"
+blockedBy: ""
 ---
 
 # Summary
