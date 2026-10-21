@@ -1,8 +1,8 @@
 ---
 name: "feat: integration test stage after live test"
 priority: "high"
-state: "to-do"
-worktree: ""
+state: "doing"
+worktree: "feat/301-integration-test-stage"
 issuer: "user"
 complexity: "complex"
 shortName: "integration-test-stage"
