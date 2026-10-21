@@ -1,7 +1,7 @@
 ---
 name: "refactor: scope the covered task summaries in generated integration Specs"
 priority: "medium"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "#301"
 complexity: "moderate"
