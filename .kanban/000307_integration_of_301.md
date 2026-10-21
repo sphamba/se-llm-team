@@ -1,5 +1,5 @@
 ---
-name: "test: integration of #301"
+name: "test: integration of #301, #306"
 priority: "low"
 state: "to-integration-test"
 worktree: ""
@@ -9,13 +9,15 @@ shortName: "integration-of-301"
 ---
 
 # Summary
-Integration test of the merged base branch after #301.
+Integration test of the merged base branch after #301, #306.
 
 # Specs
 Perform integration testing following the merge of:
 
 - #301 feat: integration test stage after live test
   Add an integration-test stage to the pipeline. When the orchestrator moves a task from live-testing to done, it creates or extends one integration-test task in the new state to-integration-test. That task promotes to integration-testing (one run at a time, counting as one maxParallel slot), runs a new integration-tester agent over the full suite on the merged base branch, reports findings, and ends at done. The board's last column must hold to-live-test, live-testing, to-integration-test, integration-testing and done.
+- #306 fix: task cards show the auto issuer as auto, not user
+  cardBaseHtml treats auto as a non-ref issuer and falls back to printing the literal user, so orchestrator-created integration tasks show a user chip. Narrow the ref test to #<num> and print the real issuer value, so an auto task shows a plain auto chip with no badge and no link.
 
 Run the project test script in the root checkout.
 Report defects and coverage gaps in `# Open questions`.

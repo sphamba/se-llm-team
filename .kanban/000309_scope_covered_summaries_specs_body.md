@@ -1,8 +1,8 @@
 ---
 name: "refactor: rebuild the integration Specs body from the board"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "refactor/309-scope-covered-summaries-specs-body"
 issuer: "#308"
 complexity: "simple"
 shortName: "scope-covered-summaries-specs-body"

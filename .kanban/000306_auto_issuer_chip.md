@@ -1,8 +1,8 @@
 ---
 name: "fix: task cards show the auto issuer as auto, not user"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/306-auto-issuer-chip"
+state: "done"
+worktree: ""
 issuer: "#301"
 complexity: "simple"
 shortName: "auto-issuer-chip"
@@ -80,3 +80,27 @@ Review of d381ad8 (first pass): pass. The diff matches the Specs line for line, 
 - `tests/webui/board.test.ts:130-132` pins the auto chip, the absent `chip issuer` and `name issued` classes, and the differ-only-in-chip-text comparison; the pre-fix code printed `user`, so the new pins cover the bug. The `user` pin at `:125` is unchanged.
 - `git diff --stat main...HEAD` lists only `src/webui/board.ts` and `tests/webui/board.test.ts`, so `issuerCell` (`tests/webui/page.test.ts:124-130`), `parseTask`, the payload and the CSS are untouched.
 Tests: `node tests/webui/board.test.ts` exit 0, `node tests/webui/page.test.ts` exit 0 (chained in one call).
+## Live test (2026-10-21)
+Lane: hub-only root. Driver `/tmp/lt306/driver.mjs` starts `startHub` from the tree under test on an isolated fixture root (`<fixture>/.kanban` with four backlog cards and one done card), drives headless Chromium through `/`, reads each card's DOM, and clicks the auto card to read the dialog's issuer row. Same driver and fixture shape ran on the merged tree and on the control tree (`git archive e893eec`, the parent commit). Proofs below are the driver's printed `RESULT` lines.
+
+| claim | printed proof (merged d381ad8) | control (parent e893eec) |
+| --- | --- | --- |
+| C1 an auto-issued card prints a plain chip labelled `auto` | `PASS actual={"classes":[],"text":"auto"}` | `FAIL actual={"classes":[],"text":"user"}` |
+| C2 the auto card has no issuer badge and no name accent | `PASS actual={"issuerBadge":false,"nameAccent":false}` | `PASS actual={"issuerBadge":false,"nameAccent":false}` |
+| C3 the auto chip carries no link | `PASS actual={"elements":0}` | `PASS actual={"elements":0}` |
+| C4 a user-issued card keeps the plain `user` chip | `PASS actual={"classes":[],"text":"user"}` | `PASS actual={"classes":[],"text":"user"}` |
+| C5 a `#42` card keeps the `chip issuer` badge and the `name issued` accent | `PASS actual={"classes":["issuer"],"text":"#42","nameAccent":true}` | `PASS actual={"classes":["issuer"],"text":"#42","nameAccent":true}` |
+| C6 a missing issuer still reads `user` | `PASS actual={"classes":[],"text":"user"}` | `PASS actual={"classes":[],"text":"user"}` |
+| C7 the auto task's detail dialog prints `auto`, unlinked | `PASS actual={"label":"issuer","value":"auto","links":0}` | `PASS actual={"label":"issuer","value":"auto","links":0}` |
+
+- Merged tree: 7/7 pass, `/health` = `ok`, one anchored `ss -ltn` line on the hub port, 5 cards rendered, no page errors, hub socket `closed` after `close()`.
+- Control tree: 6/7. Only C1 is red, so the check fails when the change is absent, and the keep-green rows (C4, C5, C6, C7) hold on both trees.
+- The auto card's issuer chip is a bare `<span class="chip">auto</span>`: no `issuer` class, no nested element, no `name issued` accent. The dialog agreement called out in the Specs now holds: card `auto`, dialog `auto`.
+
+Assumptions:
+- The fixture reproduces the real case `.kanban/000305_integration_of_303.md` with an isolated auto-issued card, because the shared real board is not a live-test target; the card markup does not read the task body.
+- The issuer chip is identified as the card chip that carries neither a `p-` priority class nor a `cx` complexity class, so a new chip style would not be mistaken for it.
+- The detail dialog is reached by clicking the auto card, as a user does, not by a direct URL.
+- `state: backlog` and `state: done` place the five fixture cards in rendered columns; the `#42` issuer needs no existing task for the card chip, and a `done` origin task keeps the ref realistic.
+
+Not exercised: the hub view (one project entry, so `/api/projects` shows a single tab; the Specs say it shares `cardHtml`), `/api/tasks` payload bytes, and any CSS, which the Specs keep out of scope.

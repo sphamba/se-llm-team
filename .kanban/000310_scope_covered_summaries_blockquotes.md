@@ -1,8 +1,8 @@
 ---
 name: "refactor: render blockquotes in the dialog markdown"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "refactor/310-scope-covered-summaries-blockquotes"
 issuer: "#308"
 complexity: "moderate"
 shortName: "scope-covered-summaries-blockquotes"
@@ -79,3 +79,7 @@ At live test, in the repo root: `pnpm test` exits 0. Then, by hand: open a task 
 - No change to the integration Specs body. That is the sibling task.
 
 # Notes
+## Splitter decision: no split
+This task is already the renderer half of #308, and the pipeline half is a separate task. The remaining work is one `md` branch, one CSS rule and two small test additions in two tightly coupled files. A separate CSS subtask would not save enough time to pay for its own review, merge and live-test cycle.
+
+Durable guidance: do not split a small webui renderer change that also needs one CSS rule and a matching test assertion. Split only when each independent file set carries substantial work.
