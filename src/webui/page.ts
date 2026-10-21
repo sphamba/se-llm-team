@@ -213,6 +213,9 @@ card keeps the role-colored outline and a 20% panel mix via .agent-card-active *
 .agent-livetest { color: #0d9488; }
 .agent-livetest.agent-card-active { border-color: #0d9488; background: color-mix(in srgb, #0d9488 20%, var(--panel)); }
 .agent-livetest .check { color: #0d9488; }
+.agent-integration { color: #e11d48; }
+.agent-integration.agent-card-active { border-color: #e11d48; background: color-mix(in srgb, #e11d48 20%, var(--panel)); }
+.agent-integration .check { color: #e11d48; }
 /* 000276: the sub, splitter and doctor cards read at 85% of the role cards' text, the name line
 at 0.75rem, the stats line at 0.625rem; the four role cards keep the base 0.875rem/0.75rem sizes */
 .agent-sub, .agent-splitter, .agent-doctor { font-size: 0.75rem; }
@@ -323,6 +326,8 @@ one line, and the leftmost column pins left with a static right border as the cu
 .c-merging { --ac: #c026d3; }
 .c-to-live-test { --ac: #14b8a6; }
 .c-live-testing { --ac: #0d9488; }
+.c-to-integration-test { --ac: #f43f5e; }
+.c-integration-testing { --ac: #e11d48; }
 .c-done { --ac: #22c55e; }
 /* 204: mobile, the root font size 15% smaller so every rem-based size scales down with it */
 @media (max-width: 600px) { html { font-size: 85%; } }
@@ -695,9 +700,10 @@ function blockedRow(t) {
 	return "<div><span>blockedBy</span>" + items.join(", ") + "</div>";
 }
 // the issuer row: a task-issued issuer ("#<num>") links to its card when that task is on the
-// active board; "user", an absent issuer, or an off-board number stays plain text
+// active board; "user", the orchestrator's "auto", an absent issuer, or an off-board number stays
+// plain text (auto never carries an issuer link)
 function issuerCell(t) {
-	const target = t.issuer && t.issuer !== "user" ? taskByNum(t.issuer) : null;
+	const target = t.issuer && t.issuer !== "user" && t.issuer !== "auto" ? taskByNum(t.issuer) : null;
 	return target ? numLinkHtml(target.file) : esc(t.issuer || "user");
 }
 // live agent log pane: each run card carries only its handle, the server resolves the real
@@ -816,7 +822,7 @@ function ingest(html, where) {
 	logFixups(el, document);
 }
 // payload role to card marker class; the run card and its sub cards share the run's role class
-const ROLE_CLS = { splitter: "agent-splitter", developer: "agent-developer", reviewer: "agent-reviewer", merger: "agent-merger", "live-tester": "agent-livetest" };
+const ROLE_CLS = { splitter: "agent-splitter", developer: "agent-developer", reviewer: "agent-reviewer", merger: "agent-merger", "live-tester": "agent-livetest", "integration-tester": "agent-integration" };
 // one agent card: the role label, then a tokens/duration stats line (42k · 5m 12s); mark is the
 // live spinner or the past check, empty on a sub card
 function agentCardHtml(extraCls, attrs, label, tokens, duration, mark) {

@@ -9,11 +9,12 @@
 export const LOG_LINES = 100;
 
 // working state -> the agent role the orchestrator spawns for it (spawnAgent, src/orchestrator.ts)
-export const AGENT_ROLE = { doing: "developer", reviewing: "reviewer", "live-testing": "live-tester" };
-// the roles the orchestrator writes per task log, in pipeline order (the Splitter runs on the
-// to-do task, before the Developer), plus the merger; the doctor analysis writes no per-task run
-// log: its stream output rides next to the analysed run's log as <slug>.<role>.<n>.doctor.log,
-// enumerated by the payload builder's doctor history
+export const AGENT_ROLE = { doing: "developer", reviewing: "reviewer", "live-testing": "live-tester", "integration-testing": "integration-tester" };
+// the roles the orchestrator writes per task log: the Splitter (on the to-do task, before the
+// Developer), the state-mapped roles, then the merger; the history orders each run by its first
+// in-log record, so this enumeration order only breaks identical-timestamp ties. The doctor
+// analysis writes no per-task run log: its stream output rides next to the analysed run's log as
+// <slug>.<role>.<n>.doctor.log, enumerated by the payload builder's doctor history
 export const LOG_ROLES = ["splitter", ...Object.values(AGENT_ROLE), "merger", "doctor"];
 
 // html escape, shipped to the client and shared with the tab renderer

@@ -7,7 +7,8 @@ One skill turns your coding-agent session into the Project manager. A non-LLM de
 - [Reviewer](agents/reviewer.md): reviews the diff against the Specs, fixes small mistakes, and can send the task back to the developer. It can use subagents.
 - [Merger](agents/merger.md): resolves rebase conflicts only. The orchestrator merges clean branches itself.
 - [Live-tester](agents/live-tester.md): runs the merged commit like a user and reports findings.
-- [Doctor](agents/doctor.md): after every successful run, writes what it learned into that role's notes file so future runs start faster. There is one for the developer, reviewer, merger, and live-tester.
+- [Integration-tester](agents/integration-tester.md): runs the full project test suite on the merged base branch and reports defects and coverage gaps.
+- [Doctor](agents/doctor.md): after every successful run, writes what it learned into that role's notes file so future runs start faster. There is one for the developer, reviewer, merger, live-tester, and integration-tester.
 
 ```mermaid
 flowchart TD
@@ -19,6 +20,7 @@ flowchart TD
         Developers --> Reviewers
         Reviewers --> Merger
         Merger --> LiveTester["Live-tester"]
+        LiveTester --> IntegrationTester["Integration-tester"]
     end
     subgraph Developers
         direction TB

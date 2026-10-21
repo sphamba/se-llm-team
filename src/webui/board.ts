@@ -141,14 +141,16 @@ export function syncDoctorCards(cards, docs, row, residual, doc) {
 
 // board layout, left to right: a string is a single column, an array is a stacked group with the
 // first state on top. backlog stays a single side column, the states after it pair two by two in
-// pipeline order (to-do over doing, to-review over reviewing, ...) while more than three remain,
-// and the remaining tail (here to-live-test, live-testing, done, all non-blocking for the backlog)
-// stacks together as the last group
+// pipeline order (to-do over doing, to-review over reviewing, ...) while more than TAIL_STATES
+// remain, and the remaining tail (the last five states: to-live-test, live-testing,
+// to-integration-test, integration-testing, done, all non-blocking for the backlog) stacks
+// together as the last group
+const TAIL_STATES = 5;
 export function pairLayout(states: readonly string[]): (string | string[])[] {
 	const layout: (string | string[])[] = [states[0]];
 	const tail = states.slice(1);
 	let i = 0;
-	while (tail.length - i > 3) {
+	while (tail.length - i > TAIL_STATES) {
 		layout.push(tail.slice(i, i + 2));
 		i += 2;
 	}
@@ -164,16 +166,17 @@ export const LAYOUT = pairLayout(STATES);
 // markup, so its animation starts or stops with the state, and prefers-reduced-motion turns the CSS
 // animation off underneath
 export function spinnerHtml(st: string) {
-	return st === "doing" || st === "reviewing" || st === "live-testing" || st === "merging" ? '<span class="spin"></span>' : "";
+	return st === "doing" || st === "reviewing" || st === "live-testing" || st === "merging" || st === "integration-testing" ? '<span class="spin"></span>' : "";
 }
 
 // one card's markup without the trailing stats line: the card's structural identity across a
 // refresh (syncBoard compares it), so a stats-only change can update the span in place and the
 // run's spinner and entrance animations survive the poll. user-issued cards stay full contrast,
 // task-issued ones (issuer "#<num>") dim the name and carry a small #<num> badge instead of the
-// plain user chip; the complexity chip renders quiet next to the priority chip
+// plain user chip; the orchestrator's own "auto" issuer renders exactly like "user", with no
+// badge and no link, and the complexity chip renders quiet next to the priority chip
 export function cardBaseHtml(t: Task, st: string) {
-	const issued = !!t.issuer && t.issuer !== "user";
+	const issued = !!t.issuer && t.issuer !== "user" && t.issuer !== "auto";
 	return (
 		'<div class="name' +
 		(issued ? " issued" : "") +

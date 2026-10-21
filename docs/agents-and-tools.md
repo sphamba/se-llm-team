@@ -15,13 +15,14 @@ The orchestrator also reads the project root's `AGENTS.md`. When it exists and i
 | Reviewer | the task worktree | [agents/reviewer.md](../agents/reviewer.md) |
 | Merger | the task worktree | [agents/merger.md](../agents/merger.md) |
 | Live-tester | the task worktree | [agents/live-tester.md](../agents/live-tester.md) |
+| Integration-tester | the root checkout | [agents/integration-tester.md](../agents/integration-tester.md) |
 | Doctor | the task worktree | [agents/doctor.md](../agents/doctor.md) |
 
-The Merger runs the full test suite after it concludes the rebase.
+The Merger runs the full test suite after it concludes the rebase. The Integration-tester runs the full project test suite on the merged base branch in the root checkout. It reports defects and coverage gaps.
 
 Agent logs live in `.kanban/.logs/`. The web UI renders them readably. The orchestrator reads the role prompt from `agents/` in its own checkout at each spawn. A prompt fix on a task branch applies only after that branch merges.
 
-Agents append notes to the task file directly. On a successful finish, the orchestrator moves the developer to to-review and the live-tester to done. A merger returns the task to to-merge. The Reviewer sets its own states: to-merge on approval, to-review after fixes, to-do on a Specs violation. The Live-tester ends with a finish message that reports its findings. It creates no task and moves no state. A Doctor pass follows every successful run of the developer, reviewer, merger, and live-tester. It rewrites that role's notes file.
+Agents append notes to the task file directly. On a successful finish, the orchestrator moves the developer to to-review and the live-tester and the integration-tester to done. A merger returns the task to to-merge. The Reviewer sets its own states: to-merge on approval, to-review after fixes, to-do on a Specs violation. The Live-tester ends with a finish message that reports its findings. It creates no task and moves no state. The Integration-tester ends the same way. It edits no code, commits nothing, merges nothing, creates no task, and moves no state. A Doctor pass follows every successful run of the developer, reviewer, merger, live-tester, and integration-tester. It rewrites that role's notes file.
 
 ## Tools
 

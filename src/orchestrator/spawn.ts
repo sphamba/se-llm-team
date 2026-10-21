@@ -308,29 +308,29 @@ export function spawnRunAnalysis(root: string, slug: string, role: string): void
 		log(root, `spawned analysis pid=${child.pid} for ${raw}`);
 	}
 }
-// the slug the current merger was spawned for, next to its pid/exit files: the merger pid
-// files are project-wide, so a merging task can outlive its own merger run while another
-// task's merger works (or after a daemon restart). The poll matches a merging task against
-// this file, so only the task the current merger serves may stall-bounce it or consume its
-// exit code; on disk, so the match survives a daemon restart (an in-memory slug would not)
-export const mergerSlugPath = (root: string) => join(kanbanDir(root), ".pids", "merger.slug");
+// the slug the current project-wide agent (the merger, the integration-tester) was spawned for,
+// next to its pid/exit files: those pid files are project-wide, so a task in its lane can outlive
+// its own run while another task's run works (or after a daemon restart). The poll matches a lane
+// task against this file, so only the task the current run serves may stall-bounce it or consume
+// its exit code; on disk, so the match survives a daemon restart (an in-memory slug would not)
+export const mergerSlugPath = (root: string, name = "merger") => join(kanbanDir(root), ".pids", `${name}.slug`);
 
-export function writeMergerSlug(root: string, slug: string): void {
+export function writeMergerSlug(root: string, slug: string, name = "merger"): void {
 	mkdirSync(join(kanbanDir(root), ".pids"), { recursive: true });
-	writeFileSync(mergerSlugPath(root), `${slug}\n`);
+	writeFileSync(mergerSlugPath(root, name), `${slug}\n`);
 }
 
-export function readMergerSlug(root: string): string | null {
+export function readMergerSlug(root: string, name = "merger"): string | null {
 	try {
-		return readFileSync(mergerSlugPath(root), "utf8").trim() || null;
+		return readFileSync(mergerSlugPath(root, name), "utf8").trim() || null;
 	} catch {
 		return null;
 	}
 }
 
-export function clearMergerSlug(root: string): void {
+export function clearMergerSlug(root: string, name = "merger"): void {
 	try {
-		rmSync(mergerSlugPath(root));
+		rmSync(mergerSlugPath(root, name));
 	} catch {
 		/* already gone */
 	}

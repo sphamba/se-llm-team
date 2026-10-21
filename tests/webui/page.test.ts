@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask, getTask, setState } from "../../src/kanban.ts";
 import { startHub } from "../../src/hub.ts";
-import { agentRowSig, agentStatsText, boardOf, curve, doctorCol, logFixups, mergeBoards, refreshMs, syncAgentStats, syncDoctorCards, syncStatsLine } from "../../src/webui.ts";
+import { agentLabel, agentRowSig, agentStatsText, boardOf, curve, doctorCol, logFixups, mergeBoards, refreshMs, syncAgentStats, syncDoctorCards, syncStatsLine } from "../../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the logpane module
 import { esc } from "../../src/webui/logpane.ts";
 
@@ -122,7 +122,12 @@ assert.deepEqual(histPayload.agents, [], "no role logs yet, empty agent history"
 assert.ok(page.includes('id="m-agent"'), "modal has the agent area");
 assert.ok(!page.includes("<div><span>name</span>"), "the detail card drops the name attribute row the title already shows");
 assert.ok(page.includes('"<div><span>issuer</span>" + issuerCell(t) + "</div>"'), "the detail card shows the issuer row");
-assert.ok(page.includes('return target ? numLinkHtml(target.file) : esc(t.issuer || "user")'), "a task-issued issuer links to its card, plain text for user or an off-board number");
+assert.ok(page.includes('return target ? numLinkHtml(target.file) : esc(t.issuer || "user")'), "a task-issued issuer links to its card, plain text for user, auto or an off-board number");
+// issuer auto: the orchestrator's own task gets no issuer link in the detail card either, so the
+// issuer cell never resolves "auto" to a task (only a #<num> issuer can link)
+const issuerCellSrc = page.match(/function issuerCell\(t\) \{[\s\S]*?\n\}/)![0];
+assert.ok(issuerCellSrc.includes('t.issuer !== "auto"'), "issuerCell never links an auto issuer to a task card");
+assert.ok(!issuerCellSrc.includes("chip"), "the detail card's issuer cell renders no badge, plain text only");
 assert.ok(
 	page.includes("\"<div><span>complexity</span><span class='chip cx cx-\" + esc(t.complexity || \"moderate\") + \"'>\""),
 	"the detail card complexity row carries the value class",
@@ -376,7 +381,10 @@ assert.equal(mobileBox.style.height, "120px", "the mobile full-screen sheet neve
 const ra = page.match(/function renderAgent\(t, keep\) \{[\s\S]*?\n\}/)![0];
 assert.ok(ra.includes('.agent-subs").replaceWith(box)'), "a refresh carries the fetched sub boxes over by handle");
 assert.ok(ra.includes('ROLE_CLS[a.role] ? ROLE_CLS[a.role] + " " : ""'), "every run card carries its role class, the splitter run keeps agent-splitter");
-assert.ok(page.includes('const ROLE_CLS = { splitter: "agent-splitter", developer: "agent-developer", reviewer: "agent-reviewer", merger: "agent-merger", "live-tester": "agent-livetest" };'), "the role map names every pipeline role's marker class");
+assert.ok(page.includes('const ROLE_CLS = { splitter: "agent-splitter", developer: "agent-developer", reviewer: "agent-reviewer", merger: "agent-merger", "live-tester": "agent-livetest", "integration-tester": "agent-integration" };'), "the role map names every pipeline role's marker class");
+// the integration tester's board column accent doubles as its card color, and its label comes
+// from the shared agentLabel pass (the role capitalized, 1-based when the role has several runs)
+assert.equal(agentLabel({ role: "integration-tester", run: 0 }, { "integration-tester": 1 }), "Integration-tester", "the integration-tester run card reads its role as a label");
 assert.ok(fsSubs.includes('ROLE_CLS[a.role] ? ROLE_CLS[a.role] + " agent-sub" : "agent-sub"'), "sub cards carry their parent run's role class");
 // 000130: the keep refresh re-fetches only the live run's sub list, so a sub spawned after the
 // card was opened gets its button without re-opening the run; past runs' lists are never re-fetched
@@ -407,7 +415,7 @@ assert.ok(lightVars.includes("--hover: rgba(233, 237, 242, .95);"), `the light h
 for (const [theme, block] of [["dark", darkVars], ["prefers-dark", mediaVars]] as const) {
 	assert.ok(block.includes("--hover: #1b1f29;"), `the ${theme} hover stays the opaque #1b1f29`);
 }
-for (const [role, hex] of [["agent-doctor", "#22c55e"], ["agent-splitter", "#94a3b8"], ["agent-developer", "#818cf8"], ["agent-reviewer", "#d97706"], ["agent-merger", "#c026d3"], ["agent-livetest", "#0d9488"]] as const) {
+for (const [role, hex] of [["agent-doctor", "#22c55e"], ["agent-splitter", "#94a3b8"], ["agent-developer", "#818cf8"], ["agent-reviewer", "#d97706"], ["agent-merger", "#c026d3"], ["agent-livetest", "#0d9488"], ["agent-integration", "#e11d48"]] as const) {
 	assert.ok(page.includes(`.${role} { color: ${hex}; }`), `the ${role} card reads the board column accent ${hex} at rest, only the text and check colored`);
 	assert.ok(page.includes(`.${role}.agent-card-active { border-color: ${hex}; background: color-mix(in srgb, ${hex} 20%, var(--panel)); }`), `the active ${role} card keeps the role-colored outline and a 20% ${hex} panel mix`);
 	assert.ok(page.includes(`.${role} .check { color: ${hex}; }`), `the ${role} card's checkmark reads the role color`);

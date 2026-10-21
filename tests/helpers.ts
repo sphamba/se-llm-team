@@ -137,7 +137,8 @@ const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 const role = prompt.includes("Merger agent") ? "merger"
 	: prompt.includes("Developer agent") ? "developer"
 	: prompt.includes("Reviewer agent") ? "reviewer"
-	: prompt.includes("Live-tester") ? "live-tester" : "";
+	: prompt.includes("Live-tester") ? "live-tester"
+	: prompt.includes("Integration-tester") ? "integration-tester" : "";
 // the task comes from the cwd SPECS.md symlink: the prompt carries no absolute paths, so
 // spawns are attributed by the task name read from the task file
 const file = "SPECS.md";
@@ -249,7 +250,13 @@ const killAnalyses = (root: string) => {
 	}
 	for (const f of names) {
 		if (!f.endsWith(".analysis.pid")) continue;
-		const [pidStr, ...rest] = readFileSync(join(pids, f), "utf8").trim().split(/\s+/);
+		let body: string;
+		try {
+			body = readFileSync(join(pids, f), "utf8");
+		} catch {
+			continue; // the analysis exited and dropped its pid file between readdir and read
+		}
+		const [pidStr, ...rest] = body.trim().split(/\s+/);
 		const pid = parseInt(pidStr, 10);
 		const disc = rest.length ? rest.join(" ") : null;
 		if (pid > 0 && pid !== process.pid && pidAlive(pid, disc)) {

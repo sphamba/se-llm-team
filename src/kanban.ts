@@ -12,6 +12,8 @@ export const STATES = [
 	"merging",
 	"to-live-test",
 	"live-testing",
+	"to-integration-test",
+	"integration-testing",
 	"done",
 ] as const;
 export type TaskState = (typeof STATES)[number];
@@ -63,6 +65,8 @@ const IN_PROGRESS = new Set<TaskState>([
 	"merging",
 	"to-live-test",
 	"live-testing",
+	"to-integration-test",
+	"integration-testing",
 ]);
 
 export function kanbanDir(root: string): string {
@@ -420,7 +424,7 @@ const SHORTNAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export function createTask(
 	root: string,
-	input: { name: string; shortName?: string; priority?: Priority | string; complexity?: string; summary: string; specs?: string; openQuestions?: string; issuer?: string; blockedBy?: string },
+	input: { name: string; shortName?: string; priority?: Priority | string; complexity?: string; summary: string; specs?: string; notes?: string; openQuestions?: string; issuer?: string; blockedBy?: string },
 ): Task {
 	const priority = (PRIORITIES as readonly string[]).includes(input.priority as Priority)
 		? input.priority
@@ -428,8 +432,9 @@ export function createTask(
 	const complexity = (COMPLEXITIES as readonly string[]).includes(input.complexity as string)
 		? (input.complexity as string)
 		: "moderate";
-	// issuer is set at creation only and never changed afterwards; anything but "user" or "#<num>" falls back to "user"
-	const issuer = input.issuer !== undefined && (input.issuer === "user" || /^#\d+$/.test(input.issuer)) ? input.issuer : "user";
+	// issuer is set at creation only and never changed afterwards; "user" is the PM, "auto" the
+	// orchestrator (the integration task), "#<num>" a splitter piece. Anything else falls back to "user"
+	const issuer = input.issuer !== undefined && (input.issuer === "user" || input.issuer === "auto" || /^#\d+$/.test(input.issuer)) ? input.issuer : "user";
 	// shortName is set at creation only: it names the file and the branch, so it cannot change later;
 	// anything invalid is rejected, unlike issuer which falls back
 	const shortName = input.shortName || undefined;
@@ -437,12 +442,14 @@ export function createTask(
 		throw new Error(`invalid shortName "${shortName}": use lowercase letters and digits with single hyphens between words, no leading or trailing hyphen`);
 	if (shortName && shortName.split("-").length > 5) throw new Error(`invalid shortName "${shortName}": max 5 hyphen-separated words`);
 	const open = (input.openQuestions ?? "").trim();
+	const notes = (input.notes ?? "").trim();
 	const front: Record<string, string> = { name: input.name, priority, state: "backlog", worktree: "", issuer, complexity };
 	if (shortName) front.shortName = shortName;
 	if (input.blockedBy) front.blockedBy = input.blockedBy;
 	const content =
 		`${serializeFrontmatter(front)}\n` +
 		`# Summary\n${input.summary.trim()}\n\n# Specs\n${(input.specs ?? "").trim()}\n\n# Notes\n` +
+		(notes ? `${notes}\n` : "") +
 		(open ? `\n# Open questions\n${open}\n` : "");
 	mkdirSync(kanbanDir(root), { recursive: true });
 	// serialize the allocation: wx guards only one exact path, so two creators scanning

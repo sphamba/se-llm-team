@@ -5,7 +5,7 @@ import { clearPid, killTree, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP } from "./config.ts";
 import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, logPath, newestRunRole, nextRunIndex, readCounter } from "./log.ts";
 import { clearContextSymlinks, clearExitFile, readExitCode, readMergerSlug, spawnRunAnalysis } from "./spawn.ts";
-import { dropDoneBlockers, promoteBacklog } from "./pipeline.ts";
+import { dropDoneBlockers, ensureIntegrationTask, promoteBacklog } from "./pipeline.ts";
 
 // the working states with an agent out: next is the one-state-back bounce target when the
 // agent dies, success is the state the orchestrator moves the task to on a successful finish
@@ -17,6 +17,15 @@ const WORKING_STATES: Partial<Record<TaskState, { next: TaskState; success: Task
 	reviewing: { next: "to-review", success: null, role: "reviewer" },
 	"live-testing": { next: "to-live-test", success: "done", role: "live-tester" },
 	merging: { next: "to-merge", success: "to-merge", role: "merger" },
+	"integration-testing": { next: "to-integration-test", success: "done", role: "integration-tester" },
+};
+
+// the project-wide single-lane agents: one run at a time, one global pid/exit/slug trio under
+// the given pid name, instead of the per-task <slug> trio; next is the state a task goes back
+// to when its lane run is gone without serving it
+const LANES: Partial<Record<TaskState, { pid: string; next: TaskState }>> = {
+	merging: { pid: "merger", next: "to-merge" },
+	"integration-testing": { pid: "integration-tester", next: "to-integration-test" },
 };
 
 // a live-but-hung agent passes pidAlive forever: the stall check kills it by its log instead
@@ -115,25 +124,27 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 			if (task.conflicted) continue;
 			const working = WORKING_STATES[task.state];
 			const slug = taskSlug(task.file);
-			// a merging task the merger slug file does not name: the shared pid/exit pair belongs to
-			// another task's merger (or no merger was ever recorded). Its own merger run is over
-			// either way (a new spawn requires the old merger dead), so requeue it without a death
-			// record and leave the shared pair for the task the slug file names
-			if (task.state === "merging" && readMergerSlug(root) !== slug) {
+			// a lane task the lane's slug file does not name: the shared pid/exit pair belongs to
+			// another task's run (or no run was ever recorded). Its own run is over either way (a
+			// new spawn requires the old run dead), so requeue it without a death record and leave
+			// the shared pair for the task the slug file names
+			const lane = LANES[task.state];
+			if (lane && readMergerSlug(root, lane.pid) !== slug) {
 				dropLogSamples(slug);
 				// re-read + state-match: a task that moved on underneath (PM or user) wins
 				const fresh = getTask(root, task.file);
 				if (fresh && fresh.state === task.state) {
 					ended = true;
-					setState(root, fresh, "to-merge");
-					log(root, `${slug}: its merger run is over (superseded or unrecorded), merging -> to-merge`);
+					setState(root, fresh, lane.next);
+					log(root, `${slug}: its ${lane.pid} run is over (superseded or unrecorded), ${task.state} -> ${lane.next}`);
 				}
 				continue;
 			}
-			// a merging task's agent is the project-wide merger (the global pid file); every other
-			// state maps to the task's own agent pid. Clear before the transition check: a pidfile
-			// for a state with no transition (to-merge, done) would otherwise linger forever
-			const pidName = task.state === "merging" ? "merger" : slug;
+			// a merging or integration-testing task's agent is the project-wide lane agent (the global
+			// pid file); every other state maps to the task's own agent pid. Clear before the
+			// transition check: a pidfile for a state with no transition (to-merge, done) would
+			// otherwise linger forever
+			const pidName = lane?.pid ?? slug;
 			const { pid, disc } = pidEntry(root, pidName);
 			if (pidAlive(pid, disc)) {
 				// a live pid is stalled when its per-run log size is unchanged for the whole window:
@@ -201,6 +212,16 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 					if (fresh && fresh.state === task.state) {
 						setState(root, fresh, working.success);
 						log(root, `${slug}: agent exited 0, ${task.state} -> ${working.success}`);
+						// the live test opens or extends the one integration-test task: only the exact
+						// live-testing -> done transition qualifies, so an integration task that reaches
+						// done (or a PM-moved done) creates nothing. Never blocks the done move
+						if (task.state === "live-testing" && working.success === "done") {
+							try {
+								ensureIntegrationTask(root, fresh);
+							} catch (err) {
+								log(root, `integration task for ${slug} failed: ${err instanceof Error ? err.message : err}`);
+							}
+						}
 					}
 				} else {
 					// the reviewer sets the state itself; exit 0 with the task still in reviewing

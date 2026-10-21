@@ -24,7 +24,7 @@ export function newestRunRole(root: string, slug: string): string | null {
 	try {
 		const logs = join(kanbanDir(root), ".logs");
 		for (const f of readdirSync(logs)) {
-			const m = f.match(/^(.+)\.(developer|reviewer|live-tester)\.\d+\.log(?:\.gz)?$/);
+			const m = f.match(/^(.+)\.(developer|reviewer|live-tester|integration-tester)\.\d+\.log(?:\.gz)?$/);
 			if (!m || m[1] !== slug) continue;
 			const mtime = statSync(join(logs, f)).mtimeMs;
 			if (!best || mtime > best.mtime) best = { role: m[2], mtime };
@@ -154,7 +154,7 @@ export function compactFinishedLogs(root: string): { files: number; before: numb
 	for (const name of names) {
 		// role-log name pattern: <slug>.<role>[.<n>].log, plus the analysis pass logs
 		// <slug>.<analysed role>[.<n>].doctor.log (000250: doctor logs gzip like role logs)
-		const m = name.match(/^(.+)\.(developer|reviewer|live-tester|merger)(\.\d+)?\.log$/) ?? name.match(/^(.+)\.([a-z-]+)\.(\d+)\.doctor\.log$/);
+		const m = name.match(/^(.+)\.(developer|reviewer|live-tester|merger|integration-tester)(\.\d+)?\.log$/) ?? name.match(/^(.+)\.([a-z-]+)\.(\d+)\.doctor\.log$/);
 		if (!m) continue;
 		const guards = m[0].endsWith(".doctor.log")
 			? [`${m[1]}.${m[2]}.${m[3]}.analysis`]

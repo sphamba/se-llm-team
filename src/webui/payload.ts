@@ -251,13 +251,13 @@ async function doctorHistory(root: string, t: Task, files: string[]): Promise<Ag
 // log handle `<slug>.<role>.<n>.doctor` for the analysed run, so a raw client-supplied path can
 // never reach the fs; the slug rides along for the liveness check (the pid file is per task)
 function agentLogPath(root: string, handle: string): { path: string; slug: string } | null {
-	const m = handle.match(/^(.+)\.(splitter|developer|reviewer|live-tester|merger|doctor)(?:\.(\d+))?$/);
+	const m = handle.match(/^(.+)\.(splitter|developer|reviewer|live-tester|integration-tester|merger|doctor)(?:\.(\d+))?$/);
 	if (!m) return null;
 	let slug = m[1];
 	if (m[2] === "doctor") {
 		// a doctor log names the analysed run: its task file is the analysed run's task, so the
 		// slug is the handle minus the trailing .<role>.<n>
-		const dm = slug.match(/^(.+)\.(?:developer|reviewer|live-tester|merger)\.(\d+)$/);
+		const dm = slug.match(/^(.+)\.(?:developer|reviewer|live-tester|integration-tester|merger)\.(\d+)$/);
 		if (!dm) return null;
 		slug = dm[1];
 	}

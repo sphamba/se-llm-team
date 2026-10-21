@@ -12,7 +12,7 @@ import { boardOf, buildShell, cardBaseHtml, cardHtml, curve, flipDiff, LAYOUT, m
 import { applyCardStats, makeStatsQueue, mergeCardStats, sortedCol, statsKey } from "../../src/webui/board.ts";
 import { PAGE } from "../../src/webui/page.ts";
 
-const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-merge", "merging", "to-live-test", "live-testing", "done"];
+const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-merge", "merging", "to-live-test", "live-testing", "to-integration-test", "integration-testing", "done"];
 
 // 000215: the neutral config dir resolves to $HOME/.config/se-llm-team when XDG_CONFIG_HOME
 // is unset, so dropping it keeps the temp-HOME hub off the real user config
@@ -81,13 +81,17 @@ class El {
 }
 const boardEl = new El("main");
 const cols: Record<string, any> = buildShell(boardEl, { createElement: (tag: string) => new El(tag) });
-assert.deepEqual(boardEl.children.map((c) => c.className), ["col c-backlog", "pair", "pair", "pair", "pair"], "backlog stays a single side column, the other nine states sit in four pairs");
+assert.deepEqual(boardEl.children.map((c) => c.className), ["col c-backlog", "pair", "pair", "pair", "pair"], "backlog stays a single side column, the other eleven states sit in three pairs and one tail group");
 assert.deepEqual(
 	boardEl.children.slice(1, 5).map((p) => p.children.map((c) => c.className)),
-	[["col c-to-do", "col c-doing"], ["col c-to-review", "col c-reviewing"], ["col c-to-merge", "col c-merging"], ["col c-to-live-test", "col c-live-testing", "col c-done"]],
-	"to-do over doing, to-review over reviewing, to-merge over merging, to-live-test over live-testing over done",
+	[["col c-to-do", "col c-doing"], ["col c-to-review", "col c-reviewing"], ["col c-to-merge", "col c-merging"], ["col c-to-live-test", "col c-live-testing", "col c-to-integration-test", "col c-integration-testing", "col c-done"]],
+	"to-do over doing, to-review over reviewing, to-merge over merging, then the five tail states stacked",
 );
-assert.deepEqual(LAYOUT, ["backlog", ["to-do", "doing"], ["to-review", "reviewing"], ["to-merge", "merging"], ["to-live-test", "live-testing", "done"]], "backlog stays single, the middle states pair two by two, the last three stack as one group");
+assert.deepEqual(LAYOUT, ["backlog", ["to-do", "doing"], ["to-review", "reviewing"], ["to-merge", "merging"], ["to-live-test", "live-testing", "to-integration-test", "integration-testing", "done"]], "backlog stays single, the middle states pair two by two, the last five stack as one group");
+// the last visual column holds exactly the five tail states, in pipeline order (the integration
+// stage lands after the live test and before done, so the layout tail constant is 5, not 3)
+assert.deepEqual(LAYOUT[LAYOUT.length - 1], ["to-live-test", "live-testing", "to-integration-test", "integration-testing", "done"], "the last visual column holds exactly the five tail states, in order");
+assert.deepEqual((LAYOUT[LAYOUT.length - 1] as string[]).slice(-3), ["to-integration-test", "integration-testing", "done"], "the integration states sit between the live test and done");
 assert.deepEqual(pairLayout(STATE_NAMES), LAYOUT, "the pairs derive from the state list, with no state-specific wiring");
 assert.ok(LAYOUT.every((part) => (typeof part === "string" ? cols[part] : part.every((st) => cols[st]))), "every layout state gets a column");
 assert.ok(page.includes(JSON.stringify(LAYOUT)), "the page ships the tested layout");
@@ -107,7 +111,9 @@ assert.equal(new Set(accentColors).size, STATE_NAMES.length, "each column has a 
 
 // the state picks the animation: only the states the orchestrator works on carry the spinner
 assert.ok(spinnerHtml("doing").includes('<span class="spin">') && spinnerHtml("live-testing").includes('<span class="spin">') && spinnerHtml("merging").includes('<span class="spin">'), "working states render the spinner");
-assert.equal(spinnerHtml("to-do") + spinnerHtml("to-review") + spinnerHtml("to-merge") + spinnerHtml("done"), "", "waiting and finished states render no spinner");
+assert.ok(spinnerHtml("integration-testing").includes('<span class="spin">'), "the integration-tester's working state renders the spinner");
+assert.equal(spinnerHtml("to-integration-test"), "", "a task waiting in to-integration-test renders no spinner");
+assert.equal(spinnerHtml("to-do") + spinnerHtml("to-review") + spinnerHtml("to-merge") + spinnerHtml("to-live-test") + spinnerHtml("done"), "", "waiting and finished states render no spinner");
 assert.ok(cardHtml({ file: "000047_fix_x.md", name: "a & b", priority: "high" }, "doing").includes('<span class="num-link num" data-task="000047_fix_x.md">#47</span>a &amp; b'), "a card carries its short number as a link and its escaped name");
 // task ids are links: numLinkHtml carries the file for the post-render binding, escaped, and the
 // card's own id keeps the num class
@@ -118,6 +124,11 @@ assert.equal(numLinkHtml('000048_quo"te.md'), '<span class="num-link" data-task=
 const userCard = cardHtml({ file: "000001_a.md", name: "a", priority: "high" }, "doing");
 assert.ok(userCard.includes('<span class="chip">user</span>'), "a user-issued card shows a plain user chip");
 assert.ok(!userCard.includes("issued"), "a user-issued card keeps full-contrast styling");
+// issuer auto: the orchestrator's own task renders exactly like a user task, no dimmed name, no
+// #num badge and no issuer link (see the detail card's issuerCell)
+const autoCard = cardHtml({ file: "000001_a.md", name: "a", priority: "high", issuer: "auto" }, "doing");
+assert.equal(autoCard, userCard, "an auto-issued card renders exactly like a user-issued one");
+assert.ok(autoCard.includes('<span class="chip">user</span>') && !autoCard.includes("issued") && !autoCard.includes("auto"), "an auto-issued card shows a plain user chip, full contrast and no issuer badge");
 const issuedCard = cardHtml({ file: "000002_b.md", name: "b", priority: "low", issuer: "#42" }, "to-do");
 assert.ok(issuedCard.includes('<div class="name issued">'), "a task-issued card dims its name");
 assert.ok(issuedCard.includes('<span class="chip issuer">#42</span>'), "a task-issued card carries a small #num badge");

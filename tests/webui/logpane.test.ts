@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { logFixups, md, renderLogChunk } from "../../src/webui.ts";
+// not re-exported by the webui barrel: the role constants live in the logpane module
+import { AGENT_ROLE, LOG_ROLES } from "../../src/webui/logpane.ts";
 
 // minimal element stub for the log-pane fixups: only the DOM surface logFixups touches
 class LogEl {
@@ -420,3 +422,9 @@ escapedPane.appendChild(escapedTable.wrap);
 escapedPane.appendChild(logRow("| <b>bold</b> | &lt;img&gt; |"));
 logFixups(escapedPane, logDoc);
 assert.equal(escapedTable.tbody.children[0].innerHTML, '<tr><td class="md-pin"><b>bold</b></td><td>&lt;img&gt;</td></tr>', "the cell html goes in as it renders, never escaped a second time");
+
+// the role constants the payload builders read: the integration stage's working state maps to the
+// integration-tester role, and LOG_ROLES (derived from the map's values) enumerates its run logs
+assert.equal(AGENT_ROLE["integration-testing"], "integration-tester", "the integration-testing state maps to the integration-tester role");
+assert.ok(LOG_ROLES.includes("integration-tester"), "the integration-tester's per-task run logs are enumerated");
+assert.equal(LOG_ROLES[LOG_ROLES.length - 1], "doctor", "the doctor analysis role stays last");

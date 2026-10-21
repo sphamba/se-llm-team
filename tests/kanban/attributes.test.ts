@@ -82,6 +82,12 @@ const tui = createTask(root, { name: "feat: user issued", summary: "s" });
 assert.equal(tui.issuer, "user");
 assert.match(readFileSync(join(root, ".kanban", tui.file), "utf8"), /^issuer: "user"$/m);
 assert.equal(createTask(root, { name: "feat: bad issuer", summary: "s", issuer: "#x" }).issuer, "user"); // invalid value falls back to "user"
+// issuer "auto" is the orchestrator's own (the integration-test task)
+const tai = createTask(root, { name: "test: integration of #42", summary: "s", issuer: "auto" });
+assert.equal(tai.issuer, "auto");
+assert.match(readFileSync(join(root, ".kanban", tai.file), "utf8"), /^issuer: "auto"$/m);
+assert.equal(parseTask(root, tai.file).issuer, "auto");
+assert.equal(createTask(root, { name: "feat: bad issuer 2", summary: "s", issuer: "Auto" }).issuer, "user", "an unknown issuer still falls back to user");
 // absent attribute (hand-written or pre-change files) reads as "user"
 writeFileSync(join(root, ".kanban", "000090_legacy.md"), '---\nname: "legacy"\n---\n# Summary\nx\n');
 assert.equal(getTask(root, "000090_legacy.md")?.issuer, "user");
@@ -93,6 +99,11 @@ assert.equal(parseTask(root, ti.file).issuer, "#42");
 assert.equal(listTasks(root, "in-progress").find((t) => t.file === ti.file)?.issuer, "#42");
 // to-merge and merging parse and count as in-progress (scope filter and orchestrator_status)
 setState(root, ti, "to-merge");
+// the two integration stages count as in-progress too
+setState(root, tai, "to-integration-test");
+assert.ok(listTasks(root, "in-progress").some((t) => t.file === tai.file), "a to-integration-test task is in progress");
+setState(root, tai, "integration-testing");
+assert.ok(listTasks(root, "in-progress").some((t) => t.file === tai.file), "an integration-testing task is in progress");
 assert.equal(parseTask(root, ti.file).state, "to-merge");
 assert.ok(listTasks(root, "in-progress").some((t) => t.file === ti.file), "to-merge counts as in-progress");
 setState(root, ti, "merging");

@@ -36,7 +36,19 @@ const taskClean = () => mirrorSubjects(rootA).includes(`kanban: done ${taskA.fil
 // recorded exit 0. The stub transitions in milliseconds, so intermediate states are asserted
 // through the daemon log.
 await waitFor(() => readA().state === "done" && readA().worktree === "" && taskClean(), 60000, "full pipeline + merge + done mirror commit", a.output);
-for (const marker of ["spawned developer", "spawned reviewer", "spawned live-tester", "fast-forwarded main to feat/1-smoke-test, set to-live-test", "merged feat/1-smoke-test"]) {
+// the integration stage opens its own task after the live test: let that task reach done and its
+// fold-in commit land too, so the board mirror settles before its commit log is compared
+const integrationFileA = () => listAll(rootA).find((t) => t.issuer === "auto")?.file;
+await waitFor(
+	() => {
+		const f = integrationFileA();
+		return !!f && mirrorSubjects(rootA).includes(`kanban: done ${f}`);
+	},
+	60000,
+	"the integration task runs to done and folds into the mirror",
+	a.output,
+);
+for (const marker of ["spawned developer", "spawned reviewer", "spawned live-tester", "spawned integration-tester", "fast-forwarded main to feat/1-smoke-test, set to-live-test", "merged feat/1-smoke-test", "integration-testing -> done"]) {
 	assert.ok(a.output().includes(marker), `expected daemon log to contain: ${marker}`);
 }
 // no merger on the clean path: the orchestrator merged, so no merger pid file or agent run
@@ -50,7 +62,10 @@ assert.ok(!existsSync(join(rootA, ".worktrees", "feat/1-smoke-test")), "worktree
 // done folds in the whole task life, exactly one create and one done commit, newest first;
 // the merged work never touched .kanban and main history gets no board commits
 const boardLog = mirrorSubjects(rootA).split("\n");
-assert.deepEqual(boardLog, [`kanban: done ${taskA.file}`, `kanban: create ${taskA.file}`]);
+// the integration task opens after the live test: this part pins the covered task's own life,
+// exactly one create and one done commit, newest first
+assert.deepEqual(boardLog.filter((s) => s.includes(taskA.file)), [`kanban: done ${taskA.file}`, `kanban: create ${taskA.file}`]);
+assert.ok(boardLog.some((s) => s.includes(integrationFileA() ?? "")), "the integration task reaches the board mirror");
 assert.equal(execSync("git log --format=%s -- .kanban", { cwd: rootA, encoding: "utf8" }).trim(), "", "board commits landed on main history");
 const committed = execSync(`git show refs/heads/meta/kanban:.kanban/${taskA.file}`, { cwd: rootA, encoding: "utf8", shell: "/bin/bash" });
 assert.match(committed, /^state: "done"$/m);
@@ -259,7 +274,12 @@ const taskAS = createTask(rootAS, { name: "feat: role notes", summary: "Role not
 setState(rootAS, taskAS, "to-do");
 const as = await runDaemon(rootAS, join(HERE, "../src/orchestrator.ts"), homeAS);
 await waitFor(
-	() => parseTask(rootAS, taskAS.file).state === "done" && parseTask(rootAS, taskAS.file).worktree === "",
+	() =>
+		parseTask(rootAS, taskAS.file).state === "done" &&
+		parseTask(rootAS, taskAS.file).worktree === "" &&
+		// the live test opens the integration task: wait for its run too, so every role's notes
+		// file exists before the loop below reads them
+		listAll(rootAS).some((t) => t.issuer === "auto" && t.state === "done"),
 	60000,
 	"pipeline with role notes",
 	as.output,
@@ -271,7 +291,7 @@ const asSpawns = () =>
 		.split("\n")
 		.filter(Boolean)
 		.map((l) => JSON.parse(l) as { role: string; argv: string[] });
-for (const role of ["developer", "reviewer", "merger", "live-tester"]) {
+for (const role of ["developer", "reviewer", "merger", "live-tester", "integration-tester"]) {
 	const path = notesPathAS(role);
 	assert.ok(existsSync(path), `the ${role} notes file was created when missing`);
 	const starter = readFileSync(path, "utf8");
@@ -282,19 +302,23 @@ for (const role of ["developer", "reviewer", "merger", "live-tester"]) {
 	const spawns = asSpawns().filter((s) => s.role === role);
 	assert.ok(spawns.length > 0, `the ${role} ran`);
 	for (const s of spawns) {
-		assert.ok(s.argv.indexOf("--append-system-prompt") === -1, `every ${role} spawn drops --append-system-prompt: no project AGENTS.md at the root`);
+		const i = s.argv.indexOf("--append-system-prompt");
+		// at the project root there is no AGENTS.md symlink, so the role notes ride inline instead
+		// of the project AGENTS.md; every worktree spawn injects no project file in this fixture
+		if (role === "integration-tester") assert.ok(i === -1 || s.argv[i + 1].includes(`# ${role}:`), `the ${role} spawn carries its role notes, not a project AGENTS.md`);
+		else assert.ok(i === -1, `every ${role} spawn drops --append-system-prompt: no project AGENTS.md at the root`);
 	}
 }
 assert.ok(!listAll(rootAS).some((t) => ROLE_NOTES_RE.test(t.file)), "role notes files are not tasks");
 assert.ok(!readFileSync(join(kanbanDir(rootAS), "AGENTS.md"), "utf8").match(/^state: /m), "a bare AGENTS.md never parses as a task");
 // the done fold-in commit lands one sweep after the file shows done, so wait for the mirror
 await waitFor(
-	() => ["developer", "reviewer", "merger", "live-tester"].every((role) => showTip(rootAS, `AGENTS.${role}.md`) !== null),
+	() => ["developer", "reviewer", "merger", "live-tester", "integration-tester"].every((role) => showTip(rootAS, `AGENTS.${role}.md`) !== null),
 	15000,
 	"role notes on the board mirror",
 	as.output,
 );
-for (const role of ["developer", "reviewer", "merger", "live-tester"]) {
+for (const role of ["developer", "reviewer", "merger", "live-tester", "integration-tester"]) {
 	assert.ok(showTip(rootAS, `AGENTS.${role}.md`) !== null, `the board mirror carries the ${role} notes file`);
 }
 as.daemon.kill("SIGTERM");
