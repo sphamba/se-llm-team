@@ -7,6 +7,7 @@ import { gunzipSync } from "node:zlib";
 import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, ROLE_NOTES_RE } from "../../src/kanban.ts";
 import { loadConfig, promoteBacklog } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline.ts";
+import { renderPrompt } from "../../src/orchestrator/spawn.ts";
 import { HERE, fixture, mirrorSubjects, showTip, roleStub, argvStub, llmArgs, runDaemon, waitFor, cleanupAll, daemons, cleaned } from "../helpers.ts";
 
 // --- part A: happy pipeline with a working stub ---
@@ -578,3 +579,15 @@ assert.equal(readFileSync(claudeSplitAZ[promptFileIdxAZ + 1], "utf8"), `${projec
 assert.ok(!existsSync(join(kanbanDir(rootAZ), "AGENTS.splitter.md")), "the claude splitter spawn created no role notes file");
 cleanupAll(rootAZ);
 console.log("orchestrator.test.ts: ... + splitter no-notes spawn smoke passed");
+
+// --- a root-cwd spawn names the literal task path: the splitter and the integration-tester
+// share one root SPECS.md link, so the later spawn re-points it mid-run (#313) ---
+const rootFilePR = "000313_root_specs_pointer.md";
+const rootPromptPR = renderPrompt(rootAZ, "splitter", 60, rootFilePR, true);
+assert.ok(rootPromptPR.includes(`\`.kanban/${rootFilePR}\``), "the root-cwd prompt names the literal .kanban path");
+assert.ok(rootPromptPR.includes("The root `SPECS.md` is a shared link"), "the root-cwd prompt says the root link is shared");
+assert.ok(rootPromptPR.includes(`pass \`${rootFilePR}\` as the \`file\` argument of every kanban_* call`), "the root-cwd prompt names the kanban file argument");
+const wtPromptPR = renderPrompt(rootAZ, "developer", 60, rootFilePR, false);
+assert.ok(!wtPromptPR.includes("shared link"), "the worktree prompt carries no shared-link line");
+assert.equal(wtPromptPR, renderPrompt(rootAZ, "developer", 60), "a worktree run keeps today's prompt");
+console.log("orchestrator.test.ts: ... + root-cwd prompt task path passed");
