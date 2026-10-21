@@ -1,7 +1,7 @@
 ---
 name: "fix: keep agent card links visible when they curve outside the agent area"
 priority: "medium"
-state: "doing"
+state: "live-testing"
 worktree: "fix/304-visible-agent-links"
 issuer: "user"
 complexity: "simple"
@@ -106,3 +106,21 @@ At live test, in the repo root: `pnpm test` exits 0. Then, by hand in the dialog
 - The modal's own scroll behaviour beyond the horizontal guard above.
 
 # Notes
+- Checked the four strokes sites in `src/webui/page.ts` and updated them: added `overflow: visible` to `#agent-relations` (000237 comment now states the layer paints outside the area, bounded by the dialog card), added `position: relative; z-index: 2;` to `#m-log`, changed `#m-box` to `overflow-y: auto; overflow-x: hidden`, and removed the `x2` cap from `dropCurve` with a rewritten comment.
+- Pinned the CSS claims with a small `cssRule(sel)` extraction helper in `tests/webui/page.test.ts`, next to the 000246 `#m-box.grow` pins. The `#agent-relations path` and reduced-motion rules are untouched.
+- Red first: the `#agent-relations` overflow pin failed (`the connector svg no longer clips its own strokes at the agent area box`), then green.
+- Conflict, one line: the Specs give `M 100 40 C 100 49.5, -80 59, 0 59` for the stub drop, but the Specs table says a 100px span gives `d = 90`, so the uncapped control x is `-90`. The code and the table agree, so I pinned `-90` for the stub sub path and for the doctor path at `:869` (same `dropCurve`, same 100px span, also `x2 = 0`, also changed by the uncap).
+- `tests/webui/page.test.ts` and `tests/webui/board.test.ts` both exit 0. `board.test.ts` proves `curve()` is untouched. Visual checks (no cut strokes, no horizontal scrollbar, log pane stays above the strokes) are live-test only; a page change needs a daemon restart.
+
+Review of e893eec (first pass): pass.
+- src/webui/page.ts:231 ends the #agent-relations box rule with `overflow: visible` only, and the 000237 comment now states the layer paints outside the area, bounded by the dialog card.
+- src/webui/page.ts:236 puts `position: relative; z-index: 2;` on #m-log, which outranks the z-index-1 SVG; #m-log-meta, #m-attrs, #m-body and #m-head are untouched.
+- src/webui/page.ts:292 carries `overflow-y: auto; overflow-x: hidden` on #m-box, the agreed clip boundary.
+- src/webui/page.ts:757 drops the x2 cap: base 35 on a 100px span gives d 90 and control x -90 (tests/webui/page.test.ts:805), which matches the Specs table, so the Specs' `-80` stub value is a typo, not a code defect; src/webui/board.ts is absent from the diff and the run-chain pin at tests/webui/page.test.ts:869-871 is unchanged.
+- Tests: node tests/webui/page.test.ts exit=0, node tests/webui/board.test.ts exit=0.
+- Non-blocking: tests/webui/page.test.ts:873 re-pins the doctor drop to `-90 215` as well; the Specs named only the sub path, but the same uncap reaches it and the pin is right.
+- Non-blocking: cssRule() returns the first line-anchored match, so a future second `#m-box {` earlier in PAGE would make that pin read the wrong rule; anchor the selector to its whole line then.
+- Durable: the 000304 CSS pins sit next to the 000246 grow pins in tests/webui/page.test.ts; extend cssRule() there instead of adding a second matcher.
+- Answered and removed from # Open questions: the Specs table fixes d = 90 for a 100px span, so -90 is settled and the -80 stub value is a typo.
+
+# Open questions
