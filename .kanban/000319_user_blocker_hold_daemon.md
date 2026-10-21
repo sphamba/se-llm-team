@@ -1,7 +1,7 @@
 ---
 name: "feat: hold a task on a user blocker in the daemon gates"
 priority: "medium"
-state: "to-do"
+state: "doing"
 worktree: "feat/319-user-blocker-hold-daemon"
 issuer: "#318"
 complexity: "moderate"
@@ -66,4 +66,12 @@ Review of 84a0c8c (first pass, empty committed diff): HEAD is an ancestor of mai
 - Keep the five test cases: they match the Specs test list, so commit them with the implementation. Rebase onto main b7596fc first, because the branch sits on the stale 84a0c8c and the Specs line anchors came from a newer tree.
 - `tests/orchestrator/promote.test.ts:420` ("a fresh task file still defers promotion within the window") failed in one of two runs and sits before this task's case: a pre-existing timing flake under load, recorded for a separate task, not this one.
 - Nit: the uncommitted merge/split/sweep cases never ran against an implementation, so their own assertions are unverified. Re-check the branch-at-HEAD setup in merge part UH3 when the guard lands.
+
+## Splitter pass (no split)
+
+Decision: do not split. State is unchanged, so the developer starts after this pass.
+- One shared symbol (`hasUserHold` in `src/kanban.ts`) gates all six gate sites in `src/orchestrator/pipeline.ts`. A subtask for the predicate and a subtask for the gates would serialize, so the split saves no time.
+- The parent #318 already made the split that pays: #319 (daemon and docs) and #320 (card, `src/webui/*`, state doing). The Out of scope section keeps this task out of `src/webui/*`, so the two worktrees do not collide.
+- Two subtasks would cost two review passes, two merge cycles and two live tests on almost the same test suites. That overhead is more than the time saved.
+- Guidance for a future Splitter on a task of this kind: first find the shared symbol and count the files that it touches. A predicate plus its call sites is one unit of work, not a fan-out.
 

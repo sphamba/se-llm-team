@@ -1,7 +1,7 @@
 ---
 name: "feat: mark a user-held task card with a dashed border"
 priority: "medium"
-state: "doing"
+state: "to-review"
 worktree: "feat/320-user-blocker-hold-card"
 issuer: "#318"
 complexity: "moderate"
@@ -88,3 +88,16 @@ Code check for the Developer redo:
 - `relationPaths` (`board.ts:241`) and `blockedRow` (`page.ts:698`) already handle `user` as plain text. No edit there.
 
 Guidance for future Splitter agents on this repo: read `## Split scope` before you weigh a split, then run the code check. A yes-split here must also name the worktree of each subtask, because the parent worktree stays with the parent.
+
+## Developer pass (#320, feat, moderate)
+
+Worktree `feat/320-user-blocker-hold-card`, fast-forwarded to base `b7596fc` first (HEAD was `84a0c8c`, whose tree already equalled main).
+
+- `src/webui/board.ts` `syncBoard`: one `el.classList.toggle("user-hold", ...)` after the creation branch, token test inline (`String(t.blockedBy || "").split(",").some((r) => r.trim().toLowerCase() === "user")`). No new helper and no new interpolation site, so nothing unshipped can run in the browser. `classList.toggle` leaves `enter` alone: the pin asserts the exact `card enter` string on the pass after the token goes.
+- `src/webui/page.ts`: `.card.user-hold` turns the 1px top/right/bottom border transparent (box size, the solid 3px left accent and the 6px radius stay), and `.card.user-hold::after` paints three `repeating-linear-gradient` layers, 6px on and 4px off, on the border box (`inset: -1px -1px -1px -3px`, because an absolute child is placed from the padding box), `pointer-events: none`, clipped by `border-radius: 6px`. The dashes sit on the pseudo-element, so `.card:hover`'s `background` shorthand cannot wipe them. Static, no animation.
+- `relationPaths` and `blockedRow` are untouched; both now carry a `user` pin.
+- Tests written first and seen red (`a \`user\` blockedBy marks the card held`, `the held card's top and bottom edges dash 6px on and 4px off`), then green: `tests/webui/board.test.ts` (add, remove on the next pass, `user, #42`, case-insensitive token, unheld card, one-shot `enter`, `relationPaths` draws nothing for `user`, `blockedRow` prints it plain) and `tests/webui/page.test.ts` (the 6/4 layers, the transparent top and bottom border, the kept 3px left accent and 6px radius).
+- The `El` stub in `tests/webui/board.test.ts` gained `classList.toggle` over `className` (Set-based, so class order is stable and the existing exact `card enter` asserts still hold). `page.test.ts` never runs `syncBoard` on its stub, so its stub is unchanged.
+- Suites: `node tests/webui/board.test.ts` exit=0, `node tests/webui/page.test.ts` exit=0, `node scripts/test-changed.mjs` exit=0 (5 suites: agentlog, board, hub, logpane, page). The full suite stays the live tester's gate. The dashed border itself is a by-hand browser check after a daemon restart, as the Specs say.
+
+Durable finding for future Developer passes on this repo: a backtick inside a CSS comment in `page.ts` closes the `PAGE` template literal, and every import of the module then dies with `ERR_INVALID_TYPESCRIPT_SYNTAX` pointing at the comment word. Keep `PAGE` comments backtick-free.
