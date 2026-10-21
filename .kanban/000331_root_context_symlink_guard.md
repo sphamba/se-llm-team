@@ -1,8 +1,8 @@
 ---
 name: "fix: the root context symlink never replaces a real file"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/331-root-context-symlink-guard"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "root-context-symlink-guard"
@@ -106,5 +106,49 @@ Review of a1ac53c (first pass):
 - Note: the part A red has no owning card on the board (backlog and in-progress show no match). The owning area is the board mirror after `queued board report` in `tests/orchestrator/spawn.test.ts` part A.
 - Nit: `refusalsBA.length === 3` at `tests/orchestrator/spawn.test.ts:618` pins the order where the root `SPECS.md` repoint runs before the early return, and the #332 root cleanup can change that order. Relax it to `>= 1`, or count after a direct `repointContextSymlink` call, when #332 lands.
 - Nit: `spawn.ts:127` logs the caller's alias spelling, so the line names a path a reader cannot find. Log `realpathOrSelf(dirname(link))` if the line must name the root.
+
+## Live test (live-tester)
+
+Setup. The driver is `/tmp/lt331/driver.mjs`, the wrapper is `/tmp/lt331/run.sh`, and the log is `/tmp/lt331/run.log`. Every case makes a fresh git root with a real tracked `AGENTS.md` (`# project guidance`) and a real tracked `SPECS.md` (`# my real specs`). The root also holds the task file `000313_root_specs_pointer.md` and an executable fake agent. The case calls the production `spawnAgent`, so the run covers `ensureContextSymlinks`, `renderPrompt`, and the pi argv. Three scored runs use this worktree. One control run uses the feature parent `d674e44`, extracted with `git archive`. Every actual value is one sample from the third scored run. All three scored runs agree.
+
+| C | claim | expected | actual | control (parent d674e44) | result |
+| --- | --- | --- | --- | --- | --- |
+| C1 | trailing-slash cwd: the real root AGENTS.md is not replaced | regular(unchanged) | regular(unchanged) | symlink->.kanban/AGENTS.integration-tester.md | PASS |
+| C2 | trailing-slash cwd: the real root SPECS.md is not replaced | regular(unchanged) | regular(unchanged) | symlink->.kanban/000313_root_specs_pointer.md | PASS |
+| C3 | exactly one refusal line per root spelling, each naming the root SPECS.md | trailing 1:SPECS.md alias 1:SPECS.md | trailing 1:SPECS.md alias 1:SPECS.md | trailing 0 alias 0 | PASS |
+| C4 | symlink-alias cwd: the real root AGENTS.md is not replaced | regular(unchanged) | regular(unchanged) | symlink->.kanban/AGENTS.integration-tester.md | PASS |
+| C5 | symlink-alias cwd: the real root SPECS.md is not replaced | regular(unchanged) | regular(unchanged) | symlink->.kanban/000313_root_specs_pointer.md | PASS |
+| C6 | plain root cwd: both real files survive with one refusal | AGENTS.md regular(unchanged) SPECS.md regular(unchanged) 1:SPECS.md | AGENTS.md regular(unchanged) SPECS.md regular(unchanged) 1:SPECS.md | AGENTS.md regular(unchanged) SPECS.md symlink->.kanban/000313_root_specs_pointer.md 0 | PASS |
+| C7 | real .worktrees worktree cwd: both names still become the context symlinks | SPECS.md symlink->.kanban/000313_root_specs_pointer.md AGENTS.md symlink->.kanban/AGENTS.integration-tester.md skip=S | SPECS.md symlink->.kanban/000313_root_specs_pointer.md AGENTS.md symlink->.kanban/AGENTS.integration-tester.md skip=S | SPECS.md symlink->.kanban/000313_root_specs_pointer.md AGENTS.md symlink->.kanban/AGENTS.integration-tester.md skip=S | PASS |
+| C8 | root-cwd spawn through a trailing slash or an alias gets the #313 task-file prompt prefix | pre=yes,yes | pre=yes,yes | pre=no,no | PASS |
+
+scored runs agree: true (C1:true C2:true C3:true C4:true C5:true C6:true C7:true C8:true / C1:true C2:true C3:true C4:true C5:true C6:true C7:true C8:true / C1:true C2:true C3:true C4:true C5:true C6:true C7:true C8:true)
+rows=8 cells=6
+all rows pass (merged): true
+
+### Covered
+- The four root spellings from the Specs: trailing slash, `symlinkSync(root, alias)`, plain root, and a real `.worktrees/feat-x` from `git worktree add`.
+- The file state: `lstat` kind, `readlink` target, and `sha256` before and after the spawn.
+- The refusal lines in `.kanban/.logs/orchestrator.log`: count and named file.
+- The worktree flow: both names become `.kanban/...` links and `git ls-files -v AGENTS.md` reports `S` (skip-worktree).
+- The root-cwd prompt: the `-p` text starts with the #313 `Task file:` line for the trailing slash and for the alias. The control tree has no prefix.
+
+### Assumptions
+- The change is the merged commit `c7b47c8`. `git show --stat c7b47c8` lists only `src/orchestrator/spawn.ts` and `tests/orchestrator/spawn.test.ts`.
+- The control is the feature parent `d674e44` (the #332 root cleanup). It has no `realpathOrSelf` guard.
+- No daemon. The change is in the spawn path. A daemon loop adds wait time and no new evidence.
+- The fixture root is a real git repo with both files tracked. The worktree case needs that shape for the `skip-worktree` path.
+- The fake agent exits at once. Cleanup waits for each saved pid, then checks that `kill -0` fails. Every run prints `pids=4 survivors=0 captures=4/4`.
+- C3 first expected 2 refusal lines per divergent spelling. The first scored run measured 1, so the expectation was a checker bug and I fixed it in one edit. The reason is in the next section.
+
+### Observed: Specs 3 says "both names", the code fires one
+Specs 3 says the refusal "must fire for both names at the root". The measurement shows one refusal line per root spelling, and each line names the root `SPECS.md`. The resolved early return from Specs 2 runs before the `AGENTS.md` repoint. `dirname(link)` is `cwd`, so the same resolved comparison gates both the early return and the refusal. The `AGENTS.md` refusal is therefore not reachable through `ensureContextSymlinks`. It is a safety net for a direct `repointContextSymlink` call. No file is destroyed. The shipped part BA pins the same shape: three lines, all naming `SPECS.md`. This is a wording gap in Specs 3, not a behavior defect.
+
+### Not exercised
+- Any `*.test.ts` file. The Specs' suites are the developer lane. Part BA also stays blocked by the pre-existing part A wait in the Notes above.
+- `clearContextSymlinks`, `stripContextSymlinks`, `ensureInfoExclude`, and `cleanContextPaths`, which Spec 6 excludes and other tasks own.
+- The hub, the web UI, and the merge lane, which this change does not touch.
+- A real pi or claude agent. A fake agent records the argv, and that record is the sample.
+- No technical difficulty blocked a flow.
 
 # Open questions
