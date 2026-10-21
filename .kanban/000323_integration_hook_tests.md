@@ -1,12 +1,12 @@
 ---
 name: "test: cover the integration hook failure contract and the live-test overlap"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "to-do"
+worktree: "test/323-integration-hook-tests"
 issuer: "#315"
 complexity: "simple"
 shortName: "integration-hook-tests"
-blockedBy: "#322"
+blockedBy: ""
 ---
 
 # Summary

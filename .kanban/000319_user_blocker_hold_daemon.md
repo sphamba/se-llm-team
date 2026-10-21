@@ -86,3 +86,17 @@ Rebased onto main b7596fc (was 84a0c8c): stashed the five uncommitted test files
 - Docs: `skills/se-llm-team/SKILL.md:18`, `:33`, `:37`, `docs/architecture.md` backlog and to-do bullets, `docs/agents-and-tools.md:7` and the Splitter table row, and `agents/splitter.md` after the split steps.
 - Skipped `node scripts/test-changed.mjs`: `src/orchestrator/pipeline.ts` matches no RULES entry, so the script falls back to running every suite. Ran the six touched suites instead.
 - `tests/orchestrator/spawn.test.ts` fails at "timeout waiting for the integration task runs to done and folds into the mirror" with and without this diff (base probe: stash, run, pop, same exit=1 and the same daemon log), so it is pre-existing. It is not in the Specs test list.
+
+## Reviewer pass (1)
+
+Review of ed99f3b (first pass): fix 30a425f scopes one false doc claim; code and tests hold.
+- `src/kanban.ts:370` `hasUserHold` is the one predicate, and all six `spawnAgent` sites in `src/orchestrator/pipeline.ts` sit behind it (`:148` to-do, `:254` merge, `:337` integration, `:511` reviewer, `:538` live test, `:629` backlog). `spawnRunAnalysis` at `:238` still runs ahead of the merge guard, as the Specs require.
+- `src/orchestrator/pipeline.ts:738` and `:745` route both promotion call sites through the predicate, and `dropDoneBlockers` (`:645`) keeps `user` by its unchanged `num > 0` filter. `blockedNums` and `assertNoBlockCycle` are untouched.
+- Fixed in 30a425f: `skills/se-llm-team/SKILL.md:33` claimed "blockedBy gates every stage start ... a task with an unfinished blocker starts no stage". The code holds only on the `user` token, so the line now scopes the stage gate to the hold token and leaves plain refs gating promotion.
+- Docs match the six gates: `docs/architecture.md:19-20`, `docs/agents-and-tools.md:7` and `:13`, `agents/splitter.md:13`.
+- Tests: blockedby exit=0, promote exit=0, split exit=0, sweep exit=0, merge exit=0, integration exit=0. One case per gate, each asserting the kept source state plus the absent pid or marker, and UH2/UH3/part 16 assert the next eligible task takes the lane.
+- Nit: the to-live-test guard at `:538` sits before the unmerged-branch requeue, one step earlier than the Specs anchor. That is stricter and matches "keeps its source state", so no change. Upgrade path: move it after the requeue only if a held task must still be corrected to to-merge.
+- Nit: the reviewer guard reads the sweep snapshot at `:511`, not a fresh read like `startTodo` at `:146`. A hold written mid-sweep lands on the next sweep, which cannot race a spawn inside one sweep. Upgrade path: re-read there too if a same-sweep release must take effect.
+
+
+

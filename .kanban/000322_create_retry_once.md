@@ -1,7 +1,7 @@
 ---
 name: "fix: skip the state-pass create retry for a create that already landed"
 priority: "medium"
-state: "to-live-test"
+state: "live-testing"
 worktree: "fix/322-create-retry-once"
 issuer: "#315"
 complexity: "simple"
