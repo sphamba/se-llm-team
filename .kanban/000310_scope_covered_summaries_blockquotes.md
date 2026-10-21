@@ -1,8 +1,8 @@
 ---
 name: "refactor: render blockquotes in the dialog markdown"
 priority: "medium"
-state: "live-testing"
-worktree: "refactor/310-scope-covered-summaries-blockquotes"
+state: "done"
+worktree: ""
 issuer: "#308"
 complexity: "moderate"
 shortName: "scope-covered-summaries-blockquotes"
@@ -99,3 +99,40 @@ Review of 16078fe (first pass): pass.
 - Note (non-blocking): `md` is shared, so thinking and assistant text in the log pane now render a `> ` line as a `<blockquote>` with UA margins and no `#m-body` styling (`src/webui/logpane.ts:235`). The Specs' out-of-scope line asks for identical log-pane output. Making it identical needs a mode argument on `md`, which also edits the frozen `function md(src) {` extractor at `tests/webui/page.test.ts:189`, so it is left to the merger.
 - Tests: `node tests/webui/logpane.test.ts` exit=0; `node tests/webui/page.test.ts` exit=0.
 
+## Live test (2026-10-21)
+Lane: hub-only root plus the real task detail dialog in Chromium. Control: parent commit `1b785f2` in `/tmp/live-310/pre-fix` (`git archive`). Fixture: one task with hand-written `> ` lines in the body (two consecutive lines, a lone `>`, inline code, bold, a link, a fence, a table, a bullet run and a quoted Open-questions line). The fixture quotes are hand-written, not generated Specs. Driver: `/tmp/live-310/driver.mjs`, with the frozen claim table in its header. Logs: `run-merged.log` and `run-control.log`. Merged: 17 checks, 15 pass, 2 fail. Control: 11 pass, 6 n/a, 0 fail.
+
+| Claim | Printed proof (merged) | Control (parent) |
+| --- | --- | --- |
+| A quoted run renders one `<blockquote>` (three runs in the fixture body) | actual=3, expected=3, pass=1 | 0 |
+| No literal `&gt;` text for the quoted run | actual=false, expected=false, pass=1 | true |
+| The blockquote carries the quoted sentences | actual=true, expected=true, pass=1 | false |
+| Specs: consecutive `> ` lines form one paragraph, not one `<p>` per line | actual=3, expected=2, pass=0 | n/a (no blockquote in the parent) |
+| A lone `>` is a paragraph break, never an empty `<p>` | actual=0, expected=0, pass=1 | n/a (no blockquote in the parent) |
+| Inline code inside the quote renders `<code>` in the blockquote | actual=["inline-code"], expected=["inline-code"], pass=1 | n/a (no blockquote in the parent) |
+| Bold and link inside the quote render through `inline()` | actual=[["bold"],[{"text":"link","href":"https://example.com/x"}]], expected=[["bold"],[{"text":"link","href":"https://example.com/x"}]], pass=1 | n/a (no blockquote in the parent) |
+| A `>` inside a fenced block stays literal | actual={"fence":true,"preBq":0}, expected={"fence":true,"preBq":0}, pass=1 | {"fence":true,"preBq":0} |
+| A blank line after a quote closes it | actual=true, expected=true, pass=1 | true |
+| A quote closes the open list first | actual=["ul","blockquote","ul"], expected=["ul","blockquote","ul"], pass=1 | ["ul","p","ul"] |
+| Headings keep their output | actual=["Summary","Specs","Notes","Open questions"], expected=["Summary","Specs","Notes","Open questions"], pass=1 | ["Summary","Specs","Notes","Open questions"] |
+| Tables keep their output | actual=[{"head":["a","b"],"rows":[["1","2"]]}], expected=[{"head":["a","b"],"rows":[["1","2"]]}], pass=1 | [{"head":["a","b"],"rows":[["1","2"]]}] |
+| A quote closes at the end of input | actual=<blockquote><p>tail quote</p></blockquote>, expected=<blockquote><p>tail quote</p></blockquote>, pass=1 | <p>&gt; tail quote</p> |
+| The `#m-body blockquote` rule is served | actual=true, expected=true, pass=1 | false |
+| Computed style: border, padding, soft colour, margins | style={"borderLeftWidth":"3px","borderLeftStyle":"solid","borderLeftColor":"rgba(107, 125, 143, 0.12)","paddingLeft":"10px","paddingTop":"0px","paddingRight":"0px","marginTop":"4px","marginBottom":"4px","marginLeft":"0px","marginRight":"0px","color":"rgb(92, 97, 102)"}, ul={"marginTop":"4px","marginBottom":"4px"}, vars={"soft":"rgb(92, 97, 102)","border":"rgba(107, 125, 143, 0.12)"}, pass=1 | n/a (no blockquote in the parent) |
+| No horizontal shift, text starts after border + padding | actual={"bqLeft":278,"bodyContentLeft":278,"pOffset":13,"expectedOffset":13,"modalHidden":false,"bodyWidth":724}, expected=left equal, offset 13, modal visible, pass=1 | n/a (no blockquote in the parent) |
+| Log-pane `md` output stays identical (Specs out of scope) | actual=true, expected=false, pass=0 | false |
+
+### Findings
+- **C2: the Specs and the code disagree.** The merged `md` emits one `<p>` per quote line. The Specs say "Do not emit a `<p>` per line" and name the lone `>` as the paragraph break, so the four-line run A should give 2 paragraphs, and gives 3 (`actual=3, expected=2`). The probe printed `<blockquote><p>Covered task #101: it added the quote rule.</p><p>Covered task #102: it added the second line.</p><p>Second paragraph with <code>inline-code</code> and <b>bold</b> and a <a href="https://example.com/x" target="_blank" rel="noopener">link</a>.</p></blockquote>`. Effect: each quoted covered-task summary line becomes its own paragraph with the UA paragraph margins, so the quote reads as a stack of gapped paragraphs, not one quote. The merged unit test pins only the lone-`>` split, so no test covers two consecutive quote lines. If the intended reading is "do not open a blockquote per line", the Specs sentence should say that.
+- **C15: the log pane changed too.** The Specs out-of-scope line asks for identical log-pane output. A `text_delta` of `> quoted line\n` through `renderLogChunk` returns `<blockquote><p>quoted line</p></blockquote>` on merged and `<p>&gt; quoted line</p>` on the parent. `#m-body blockquote` is scoped to the dialog, so that blockquote gets the UA margins. The review note already leaves this to the merger. The live test confirms it with the renderer helper, not in a browser log pane.
+
+### Assumptions
+- The dialog body is `md(t.body)` (`src/webui/page.ts` `setBody`), so quotes in the fixture task body exercise the changed renderer.
+- Fixture quote lines use the space form `> `, as the Specs state. `>text` without a space is outside the Specs and not checked.
+- C2's expected 2 paragraphs reads "Do not emit a `<p>` per line" literally. See the finding.
+- Expected colours come from a probe element with `var(--soft)` and `var(--border)` in the served page. The 4px vertical margin expected value is the computed `#m-body ul` margin on the same page. No hex value is hard-coded.
+- The first tally run had one checker bug: C1c anchored on a slice of A3 that still contained markdown backticks. The fix and the single rerun changed no product code.
+
+### Not exercised
+- The log pane in the browser with an agent-log fixture. Only the server helper `renderLogChunk` was probed.
+- `>text` without a space, quotes inside table cells and nested quotes, which the Specs do not name.

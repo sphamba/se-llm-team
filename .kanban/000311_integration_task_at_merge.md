@@ -1,8 +1,8 @@
 ---
 name: "refactor: create the integration task at merge time, not at the live-test end"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "refactor/311-integration-task-at-merge"
 issuer: "user"
 complexity: "moderate"
 shortName: "integration-task-at-merge"
@@ -77,3 +77,9 @@ Live test observable, in the repo root: with a scratch fixture repo, or with the
 - No webui change and no doc rewrite beyond the two trigger sentences.
 
 # Notes
+
+## Splitter: no split
+
+This task stays whole. The hook move in `src/orchestrator/pipeline.ts` and the removal in `src/orchestrator/liveness.ts` share one trigger contract, and both test files assert through the same merge helper that `tests/orchestrator/integration.test.ts` must introduce. A separate subtask for either test file would block on that helper, and a doc-only subtask costs a full review, merge, and live test cycle for two sentences. One developer pass, one review, one merge, one live test.
+
+Guidance for future Splitters: a hook relocation with its test rewrite is one unit. Split only when the pieces write disjoint files and each piece passes its own acceptance checks without the other.
