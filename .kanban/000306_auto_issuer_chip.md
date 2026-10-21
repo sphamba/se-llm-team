@@ -1,7 +1,7 @@
 ---
 name: "fix: task cards show the auto issuer as auto, not user"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/306-auto-issuer-chip"
 issuer: "#301"
 complexity: "simple"
@@ -74,3 +74,9 @@ At live test, in the repo root: `pnpm test` exits 0. Then, by hand, open the boa
 - Updated the comment above `cardBaseHtml` and the auto-card pins in `tests/webui/board.test.ts`, including the new differ-only-in-chip-text check. The test went red first, then green.
 - `node tests/webui/board.test.ts` exit 0 and `node tests/webui/page.test.ts` exit 0. No change to `issuerCell`, `parseTask`, the payload or the CSS.
 - Assumption: any issuer that is not `#<num>` (and not empty) now prints as-is with a plain chip, which matches the Specs rule and the dialog.
+Review of d381ad8 (first pass): pass. The diff matches the Specs line for line, and both acceptance suites are green.
+- `src/webui/board.ts:179` narrows `issued` to `/^#\d+$/`, so `auto` takes the plain chip path, and `src/webui/board.ts:198` prints `esc(t.issuer || "user")`; a missing issuer still reads `user`.
+- `src/webui/board.ts:175-176` now states that `auto` gets a plain chip labelled `auto` with no badge and no link.
+- `tests/webui/board.test.ts:130-132` pins the auto chip, the absent `chip issuer` and `name issued` classes, and the differ-only-in-chip-text comparison; the pre-fix code printed `user`, so the new pins cover the bug. The `user` pin at `:125` is unchanged.
+- `git diff --stat main...HEAD` lists only `src/webui/board.ts` and `tests/webui/board.test.ts`, so `issuerCell` (`tests/webui/page.test.ts:124-130`), `parseTask`, the payload and the CSS are untouched.
+Tests: `node tests/webui/board.test.ts` exit 0, `node tests/webui/page.test.ts` exit 0 (chained in one call).
