@@ -2,7 +2,7 @@
 name: "fix: cut the sub and doctor curve multiplier from 3 to 2.5"
 priority: "medium"
 state: "done"
-worktree: "fix/303-curve-times-two-point-five"
+worktree: ""
 issuer: "#302"
 complexity: "simple"
 shortName: "curve-times-two-point-five"
