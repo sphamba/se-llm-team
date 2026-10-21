@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { kanbanDir, roleNotesPath, taskSlug, type Task } from "../kanban.ts";
@@ -56,7 +56,7 @@ export function ensureContextSymlinks(root: string, cwd: string, taskFile: strin
 	// project's own AGENTS.md and poison the projectAgentsPrompt read of every later spawn:
 	// no AGENTS.md link at the root; the splitter has no notes file and runs on its shipped
 	// prompt plus the project's own root AGENTS.md
-	if (cwd === root) return;
+	if (realpathOrSelf(cwd) === realpathOrSelf(root)) return;
 	// a target project's own tracked AGENTS.md sits where the role-notes symlink must go:
 	// skip-worktree hides the replacement from git status (an untracked file cannot be marked;
 	// the failure is ignored), then the symlink replaces it
@@ -69,6 +69,14 @@ function isRealFile(path: string): boolean {
 		return lstatSync(path).isFile();
 	} catch {
 		return false;
+	}
+}
+
+function realpathOrSelf(path: string): string {
+	try {
+		return realpathSync(path);
+	} catch {
+		return path;
 	}
 }
 
@@ -114,6 +122,10 @@ function repointContextSymlink(root: string, link: string, target: string): void
 		}
 	} catch {
 		/* missing: nothing to remove */
+	}
+	if (isRealFile(link) && realpathOrSelf(dirname(link)) === realpathOrSelf(root)) {
+		log(root, `refusing to replace the real file ${link} at the project root`);
+		return;
 	}
 	rmSync(link, { force: true, recursive: true });
 	try {
@@ -228,13 +240,14 @@ export function spawnAgent(root: string, cfg: Config, role: string, task: Task, 
 	// project root (the Splitter) there is no AGENTS.md symlink and no role notes: pi's cwd
 	// chain loads the project's own file, so the appended element is omitted there
 	const projectPrompt = projectAgentsPrompt(root);
-	const piPrompt = cwd === root ? readRoleNotes(root, role) : projectPrompt;
+	const rootCwd = realpathOrSelf(cwd) === realpathOrSelf(root);
+	const piPrompt = rootCwd ? readRoleNotes(root, role) : projectPrompt;
 	// per-backend argv from the resolved provider/model/thinking triple: pi keeps the
 	// byte-identical pre-backend construction (--approve, --mode json, the inline
 	// --append-system-prompt), claude swaps in bypassPermissions and stream-json and carries
 	// the system prompt as one file ref
 	const llm = resolveLlm(root, cfg, role, task.complexity ?? "moderate");
-	const prompt = renderPrompt(root, role, cfg.logStallMinutes, task.file, cwd === root);
+	const prompt = renderPrompt(root, role, cfg.logStallMinutes, task.file, rootCwd);
 	const agentArgs = cfg.backend === "claude"
 		? claudeSpawnArgs(llm, prompt, claudeSystemPromptFile(root, name, role, projectPrompt))
 		: piSpawnArgs(llm, piPrompt, prompt);

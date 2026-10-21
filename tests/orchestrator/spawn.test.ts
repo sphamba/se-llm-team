@@ -7,7 +7,7 @@ import { gunzipSync } from "node:zlib";
 import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, ROLE_NOTES_RE } from "../../src/kanban.ts";
 import { loadConfig, promoteBacklog } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline.ts";
-import { renderPrompt } from "../../src/orchestrator/spawn.ts";
+import { ensureContextSymlinks, renderPrompt } from "../../src/orchestrator/spawn.ts";
 import { HERE, fixture, mirrorSubjects, showTip, roleStub, argvStub, llmArgs, runDaemon, waitFor, cleanupAll, daemons, cleaned } from "../helpers.ts";
 
 // --- part A: happy pipeline with a working stub ---
@@ -582,6 +582,43 @@ assert.equal(readFileSync(claudeSplitAZ[promptFileIdxAZ + 1], "utf8"), `${projec
 assert.ok(!existsSync(join(kanbanDir(rootAZ), "AGENTS.splitter.md")), "the claude splitter spawn created no role notes file");
 cleanupAll(rootAZ);
 console.log("orchestrator.test.ts: ... + splitter no-notes spawn smoke passed");
+
+// --- part BA: a real file at the project root is never replaced by a context symlink ---
+const rootBA = fixture();
+cleaned.push(rootBA);
+mkdirSync(kanbanDir(rootBA), { recursive: true });
+const realAgentsBA = "# project guidance\n";
+const realSpecsBA = "# my real specs\n";
+writeFileSync(join(rootBA, "AGENTS.md"), realAgentsBA);
+writeFileSync(join(rootBA, "SPECS.md"), realSpecsBA);
+const aliasBA = `${rootBA}-alias`;
+cleaned.push(aliasBA);
+symlinkSync(rootBA, aliasBA);
+const taskFileBA = "000313_root_specs_pointer.md";
+const rootCwdBA = (cwd: string, label: string) => {
+	ensureContextSymlinks(rootBA, cwd, taskFileBA, "integration-tester");
+	assert.ok(lstatSync(join(rootBA, "AGENTS.md")).isFile(), `the real root AGENTS.md survives the ${label} cwd`);
+	assert.ok(lstatSync(join(rootBA, "SPECS.md")).isFile(), `the real root SPECS.md survives the ${label} cwd`);
+	assert.equal(readFileSync(join(rootBA, "AGENTS.md"), "utf8"), realAgentsBA, `the root AGENTS.md content is unchanged for the ${label} cwd`);
+	assert.equal(readFileSync(join(rootBA, "SPECS.md"), "utf8"), realSpecsBA, `the root SPECS.md content is unchanged for the ${label} cwd`);
+};
+rootCwdBA(`${rootBA}/`, "trailing-slash");
+rootCwdBA(aliasBA, "symlink-alias");
+rootCwdBA(rootBA, "plain root");
+const wtBA = join(rootBA, ".worktrees", "feat-x");
+mkdirSync(wtBA, { recursive: true });
+ensureContextSymlinks(rootBA, wtBA, taskFileBA, "integration-tester");
+assert.ok(lstatSync(join(wtBA, "SPECS.md")).isSymbolicLink(), "a worktree cwd still gets the SPECS.md symlink");
+assert.equal(readlinkSync(join(wtBA, "SPECS.md")), join(".kanban", taskFileBA), "the worktree SPECS.md links the task file");
+assert.ok(lstatSync(join(wtBA, "AGENTS.md")).isSymbolicLink(), "a worktree cwd still gets the AGENTS.md role-notes symlink");
+assert.equal(readlinkSync(join(wtBA, "AGENTS.md")), join(".kanban", "AGENTS.integration-tester.md"), "the worktree AGENTS.md links the role notes");
+const refusalsBA = readFileSync(join(kanbanDir(rootBA), ".logs", "orchestrator.log"), "utf8")
+	.split("\n")
+	.filter((l) => l.includes("refusing to replace the real file"));
+assert.equal(refusalsBA.length, 3, "one refusal line per root cwd spelling");
+assert.ok(refusalsBA.every((l) => l.includes("SPECS.md")), "each refusal names the real root SPECS.md");
+cleanupAll(rootBA);
+console.log("orchestrator.test.ts: ... + root real-file symlink guard passed");
 
 // --- a root-cwd spawn names the literal task path: the splitter and the integration-tester
 // share one root SPECS.md link, so the later spawn re-points it mid-run (#313) ---
