@@ -790,7 +790,7 @@ assert.equal([...page.matchAll(/b\.onmouseenter = \(\) => hotAgentRelations\(b\.
 assert.ok(page.includes('for (const path of document.querySelectorAll("#agent-relations path"))'), "markActiveAgent also toggles the selection highlight on the connected lines");
 // 000237/000238/000302 run against the served source: the drop leaves the run card's bottom edge
 // heading down and enters the sub or doctor card's left side heading right; the horizontal approach
-// triples the span-scaled base, rounds it to 5px, then the space left of the card caps it last
+// is 2.5 times the span-scaled base, rounds it to 5px, then the space left of the card caps it last
 const relDrop = new Function(page.match(/function dropCurve\(from, to\) \{[\s\S]*?\n\}/)![0] + "; return dropCurve;")();
 const dropPath = relDrop({ x: 0, y: 0, w: 200, h: 40 }, { x: 0, y: 44, w: 200, h: 30 });
 assert.ok(dropPath.startsWith("M 100 40 C"), "the drop leaves the run card's bottom edge at its center");
@@ -798,13 +798,13 @@ assert.ok(dropPath.endsWith(", 0 59"), "the drop enters the sub card's left side
 const dropSeg = dropPath.match(/C (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+)$/)!;
 assert.ok(Number(dropSeg[1]) === 100 && Number(dropSeg[2]) === 49.5, "the departure control sits below the bottom edge at today's half-span, so the line heads down");
 assert.ok(Number(dropSeg[3]) === 0 && Number(dropSeg[4]) === 59, "the x2 cap lands last, so a card flush with the area's left edge takes no run-in and the arrival control sits on the edge");
-assert.equal(relDrop({ x: 0, y: 0, w: 200, h: 40 }, { x: 300, y: 44, w: 200, h: 30 }), "M 100 40 C 100 49.5, 120 59, 300 59", "a card with space to its left gets the base capped at 60px, tripled to 180px and rounded to 5px");
+assert.equal(relDrop({ x: 0, y: 0, w: 200, h: 40 }, { x: 300, y: 44, w: 200, h: 30 }), "M 100 40 C 100 49.5, 150 59, 300 59", "a card with space to its left gets the base capped at 60px, 2.5 times to 150px and rounded to 5px");
 // the six pinned spans: base 8, 20, 35, 60, then the two x2 caps that beat the old 8px floor
 const relDropD = (x1, x2) => {
 	const m = relDrop({ x: x1 - 100, y: 0, w: 200, h: 40 }, { x: x2, y: 44, w: 200, h: 30 }).match(/C -?[\d.]+ (-?[\d.]+), (-?[\d.]+) -?[\d.]+, -?[\d.]+ -?[\d.]+$/)!;
 	return x2 - Number(m[2]);
 };
-for (const [x1, x2, d] of [[100, 123, 25], [100, 157, 60], [100, 200, 105], [100, 300, 180], [240, 40, 40], [100, 6, 6]])
+for (const [x1, x2, d] of [[100, 123, 20], [100, 157, 50], [100, 200, 90], [100, 300, 150], [240, 40, 40], [100, 6, 6]])
 	assert.equal(relDropD(x1, x2), d, "a " + Math.abs(x1 - x2) + "px span with " + x2 + "px of space left of the card gets a " + d + "px approach");
 // 000237 run the served draw against a stub agent area: two run columns with run 2 wrapped below
 // run 1, two subs under run 1, one doctor card in the residual #m-doctor row. The wrap must not
