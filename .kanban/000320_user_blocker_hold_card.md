@@ -1,7 +1,7 @@
 ---
 name: "feat: mark a user-held task card with a dashed border"
 priority: "medium"
-state: "to-live-test"
+state: "live-testing"
 worktree: "feat/320-user-blocker-hold-card"
 issuer: "#318"
 complexity: "moderate"
