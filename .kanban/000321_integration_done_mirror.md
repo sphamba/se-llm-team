@@ -1,7 +1,7 @@
 ---
 name: "fix: assert the integration done state on the mirror tip, not a done commit"
 priority: "high"
-state: "to-live-test"
+state: "live-testing"
 worktree: "fix/321-integration-done-mirror"
 issuer: "#315"
 complexity: "simple"
