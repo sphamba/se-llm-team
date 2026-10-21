@@ -3,7 +3,7 @@ import { spawn, execSync } from "node:child_process";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { createTask, kanbanDir, parseTask, setState, setWorktree, taskSlug } from "../../src/kanban.ts";
+import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskNum, taskSlug } from "../../src/kanban.ts";
 import { loadConfig, poll } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline.ts";
 import { agentAlive, pidAlive, pidPath } from "../../src/pid.ts";
@@ -575,5 +575,8 @@ assert.equal(execSync("git log --format=%s -1 main", { cwd: rootAV, encoding: "u
 setState(rootAV, holderAV, "done");
 rescan(rootAV, cfgAV);
 assert.equal(parseTask(rootAV, taskAV.file).state, "to-live-test", "below the cap the merge fast-forwarded and set to-live-test");
+const laneAV = listAll(rootAV).filter((task) => task.state === "to-integration-test");
+assert.equal(laneAV.length, 1, "the fast-forward opened exactly one integration task");
+assert.equal(laneAV[0].name, `test: integration of #${taskNum(taskAV.file)}`, "the integration task names the merged ref");
 assert.ok(execSync("git log --format=%s main", { cwd: rootAV, encoding: "utf8" }).includes("capped"), "main took the branch commit below the cap");
 console.log("orchestrator.test.ts: ... + maxParallel merge cap smoke passed");

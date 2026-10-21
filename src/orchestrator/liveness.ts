@@ -5,7 +5,7 @@ import { clearPid, killTree, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP } from "./config.ts";
 import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, logPath, newestRunRole, nextRunIndex, readCounter } from "./log.ts";
 import { clearContextSymlinks, clearExitFile, readExitCode, readMergerSlug, spawnRunAnalysis } from "./spawn.ts";
-import { dropDoneBlockers, ensureIntegrationTask, promoteBacklog } from "./pipeline.ts";
+import { dropDoneBlockers, promoteBacklog } from "./pipeline.ts";
 
 // the working states with an agent out: next is the one-state-back bounce target when the
 // agent dies, success is the state the orchestrator moves the task to on a successful finish
@@ -212,16 +212,6 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 					if (fresh && fresh.state === task.state) {
 						setState(root, fresh, working.success);
 						log(root, `${slug}: agent exited 0, ${task.state} -> ${working.success}`);
-						// the live test opens or extends the one integration-test task: only the exact
-						// live-testing -> done transition qualifies, so an integration task that reaches
-						// done (or a PM-moved done) creates nothing. Never blocks the done move
-						if (task.state === "live-testing" && working.success === "done") {
-							try {
-								ensureIntegrationTask(root, fresh);
-							} catch (err) {
-								log(root, `integration task for ${slug} failed: ${err instanceof Error ? err.message : err}`);
-							}
-						}
 					}
 				} else {
 					// the reviewer sets the state itself; exit 0 with the task still in reviewing
