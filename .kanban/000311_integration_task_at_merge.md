@@ -2,7 +2,7 @@
 name: "refactor: create the integration task at merge time, not at the live-test end"
 priority: "medium"
 state: "done"
-worktree: "refactor/311-integration-task-at-merge"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "integration-task-at-merge"
