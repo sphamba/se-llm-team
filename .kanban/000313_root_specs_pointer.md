@@ -1,7 +1,7 @@
 ---
 name: "fix: stop root-cwd agents from editing another task through the shared SPECS.md link"
 priority: "high"
-state: "doing"
+state: "reviewing"
 worktree: "fix/313-root-specs-pointer"
 issuer: "#305"
 complexity: "simple"
@@ -50,3 +50,15 @@ Run `node tests/orchestrator/spawn.test.ts`.
 - No cleanup of the old link.
 
 # Notes
+
+## literal task path in the root-cwd prompt
+
+- `renderPrompt` takes two new optional arguments, `taskFile` and `rootCwd`, so the existing 3-argument call sites in `merge.test.ts` and `context-symlinks.test.ts` stay unchanged. A root-cwd run gets one line prepended: the Specs sentence verbatim, with `.kanban/<file>` and `<file>` substituted. A worktree run renders the same prompt as before.
+- `spawnAgent` passes `task.file` and `cwd === root`. The `file` argument of every `kanban_*` call now needs no link.
+- Pin in `tests/orchestrator/spawn.test.ts` (new closing part): the splitter prompt holds the literal path, the shared-link sentence and the kanban `file` argument. A developer prompt holds no shared-link line and equals today's prompt. Ran red before the fix with the same assertions, green after.
+- `node tests/orchestrator/spawn.test.ts` exits 0 and prints `root-cwd prompt task path passed`.
+- The suite was red in three earlier runs at base commit `edf27f2`, before my test edit too: part A timed out on "the integration task runs to done and folds into the mirror". Those runs overlapped other suite runs and stale `/tmp/orch-smoke-*/fake-agent.cjs` processes were alive. The last solo run passed every part, so the timeouts were load flakiness, not a code fault.
+- The worktree base was one commit behind `main`; `git merge --ff-only main` brought in `edf27f2` (`fix: end the integration lane at done on every lane end`), which part A depends on.
+
+# Open questions
+- Assumption: the root-cwd flag is exactly `cwd === root`, so only the splitter and the integration-tester take the new line (Specs 2 and 3).
