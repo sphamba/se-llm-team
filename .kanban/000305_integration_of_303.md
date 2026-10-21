@@ -1,5 +1,5 @@
 ---
-name: "test: integration of #303, #304, #309, #310"
+name: "test: integration of #303, #304, #308, #309, #310"
 priority: "low"
 state: "to-integration-test"
 worktree: ""
@@ -9,7 +9,7 @@ shortName: "integration-of-303"
 ---
 
 # Summary
-Integration test of the merged base branch after #303, #304, #309, #310.
+Integration test of the merged base branch after #303, #304, #308, #309, #310.
 
 # Specs
 Perform integration testing following the merge of:
@@ -22,6 +22,8 @@ Perform integration testing following the merge of:
   Generate the integration task Specs as a `## Own task` section followed by a `## Covered tasks` section with one `### #<num> <name>` heading and a quoted summary per ref, and rebuild that whole body from the board on append. Remove `integrationBullet` and the tail-line parsing in `integrationBullets`. Reword the three docs that describe the old bullet-per-ref shape.
 - #310 refactor: render blockquotes in the dialog markdown
   Teach the detail dialog's markdown renderer `md` blockquote blocks so quoted covered-task summaries render as real quotes instead of literal `&gt;` text, and add the matching `#m-body blockquote` CSS rule.
+- #308 refactor: scope the covered task summaries in generated integration Specs
+  Verification only. Once #309 and #310 have landed, confirm the generated integration Specs carry an `Own task` section before a quoted `Covered tasks` section, the append path rebuilds it from the board, and the detail dialog renders those quotes as real blockquotes rather than literal `>` text.
 
 Run the project test script in the root checkout.
 Report defects and coverage gaps in `# Open questions`.

@@ -1,8 +1,8 @@
 ---
 name: "refactor: scope the covered task summaries in generated integration Specs"
 priority: "medium"
-state: "live-testing"
-worktree: "refactor/308-scope-covered-summaries"
+state: "done"
+worktree: ""
 issuer: "#301"
 complexity: "simple"
 shortName: "scope-covered-summaries"
@@ -83,6 +83,30 @@ Tests: exit=0 tests/orchestrator/integration.test.ts, exit=0 tests/webui/logpane
 - Non-blocking: the What-to-check clause "`renderLogChunk` output for a quote-containing log stays as it was" does not hold, and the developer was right to report it instead of fixing it. Probed with a real record: a `text_delta` of `> quoted log line` now yields `<blockquote><p>quoted log line</p></blockquote>`, and the pre-#310 `md` at `d381ad8` had no quote branch, so it yielded `<p>&gt; quoted log line</p>`. Both contracts cannot hold while `md` is shared by the dialog and the pane. Upgrade path, only if literal `>` in agent prose ever matters: an option flag on `md` that the dialog passes and the pane does not.
 - Non-blocking: `tests/orchestrator/integration.test.ts:246` still says "one bullet per ref" and the body is quotes now. That is #309's file, unchanged here. Upgrade path: reword it on the next touch of that file.
 - Method: a claim in a previous Notes entry can be right while a grep for it comes back empty, because a comment wraps the phrase across a line break. Read the window before doubting the claim.
+
+## Live test (2026-10-21)
+
+Lane: hub-only root (served page, board card click, detail dialog DOM and computed style) plus one direct `renderLogChunk` probe, run from this worktree. Fixture: three done tasks covered through the real `ensureIntegrationTask` (create, append, then a board-side rename and a third append), hub on port 0, `HOME` and `XDG_CONFIG_HOME` in the fixture. `RESULT summary FAIL passed=9 total=10`. One check (C9) fails on a Specs clause that the #310 renderer change contradicts; it is the item already under Open questions.
+
+| Claim | Printed proof | Control |
+| --- | --- | --- |
+| File: `## Own task` precedes `## Covered tasks`, both level 2 | `PASS` actual `{"ownAt":253,"coveredAt":591,"ownLine":"## Own task","coveredLine":"## Covered tasks"}` | expected `{"ownBeforeCovered":true,"ownLine":"## Own task","coveredLine":"## Covered tasks"}` |
+| One `### #<num> <name>` per covered ref, heading ref order equals the head-sentence ref order | `PASS` actual `{"headRefs":[1,2,3],"h3Refs":[1,2,3],"names":["fix: alpha renamed","feat: beta plain","fix: gamma later"]}` | expected `{"headRefs":[1,2,3],"h3Refs":[1,2,3],"names":["fix: alpha renamed","feat: beta plain","fix: gamma later"]}` |
+| Every covered summary line quoted, none indented or bulleted, a blank summary line is a lone `>` | `PASS` actual `{"quoteShape":[{"lines":["> Renamed alpha summary.",">","> Renamed second paragraph."],"allQuoted":true,"loneQuote":1,"indented":0,"bulleted":0},{"lines":["> Beta summary with **bold**."],"allQuoted":true,"loneQuote":0,"indented":0,"bulleted":0},{"lines":["> Gamma summary."],"allQuoted":true,"loneQuote":0,"indented":0,"bulleted":0}],"expectedLone":[1,0,0]}` | expected `{"expectedQuote":[["> Renamed alpha summary.",">","> Renamed second paragraph."],["> Beta summary with **bold**."],["> Gamma summary."]],"expectedLone":[1,0,0]}` |
+| Both headings level 2: file keeps exactly `# Summary`, `# Specs`, `# Notes` and two `##` | `PASS` actual `{"topLevel":["Summary","Specs","Notes"],"h2count":2}` | expected `{"topLevel":["Summary","Specs","Notes"],"h2count":2}` |
+| Field contract of the generated task | `PASS` actual `{"name":"test: integration of #1, #2, #3","priority":"low","complexity":"simple","issuer":"auto","state":"to-integration-test","blockedBy":"","worktree":""}` | expected `{"name":"test: integration of #1, #2, #3","priority":"low","complexity":"simple","issuer":"auto","state":"to-integration-test","blockedBy":"","worktree":""}` |
+| Direct `renderLogChunk` of a quote-containing log record, the Specs What-to-check clause | `FAIL` actual `{"logQuote":"<blockquote><p>quoted log line</p></blockquote>"}` | expected `{"logQuote":"<p>&gt; quoted log line</p>"}` |
+| Dialog: one blockquote per covered summary, no literal `&gt;`, `#m-body blockquote` CSS, paragraph break inside one blockquote | `PASS` actual `{"bqCount":3,"bqParagraphs":[["Renamed alpha summary.","Renamed second paragraph."],["Beta summary with bold."],["Gamma summary."]],"gtCount":0,"quoteLineCount":0,"css":{"borderLeftWidth":"3px","borderLeftStyle":"solid","paddingLeft":"10px","color":"rgb(92, 97, 102)"}}` | expected `{"bqCount":3,"firstBqParagraphs":["Renamed alpha summary.","Renamed second paragraph."],"gtCount":0,"quoteLineCount":0,"css":{"borderLeftWidth":"3px","borderLeftStyle":"solid","paddingLeft":"10px"}}` |
+| Dialog: own instructions render before the covered summaries | `PASS` actual `{"ownIdx":87,"firstCoveredIdx":451,"h2":["Own task","Covered tasks"],"ownInstruction":"Perform integration testing following the merge of","firstCoveredText":"Renamed alpha summary."}` | expected `{"ownBeforeCovered":true,"h2":["Own task","Covered tasks"]}` |
+| Append rebuild from the board: rename and third ref appear, old name and summary gone | `PASS` actual `{"h3":["#1 fix: alpha renamed","#2 feat: beta plain","#3 fix: gamma later"],"oldName":false,"oldSummary":false,"newSummary":true}` | expected `{"h3":["#1 fix: alpha renamed","#2 feat: beta plain","#3 fix: gamma later"],"oldName":false,"oldSummary":false,"newSummary":true}` |
+| Dialog body holds three `<h1>` and no stray top-level section | `PASS` actual `{"h1":["Summary","Specs","Notes"]}` | expected `{"h1":["Summary","Specs","Notes"]}` |
+
+- Finding (C9): the What-to-check clause "renderLogChunk output for a quote-containing log stays as it was" does not hold live. A real `text_delta` record of `> quoted log line` renders `<blockquote><p>quoted log line</p></blockquote>`, and the clause expects `<p>&gt; quoted log line</p>`. The dialog and the pane share `md`, so the blockquote cannot exist in the dialog while the pane keeps literal text. This matches the open question below and is not fixed here.
+- Checker note: two checker bugs were fixed before the tally, the last covered entry's slice ran into `# Notes`, and every entry was required to hold a lone `>`. They were checker bugs, not findings.
+- The dialog opened from the board card click: 4 cards, files ["000004_integration_of_1.md","000001_alpha_quoted.md","000003_gamma_later.md","000002_beta_plain.md"], page errors [], hub health "ok".
+- Assumptions: the covered summaries came from `createTask` as #1 two paragraphs, #2 one line with bold, #3 one plain line; "one blockquote per covered summary" means one blockquote even when the summary has two paragraphs; the task file was read from disk and the dialog from the served page over HTTP.
+- Not exercised: `pnpm test` (the acceptance suite, the live test must not run suites); the log pane through the dialog UI, because a pane run handle needs a run log and the C9 probe calls the same renderer directly; the off-board ref drop in `coveredOnBoard`, which needs a vanished task and is #309's unit path.
+- Cleanup: the hub ran in the driver process and `ui.close()` ran in the `finally`, the driver pid 865496 exited, and the fixture root was removed.
 
 # Open questions
 
