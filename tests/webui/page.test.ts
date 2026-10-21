@@ -780,18 +780,24 @@ assert.ok(page.includes("markActiveAgent();\n\t\tdrawAgentRelations();"), "sub f
 assert.ok(page.includes('window.addEventListener("resize", drawAgentRelations);'), "a window resize redraws the lines");
 assert.equal([...page.matchAll(/b\.onmouseenter = \(\) => hotAgentRelations\(b\.dataset\.handle, true\);/g)].length, 3, "run, sub and doctor cards all bind the hover raise, mouseleave reverts");
 assert.ok(page.includes('for (const path of document.querySelectorAll("#agent-relations path"))'), "markActiveAgent also toggles the selection highlight on the connected lines");
-// 000237/000238 run against the served source: the drop leaves the run card's bottom edge heading
-// down and enters the sub or doctor card's left side heading right; the horizontal run-in scales
-// with the span and clamps to the space left of the card, so a flush card keeps the short hook
+// 000237/000238/000302 run against the served source: the drop leaves the run card's bottom edge
+// heading down and enters the sub or doctor card's left side heading right; the horizontal approach
+// triples the span-scaled base, rounds it to 5px, then the space left of the card caps it last
 const relDrop = new Function(page.match(/function dropCurve\(from, to\) \{[\s\S]*?\n\}/)![0] + "; return dropCurve;")();
 const dropPath = relDrop({ x: 0, y: 0, w: 200, h: 40 }, { x: 0, y: 44, w: 200, h: 30 });
 assert.ok(dropPath.startsWith("M 100 40 C"), "the drop leaves the run card's bottom edge at its center");
 assert.ok(dropPath.endsWith(", 0 59"), "the drop enters the sub card's left side at its vertical middle");
 const dropSeg = dropPath.match(/C (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+)$/)!;
-assert.ok(Number(dropSeg[1]) === 100 && Number(dropSeg[2]) > 40, "the departure control sits below the bottom edge, so the line heads down");
-assert.ok(Number(dropSeg[3]) < 0 && Number(dropSeg[4]) === 59, "the arrival control sits left of the left edge at the same y, so the line heads right into the card; a flush card keeps the short 8px hook");
-assert.equal(relDrop({ x: 0, y: 0, w: 200, h: 40 }, { x: 300, y: 44, w: 200, h: 30 }), "M 100 40 C 100 49.5, 240 59, 300 59", "a card with space to its left gets a run-in scaled from the span, capped at 60px");
-assert.equal(relDrop({ x: 0, y: 0, w: 200, h: 40 }, { x: 20, y: 44, w: 200, h: 30 }), "M 100 40 C 100 49.5, 0 59, 20 59", "the run-in clamps to the space left of the card, so no length hides past the canvas edge");
+assert.ok(Number(dropSeg[1]) === 100 && Number(dropSeg[2]) === 49.5, "the departure control sits below the bottom edge at today's half-span, so the line heads down");
+assert.ok(Number(dropSeg[3]) === 0 && Number(dropSeg[4]) === 59, "the x2 cap lands last, so a card flush with the area's left edge takes no run-in and the arrival control sits on the edge");
+assert.equal(relDrop({ x: 0, y: 0, w: 200, h: 40 }, { x: 300, y: 44, w: 200, h: 30 }), "M 100 40 C 100 49.5, 120 59, 300 59", "a card with space to its left gets the base capped at 60px, tripled to 180px and rounded to 5px");
+// the six pinned spans: base 8, 20, 35, 60, then the two x2 caps that beat the old 8px floor
+const relDropD = (x1, x2) => {
+	const m = relDrop({ x: x1 - 100, y: 0, w: 200, h: 40 }, { x: x2, y: 44, w: 200, h: 30 }).match(/C -?[\d.]+ (-?[\d.]+), (-?[\d.]+) -?[\d.]+, -?[\d.]+ -?[\d.]+$/)!;
+	return x2 - Number(m[2]);
+};
+for (const [x1, x2, d] of [[100, 123, 25], [100, 157, 60], [100, 200, 105], [100, 300, 180], [240, 40, 40], [100, 6, 6]])
+	assert.equal(relDropD(x1, x2), d, "a " + Math.abs(x1 - x2) + "px span with " + x2 + "px of space left of the card gets a " + d + "px approach");
 // 000237 run the served draw against a stub agent area: two run columns with run 2 wrapped below
 // run 1, two subs under run 1, one doctor card in the residual #m-doctor row. The wrap must not
 // break the chain: curve spans any x/y pair, so the line still connects the wrapped pair
@@ -850,8 +856,8 @@ assert.ok(drawn[0].includes('data-from="t.dev.0"') && drawn[0].includes('data-to
 const chainSeg = drawn[0].match(/d="M (-?[\d.]+) (-?[\d.]+) C (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+)"/)!;
 assert.ok(chainSeg[1] === "200" && chainSeg[2] === "20", "the chain leaves the first run card's right edge");
 assert.ok(chainSeg[7] === "0" && chainSeg[8] === "170", "the chain enters the wrapped run card's left edge: the wrap does not break the pair");
-assert.ok(drawn[1].includes('data-from="t.dev.0"') && drawn[1].includes('data-to="t.dev.0"') && drawn[1].includes('d="M 100 40 C 100 49.5, -8 59, 0 59"'), "a sub's drop line runs from its run card's bottom edge into its left side");
-assert.ok(drawn[3].includes('data-to="t.dev.0.doctor"') && drawn[3].includes('d="M 100 40 C 100 100, -8 215, 0 215"'), "a doctor card in the residual row still drops from its analysed run's card");
+assert.ok(drawn[1].includes('data-from="t.dev.0"') && drawn[1].includes('data-to="t.dev.0"') && drawn[1].includes('d="M 100 40 C 100 49.5, 0 59, 0 59"'), "a sub's drop line runs from its run card's bottom edge into its left side");
+assert.ok(drawn[3].includes('data-to="t.dev.0.doctor"') && drawn[3].includes('d="M 100 40 C 100 100, 0 215, 0 215"'), "a doctor card in the residual row still drops from its analysed run's card");
 relHotApply = null;
 relDraw();
 assert.equal(relMarks, 1, "the rewrite is html-gated: an unchanged redraw neither rewrites nor re-runs markActiveAgent");

@@ -185,11 +185,11 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .agent-card-active { border-color: var(--link); background: color-mix(in srgb, var(--link) 20%, var(--panel)); }
 .agent-dead { color: var(--critical-fg); }
 .agent-stats { display: block; font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
-.agent-col { display: flex; flex-direction: column; gap: 4px; }
-.agent-subs { display: flex; flex-direction: column; gap: 4px; }
+.agent-col { display: flex; flex-direction: column; gap: 8px; }
+.agent-subs { display: flex; flex-direction: column; gap: 8px; }
 .agent-subs:empty { display: none; }
-#m-agent-btns { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
-#m-doctor { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-top: 8px; }
+#m-agent-btns { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; }
+#m-doctor { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; margin-top: 8px; }
 #m-doctor:empty { display: none; }
 /* 000275: run and sub cards read their role's board column accent, the same static hex in both
 themes (doctor done green, splitter backlog grey); at rest only the text and check mark take the
@@ -736,16 +736,17 @@ function hotAgentRelations(handle, on) {
 		if (p.dataset.from === handle || p.dataset.to === handle) p.classList.toggle("relations-hot", on);
 }
 // the vertical connector: out of the run card's bottom edge heading down, into the sub or doctor
-// card's left side heading right; the horizontal run-in scales with the span (the board sBend
-// pattern) and clamps to the space left of the card, so the approach reads perpendicular; a card
-// flush with the area's left edge keeps the short hook and loses no visible length to the clip
+// card's left side heading right; the departure scales with the vertical span and the horizontal
+// approach triples the span-scaled base, rounded to the nearest 5px, then the space left of the
+// card caps it last, so the control point never lands left of the area and the approach never clips
 function dropCurve(from, to) {
 	const x1 = from.x + from.w / 2;
 	const y1 = from.y + from.h;
 	const x2 = to.x;
 	const y2 = to.y + to.h / 2;
 	const v = Math.max(8, Math.min((y2 - y1) * 0.5, 60));
-	const d = Math.max(8, Math.min(Math.abs(x1 - x2) * 0.35, 60, x2));
+	const base = Math.max(8, Math.min(Math.abs(x1 - x2) * 0.35, 60));
+	const d = Math.min(5 * Math.round((3 * base) / 5), x2);
 	return "M " + x1 + " " + y1 + " C " + x1 + " " + (y1 + v) + ", " + (x2 - d) + " " + y2 + ", " + x2 + " " + y2;
 }
 // 000237 the detail card's relation lines, behind the cards in #m-agent: one dashed connector per
