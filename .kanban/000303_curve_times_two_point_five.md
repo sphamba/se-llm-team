@@ -1,8 +1,8 @@
 ---
 name: "fix: cut the sub and doctor curve multiplier from 3 to 2.5"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "live-testing"
+worktree: "fix/303-curve-times-two-point-five"
 issuer: "#302"
 complexity: "simple"
 shortName: "curve-times-two-point-five"
@@ -66,3 +66,9 @@ At live test, in the repo root: `pnpm test` exits 0, and the user opens a task d
 - No rounded stroke caps, no dash change, no config key.
 
 # Notes
+- Changed `dropCurve` in `src/webui/page.ts`: the horizontal approach is now `5 * Math.round((2.5 * base) / 5)` capped last by `x2`. The `base` clamp, `v`, the `x2` cap and `curve()` in `src/webui/board.ts` are unchanged.
+- Rewrote the comment above `dropCurve` to say "2.5 times ... rounded to the nearest 5px".
+- Updated `tests/webui/page.test.ts`: the exact-path pin now expects `M 100 40 C 100 49.5, 150 59, 300 59`, and the six-row table is `20, 50, 90, 150` with the two `x2`-capped rows `40` and `6` unchanged. Red first (actual 120 vs expected 150), green after the fix.
+- `node tests/webui/page.test.ts` exits 0, `node tests/webui/board.test.ts` exits 0. The full suite and the live-test judgement are left to the repo root run.
+- Assumption: `x2` caps use the same base clamp, so the two x2 rows keep their old values. The Specs table confirms it.
+- Review of 3ec62ed (first pass): pass, no findings, no fixes. Every spec line holds. `src/webui/page.ts:755` is `5 * Math.round((2.5 * base) / 5)` capped by `x2` last, and the `base` clamp plus `v` are unchanged. The comment at `src/webui/page.ts:744-747` reads "2.5 times ... rounded to the nearest 5px", and the test comment at `tests/webui/page.test.ts:793` matches. `git diff --numstat main...HEAD` lists only `src/webui/page.ts` (2/2) and `tests/webui/page.test.ts` (3/3), so `curve()` at `src/webui/board.ts:218` is untouched. All six Specs table values re-derive from the formula, including 87.5 -> 90 and the two `x2` rows 40 and 6. The exact-path pin is `M 100 40 C 100 49.5, 150 59, 300 59`. Tests: `node tests/webui/page.test.ts` exit 0, `node tests/webui/board.test.ts` exit 0. Tree clean at 3ec62ed. No open questions: the `x2` clamp reading is stated in the Notes and confirmed by the Specs table. No silent assumptions in the diff.
