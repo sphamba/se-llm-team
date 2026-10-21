@@ -1,8 +1,8 @@
 ---
 name: "feat: mark a user-held task card with a dashed border"
 priority: "medium"
-state: "to-do"
-worktree: ""
+state: "doing"
+worktree: "feat/320-user-blocker-hold-card"
 issuer: "#318"
 complexity: "moderate"
 shortName: "user-blocker-hold-card"
@@ -48,7 +48,6 @@ Do not split further. The class toggle, the CSS rule and their tests land togeth
 
 # Notes
 - 2026-10-21 Splitter (no split, #320): No split. The "Split scope" section forbids it, and the code agrees. The `user-hold` class toggle in `syncBoard` (`src/webui/board.ts`) and the dashed pseudo-element rule in `src/webui/page.ts` are one UI change. The two suites pin the same class and the same style block, so no test goes green before both parts exist. A cut between the class and the CSS would add one review, one merge and one live test for no parallel gain. The sibling #319 owns the daemon half, so the work is already parallelized.
-- Guidance for future Splitter agents (from #320): a "Split scope" section written by the parent Splitter is binding. Do not split a task that the parent already sliced unless the Specs contradict the section. Name the shared files and suites that make a cut sequential, so the next pass can check the reasoning. Omit the kanban tool `file` argument: the tools resolve the cwd `SPECS.md` symlink, and `file: SPECS.md` looks for a task of that name and fails.
 ## Splitter pass: no split (verified)
 
 The decision above stands after a code check. Complexity stays moderate and the task stays in to-do.
@@ -59,3 +58,5 @@ The decision above stands after a code check. Complexity stays moderate and the 
 - `syncBoard` (`src/webui/board.ts:439`) sets no `className` after creation, so `classList.toggle("user-hold", ...)` keeps the one-shot `enter` class safe.
 
 Guidance for the next Splitter pass: keep the token test inline in `syncBoard`. A new helper in `board.ts` needs a new source-interpolation site in `page.ts`, and an unshipped helper throws in the browser on the first poll.
+
+- Durable guidance for future Splitter agents: read the `## Split scope` section first, because a parent Splitter that already sliced the work makes a second split duplicate work. The root `SPECS.md` symlink is shared by root-cwd spawns, so edit the `.kanban/<file>.md` path directly and pass that file name to the kanban tools.
