@@ -1,7 +1,7 @@
 ---
 name: "fix: end the integration task at done on every lane end, never requeue it"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/312-integration-lane-done"
 issuer: "user"
 complexity: "simple"
@@ -67,3 +67,13 @@ Check `skills/se-llm-team/SKILL.md:19` and `docs/architecture.md:28`. Update a l
 - Red first: `node tests/orchestrator/integration.test.ts` failed at the crash assert with `to-integration-test` vs `done`.
 - Green after the change: `node tests/orchestrator/integration.test.ts` exit=0 and `node tests/orchestrator/merge.test.ts` exit=0.
 - The full suite is the live tester's gate.
+
+Review of edf27f2 (first pass): approve. Both specs end paths now read `done`, the logic is unchanged, and the tests pin both ends.
+
+- `src/orchestrator/liveness.ts:21` (`WORKING_STATES["integration-testing"].next`) and `src/orchestrator/liveness.ts:30` (`LANES["integration-testing"].next`) are `done`, with the comments the Specs asked for.
+- `src/orchestrator/liveness.ts:236` (the non-zero exit path) and `:159` (the stall-kill path) both pass `working.next`, so a crash, a stall kill and a superseded slug all land at `done`. The `.dead` marker, the dead-streak bump and the exit-file clear stay.
+- `tests/orchestrator/integration.test.ts:523` asserts `done` for the crash case (pid 999999, exit 3, no lane pid, no lane exit, nothing in `integration-testing`). `tests/orchestrator/integration.test.ts:535` asserts `done` for the superseded case and that the live pid/slug pair is untouched.
+- `docs/architecture.md:32` no longer says a crashed integration run returns to `to-integration-test`. `skills/se-llm-team/SKILL.md:19` already said "It ends at done", so the Specs' conditional edit did not fire.
+- Tests: `node tests/orchestrator/integration.test.ts` exit=0, `node tests/orchestrator/merge.test.ts` exit=0.
+- Non-blocking: the superseded case checks the third member of the shared trio by absence (`existsSync(laneFile(root10, "exit")) === false`, `integration.test.ts:538`) instead of seeding the exit file and asserting it survives. Upgrade path: write `"0"` to the lane exit before the poll and assert the file still holds `0`, which pins "untouched" for all three files rather than two.
+

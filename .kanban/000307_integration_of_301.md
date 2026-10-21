@@ -1,7 +1,7 @@
 ---
 name: "test: integration of #301, #306"
 priority: "low"
-state: "integration-testing"
+state: "done"
 worktree: ""
 issuer: "auto"
 complexity: "simple"
