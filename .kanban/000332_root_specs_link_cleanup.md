@@ -1,8 +1,8 @@
 ---
 name: "fix: clear the root SPECS.md link when a root-cwd agent exits"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "to-live-test"
+worktree: "fix/332-root-specs-link-cleanup"
 issuer: "user"
 complexity: "simple"
 shortName: "root-specs-link-cleanup"
@@ -61,3 +61,27 @@ Run from the task worktree. Every command must exit 0.
 6. `grep -q "clearContextSymlinks(root, fresh)" src/orchestrator/pipeline.ts`
 
 # Notes
+
+## Done
+- `clearContextSymlinks` now derives the cwd from the task and falls back to the root; the `!task.worktree` early return is gone. At the root it removes `SPECS.md` only while the link still points at `.kanban/<task.file>`, so a link that a live root-cwd run repointed survives. A worktree keeps the unconditional removal of both links.
+- Splitter: `clearContextSymlinks(root, fresh)` sits in the `SPLITTER_COMPLEXITIES` fall-through of the to-do sweep, before `ensureWorktree`, with the import from `./spawn.ts`. The integration-tester needs no change, the two liveness call sites already cover it.
+- `tests/context-symlinks.test.ts` part CS6 covers the root exit (link gone, real `AGENTS.md` untouched), the pointer mismatch (the link survives), and the unchanged worktree removal. Red first: `a root-cwd exit removes its SPECS.md link` failed with exit 1.
+- A root exit removes only `SPECS.md`, never `AGENTS.md`, because `ensureContextSymlinks` returns early at the root and creates no role-notes link there.
+
+## Acceptance
+1. `node tests/context-symlinks.test.ts` exit 0, part CS6 and the updated summary line in the output.
+2. `node tests/orchestrator/spawn.test.ts` exit 1, pre-existing: `timeout waiting for the integration task runs to done and folds into the mirror`. Base proof on HEAD 2273595: `git stash push -- src/orchestrator/spawn.ts src/orchestrator/pipeline.ts`, same suite, same wait, same last daemon line (`queued board report`). Not this diff.
+3. `node tests/orchestrator/integration.test.ts` exit 0, the integration-tester lane smoke passed.
+4. `! grep -q "if (!task.worktree) return;" src/orchestrator/spawn.ts` exit 0.
+5. `grep -q 'const cwd = task.worktree ? join(root, ".worktrees", task.worktree) : root;' src/orchestrator/spawn.ts` exit 0.
+6. `grep -q "clearContextSymlinks(root, fresh)" src/orchestrator/pipeline.ts` exit 0.
+7. Docs unchanged: `grep -rn "SPECS.md" docs/ README.md` finds spawn-time claims only (`docs/agents-and-tools.md:7` "gets only the `SPECS.md` link", `:31` the tool error text), and no sentence says the root keeps the link after a run. `skills/se-llm-team/SKILL.md:19` and `docs/development.md:16` name the root cwd, not the link.
+
+Review of d674e44 (first pass):
+- `src/orchestrator/spawn.ts:131`: the cwd is `task.worktree ? join(root, ".worktrees", task.worktree) : root`, and the root path removes only `SPECS.md`, only while `readlinkSync(path) === join(".kanban", task.file)` (`:138`), after the `isSymbolicLink` check (`:135`) and before `rmSync` (`:139`). A worktree keeps the unconditional pair removal. The `!task.worktree` early return is gone from `src`, and Spec 5's functions (`ensureContextSymlinks`, `repointContextSymlink`, `ensureInfoExclude`, `cleanContextPaths`) are untouched.
+- `src/orchestrator/pipeline.ts:161`: `clearContextSymlinks(root, fresh)` is the last statement of the `SPLITTER_COMPLEXITIES` fall-through, before `ensureWorktree` (`:163`), with the import on `:7`. The integration-tester needs no new call because `src/orchestrator/liveness.ts:89` and `:186` already clear a task with an empty `worktree`.
+- `tests/context-symlinks.test.ts:238`: part CS6 removes the root link and keeps the real `AGENTS.md` (`:243` pins the matching target), keeps a link repointed at another task (`:252`), and still removes both worktree links (`:259`), so the guard and the worktree path are both pinned to behavior, not to a message.
+- Docs (Spec 7): `docs/agents-and-tools.md:7` and `:31` are spawn-time claims that stay true, and no sentence says the root keeps the link after a run, so no doc edit was needed.
+Tests: exit=0 tests/context-symlinks.test.ts (CS6 in the run, summary line updated) | exit=0 tests/orchestrator/integration.test.ts | exit=1 tests/orchestrator/spawn.test.ts, pre-existing and reproduced on this tree by copying `main`'s `spawn.ts` and `pipeline.ts` over HEAD's: same first line `timeout waiting for the integration task runs to done and folds into the mirror`, same last daemon line `queued board report`, then restored (tree clean).
+Note (non-blocking): the guard compares raw link text, so it clears only a relative `.kanban/<file>` target; a hand-made or future absolute-target root link survives. Upgrade path: compare `resolve(dirname(path), readlinkSync(path))` with `join(root, ".kanban", task.file)` the day a spawn writes an absolute target.
+

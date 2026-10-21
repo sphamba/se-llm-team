@@ -1,8 +1,8 @@
 ---
 name: "fix: the root context symlink never replaces a real file"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "fix/331-root-context-symlink-guard"
 issuer: "user"
 complexity: "simple"
 shortName: "root-context-symlink-guard"
@@ -75,3 +75,27 @@ Run from the task worktree. Every command must exit 0.
 7. `grep -q "refusing to replace the real file" src/orchestrator/spawn.ts`
 
 # Notes
+## What changed
+- `src/orchestrator/spawn.ts`: new `realpathOrSelf` helper next to `isRealFile`; `realpathSync` added to the `node:fs` import. The root guard in `ensureContextSymlinks` now compares resolved paths, so `root + "/"` and a symlink alias of the root take the early return. `repointContextSymlink` refuses a real file whose `dirname` resolves to the project root, with one `refusing to replace the real file ... at the project root` log line. Both surrounding comments stayed verbatim, and the `readlinkSync` check, directory refusal, `rmSync` and `symlinkSync` are unchanged.
+- `src/orchestrator/spawn.ts`: `spawnAgent` computes `rootCwd` from the same resolved comparison and uses it for `piPrompt` and `renderPrompt`. The two remaining raw `cwd === root` expressions were the same defect class: a trailing-slash or alias cwd would have skipped the #313 root-cwd prompt and appended the project `AGENTS.md` as a second system prompt. Acceptance 5 (`! grep -q "cwd === root"`) cannot hold without this. Behavior is identical for every existing caller, since a real root cwd resolves equal.
+- `tests/orchestrator/spawn.test.ts`: part BA (after part AZ), `ensureContextSymlinks` imported. Fixture holds a real `AGENTS.md` (`# project guidance`) and a real `SPECS.md` (`# my real specs`), task file `000313_root_specs_pointer.md`, role `integration-tester`. Cases: trailing-slash root, `symlinkSync(root, alias)` alias, plain root (both files stay regular files, content unchanged), real `<root>/.worktrees/feat-x` (both names become symlinks, so the worktree flow does not leak), and three refusal lines in `.kanban/.logs/orchestrator.log` naming the real root `SPECS.md`.
+
+## Acceptance
+1. `node tests/orchestrator/spawn.test.ts` - RED AT BASE, pre-existing. Fails at the part A wait `timeout waiting for the integration task runs to done and folds into the mirror`, before part BA runs. Proven read-only with `git archive 2273595 | tar -x -C /tmp/baseBA` and the same suite there: same wait, same timeout, exit 1. HEAD and main were both `2273595` before my first edit. Part BA was never reached, so I did not retry the suite.
+2. `node tests/context-symlinks.test.ts` - exit 0, 6 parts passed.
+3. `node tests/orchestrator/merge.test.ts` - exit 0, 5 parts passed.
+4. Manual repro on a scratch git root with a real `AGENTS.md`: `sha256sum` before and after a `node -e` call of `ensureContextSymlinks(root, root + "/", ...)` is identical for both files, and the run wrote exactly one refusal line.
+5. `! grep -q "cwd === root" src/orchestrator/spawn.ts` - exit 0.
+6. `grep -q "if (realpathOrSelf(cwd) === realpathOrSelf(root)) return;" src/orchestrator/spawn.ts` - exit 0.
+7. `grep -q "refusing to replace the real file" src/orchestrator/spawn.ts` - exit 0.
+
+## Red-first proof of part BA
+Part A blocks the suite before part BA, so I proved the pin with the identical block in a throwaway `tests/_scratch.test.ts` (direct `ensureContextSymlinks` calls, no daemon). Before the source edit it failed with `AssertionError: the real root AGENTS.md survives the trailing-slash cwd`. After the edit it passed. The scratch file is deleted. The shipped pin is part BA in `tests/orchestrator/spawn.test.ts`.
+
+## Notes
+- `tests/orchestrator/spawn.test.ts` part A is red at `2273595` on this machine, independent of this diff. Both shas `2273595`, pre-existing wait: `timeout waiting for the integration task runs to done and folds into the mirror` (the daemon log stops after `queued board report`, so the `kanban: done ...` mirror commit and the worktree removal never land inside the 60 s window). A new task owns it.
+- Not added, per the Specs: no backup file, no restore path, and no change to `clearContextSymlinks`, `ensureInfoExclude`, `cleanContextPaths` or `stripContextSymlinks`.
+- Existing part AZ assertion `the splitter cwd still links the task file` still holds, so no fixture change was needed: at a fresh root the `SPECS.md` link is missing, not a real file, so the new refusal does not fire.
+
+# Open questions
+- `spawnAgent`'s two other `cwd === root` expressions are now a single resolved `rootCwd`. Confirm that this generalization belongs to this task. Acceptance 5 cannot exit 0 without it.
