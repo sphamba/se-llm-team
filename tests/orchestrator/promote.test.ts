@@ -746,3 +746,30 @@ rescan(rootBE, cfgBE);
 assert.equal(parseTask(rootBE, youngerBE.file).state, "doing", "the younger same-priority task starts once the slot frees");
 cleanupAll(rootBE);
 console.log("orchestrator.test.ts: ... + same-priority creation order smoke passed");
+
+// --- part BI: the user hold token holds a backlog task until the PM removes it, and the
+// auto-drop keeps the token while it drops a satisfied ref ---
+const rootBI = fixture();
+cleaned.push(rootBI);
+mkdirSync(kanbanDir(rootBI), { recursive: true });
+const heldBI = createTask(rootBI, { name: "feat: held in backlog", summary: "User hold smoke", specs: "n/a", blockedBy: "user" });
+const runningBI = createTask(rootBI, { name: "feat: blocker still running", summary: "User hold smoke", specs: "n/a" });
+setState(rootBI, runningBI, "doing");
+const doneBI = createTask(rootBI, { name: "feat: blocker done", summary: "User hold smoke", specs: "n/a" });
+setState(rootBI, doneBI, "done");
+// the token mixes with a task ref: the task waits for the user AND for the ref
+const mixedBI = createTask(rootBI, { name: "feat: held with an unfinished ref", summary: "User hold smoke", specs: "n/a", blockedBy: `user, #${taskNum(runningBI.file)}` });
+// the token survives the auto-drop of a satisfied ref
+const droppedBI = createTask(rootBI, { name: "feat: held over a done ref", summary: "User hold smoke", specs: "n/a", blockedBy: `user, #${taskNum(doneBI.file)}` });
+assert.equal(promoteBacklog(rootBI, listAll(rootBI)).length, 0, "a user hold holds every promotion");
+assert.equal(parseTask(rootBI, heldBI.file).state, "backlog", "the bare hold keeps the task in backlog");
+assert.equal(parseTask(rootBI, mixedBI.file).state, "backlog", "the hold keeps the task in backlog beside an unfinished ref");
+dropDoneBlockers(rootBI, listAll(rootBI));
+assert.equal(parseTask(rootBI, droppedBI.file).blockedBy, "user", "the auto-drop keeps the user hold and drops the done ref");
+assert.equal(parseTask(rootBI, droppedBI.file).state, "backlog", "the held task stays in backlog after the auto-drop");
+// kanban_update removes only the token: the task promotes on the next pass
+updateTask(rootBI, heldBI, { blockedBy: "" });
+assert.deepEqual(promoteBacklog(rootBI, listAll(rootBI)).map((t) => t.file), [heldBI.file], "only the released task promotes");
+assert.equal(parseTask(rootBI, heldBI.file).state, "to-do", "the released task reached to-do");
+cleanupAll(rootBI);
+console.log("orchestrator.test.ts: ... + user hold on a backlog task smoke passed");

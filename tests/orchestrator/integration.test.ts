@@ -3,7 +3,7 @@ import { execSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTask, getTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskNum, taskSlug, type Task } from "../../src/kanban.ts";
+import { createTask, getTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskNum, taskSlug, updateTask, type Task } from "../../src/kanban.ts";
 import { loadConfig, poll } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline.ts";
 import type { Config } from "../../src/orchestrator/config.ts";
@@ -623,5 +623,31 @@ assert.notEqual(fresh15[0].file, entry15.file, "the new entry is a fresh task, n
 assert.equal(fresh15[0].name, `test: integration of #${taskNum(twice15.file)}`, "the new entry names the ref");
 assert.equal(parseTask(root15, entry15.file).state, "done", "the done entry stays done");
 console.log("integration.test.ts: ... + a new entry after the earlier one reached done passed");
+
+// --- part 16: a user hold skips the integration lane: the held task keeps to-integration-test,
+// writes no lane pid or slug of its own, and the next eligible waiting task takes the slot ---
+const root16 = fixture();
+cleaned.push(root16);
+const stubDir16 = mkdtempSync(join(tmpdir(), "orch-lane-"));
+cleaned.push(stubDir16);
+const stub16 = laneStub(stubDir16);
+const cfg16 = configFor(root16, stub16.agent, 0);
+const held16 = waitingTask(root16, 961, "critical");
+updateTask(root16, held16, { blockedBy: "user" });
+const next16 = waitingTask(root16, 962, "low");
+rescan(root16, cfg16, true);
+assert.equal(parseTask(root16, held16.file).state, "to-integration-test", "the held task stays in to-integration-test");
+assert.equal(parseTask(root16, next16.file).state, "integration-testing", "the next eligible task took the single slot");
+assert.equal(readText(laneFile(root16, "slug"), "the lane slug file").trim(), taskSlug(next16.file), "the lane serves the eligible task, not the held one");
+await waitUntil(() => laneRuns(stub16.log).length === 1, 15000, "the stub agent to record its spawn");
+assert.equal(laneRuns(stub16.log)[0].name, next16.name, "the only run is the eligible task's");
+await stopLane(root16);
+// releasing the hold starts the lane run on the held task
+updateTask(root16, held16, { blockedBy: "" });
+rescan(root16, cfg16, true);
+assert.equal(parseTask(root16, held16.file).state, "integration-testing", "the released task started its run");
+assert.equal(readText(laneFile(root16, "slug"), "the lane slug file").trim(), taskSlug(held16.file), "the lane now serves the released task");
+await stopLane(root16);
+console.log("integration.test.ts: ... + user hold skips the integration lane passed");
 
 console.log("integration.test.ts: integration-test lane smoke passed (creation at the merge, fields, append, second wait, no-create, skip, one run at a time, maxParallel, crash and superseded ends, trigger moves, failed merge)");

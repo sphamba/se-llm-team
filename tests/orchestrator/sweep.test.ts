@@ -4,7 +4,8 @@ import { createServer as createNetServer } from "node:net";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTask, kanbanDir, parseTask, setState, setWorktree, taskNum, taskSlug } from "../../src/kanban.ts";
+import { createTask, kanbanDir, parseTask, setState, setWorktree, taskNum, taskSlug, updateTask } from "../../src/kanban.ts";
+import { armedPath } from "../../src/orchestrator/log.ts";
 import { REPORT_MAX_AGE_MS, reportsDir } from "../../src/orchestrator/report.ts";
 import { loadConfig, poll, removeTask } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline.ts";
@@ -367,3 +368,64 @@ rescan(rootAZ, cfgAZ);
 assert.equal(parseTask(rootAZ, taskAZ.file).state, "live-testing", "below the cap the live-tester spawned");
 assert.ok(existsSync(pidPath(rootAZ, taskSlug(taskAZ.file))), "below the cap the live-tester pid file exists");
 console.log("orchestrator.test.ts: ... + maxParallel live-test cap smoke passed");
+
+// --- part UH1: a user hold skips the reviewer spawn: the task stays in to-review and no armed
+// marker is written, so releasing the hold starts the review with no stale run on record ---
+const rootUH1 = fixture();
+cleaned.push(rootUH1);
+const homeUH1 = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeUH1);
+mkdirSync(kanbanDir(rootUH1), { recursive: true });
+const savedHomeUH1 = process.env.HOME;
+process.env.HOME = homeUH1;
+let cfgUH1: ReturnType<typeof loadConfig>;
+try {
+	cfgUH1 = loadConfig(rootUH1);
+} finally {
+	process.env.HOME = savedHomeUH1;
+}
+cfgUH1.backlogIdleMinutes = 0;
+cfgUH1.agent = deadStub(rootUH1);
+const heldUH1 = createTask(rootUH1, { name: "feat: held in review", summary: "User hold smoke", specs: "n/a", blockedBy: "user" });
+setState(rootUH1, heldUH1, "to-review");
+rescan(rootUH1, cfgUH1);
+assert.equal(parseTask(rootUH1, heldUH1.file).state, "to-review", "the held task stays in to-review");
+assert.equal(existsSync(pidPath(rootUH1, taskSlug(heldUH1.file))), false, "no reviewer pid file for a held task");
+assert.equal(existsSync(armedPath(rootUH1, taskSlug(heldUH1.file))), false, "no reviewer armed marker for a held task");
+updateTask(rootUH1, heldUH1, { blockedBy: "" });
+rescan(rootUH1, cfgUH1);
+assert.equal(parseTask(rootUH1, heldUH1.file).state, "reviewing", "the released task spawned the reviewer");
+assert.ok(existsSync(armedPath(rootUH1, taskSlug(heldUH1.file))), "the released task armed the reviewer run");
+console.log("orchestrator.test.ts: ... + user hold skips the reviewer spawn smoke passed");
+
+// --- part UH2: a user hold skips the live-tester spawn and the scan moves on: the held task
+// keeps to-live-test, the next eligible task starts its run ---
+const rootUH2 = fixture();
+cleaned.push(rootUH2);
+const homeUH2 = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeUH2);
+mkdirSync(kanbanDir(rootUH2), { recursive: true });
+const savedHomeUH2 = process.env.HOME;
+process.env.HOME = homeUH2;
+let cfgUH2: ReturnType<typeof loadConfig>;
+try {
+	cfgUH2 = loadConfig(rootUH2);
+} finally {
+	process.env.HOME = savedHomeUH2;
+}
+cfgUH2.backlogIdleMinutes = 0;
+cfgUH2.agent = deadStub(rootUH2);
+// two branches at HEAD (merged): the to-live-test branch requires the worktree branch merged
+execSync("git branch held-live && git branch next-live", { cwd: rootUH2, shell: "/bin/bash" });
+const heldUH2 = createTask(rootUH2, { name: "feat: held live test", priority: "critical", summary: "User hold smoke", specs: "n/a", blockedBy: "user" });
+setWorktree(rootUH2, heldUH2, "held-live");
+setState(rootUH2, heldUH2, "to-live-test");
+const nextUH2 = createTask(rootUH2, { name: "feat: next live test", priority: "low", summary: "User hold smoke", specs: "n/a" });
+setWorktree(rootUH2, nextUH2, "next-live");
+setState(rootUH2, nextUH2, "to-live-test");
+rescan(rootUH2, cfgUH2);
+assert.equal(parseTask(rootUH2, heldUH2.file).state, "to-live-test", "the held task stays in to-live-test");
+assert.equal(existsSync(pidPath(rootUH2, taskSlug(heldUH2.file))), false, "no live-tester pid file for a held task");
+assert.equal(parseTask(rootUH2, nextUH2.file).state, "live-testing", "the next eligible task started its live test");
+assert.ok(existsSync(pidPath(rootUH2, taskSlug(nextUH2.file))), "the next eligible task's live-tester pid file exists");
+console.log("orchestrator.test.ts: ... + user hold skips the live-tester spawn smoke passed");

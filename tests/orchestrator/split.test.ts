@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTask, kanbanDir, parseTask, setState, taskNum, taskSlug } from "../../src/kanban.ts";
+import { createTask, kanbanDir, parseTask, setState, taskNum, taskSlug, updateTask } from "../../src/kanban.ts";
 import { loadConfig } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline.ts";
 import { pidPath } from "../../src/pid.ts";
@@ -142,3 +142,37 @@ rescan(rootBF, cfgBF);
 assert.equal(parseTask(rootBF, taskBF.file).state, "doing", "below the cap the developer started");
 assert.ok(existsSync(pidPath(rootBF, taskSlug(taskBF.file))), "below the cap the developer pid file exists");
 console.log("orchestrator.test.ts: ... + maxParallel developer cap smoke passed");
+
+// --- part BG: a user hold skips the whole to-do lane: no splitter marker, no worktree and no
+// developer spawn, and removing the token restarts the path with the splitter first ---
+const rootBG = fixture();
+cleaned.push(rootBG);
+const homeBG = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeBG);
+mkdirSync(kanbanDir(rootBG), { recursive: true });
+const savedHomeBG = process.env.HOME;
+process.env.HOME = homeBG;
+let cfgBG: ReturnType<typeof loadConfig>;
+try {
+	cfgBG = loadConfig(rootBG);
+} finally {
+	process.env.HOME = savedHomeBG;
+}
+cfgBG.backlogIdleMinutes = 0;
+cfgBG.agent = deadStub(rootBG);
+// a moderate task takes the splitter branch, a simple one the developer fallthrough
+const heldSplitBG = createTask(rootBG, { name: "feat: held splitter", summary: "User hold smoke", specs: "n/a", blockedBy: "user" });
+setState(rootBG, heldSplitBG, "to-do");
+const heldDevBG = createTask(rootBG, { name: "fix: held developer", summary: "User hold smoke", specs: "n/a", complexity: "simple", blockedBy: "USER, #999" });
+setState(rootBG, heldDevBG, "to-do");
+rescan(rootBG, cfgBG);
+assert.equal(parseTask(rootBG, heldSplitBG.file).state, "to-do", "the held moderate task stays in to-do");
+assert.equal(parseTask(rootBG, heldDevBG.file).state, "to-do", "the held simple task stays in to-do");
+assert.equal(existsSync(pidPath(rootBG, `${taskSlug(heldSplitBG.file)}.splitter`)), false, "no splitter marker file for a held task");
+assert.equal(existsSync(pidPath(rootBG, taskSlug(heldSplitBG.file))), false, "no developer pid file for a held moderate task");
+assert.equal(existsSync(pidPath(rootBG, taskSlug(heldDevBG.file))), false, "no developer pid file for a held simple task");
+updateTask(rootBG, heldSplitBG, { blockedBy: "" });
+rescan(rootBG, cfgBG);
+assert.equal(parseTask(rootBG, heldSplitBG.file).state, "to-do", "the released task stays to-do while the splitter runs");
+assert.ok(existsSync(pidPath(rootBG, `${taskSlug(heldSplitBG.file)}.splitter`)), "the released task restarted with the splitter");
+console.log("orchestrator.test.ts: ... + user hold skips the to-do lane smoke passed");

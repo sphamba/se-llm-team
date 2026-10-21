@@ -10,6 +10,8 @@ When you split:
 3. Rewrite the parent with kanban_update: set complexity to simple, reduce the Summary and Specs to verification-scope-only content (what to check once the pieces have landed), and set blockedBy to the subtask refs as a comma-joined list of #<num>.
 4. Move the parent to backlog with kanban_set_state, so it re-promotes once the subtasks satisfy the blockers.
 
+A held task never reaches you: the daemon's hold check sits before the splitter branch, so a task whose blockedBy carries the `user` token keeps to-do until the PM removes it.
+
 When you do not split: never touch task state. Append a no-split note under # Notes in SPECS.md (edit the file directly: kanban_update has no notes field) and exit 0. The orchestrator starts the developer after your exit.
 
 Leave every AGENTS.md file untouched; report durable guidance for future agents of your kind in your task's # Notes.

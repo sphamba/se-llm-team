@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTask, getTask, listTasks, parseTask, setState, taskFiles, taskNum, updateTask } from "../../src/kanban.ts";
+import { createTask, getTask, hasUserHold, listTasks, parseTask, setState, taskFiles, taskNum, updateTask } from "../../src/kanban.ts";
 
 const root = mkdtempSync(join(tmpdir(), "kanban-blockedby-"));
 const t1 = createTask(root, { name: "feat: nice thing", summary: "s" });
@@ -84,5 +84,33 @@ assert.equal(taskFiles(cRoot).length, 3); // the rejected create wrote no file
 assert.throws(() => createTask(cRoot, { name: "feat: cycle e", summary: "s", blockedBy: "#4" }), /blocks itself/);
 assert.equal(taskFiles(cRoot).length, 3);
 rmSync(cRoot, { recursive: true, force: true });
+
+// the user hold token: a "user" ref is a hold on the task, not a task ref. It parses, it
+// round-trips, and it mixes with task refs, which keep their old meaning
+const hRoot = mkdtempSync(join(tmpdir(), "kanban-userhold-"));
+const th = createTask(hRoot, { name: "feat: held by the user", summary: "s", blockedBy: "user" });
+assert.equal(th.blockedBy, "user");
+assert.equal(parseTask(hRoot, th.file).blockedBy, "user", "the hold token round-trips");
+const thm = createTask(hRoot, { name: "feat: held with a ref", summary: "s", blockedBy: "user, #42" });
+assert.equal(parseTask(hRoot, thm.file).blockedBy, "user, #42", "the token mixes with task refs and is kept verbatim");
+// the shared predicate: any comma part that trims and lowercases to "user" is a hold
+for (const refs of ["user", "USER", " user ", "user, #42", "#42, User"]) {
+	assert.equal(hasUserHold(refs), true, `hasUserHold(${JSON.stringify(refs)}) is true`);
+}
+for (const refs of ["#42", "", "   ", "users", "#42, #43"]) {
+	assert.equal(hasUserHold(refs), false, `hasUserHold(${JSON.stringify(refs)}) is false`);
+}
+// the cycle guard ignores the token: a hold alone never trips it, and a real 2-cycle is still
+// caught with the token beside the ref
+const thn = createTask(hRoot, { name: "feat: cycle partner", summary: "s" });
+const hnNum = taskNum(thn.file);
+const hNum = taskNum(th.file);
+updateTask(hRoot, thn, { blockedBy: `#${hNum}` });
+assert.throws(
+	() => updateTask(hRoot, th, { blockedBy: `user, #${hnNum}` }),
+	new RegExp(`cannot set blockedBy: #${hnNum} is already blocked by #${hNum}`),
+);
+assert.equal(parseTask(hRoot, th.file).blockedBy, "user", "the rejected write changed nothing");
+rmSync(hRoot, { recursive: true, force: true });
 rmSync(root, { recursive: true, force: true });
 console.log("kanban: blockedBy tests passed");

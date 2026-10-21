@@ -8,7 +8,7 @@ import { loadConfig, poll } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline.ts";
 import { agentAlive, pidAlive, pidPath } from "../../src/pid.ts";
 import { exitFilePath, readMergerSlug, renderPrompt, readExitCode } from "../../src/orchestrator/spawn.ts";
-import { fixture, mirrorSubjects, roleStub, runDaemon, waitFor, runIdx, cleanupAll, cleaned } from "../helpers.ts";
+import { fixture, mirrorSubjects, roleStub, deadStub, runDaemon, waitFor, runIdx, cleanupAll, cleaned } from "../helpers.ts";
 
 // --- part G: the to-merge sweep waits for the task's registered agent to die, and the live
 // test runs on the merged commit in the worktree ---
@@ -580,3 +580,38 @@ assert.equal(laneAV.length, 1, "the fast-forward opened exactly one integration 
 assert.equal(laneAV[0].name, `test: integration of #${taskNum(taskAV.file)}`, "the integration task names the merged ref");
 assert.ok(execSync("git log --format=%s main", { cwd: rootAV, encoding: "utf8" }).includes("capped"), "main took the branch commit below the cap");
 console.log("orchestrator.test.ts: ... + maxParallel merge cap smoke passed");
+
+// --- part UH3: a user hold skips the merge lane before any side effect: no rebase, no
+// fast-forward, no failed-merge marker and no merger slug, and the next eligible task merges ---
+const rootUH3 = fixture();
+cleaned.push(rootUH3);
+const homeUH3 = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeUH3);
+mkdirSync(kanbanDir(rootUH3), { recursive: true });
+const savedHomeUH3 = process.env.HOME;
+process.env.HOME = homeUH3;
+let cfgUH3: ReturnType<typeof loadConfig>;
+try {
+	cfgUH3 = loadConfig(rootUH3);
+} finally {
+	process.env.HOME = savedHomeUH3;
+}
+cfgUH3.backlogIdleMinutes = 0;
+cfgUH3.agent = deadStub(rootUH3);
+// a branch one commit ahead of main, for the held task and for the eligible one after it
+execSync("git checkout -qb feat/held-merge && git commit -q --allow-empty -m held-change && git checkout -q main", { cwd: rootUH3, shell: "/bin/bash" });
+execSync("git checkout -qb feat/next-merge && git commit -q --allow-empty -m next-change && git checkout -q main", { cwd: rootUH3, shell: "/bin/bash" });
+const heldUH3 = createTask(rootUH3, { name: "feat: held merge", priority: "critical", summary: "User hold smoke", specs: "n/a", blockedBy: "user" });
+setWorktree(rootUH3, heldUH3, "feat/held-merge");
+setState(rootUH3, heldUH3, "to-merge");
+const nextUH3 = createTask(rootUH3, { name: "feat: next merge", priority: "low", summary: "User hold smoke", specs: "n/a" });
+setWorktree(rootUH3, nextUH3, "feat/next-merge");
+setState(rootUH3, nextUH3, "to-merge");
+rescan(rootUH3, cfgUH3);
+assert.equal(parseTask(rootUH3, heldUH3.file).state, "to-merge", "the held task stays in to-merge");
+assert.equal(execSync("git log --format=%s main", { cwd: rootUH3, encoding: "utf8" }).includes("held-change"), false, "the held branch was never rebased into the base");
+assert.equal(existsSync(join(kanbanDir(rootUH3), ".pids", `${taskSlug(heldUH3.file)}.merge-attempted`)), false, "no failed-merge marker for a held task");
+assert.equal(readMergerSlug(rootUH3), null, "no merger slug file written for a held task");
+assert.equal(parseTask(rootUH3, nextUH3.file).state, "to-live-test", "the next eligible task still merged");
+assert.ok(execSync("git log --format=%s main", { cwd: rootUH3, encoding: "utf8" }).includes("next-change"), "the base took the eligible branch");
+console.log("orchestrator.test.ts: ... + user hold skips the merge lane smoke passed");

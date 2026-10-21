@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { isSelfWrite, kanbanDir, createTask, getTask, listAll, PRIORITY_RANK, setState, setWorktree, taskFiles, taskNum, taskSlug, updateAttrs, updateTask, ROLE_NOTES_RE, type Task } from "../kanban.ts";
+import { isSelfWrite, kanbanDir, createTask, getTask, hasUserHold, listAll, PRIORITY_RANK, setState, setWorktree, taskFiles, taskNum, taskSlug, updateAttrs, updateTask, ROLE_NOTES_RE, type Task } from "../kanban.ts";
 import { agentAlive, agentPid, clearPid, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP, REVIEWER_RUN_CAP, type Config } from "./config.ts";
 import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, newestRunRole, readCounter } from "./log.ts";
@@ -143,6 +143,9 @@ function startTodo(root: string, cfg: Config, task: Task): void {
 	// act on the file on disk, not on the snapshot, or a stale to-do call undoes the split
 	const fresh = getTask(root, task.file);
 	if (!fresh || fresh.state !== "to-do") return;
+	// a held task starts no stage: it keeps to-do, and removing the token restarts the path with
+	// the Splitter first because no splitter marker was written
+	if (hasUserHold(fresh.blockedBy)) return;
 	if (SPLITTER_COMPLEXITIES.has(fresh.complexity ?? "")) {
 		const entry = pidEntry(root, `${slug}.splitter`);
 		if (pidAlive(entry.pid, entry.disc)) return;
@@ -246,6 +249,9 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	// to-merge for the idle interval. Read before any write: ensureWorktree/setWorktree bump the
 	// task file's mtime, which is the idle clock, so this check must come first
 	if (existsSync(mergerAttemptPath(root, slug)) && Date.now() - statSync(join(kanbanDir(root), task.file)).mtimeMs < cfg.retryIdleMinutes * 60_000) return;
+	// a held task returns before the worktree, the rebase and the merger slug, so it never leaves
+	// a stopped rebase or a fast-forwarded base behind
+	if (hasUserHold(task.blockedBy)) return;
 	const wt = task.worktree;
 	if (!wt || (git(root, ["branch", "--list", wt], true) === "" && !existsSync(join(root, ".worktrees", wt)))) {
 		// nothing to merge: no worktree and no branch
@@ -327,6 +333,8 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 // superseded. The loop snapshot is already priority-first, then creation order, so the highest
 // priority waiting task takes the free slot
 function sweepToIntegrationTest(root: string, cfg: Config, task: Task): void {
+	// a held task keeps to-integration-test and leaves the single slot to the next waiting task
+	if (hasUserHold(task.blockedBy)) return;
 	// at most one integration-tester at a time, project-wide
 	if (agentAlive(root, "integration-tester")) return;
 	// at the maxParallel cap the start waits: the task stays to-integration-test
@@ -502,6 +510,8 @@ export function rescan(root: string, cfg: Config, force = false): void {
 				// a failed spawn would bounce or strand the task; leave the state for the next rescan to retry
 				if (!ensured) log(root, `${task.file}: worktree could not be created, reviewer not spawned (state unchanged)`);
 				else {
+					// a held task keeps to-review and arms no reviewer run
+					if (hasUserHold(task.blockedBy)) continue;
 					const slug = taskSlug(task.file);
 					consumeReviewerRun(root, slug);
 					const cap = cfg.reviewerCap[task.complexity] ?? REVIEWER_RUN_CAP;
@@ -526,6 +536,9 @@ export function rescan(root: string, cfg: Config, force = false): void {
 					}
 				}
 			} else if (task.state === "to-live-test" && !deadCooldownActive(root, cfg, task)) {
+				// a held task keeps to-live-test and starts no run: the check sits before the
+				// merged-branch test, so a hold never requeues the task either
+				if (hasUserHold(task.blockedBy)) continue;
 				const slug = taskSlug(task.file);
 				consumeReviewerRun(root, slug);
 				// the live test runs on the merged commit: after the rebase + fast-forward the
@@ -615,6 +628,8 @@ const sortNum = (file: string) => {
 const BLOCKER_SATISFIED = new Set(["done", "to-live-test", "live-testing"]);
 
 function blockedByUndone(tasks: Task[], task: Task): boolean {
+	// the user hold token is a blocker no state satisfies: only the PM removes it
+	if (hasUserHold(task.blockedBy)) return true;
 	if (!task.blockedBy) return false;
 	const states = new Map(tasks.map((t) => [sortNum(t.file), t.state]));
 	return task.blockedBy.split(",").some((ref) => {
