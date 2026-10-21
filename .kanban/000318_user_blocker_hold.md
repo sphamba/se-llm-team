@@ -1,7 +1,7 @@
 ---
 name: "feat: hold a task on a user blocker at every stage start"
 priority: "medium"
-state: "reviewing"
+state: "to-merge"
 worktree: "feat/318-user-blocker-hold"
 issuer: "user"
 complexity: "simple"
@@ -89,6 +89,18 @@ The integration task's done-fold commit never lands on the `meta/kanban` mirror.
 ## Closed: the earlier method finding
 
 The prior note said a `blockedBy` pair did not stop promotion. It does not repeat here, and it is not a defect. `dropDoneBlockers` removes a ref when its blocker enters the live test, by design (`docs/architecture.md`, backlog bullet). Both refs left this card at that point (frontmatter `blockedBy` is now empty), so promotion was allowed when both changes were already on `main`. The premise was true, and this run could verify it.
+
+Re-review of 41ad23b: the tree is clean and `HEAD` equals `main`, so this is verification-only again, and every Specs line holds on the merged base.
+
+- One predicate: `hasUserHold` is defined once, `src/kanban.ts:370`, and the six gates call it at `src/orchestrator/pipeline.ts:148`, `:254`, `:337`, `:514`, `:541`, `:632`. The only second copy of the token test is `src/webui/board.ts:462`, the browser-side class toggle that must stay inline because `page.ts` ships functions as text.
+- Token semantics: `blockedNums` (`src/kanban.ts:377`) and `assertNoBlockCycle` (`src/kanban.ts:390`) parse numbers only, so both ignore the token, and `dropDoneBlockers` keeps every non-numeric part (`src/orchestrator/pipeline.ts:665`) while it drops a satisfied ref.
+- Card: `.card` keeps the 3px left accent, the 6px radius and the `8px 10px` padding (`src/webui/page.ts:145`), hover sets `background` only (`:146`), and `:153` draws `0 6px` on and `6px 10px` off on the top, bottom and right edges. `syncBoard` toggles `user-hold` before the `__html` diff (`src/webui/board.ts:462-463`), so a poll adds and removes it and the one-shot `enter` class stays.
+- Analysis is not held and nothing is killed: `spawnRunAnalysis` runs at `src/orchestrator/pipeline.ts:238`, before the to-merge gate at `:254`, and at `src/orchestrator/liveness.ts:200` and `:229` with no hold test. `pipeline.ts` holds no `kill` call.
+
+Tests: `node scripts/test-changed.mjs` exit=0, which prints "no modifications, nothing to run" because `HEAD` 41ad23b equals `main`; `tests/webui/page.test.ts` exit=0; `tests/webui/board.test.ts` exit=0; `tests/kanban/blockedby.test.ts` exit=0. The orchestrator suites were not re-run, because no file changed since the prior 41ad23b pass: 14 green and `tests/orchestrator/spawn.test.ts` red (pass 1, reused).
+
+- Pre-existing red, not this batch: `tests/orchestrator/spawn.test.ts` part A fails on the integration done-fold that never reaches the `meta/kanban` mirror, at 84a0c8c too. Upgrade path: a separate task under `src/orchestrator/`.
+- This card carries no diff against `main`, so the merger receives an empty branch. Upgrade path if it bounces back here: the merger treats an empty branch as a no-op merge and moves the card on.
 
 # Open questions
 
