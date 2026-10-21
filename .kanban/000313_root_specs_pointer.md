@@ -1,8 +1,8 @@
 ---
 name: "fix: stop root-cwd agents from editing another task through the shared SPECS.md link"
 priority: "high"
-state: "live-testing"
-worktree: "fix/313-root-specs-pointer"
+state: "done"
+worktree: ""
 issuer: "#305"
 complexity: "simple"
 shortName: "root-specs-pointer"
@@ -68,6 +68,27 @@ Review of 84a0c8c (first pass):
 - Tests: `node tests/orchestrator/spawn.test.ts` exit=1 at HEAD, and exit=1 again with both changed files reverted to main: part A times out on "the integration task runs to done and folds into the mirror", so the red predates this diff and the new closing part never executes; an isolated probe of `renderPrompt` with the same arguments returns the exact line for the splitter and the integration-tester and the 3-argument prompt for a worktree cwd.
 - Non-blocking: part A is red on main by the sweep, not by load, so the `# Notes` "load flakiness" reading is wrong: one sweep that moves two tasks to done issues one whole-board commit, and the identical-tree guard in `commitKanban` (`src/orchestrator/board.ts:60`) then drops the second `kanban: done <file>` subject (proved with a two-file `commitKanban` probe); the upgrade is to assert one settled mirror head or to commit per file, in a separate task.
 - Non-blocking: the new assertions sit last, after part A, so a part A timeout hides them; moving that block to the top of the file keeps it runnable.
+
+## Live test (2026-10-21)
+
+Lane: daemon e2e, fake agent. The fake agent appends `{cwd, prompt}` from its `-p` argv to a capture file, so every row reads the real spawn argv. Merged tree `84a0c8c`, control tree `HEAD^` = `edf27f2`, one fixture root per tree. Fixture: task A (`complexity: complex`, state `to-do`) spawns the Splitter at the root cwd, and its exit 0 falls through to a worktree Developer; task B (state `to-integration-test`) spawns the integration-tester at the root cwd; `maxParallel: 0`. The expected sentence is extracted from this Specs file and has `<file>` substituted, so it is never retyped. Driver `/tmp/lt/driver.mjs`, logs `/tmp/lt/run-merged.log` and `/tmp/lt/run-control.log`.
+
+| Claim | Merged `84a0c8c` | Control `edf27f2` |
+| --- | --- | --- |
+| C1 Fix 1: a root-cwd run gets the Specs sentence prepended, verbatim, with the literal `.kanban/<file>` and the bare `<file>` | PASS: `C1.splitter-prompt-prefix` and `C1.integration-prompt-prefix` both equal the extracted sentence with that run's own file name (`000001_splitter_root_prompt.md`, `000002_integration_root_prompt.md`) | FAIL by design: `C1.control-splitter-has-specs-line=false` and `C1.control-integration-has-specs-line=false`, so the control prompts carry no such line |
+| C2 Fix 2: `spawnAgent` passes `task.file` and `cwd === root` | PASS: `C2.splitter-cwd-is-root=true`, `C2.integration-cwd-is-root=true`, and `C2.splitter-names-own-file=true` (the line names task A and its bare file as the kanban `file` argument) | keep-green: `C4.control-splitter-cwd-is-root=true`, the cwd is the root on both trees, so the new line is the only difference |
+| C3 Fix 3: a worktree run keeps today's prompt | PASS: the Developer cwd is not the root, its prompt holds no `shared link`, and it equals `agents/developer.md` with the stall minutes substituted | PASS: `C3.developer-prompt-equals-merged=true`, the HEAD^ Developer prompt is byte-identical to the merged one |
+| C4 Fix 4: the symlink is kept, no other root-cwd spawn site changes | PASS: `C4.root-symlink-kept=true` (the root `SPECS.md` is a live symlink to `.kanban/000002_integration_root_prompt.md` after both root spawns) and `C4.root-cwd-spawn-sites` lists exactly `src/orchestrator/pipeline.ts:152` and `src/orchestrator/pipeline.ts:339` | not applicable |
+
+Assumptions that shaped the checks:
+
+- The claim is about the text the daemon hands to the agent process, so the fake agent's `-p` capture is the proof lane. The Specs Tests name `tests/orchestrator/spawn.test.ts`, which a live test does not run.
+- Task B starts at `to-integration-test` directly, so the integration-tester spawn needs no full merge lane. The fake agent exits 0 without committing, so the merge lane never opens.
+- `XDG_CONFIG_HOME` and `HOME` point at a fixture directory, `SE_LLM_TEAM_NO_WEBUI=1`, port 0 is irrelevant here because the hub is off.
+- Observed, matching the Summary's assumption: after both root spawns the root link points at the later task (`.kanban/000002_integration_root_prompt.md`), so a later root-cwd spawn still re-points it. The link is kept as Fix 4 requires, and the new line is what keeps a root-cwd agent off it.
+- One driver note: the first control invocation printed no RESULT line because of a mode gate in my driver, not a tree signal. One edit fixed it and the rerun carried the scored rows.
+
+Not exercised: the merger, reviewer and live-tester prompts (the merge lane never opened), and the effect of the new instruction on a live LLM agent. `C4.root-cwd-spawn-sites` covers the first gap statically: no spawn site other than the Splitter and the integration-tester passes the root cwd. Cleanup: zero fixture processes left after both runs.
 
 # Open questions
 - Assumption: the root-cwd flag is exactly `cwd === root`, so only the splitter and the integration-tester take the new line (Specs 2 and 3).
