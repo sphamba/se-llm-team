@@ -1,7 +1,7 @@
 ---
 name: "fix: clear the root SPECS.md link when a root-cwd agent exits"
 priority: "low"
-state: "to-live-test"
+state: "live-testing"
 worktree: "fix/332-root-specs-link-cleanup"
 issuer: "user"
 complexity: "simple"
