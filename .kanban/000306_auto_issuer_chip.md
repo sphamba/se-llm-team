@@ -1,8 +1,8 @@
 ---
 name: "fix: task cards show the auto issuer as auto, not user"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "fix/306-auto-issuer-chip"
 issuer: "#301"
 complexity: "simple"
 shortName: "auto-issuer-chip"
@@ -70,3 +70,7 @@ At live test, in the repo root: `pnpm test` exits 0. Then, by hand, open the boa
 - No change to the detail dialog, which is already correct.
 
 # Notes
+- Narrowed `issued` in `cardBaseHtml` to `/^#\d+$/` and print the real issuer with `esc(t.issuer || "user")`; `auto` now gets a plain chip with no badge and no link. Missing issuer still reads `user`.
+- Updated the comment above `cardBaseHtml` and the auto-card pins in `tests/webui/board.test.ts`, including the new differ-only-in-chip-text check. The test went red first, then green.
+- `node tests/webui/board.test.ts` exit 0 and `node tests/webui/page.test.ts` exit 0. No change to `issuerCell`, `parseTask`, the payload or the CSS.
+- Assumption: any issuer that is not `#<num>` (and not empty) now prints as-is with a plain chip, which matches the Specs rule and the dialog.
