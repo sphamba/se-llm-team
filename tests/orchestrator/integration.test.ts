@@ -218,15 +218,16 @@ const configFor = (root: string, agent: string, maxParallel: number): Config => 
 	return cfg;
 };
 
-// a lane run the test spawned stays alive for the whole part on purpose: kill it, and prove it
-// is gone, so no stub outlives its part
-const stopLane = async (root: string): Promise<void> => {
-	const { pid, disc } = pidEntry(root, LANE);
+// a run the test spawned stays alive for the whole part on purpose: kill it, and prove it is
+// gone, so no stub outlives its part
+const stopAgent = async (root: string, name: string): Promise<void> => {
+	const { pid, disc } = pidEntry(root, name);
 	if (pid > 0 && pid !== process.pid && pidAlive(pid, disc)) {
 		killTree(pid, "SIGKILL");
-		await waitUntil(() => !pidAlive(pid, disc), 5000, `the spawned lane run pid=${pid} to exit`);
+		await waitUntil(() => !pidAlive(pid, disc), 5000, `the spawned run pid=${pid} to exit`);
 	}
 };
+const stopLane = (root: string): Promise<void> => stopAgent(root, LANE);
 
 // --- part 1: a to-merge task fast-forwards and opens exactly one waiting integration task, while
 // the covered task is still in to-live-test ---
@@ -650,4 +651,63 @@ assert.equal(readText(laneFile(root16, "slug"), "the lane slug file").trim(), ta
 await stopLane(root16);
 console.log("integration.test.ts: ... + user hold skips the integration lane passed");
 
-console.log("integration.test.ts: integration-test lane smoke passed (creation at the merge, fields, append, second wait, no-create, skip, one run at a time, maxParallel, crash and superseded ends, trigger moves, failed merge)");
+// --- part 17: a throw from the merge hook is never fatal. The waiting integration task file is
+// mode 0444, so the hook's rewrite throws EACCES after the fast-forward already landed: the merge
+// stands, the covered task keeps to-live-test, and the waiting task is left byte-identical ---
+const root17 = fixture();
+cleaned.push(root17);
+const cfg17 = mergeCfg(root17);
+const covered17 = liveTask(root17, "feat: the hook throws", "The covered ref whose integration hook fails.");
+const waiting17 = waitingTask(root17, 999001, "low");
+const waiting17Path = join(kanbanDir(root17), waiting17.file);
+chmodSync(waiting17Path, 0o444);
+mergeTask(root17, covered17, cfg17);
+chmodSync(waiting17Path, 0o644);
+const log17 = readText(join(kanbanDir(root17), ".logs", "orchestrator.log"), "the orchestrator log");
+const slug17 = taskSlug(covered17.file);
+assert.ok(log17.includes(`integration task for ${slug17} failed: `), "the hook throw is logged against the covered task's slug");
+assert.ok(log17.includes("EACCES"), "the logged failure names the permission trigger, so the catch is what swallowed it");
+assert.ok(
+	log17.includes(`${covered17.file}: fast-forwarded main to feat/covered-${taskNum(covered17.file)}, set to-live-test`),
+	"the merge completed and moved the task to to-live-test before the hook ran",
+);
+assert.equal(parseTask(root17, covered17.file).state, "to-live-test", "the failed hook left the merged task in to-live-test, never back in to-merge");
+const waiting17After = getTask(root17, waiting17.file)!;
+assert.equal(waiting17After.state, "to-integration-test", "the waiting integration task still waits");
+assert.equal(waiting17After.name, waiting17.name, "the failed rewrite left the waiting task's name unchanged");
+assert.equal(waiting17After.specs, waiting17.specs, "the failed rewrite left the waiting task's Specs unchanged");
+console.log("integration.test.ts: ... + a throw from the merge hook is non-fatal passed");
+
+// --- part 18: the integration-tester runs while the covered task's live-tester still runs. One
+// sweep spawns both, so the two pids are alive at the same sample: the overlap #311 exists for ---
+const root18 = fixture();
+cleaned.push(root18);
+const stubDir18 = mkdtempSync(join(tmpdir(), "orch-lane-"));
+cleaned.push(stubDir18);
+const stub18 = laneStub(stubDir18);
+const cfg18 = configFor(root18, stub18.agent, 0);
+const covered18 = liveTask(root18, "feat: the covered live test", "The ref whose live test overlaps the integration run.");
+const branch18 = `feat/covered-${taskNum(covered18.file)}`;
+execSync(`git checkout -qb ${branch18} && git commit -q --allow-empty -m covered && git checkout -q main`, { cwd: root18, shell: "/bin/bash" });
+setWorktree(root18, covered18, branch18);
+setState(root18, covered18, "to-merge");
+rescan(root18, cfg18);
+assert.equal(parseTask(root18, covered18.file).state, "to-live-test", "the merge moved the covered task to to-live-test");
+assert.equal(inState(root18, "to-integration-test").length, 1, "the hook opened the waiting integration task");
+// the covered task's live-tester left it in to-live-test, so the next sweep starts both runs
+rescan(root18, cfg18);
+await waitUntil(() => laneRuns(stub18.log).length === 2, 15000, "both stub agents to record their spawn");
+const covered18Pid = pidEntry(root18, taskSlug(covered18.file));
+const lane18Pid = pidEntry(root18, LANE);
+assert.notEqual(covered18Pid.pid, 0, "the covered task has a live-tester pid");
+assert.notEqual(lane18Pid.pid, 0, "the integration lane has a pid");
+assert.notEqual(lane18Pid.pid, covered18Pid.pid, "the two runs are different processes");
+assert.ok(pidAlive(covered18Pid.pid, covered18Pid.disc), `the covered task's live-tester pid=${covered18Pid.pid} is alive`);
+assert.ok(pidAlive(lane18Pid.pid, lane18Pid.disc), `the integration-tester pid=${lane18Pid.pid} is alive at the same time`);
+assert.equal(parseTask(root18, covered18.file).state, "live-testing", "the covered task's live test runs");
+assert.equal(inState(root18, "integration-testing").length, 1, "the integration lane runs while the covered live test still runs");
+await stopAgent(root18, taskSlug(covered18.file));
+await stopLane(root18);
+console.log("integration.test.ts: ... + the integration-tester overlaps the covered live-tester passed");
+
+console.log("integration.test.ts: integration-test lane smoke passed (creation at the merge, fields, append, second wait, no-create, skip, one run at a time, maxParallel, crash and superseded ends, trigger moves, failed merge, user hold, hook failure, live-test overlap)");
