@@ -29,7 +29,6 @@ This task now verifies the seam BETWEEN them, which neither blocker can test alo
 - Confirm the two ref lists agree: the refs in the first sentence of `## Own task` and the refs of the `### ` headings are the same set, in the same order.
 - Confirm no summary text is indented or bulleted, and that an empty line inside a summary renders as a lone `>` in the file and a paragraph break in the HTML.
 - Confirm `## Own task` and `## Covered tasks` are level-2 headings, so `replaceSections` (`src/kanban.ts:339-371`) still rewrites `# Specs` as a whole and the append does not emit a stray top-level section.
-- Confirm the renderer change did not alter the log pane: `renderLogChunk` output for a quote-containing log stays as it was, and the table, fence, heading and bullet branches are unchanged.
 - Confirm the field contract still holds: name, shortName, priority `low`, complexity `simple`, issuer `auto`, notes, no blockedBy, no worktree, state `to-integration-test`.
 
 ## Acceptance criteria
@@ -39,6 +38,10 @@ Run in the worktree:
 - `pnpm test` exits 0.
 
 At live test, in the repo root: `pnpm test` exits 0. Then, by hand: open an integration task's detail dialog and confirm the `Covered tasks` section shows real quotes, not literal `>` text. Read the task file and confirm the own instructions come before the covered summaries and cannot be mistaken for them.
+
+## Resolution
+
+Live test C9, block quotes in the run log pane: keep the blockquote in the pane. The user accepted that the dialog and the pane share one `md`, and did not want an `md` option or a split renderer. The earlier "the log pane stays as it was" check is superseded by this decision.
 
 ## Out of scope
 
@@ -109,7 +112,4 @@ Lane: hub-only root (served page, board card click, detail dialog DOM and comput
 - Cleanup: the hub ran in the driver process and `ui.close()` ran in the `finally`, the driver pid 865496 exited, and the fixture root was removed.
 
 # Open questions
-
-- Agent text in the run log that starts with `> ` now renders as a real blockquote, not literal `>` text. #308 asked for the log pane to stay as it was and #310's contract said the same, but the dialog and the pane share one `md`, so the two cannot both hold. Keep the blockquote in the pane (current, simpler), or give `md` an option so the pane keeps literal text?
-
 
