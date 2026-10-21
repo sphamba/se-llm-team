@@ -1,8 +1,8 @@
 ---
 name: "feat: hold a task on a user blocker at every stage start"
 priority: "medium"
-state: "live-testing"
-worktree: "feat/318-user-blocker-hold"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "user-blocker-hold"
@@ -106,7 +106,7 @@ Tests: `node scripts/test-changed.mjs` exit=0, which prints "no modifications, n
 
 Usage test of the joined change on the merged base `41ad23b` from this worktree, tree unmodified. No test suite and no `*.test.ts` file ran. One driver, two lanes: `/tmp/lt318/driver.mjs`, run log `/tmp/lt318/run.log`, per-check JSON `/tmp/lt318/result.json`.
 
-- Hub lane: a plain fixture root (`/tmp/lt318/hub`, no git, no daemon) with three to-do tasks, served by `startHub({port: 0})` and driven in Chromium by Playwright. Task `000002_held.md` carries `blockedBy: "user, #42"`. Task `000003_blocked.md` carries `blockedBy: "#1"` and is the no-hold control.
+- Hub lane: a plain fixture root (`/tmp/lt318/hub`, no git, no daemon) with three to-do tasks, served by `startHub({port: 0})` and driven in Chromium by Playwright. Task `000002_user_token.md` carries `blockedBy: "user, #42"`. Task `000003_by_one.md` carries `blockedBy: "#1"` and is the no-hold control.
 - Daemon lane: a git fixture root (`/tmp/lt318/daemon`) with nine tasks, one per held state plus an eligible neighbour in the merge and integration lanes, a fake agent that appends one JSON capture line, and `node src/orchestrator.ts --root <fixture> --rescan-seconds 1 --poll-minutes 0.01` with `SE_LLM_TEAM_NO_WEBUI=1`, a fixture `HOME` and a fixture `XDG_CONFIG_HOME`.
 
 | # | claim | printed proof | expected | control | verdict |
