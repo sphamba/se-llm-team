@@ -2,7 +2,7 @@
 name: "fix: end the integration task at done on every lane end, never requeue it"
 priority: "medium"
 state: "done"
-worktree: "fix/312-integration-lane-done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "integration-lane-done"
