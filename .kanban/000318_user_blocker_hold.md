@@ -102,6 +102,62 @@ Tests: `node scripts/test-changed.mjs` exit=0, which prints "no modifications, n
 - Pre-existing red, not this batch: `tests/orchestrator/spawn.test.ts` part A fails on the integration done-fold that never reaches the `meta/kanban` mirror, at 84a0c8c too. Upgrade path: a separate task under `src/orchestrator/`.
 - This card carries no diff against `main`, so the merger receives an empty branch. Upgrade path if it bounces back here: the merger treats an empty branch as a no-op merge and moves the card on.
 
+## Live test (2026-10-21)
+
+Usage test of the joined change on the merged base `41ad23b` from this worktree, tree unmodified. No test suite and no `*.test.ts` file ran. One driver, two lanes: `/tmp/lt318/driver.mjs`, run log `/tmp/lt318/run.log`, per-check JSON `/tmp/lt318/result.json`.
+
+- Hub lane: a plain fixture root (`/tmp/lt318/hub`, no git, no daemon) with three to-do tasks, served by `startHub({port: 0})` and driven in Chromium by Playwright. Task `000002_held.md` carries `blockedBy: "user, #42"`. Task `000003_blocked.md` carries `blockedBy: "#1"` and is the no-hold control.
+- Daemon lane: a git fixture root (`/tmp/lt318/daemon`) with nine tasks, one per held state plus an eligible neighbour in the merge and integration lanes, a fake agent that appends one JSON capture line, and `node src/orchestrator.ts --root <fixture> --rescan-seconds 1 --poll-minutes 0.01` with `SE_LLM_TEAM_NO_WEBUI=1`, a fixture `HOME` and a fixture `XDG_CONFIG_HOME`.
+
+| # | claim | printed proof | expected | control | verdict |
+| --- | --- | --- | --- | --- | --- |
+| C1 | the held card carries user-hold, the ref-only card does not | [true,false] | [true,false] | ref card classes ["card","enter"] | PASS |
+| C2 | the held card paints 6px on / 4px off dashes on three edges, the ref card none | {"gradients":3,"stops":"0,6,6,10 x3","raw":"repeating-linear-gradient(90deg, rgba(107, 125, 143, 0.12) 0px, rgba(107, 125, 143, 0.12) 6px, rgba(0, 0,… | 0,6,6,10 x3 | ref ::after none | PASS |
+| C3 | sizes kept: 3px left accent, 6px radius, 8px 10px padding, 1px transparent top border | {"left":"3px","top":"1px","topStyle":"solid","radius":"6px","padding":"8px 10px","topTransparent":true} | {"left":"3px","top":"1px","topStyle":"solid","radius":"6px","padding":"8px 10px","topTran… | ref top border rgba(107, 125, 143, 0.12) | PASS |
+| C4 | hover changes the background and leaves the dashes intact | {"bgChanged":true,"dashesSame":true,"imgNone":false} | {"bgChanged":true,"dashesSame":true,"imgNone":false} | bg color(srgb 1 1 1 / 0.85) -> color(srgb 0.913725 0.929412 0.94902 / 0.806667) | PASS |
+| C5 | no relation line for the user token, one for the numeric ref | {"held":0,"ref":1} | {"held":0,"ref":1} | ref lines 1 | PASS |
+| C6 | the dialog blockedBy row prints the token plain | {"text":"user, #42","links":0} | {"text":"user, #42","links":0} | n/a | PASS |
+| C7 | syncBoard toggles user-hold on every pass | {"off":true,"on":true,"imgAfterOff":"none"} | {"off":true,"on":true,"imgAfterOff":"none"} | n/a | PASS |
+| C8 | the held backlog task stays in backlog | {"state":"backlog","spawned":0} | {"state":"backlog","spawned":0} | eligible merger none | PASS |
+| C9 | the held moderate to-do task starts no splitter | {"state":"to-do","pids":[],"spawns":0} | {"state":"to-do","pids":[],"spawns":0} | C15 after the release | PASS |
+| C10 | the held to-review task keeps to-review with no pid and no armed marker | {"state":"to-review","pids":[],"armed":false,"spawns":0} | {"state":"to-review","pids":[],"armed":false,"spawns":0} | eligible merger ran | PASS (gate not reached (fixture)) |
+| C11 | the held to-merge task is not merged while the eligible one is | {"state":"to-merge","mergeAttempted":false,"mergerPids":[],"heldSpawns":0,"eligibleSpawned":false} | {"state":"to-merge","mergeAttempted":false,"mergerPids":[],"heldSpawns":0,"eligibleSpawne… | eligible line null; other held pids [] | FAIL (eligible half not exercised (fixture)) |
+| C12 | the held to-live-test task keeps its state and starts no run | {"state":"to-live-test","pids":[],"spawns":0} | {"state":"to-live-test","pids":[],"spawns":0} | n/a | PASS |
+| C13 | the held to-integration-test task leaves the single slot to the eligible one | {"state":"to-integration-test","pids":[],"heldSpawns":0,"eligibleSpawned":true} | {"state":"to-integration-test","pids":[],"heldSpawns":0,"eligibleSpawned":true} | eligible line [2026-10-21T16:54:44.342Z] spawned integration-tester pid=33 | PASS |
+| C14 | a hold kills nothing and reverts nothing | {"state":"to-do","pidFile":true,"alive":true,"initial":"doing"} | {"state":"doing","pidFile":true,"alive":true,"initial":"doing"} | n/a | FAIL (fixture pid name wrong) |
+| C15 | removing the token starts the path at the splitter | {"first":"splitter","splitter":true} | {"first":"splitter","splitter":true} | before the release: 0 spawn(s) | PASS |
+
+Observed:
+
+- Card: the `user-hold` class, the three 6px-on/4px-off gradients, the transparent 1px top, right and bottom border, the 3px left accent, the 6px radius and the `8px 10px` padding are computed values, not screenshot pixels. Hover moved the background from `color(srgb 1 1 1 / 0.85)` to `color(srgb 0.913725 0.929412 0.94902 / 0.806667)` and left the pseudo-element image byte-identical. The control card showed `::after` = `none` and an opaque top border.
+- Board: the held card drew 0 relation paths, the `#1` control drew 1. The dialog blockedBy row printed `user, #42` with 0 links or chips.
+- Live toggle: two writes to the fixture task file (token out, token in) flipped the class off and on inside the 5 s poll, and `::after` read `none` while the class was off.
+- Daemon: the held backlog, to-do moderate, to-live-test and to-integration-test tasks kept their state, produced no spawn line and left no pid file. The integration lane handed its single slot to the eligible task in the same pass: `spawned integration-tester pid=330888 for 000009_eligible.md`.
+- Release: after the token left the moderate to-do task, its first spawn line is `spawned splitter pid=... for 000003_held_moderate.md`, and the log held 0 spawn lines for that file before it.
+- Held to-merge: the state stayed `to-merge`, with no `<slug>.merge-attempted` marker, no `<slug>.merger` pid and 0 spawn lines. The lane was not wedged: the same pass moved the eligible task out of `to-merge` with `000006_eligible.md: nothing to merge, set done`.
+
+Assumptions made while designing the checks:
+
+- Each check reads a computed value, a DOM attribute, a file on disk or a daemon log line. Each hold check has a neighbour task, or a card with a numeric ref only, as its control.
+- One card carries both accepted token forms (`user, #42`) and `#42` is deliberately a ghost ref, so the same card proves the plain dialog row and the absent relation line.
+- The daemon fixture is a git root with one commit on `main`, `maxParallel: 0`, `backlogIdleMinutes: 0`, and a fake agent that exits 0 after one capture line. A held task can then keep its state only when no spawn happened.
+- The held `doing` task uses a hand-written pid file plus a `sleep` keeper. That state cannot be reached otherwise without a long-lived agent.
+
+Not exercised, with the reason:
+
+- C10, the to-review gate: the daemon rejected the fixture worktree attribute (`git worktree add .worktrees/tmp/lt318/daemon/wt /tmp/lt318/daemon/wt failed: fatal: invalid reference`), and the gate sits after that step. The observed state and pid results hold, but a worktree failure produces them too, so this run does not pin the to-review gate.
+- C11, the eligible merger: `sweepToMerge` reads `task.worktree` as a branch name or a `.worktrees/<name>` path, so my absolute path read as nothing to merge. A to-merge task needs a branch with a commit to spawn a merger, and the fixture branch had none.
+- C14, no kill and no revert: my keeper pid file was named `held_run.pid`, and the daemon names a task pid `<numeric-prefix>_<slug>.pid` (`taskSlug` keeps the prefix). The daemon read pid 0 and bounced the task with `000001_held_run: agent pid=0 dead without state update, doing -> to-do`. That is the baseline crash bounce for a `doing` task with no pid file, not a hold effect, and not a defect of #319 or #320.
+- `spawnRunAnalysis` is not held: a live proof needs a real analysis run with a provider. Both call sites sit before the hold gates in the source.
+- The merge half of C11 and the to-review gate are the only Specs lines that this run leaves unpinned. Both are fixture limits, and the scoped suites named in the Specs cover both.
+
+Method facts:
+
+- Three driver invocations. The first two stopped on harness bugs of my own: a CSS stop parser that cut at the `rgba(` paren, a git commit that the global config tried to sign, and a missing `.pids` directory. The third is the run above.
+- Cleanup: the driver reported `savedPids=5` and printed no `LEAK` line. The close-out call confirmed that each fixture pid is gone.
+- Findings: none in the changed path. Both FAIL rows come from my fixtures, as listed above.
+
+
 # Open questions
 
 - Assumed: "both subtasks are done when this task runs" means their changes are on `main`, not that both cards read `done`. #319 is in `to-live-test` and #320 in `live-testing`, and their diffs are in `main` after one ff-only merge. Please confirm this reading for verification tasks.
