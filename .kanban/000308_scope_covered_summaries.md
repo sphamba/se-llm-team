@@ -1,7 +1,7 @@
 ---
 name: "refactor: scope the covered task summaries in generated integration Specs"
 priority: "medium"
-state: "reviewing"
+state: "live-testing"
 worktree: "refactor/308-scope-covered-summaries"
 issuer: "#301"
 complexity: "simple"
@@ -69,3 +69,23 @@ Guidance for future Splitters:
 - Log pane: `renderLogChunk` source is unchanged (the `d381ad8..HEAD` diff touches only `md`), and a corpus of prose, table, fence, heading and bullet chunks renders byte-identically to the pre-#310 renderer. A log line starting with `> ` does change, because `renderLogChunk` shares `md`: before `<p>&gt; quoted log line</p>`, now `<blockquote><p>quoted log line</p></blockquote>`. So the What-to-check line "renderLogChunk output for a quote-containing log stays as it was" cannot hold together with the dialog blockquote change (#310's contract says keep the log pane identical). Not fixed: it is #310's scope, and escaping the log pane would break the dialog quote rendering. Non-quote log branches are unaffected.
 - Leftover: `tests/orchestrator/integration.test.ts:246` still says "one bullet per ref" in the part-3 comment. That file is #309's, not changed here.
 - No source, test, or doc edit. The worktree is clean after removing the scratch files, so there is nothing to commit beyond the fast-forward.
+
+Review of cf34d85 (first pass): PASS, no fixes. Verification-only task, empty diff on a clean tree, both blockers already in `main`.
+
+- `src/orchestrator/pipeline.ts:64` emits `## Own task` before `## Covered tasks`, both level 2, and the head refs and the `### ` headings both come from the one `covered` array, so they cannot disagree.
+- `src/webui/logpane.ts:152` renders the quote branch and `src/webui/logpane.ts:205` feeds the same `md` to the log pane, which is the root of the one clause below that cannot hold.
+- `src/kanban.ts:142` matches `^# ` only, so the level-2 sections round-trip inside `task.specs` and `replaceSections` (`src/kanban.ts:339`) still rewrites `# Specs` as a whole with no stray top-level section.
+- `src/webui/page.ts:309` carries the `#m-body blockquote` CSS; the table, fence, heading and bullet branches are unchanged in `cf34d85` apart from the added `closeQuote()` calls, and a quoted line inside a fence stays literal (pinned at `tests/webui/logpane.test.ts:352`).
+
+Tests: exit=0 tests/orchestrator/integration.test.ts, exit=0 tests/webui/logpane.test.ts, exit=0 tests/webui/page.test.ts. No source edit, so no red proof is owed.
+
+- Seam proven independently with my own probe rather than the developer's: the generated body renders as 2 `<h2>`, 2 `<h3>`, 0 `<h1>`, 2 `<blockquote>`, no literal `&gt;`, and a lone `>` becomes a paragraph break inside one blockquote. The ref list is `1,2` in the head sentence and `1,2` in the headings. The field contract holds at `src/orchestrator/pipeline.ts:88-99`.
+- Non-blocking: the What-to-check clause "`renderLogChunk` output for a quote-containing log stays as it was" does not hold, and the developer was right to report it instead of fixing it. Probed with a real record: a `text_delta` of `> quoted log line` now yields `<blockquote><p>quoted log line</p></blockquote>`, and the pre-#310 `md` at `d381ad8` had no quote branch, so it yielded `<p>&gt; quoted log line</p>`. Both contracts cannot hold while `md` is shared by the dialog and the pane. Upgrade path, only if literal `>` in agent prose ever matters: an option flag on `md` that the dialog passes and the pane does not.
+- Non-blocking: `tests/orchestrator/integration.test.ts:246` still says "one bullet per ref" and the body is quotes now. That is #309's file, unchanged here. Upgrade path: reword it on the next touch of that file.
+- Method: a claim in a previous Notes entry can be right while a grep for it comes back empty, because a comment wraps the phrase across a line break. Read the window before doubting the claim.
+
+# Open questions
+
+- Agent text in the run log that starts with `> ` now renders as a real blockquote, not literal `>` text. #308 asked for the log pane to stay as it was and #310's contract said the same, but the dialog and the pane share one `md`, so the two cannot both hold. Keep the blockquote in the pane (current, simpler), or give `md` an option so the pane keeps literal text?
+
+
