@@ -1,7 +1,7 @@
 ---
 name: "refactor: the merger runs no test suite"
 priority: "medium"
-state: "to-live-test"
+state: "live-testing"
 worktree: "refactor/329-merger-runs-no-test-suite"
 issuer: "user"
 complexity: "simple"
