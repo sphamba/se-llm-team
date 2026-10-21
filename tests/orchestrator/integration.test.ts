@@ -510,7 +510,7 @@ await waitUntil(() => laneRuns(stub9.log).length === 1, 15000, "the stub agent t
 await stopLane(root9);
 console.log("integration.test.ts: ... + maxParallel gates the integration-tester spawn passed");
 
-// --- part 10: a crashed integration-tester bounces integration-testing -> to-integration-test ---
+// --- part 10: every lane end lands at done, a crash and a superseded run included ---
 const root10 = fixture();
 cleaned.push(root10);
 const crashed10 = waitingTask(root10, 921, "medium");
@@ -520,11 +520,24 @@ writeFileSync(laneFile(root10, "pid"), "999999");
 writeFileSync(laneFile(root10, "exit"), "3");
 writeFileSync(laneFile(root10, "slug"), `${taskSlug(crashed10.file)}\n`);
 poll(root10, 60, Date.now(), IDLE);
-assert.equal(parseTask(root10, crashed10.file).state, "to-integration-test", "a non-zero exit bounces the task back to to-integration-test");
-assert.equal(existsSync(laneFile(root10, "pid")), false, "the bounce clears the lane pid");
-assert.equal(existsSync(laneFile(root10, "exit")), false, "the bounce consumes the lane exit code");
-assert.equal(inState(root10, "integration-testing").length, 0, "nothing runs after the crash bounce");
-console.log("integration.test.ts: ... + crash bounce to to-integration-test passed");
+assert.equal(parseTask(root10, crashed10.file).state, "done", "a non-zero exit ends the task at done");
+assert.equal(existsSync(laneFile(root10, "pid")), false, "the crash end clears the lane pid");
+assert.equal(existsSync(laneFile(root10, "exit")), false, "the crash end consumes the lane exit code");
+assert.equal(inState(root10, "integration-testing").length, 0, "nothing runs after the crash end");
+// the superseded case: the lane slug names another task, so this task's run is over. The shared
+// pid/exit/slug pair belongs to the live run the slug names, so the end leaves it untouched
+const superseded10 = waitingTask(root10, 922, "medium");
+const other10 = waitingTask(root10, 923, "medium");
+setState(root10, superseded10, "integration-testing");
+writeFileSync(laneFile(root10, "pid"), String(process.pid));
+writeFileSync(laneFile(root10, "slug"), `${taskSlug(other10.file)}\n`);
+poll(root10, 60, Date.now(), IDLE);
+assert.equal(parseTask(root10, superseded10.file).state, "done", "a superseded lane run ends the task at done");
+assert.equal(readText(laneFile(root10, "pid"), "the lane pid file").trim(), String(process.pid), "the shared lane pid is untouched");
+assert.equal(readText(laneFile(root10, "slug"), "the lane slug file").trim(), taskSlug(other10.file), "the shared lane slug is untouched");
+assert.equal(existsSync(laneFile(root10, "exit")), false, "no lane exit file was written");
+assert.equal(inState(root10, "integration-testing").length, 0, "nothing runs after the superseded end");
+console.log("integration.test.ts: ... + crash and superseded lane ends land at done passed");
 
 
 // --- part 11: live-testing -> done creates nothing and never extends the waiting task ---
@@ -611,4 +624,4 @@ assert.equal(fresh15[0].name, `test: integration of #${taskNum(twice15.file)}`, 
 assert.equal(parseTask(root15, entry15.file).state, "done", "the done entry stays done");
 console.log("integration.test.ts: ... + a new entry after the earlier one reached done passed");
 
-console.log("integration.test.ts: integration-test lane smoke passed (creation at the merge, fields, append, second wait, no-create, skip, one run at a time, maxParallel, crash bounce, trigger moves, failed merge)");
+console.log("integration.test.ts: integration-test lane smoke passed (creation at the merge, fields, append, second wait, no-create, skip, one run at a time, maxParallel, crash and superseded ends, trigger moves, failed merge)");

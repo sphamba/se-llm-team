@@ -11,21 +11,23 @@ import { dropDoneBlockers, promoteBacklog } from "./pipeline.ts";
 // agent dies, success is the state the orchestrator moves the task to on a successful finish
 // (exit 0), role is the agent role whose per-run log (.kanban/.logs/<slug>.<role>.<n>.log)
 // the stall check samples. The reviewer has no success move: it sets the state itself via
-// kanban_set_state, so the orchestrator leaves the task for the PM on its exit-0 finish
+// kanban_set_state, so the orchestrator leaves the task for the PM on its exit-0 finish.
+// The integration lane is report-only, so every end, a crash included, is a completion
 const WORKING_STATES: Partial<Record<TaskState, { next: TaskState; success: TaskState | null; role: string }>> = {
 	doing: { next: "to-do", success: "to-review", role: "developer" },
 	reviewing: { next: "to-review", success: null, role: "reviewer" },
 	"live-testing": { next: "to-live-test", success: "done", role: "live-tester" },
 	merging: { next: "to-merge", success: "to-merge", role: "merger" },
-	"integration-testing": { next: "to-integration-test", success: "done", role: "integration-tester" },
+	"integration-testing": { next: "done", success: "done", role: "integration-tester" },
 };
 
 // the project-wide single-lane agents: one run at a time, one global pid/exit/slug trio under
 // the given pid name, instead of the per-task <slug> trio; next is the state a task goes back
-// to when its lane run is gone without serving it
+// to when its lane run is gone without serving it, which for a lane task whose run is gone is
+// done, never back to the queue
 const LANES: Partial<Record<TaskState, { pid: string; next: TaskState }>> = {
 	merging: { pid: "merger", next: "to-merge" },
-	"integration-testing": { pid: "integration-tester", next: "to-integration-test" },
+	"integration-testing": { pid: "integration-tester", next: "done" },
 };
 
 // a live-but-hung agent passes pidAlive forever: the stall check kills it by its log instead
