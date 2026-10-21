@@ -1,7 +1,7 @@
 ---
 name: "feat: hold a task on a user blocker in the daemon gates"
 priority: "medium"
-state: "to-live-test"
+state: "live-testing"
 worktree: "feat/319-user-blocker-hold-daemon"
 issuer: "#318"
 complexity: "moderate"

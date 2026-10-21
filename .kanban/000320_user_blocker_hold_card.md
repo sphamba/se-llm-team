@@ -1,8 +1,8 @@
 ---
 name: "feat: mark a user-held task card with a dashed border"
 priority: "medium"
-state: "live-testing"
-worktree: "feat/320-user-blocker-hold-card"
+state: "done"
+worktree: ""
 issuer: "#318"
 complexity: "moderate"
 shortName: "user-blocker-hold-card"
@@ -111,3 +111,45 @@ Re-review of f90f233 (the earlier pass had no work; this pass reviews the featur
 - Nit (non-blocking): `page.ts:153` hardcodes the base border widths in `inset`, so a later `.card` border-width change drifts the dashes off the edges. Upgrade path: restate the insets from the border widths with `calc()`.
 - No unvoiced assumption: the developer's Notes name the transparent border colours and the `El` stub's `classList.toggle`, and the Specs' `## Split scope` and `## Unchanged` items hold.
 
+
+## Live test (2026-10-21)
+
+Lane: hub-only root. A fixture root held 10 tasks, one per state, and each tree served it in-process with `startHub({ port: 0 })`. Chromium ran at 1680x1050, DPR 4, dark scheme, and followed the page's hardcoded 5 s board poll. Merged tree: `f90f233`. Control: `b7596fc`, extracted with `git archive` to `/tmp/lt320/pre-fix`. Driver `/tmp/lt320/driver.mjs`, logs `/tmp/lt320/logs/`, raw results `/tmp/lt320/result-*.json`.
+
+Scope: `git diff --stat b7596fc..HEAD` lists only `src/webui/board.ts`, `src/webui/page.ts`, `tests/webui/board.test.ts` and `tests/webui/page.test.ts` (4 files, 51 insertions). The archived control has no git metadata, so it backs behavior cells only, not the scope line.
+
+| Check | Claim (Specs) | Merged f90f233 | Control b7596fc |
+| --- | --- | --- | --- |
+| C1 | Behaviour: user token marks the card held | PASS: class=<card user-hold> | FAIL: class=<card> |
+| C2 | Behaviour: mixed/case token User, #2 holds | PASS: class=<card user-hold> | FAIL: class=<card> |
+| C3 | Behaviour: unheld cards get no class | PASS: <card> <card> <card> | PASS: <card> <card> <card> |
+| C4 | Behaviour: poll adds user-hold after the token lands | PASS: before=<card> after=<card user-hold> waited<=12000ms | FAIL: before=<card> after=<card> waited<=12000ms |
+| C5 | Behaviour: poll removes user-hold after the token goes | PASS: before=<card user-hold> after=<card> | FAIL: before=<card> (class never appeared) |
+| C6 | Behaviour: one-shot enter: new held card first paints with both, keeps user-hold across polls and a reorder | PASS: first=<card enter user-hold> after-polls=<card user-hold> t1-after-reorder=<card user-hold> reordered=true t1 events=1 t11 events=1 | FAIL: first=<card enter> after-polls=<card> t1-after-reorder=<card> reordered=true t1 events=1 t11 events=1 |
+| C7 | Behaviour: enter is not replayed after insertion | PASS: class events=13 events carrying enter=0 | PASS: class events=11 events carrying enter=0 |
+| C8 | CSS: 6/4 dashes on 3 static pseudo layers, same rhythm as relations | PASS: layers=3 stopPx=[0,6,6,10,0,6,6,10,0,6,6,10] chunks=[[0,6,6,10],[0,6,6,10],[0,6,6,10]] anim=none stroke-dasharray=[6,4] | FAIL: layers=0 stopPx=[] chunks=[] anim=none stroke-dasharray=[6,4] |
+| C9 | CSS: transparent T/R/B, kept 3px accent, 1px widths, 6px radius, dash=border colour | PASS: t/r/b=<rgba(0, 0, 0, 0)\|rgba(0, 0, 0, 0)\|rgba(0, 0, 0, 0)> left=3px solid <rgb(148, 163, 184)> accent=<rgb(148, 163, 184)> widths=1px/1px/1px radius=6px dash=<27, 31, 41> base=<rgb(27, 31, 41)> | FAIL: t/r/b=<rgb(27, 31, 41)\|rgb(27, 31, 41)\|rgb(27, 31, 41)> left=3px solid <rgb(148, 163, 184)> accent=<rgb(148, 163, 184)> widths=1px/1px/1px radius=6px dash=<undefined> base=<rgb(27, 31, 41)> |
+| C10 | CSS: sizes stay across the class toggle | PASS: 299x64 -> 299x64 -> 299x64 | PASS: 299x64 -> 299x64 -> 299x64 |
+| C11 | CSS: hover keeps the dashed layers and changes only the card background | PASS: active=true pseudoSame=true cardBg=<color(srgb 0.0784314 0.0941176 0.129412 / 0.85)>-><color(srgb 0.105882 0.121569 0.160784 / 0.85)> layers=3 | FAIL: active=true pseudoSame=true cardBg=<color(srgb 0.0784314 0.0941176 0.129412 / 0.85)>-><color(srgb 0.105882 0.121569 0.160784 / 0.85)> layers=0 |
+| C12 | CSS: rendered top edge alternates 6 on / 4 off | PASS: row=4 dash%=60 medOn=6 medOff=4 onRuns=[24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24] offRuns=[16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16] | FAIL: row=4 dash%=100 medOn=0 medOff=0 onRuns=[] offRuns=[] |
+| C13 | Unchanged: relationPaths draws nothing for user and draws the #2 refs | PASS: paths=[["000003_held_mixed.md","000002_plain_blocker.md"],["000005_plain_ref.md","000002_plain_blocker.md"]] | PASS: paths=[["000003_held_mixed.md","000002_plain_blocker.md"],["000005_plain_ref.md","000002_plain_blocker.md"]] |
+| C14 | Unchanged: blockedRow prints user plain and links #2 | PASS: userRow=<blockedByuser> links=[] mixedRow=<blockedByUser, #2> links=["000002_plain_blocker.md"] | PASS: userRow=<blockedByuser> links=[] mixedRow=<blockedByUser, #2> links=["000002_plain_blocker.md"] |
+| C15 | Behaviour: no page error from an unshipped helper | PASS: pageErrors=[] consoleErrors=0 | PASS: pageErrors=[] consoleErrors=0 |
+| C16 | CSS: the served page ships the rule and the gradient | PASS: bytes=88149 .card.user-hold=2 gradients=3 | FAIL: bytes=86782 .card.user-hold=0 gradients=0 |
+
+Assumptions:
+- Fixture task numbers allocate from #1, so `#2` stands in for the Specs' `#42` example. The token rule is the same: `User, #2` exercises trim, case-insensitive match and a mixed ref.
+- The poll cadence is the page's hardcoded 5 s tick, not a daemon flag. Each live transition waited up to 12 s for the next `/api/tasks` fetch.
+- The 6/4 rhythm was measured on rendered pixels at DPR 4 in dark mode, because the light theme `--border` is a 12% alpha colour. In dark mode `--border` is opaque.
+- The `enter` one-shot was observed through a MutationObserver: the class at insertion, then every class mutation. No animation was slowed.
+- The live test used a real browser because the Specs says the user checks the border by hand and no browser test ships. No unit suite and no `*.test.ts` file was run.
+- No task state changed, no product code was edited, and the real board was not touched. `SPECS.md` had no `Commit` bullet at test time (`grep -c 'Commit'` printed 0), so none is kept above this block.
+
+Not exercised:
+- The daemon-side token parse, gates and spawn behavior (sibling #319, outside this Specs).
+- The `relationPaths` hover highlight and the heavy detail blocks; only the path set and `blockedRow` were read.
+- The pseudo-element corner clipping at the rounded corners. The pixel strip sampled x+20 to x+w-20 and avoided the corners.
+- An `ss -ltn` socket line. The hub was closed after each run, so `/health` 200 plus the served page and the Chromium load prove the socket instead.
+- The `border-right-color: transparent` override alone (covered by the combined T/R/B truth in C9) and the non-blocking nits in the review block above.
+
+Findings: none. The merged tree met every exercised Specs line, the control failed only the 10 change claims, and the 6 keep-green checks passed on both trees. Two first-cycle FAILs were driver bugs (the gradient stop parser read the angle, and a stale `layers` reference). The final scored run uses the fixed driver and touched no product code.
