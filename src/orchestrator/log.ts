@@ -156,11 +156,15 @@ export function compactFinishedLogs(root: string): { files: number; before: numb
 		// <slug>.<analysed role>[.<n>].doctor.log (000250: doctor logs gzip like role logs)
 		const m = name.match(/^(.+)\.(developer|reviewer|live-tester|merger|integration-tester)(\.\d+)?\.log$/) ?? name.match(/^(.+)\.([a-z-]+)\.(\d+)\.doctor\.log$/);
 		if (!m) continue;
+		// the project-wide lane roles write one pid for the whole lane, never a <slug>.pid: their
+		// run log is live while that lane pid is, so it must stay plain and appendable
 		const guards = m[0].endsWith(".doctor.log")
 			? [`${m[1]}.${m[2]}.${m[3]}.analysis`]
 			: m[2] === "merger"
 				? ["merger", `${m[1]}.merger`]
-				: [m[1]];
+				: m[2] === "integration-tester"
+					? ["integration-tester"]
+					: [m[1]];
 		if (guards.some((g) => agentAlive(root, g))) continue;
 		const path = join(kanbanDir(root), ".logs", name);
 		let before: string;
