@@ -49,6 +49,9 @@ await waitFor(
 	"the integration task runs to done and folds into the mirror",
 	a.output,
 );
+// the state-pass create retry must not re-commit a create that pass one already landed (#322)
+const integrationCreates = mirrorSubjects(rootA).split("\n").filter((s) => s === `kanban: create ${integrationFileA()}`);
+assert.equal(integrationCreates.length, 1, `exactly one create commit for ${integrationFileA()}`);
 for (const marker of ["spawned developer", "spawned reviewer", "spawned live-tester", "spawned integration-tester", "fast-forwarded main to feat/1-smoke-test, set to-live-test", "merged feat/1-smoke-test", "integration-testing -> done"]) {
 	assert.ok(a.output().includes(marker), `expected daemon log to contain: ${marker}`);
 }

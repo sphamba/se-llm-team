@@ -454,6 +454,7 @@ export function rescan(root: string, cfg: Config, force = false): void {
 	const files = taskFiles(root);
 	const status = boardStatus(root, files);
 	const tasks = listAll(root);
+	const created = new Set<string>();
 	// sole commit points: board files not on the mirror yet are new, finished tasks fold in
 	// their whole life; everything else stays unmirrored until done. Creates run first:
 	// commitKanban rebuilds the tree from the whole board, so a done commit later in the
@@ -462,7 +463,7 @@ export function rescan(root: string, cfg: Config, force = false): void {
 	for (const task of tasks) {
 		try {
 			if (task.conflicted) continue;
-			if (status.get(join(".kanban", task.file)) === "??") commitKanban(root, `kanban: create ${task.file}`, files);
+			if (status.get(join(".kanban", task.file)) === "??" && commitKanban(root, `kanban: create ${task.file}`, files)) created.add(task.file);
 		} catch (err) {
 			log(root, `error handling ${task.file} (create): ${err instanceof Error ? err.message : err}`);
 		}
@@ -480,10 +481,12 @@ export function rescan(root: string, cfg: Config, force = false): void {
 				log(root, `${task.file}: unresolved merge conflict markers, skipping (merger or user resolves)`);
 				continue;
 			}
-			// "??" here means the pass-one create commit failed (git error): retry it; the
-			// identical-tree guard keeps an already-mirrored file a no-op
+			// "??" here means the pass-one create commit failed (git error): retry it. The map is
+			// the sweep-start snapshot, so a create that already landed still reads "??" and is
+			// skipped: a retry after mid-sweep state writes would fold another task's state change
+			// into a second "kanban: create" commit
 			const code = status.get(join(".kanban", task.file));
-			if (code === "??") commitKanban(root, `kanban: create ${task.file}`, files);
+			if (code === "??" && !created.has(task.file)) commitKanban(root, `kanban: create ${task.file}`, files);
 			if (task.state === "to-do") {
 				// a to-do arrival breaks the review streak: a stale count would force-merge the next
 				// to-review arrival without a review
