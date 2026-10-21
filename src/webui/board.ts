@@ -173,10 +173,10 @@ export function spinnerHtml(st: string) {
 // refresh (syncBoard compares it), so a stats-only change can update the span in place and the
 // run's spinner and entrance animations survive the poll. user-issued cards stay full contrast,
 // task-issued ones (issuer "#<num>") dim the name and carry a small #<num> badge instead of the
-// plain user chip; the orchestrator's own "auto" issuer renders exactly like "user", with no
+// plain chip; the orchestrator's own "auto" issuer gets a plain chip labelled "auto", with no
 // badge and no link, and the complexity chip renders quiet next to the priority chip
 export function cardBaseHtml(t: Task, st: string) {
-	const issued = !!t.issuer && t.issuer !== "user" && t.issuer !== "auto";
+	const issued = !!t.issuer && /^#\d+$/.test(t.issuer);
 	return (
 		'<div class="name' +
 		(issued ? " issued" : "") +
@@ -195,7 +195,7 @@ export function cardBaseHtml(t: Task, st: string) {
 		'</span> <span class="chip' +
 		(issued ? " issuer" : "") +
 		'">' +
-		(issued ? esc(t.issuer) : "user") +
+		(issued ? esc(t.issuer) : esc(t.issuer || "user")) +
 		"</span>"
 	);
 }

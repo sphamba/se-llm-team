@@ -124,11 +124,12 @@ assert.equal(numLinkHtml('000048_quo"te.md'), '<span class="num-link" data-task=
 const userCard = cardHtml({ file: "000001_a.md", name: "a", priority: "high" }, "doing");
 assert.ok(userCard.includes('<span class="chip">user</span>'), "a user-issued card shows a plain user chip");
 assert.ok(!userCard.includes("issued"), "a user-issued card keeps full-contrast styling");
-// issuer auto: the orchestrator's own task renders exactly like a user task, no dimmed name, no
-// #num badge and no issuer link (see the detail card's issuerCell)
+// issuer auto: the orchestrator's own task gets a plain auto chip, no dimmed name, no #num badge
+// and no issuer link (see the detail card's issuerCell)
 const autoCard = cardHtml({ file: "000001_a.md", name: "a", priority: "high", issuer: "auto" }, "doing");
-assert.equal(autoCard, userCard, "an auto-issued card renders exactly like a user-issued one");
-assert.ok(autoCard.includes('<span class="chip">user</span>') && !autoCard.includes("issued") && !autoCard.includes("auto"), "an auto-issued card shows a plain user chip, full contrast and no issuer badge");
+assert.ok(autoCard.includes('<span class="chip">auto</span>'), "an auto-issued card shows a plain auto chip");
+assert.ok(autoCard.includes("auto") && !autoCard.includes("chip issuer") && !autoCard.includes('class="name issued"'), "an auto-issued card has no issuer badge and keeps full contrast");
+assert.equal(autoCard.replace('<span class="chip">auto</span>', '<span class="chip">user</span>'), userCard, "an auto-issued card differs from a user-issued one only in its chip text");
 const issuedCard = cardHtml({ file: "000002_b.md", name: "b", priority: "low", issuer: "#42" }, "to-do");
 assert.ok(issuedCard.includes('<div class="name issued">'), "a task-issued card dims its name");
 assert.ok(issuedCard.includes('<span class="chip issuer">#42</span>'), "a task-issued card carries a small #num badge");
