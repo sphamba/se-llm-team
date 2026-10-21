@@ -1,8 +1,8 @@
 ---
 name: "test: cover the integration hook failure contract and the live-test overlap"
 priority: "low"
-state: "live-testing"
-worktree: "test/323-integration-hook-tests"
+state: "done"
+worktree: ""
 issuer: "#315"
 complexity: "simple"
 shortName: "integration-hook-tests"
@@ -72,5 +72,29 @@ Review of 57bd6e4 (first pass): the Specs hold, and both pins bind real producti
 - `npm test` exits 1. The first failure line is `timeout waiting for the integration task runs to done and folds into the mirror` in `tests/orchestrator/spawn.test.ts`. This branch does not touch that file and does not touch `src`: `git diff --stat 41ad23b..HEAD` lists only `tests/orchestrator/integration.test.ts`, and the failure reproduces on base `41ad23b` alone. It is a pre-existing red on the new base, not this change.
 - The Blocker entry above was recorded against base `d51a72e`. The base now holds the user-hold commits (`c27fdb8`, `41ad23b`) and the same red is still there.
 - Durable guidance: when both sides append a numbered test part, the numbers collide and the parts are module-scope consts. Keep both sides and renumber the replayed parts, suffixed identifiers like `root17` and `waiting16Path` included.
+
+## Live test (2026-10-21)
+
+Live test of task #323, run from the worktree at `c7a71d3` (the only change against base `41ad23b` is `tests/orchestrator/integration.test.ts`). This lane never runs a `*.test.ts` file, so the two scenarios of parts 17 and 18 were replayed with a driver over the production functions (`rescan`, `loadConfig`, `createTask`, `setState`, `setWorktree`, `pidEntry`, `pidAlive`, `killTree`) on throwaway git fixtures. No production code was edited.
+
+| ID | Claim | Measured | Expected | Control | Result |
+| --- | --- | --- | --- | --- | --- |
+| C1 | a throw from ensureIntegrationTask logs `integration task for <slug> failed:` | failLines=1 slugMatch=true EACCES=true first="[2026-10-21T16:52:21.179Z] integration task for 000001_the_hook_throws failed: EACCES: permission denied, open '/tmp/lt-323/work/fx/hook-throw/.kanban/000002_integration_of_999001.md'" | integration task for 000001_the_hook_throws failed: <EACCES ...> | plain merge failure lines=0 | PASS |
+| C2 | the covered task ends in to-live-test and does not return to to-merge | state=to-live-test bounceLines=0 | state=to-live-test bounceLines=0 | state before the failing rescan=to-merge | PASS |
+| C3 | the merge completed: the log holds `fast-forwarded ... set to-live-test` | "[2026-10-21T16:52:21.175Z] 000001_the_hook_throws.md: fast-forwarded main to feat/covered-1, set to-live-test" | <file>: fast-forwarded <base> to feat/covered-1, set to-live-test | plain merge prints the same line=true | PASS |
+| C4 | the throw leaves the waiting integration task whole (no partial rewrite) | state=to-integration-test nameSame=true specsSame=true bytesSame=true | state=to-integration-test nameSame=true specsSame=true bytesSame=true | plain merge extended the same file with the covered ref=true | PASS |
+| C5 | the integration-tester runs while the covered task's live-tester still runs | livePid=324142 liveAlive=true lanePid=324145 laneAlive=true pidsDiffer=true coveredState=live-testing integrationTesting=1 spawns=2 roles=["live-tester","integration-tester"] | two live pids, coveredState=live-testing, integrationTesting=1, spawns=2 (sweep after the merge: covered=to-live-test waiting=1) | after killTree(lane): laneDead=true liveStillAlive=true | PASS |
+
+Findings: none. Both pinned contracts hold in real usage: the merge hook throw is swallowed with the merge and the `to-live-test` state intact, and the integration-tester and the covered live-tester are two different processes alive at one sample.
+
+Assumptions:
+- The Specs name `node tests/orchestrator/integration.test.ts`, `node tests/orchestrator/spawn.test.ts` and `pnpm test` as gates. This lane forbids running a test file or a suite, so those three commands are the "not exercised" line below, and the production behavior behind each pinned assertion was replayed instead.
+- The 0444 permission trigger for the hook throw works here because the process runs as uid 1000, not root. Under a root runner the write would succeed and C1 would read a plain merge.
+- Fixtures use `git init -b main`, so the base branch name in the merge log line is deterministic.
+- The waiting integration task names ref #99900N, which is not on the board. The hook therefore logs `dropped #99900N, no such task on the board` before the rewrite, and that rewrite is what throws. Fixture B runs the same shape without the chmod and the rewrite succeeds, so the trigger is the mode bit, not the missing ref.
+- The overlap part relies on the second rescan to start both runs, as part 18 states. The log shows the covered task reaching `to-live-test` in the first pass and both agents spawning in the next one.
+- The ordering fallback that Spec 2 allows (integration pid file before the live-tester exit marker) was not needed: both pids were alive at one sample, so the primary check decided.
+
+Not exercised: `node tests/orchestrator/integration.test.ts`, `node tests/orchestrator/spawn.test.ts`, `pnpm test`, and the ordering fallback above. The driver and its log are in `/tmp/lt-323/` (`driver.mjs`, `run.log`, `results.json`); cleanup left 2 saved pids, 0 still alive.
 
 # Open questions

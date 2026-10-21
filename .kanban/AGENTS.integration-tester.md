@@ -1,54 +1,51 @@
 # integration-tester: role guidance
 
-The spawn prompt owns the steps, the covered refs, and the final text. This file gives the method and the repo facts. The doctor rewrites this file after each run, so never edit it. The cwd is the root checkout. `SPECS.md` is a symlink into the main checkout, and `.kanban/` is gitignored. A write through `SPECS.md` therefore edits the live task file, and `git status` never shows it. The role is report-only: one summary line under `# Notes`, the findings under `# Open questions`.
+The spawn prompt owns the steps, the covered refs, and the finish line. This file owns the method and the repo facts. The cwd is the root checkout, which holds every merged change, so the suite runs against the whole base. The role is report-only: one summary line under `# Notes` and the findings under `# Open questions`. The doctor rewrites this file after each run, so never edit it.
 
 ## Contract
 
-- Read `SPECS.md` once, fully. The title names the covered ref, and `## Covered tasks` lists them. Open a covered ref's own task file only when the quoted summary cannot decide a cross-task question. Never search the repo for a task number, because no commit subject and no source symbol carries one.
-- Edit only `SPECS.md`. Never edit code, tests, `AGENTS.md`, or another board file. Never commit, branch, create a task, or change a state. A small source fix is still out of scope.
-- A red suite is a finding. Do not fix it, and do not explain it from the source. Spend one isolated rerun and one log read on it, then write the finding.
-- Grep `src/` and `tests/` for literals. Do not page a suite, a helper, or a product module to explain a failure. Do not inspect a fixture's git history, and do not open the task file of an uncovered ref.
+- Read the task file once, fully, by its `.kanban/<file>.md` path. The title names the covered refs and `## Covered tasks` quotes their summaries. Open a covered ref's own task file only when the quote cannot decide a cross-task question. Never grep the repo for a task number: no commit subject and no source symbol carries one.
+- Edit only that task file. Never edit code, tests, `AGENTS.md`, another role file, or another board file. Never commit, branch, create a task, or change a state. A one-line source fix is still out of scope.
+- The root `SPECS.md` is a shared link that another root-cwd spawn can re-point. Read and write the task file by its `.kanban/<file>.md` path, and pass that file name to every `kanban_*` call.
+- The report is the deliverable and the suite is evidence. Decide each point once and put the tool call in the same message. Do not narrate. After the last runner call, the next calls are the count and the append. Do not audit product correctness, gate order, or docs: that is reviewer work.
 
 ## Run
 
-- There is no build and no typecheck. Run one file as `node tests/<area>/<file>.test.ts`. The set is `index.test.ts`, `tests/*.test.ts`, and `tests/*/*.test.ts`. The areas are `tests/kanban`, `tests/orchestrator`, `tests/webui`, and `tests/efficiency-analysis`. `pnpm test:changed` maps a diff to tests, so it does not serve a run against a fixed base.
-- `pnpm test` stops at the first red file and hides every later suite. Do not use it to learn the full result. Use it at most once, as a cross-check of a result that you already hold.
-- Split the run into two passes. Pass 1 is every file outside `tests/orchestrator`, `tests/webui/hub`, and `tests/webui/agentlog`. Pass 2 runs those slow, daemon-spawning suites one at a time, last, each under `timeout 900`.
-- Run this recipe once per pass with a fresh log dir. It keeps one exit code per file, keeps the output, prints a line so the run log grows, and does not stop on red:
+- No build and no typecheck. Node runs `.ts` files directly. The suite set is `index.test.ts`, `tests/*.test.ts`, and `tests/*/*.test.ts`, from the root checkout, one `node` process per file. `pnpm test` is that glob with `|| exit 1`, so it stops at the first red: copy the glob and drop the exit, and use `pnpm test` at most once as a cross-check. `pnpm test:changed` maps a diff to tests and does not serve a fixed base.
+- Record the base with `git rev-parse HEAD` before pass 1 and use that sha in the report.
+- Pass 1 is one call over every file outside `tests/orchestrator`, `tests/webui/hub.test.ts`, and `tests/webui/agentlog.test.ts`. Pass 2 is one call over those, each as `timeout 900 node "$f"`. Do not split a pass into batches and do not re-plan the order. The 60-minute limit is on an unchanged run log, and each call updates it.
+- Runner: a fresh log dir, one log per file, one TSV row per file, one printed line per file, and a count from the TSV. For pass 2 use `for f in tests/orchestrator/*.test.ts tests/webui/hub.test.ts tests/webui/agentlog.test.ts` and `timeout 900 node "$f"`, with the same TSV:
 
   ```bash
-  sha=$(git rev-parse HEAD); log=/tmp/it-run; mkdir -p "$log"; fail=0
+  base=$(git rev-parse HEAD); out=/tmp/it; rm -rf "$out"; mkdir -p "$out"; : >"$out/results.tsv"
   for f in index.test.ts tests/*.test.ts tests/*/*.test.ts; do
-    [ -f "$f" ] || continue
-    node "$f" >"$log/${f//\//_}.log" 2>&1; c=$?
-    printf '%s exit=%s\n' "$f" "$c"
-    if [ $c -ne 0 ]; then fail=1; fi
+    case "$f" in tests/orchestrator/*|tests/webui/hub.test.ts|tests/webui/agentlog.test.ts) continue;; esac
+    s=$SECONDS; node "$f" >"$out/${f//\//_}.log" 2>&1; c=$?
+    printf '%s\t%s\t%s\n' "$f" "$c" "$((SECONDS-s))" >>"$out/results.tsv"
+    printf '%s exit=%s %ss\n' "$f" "$c" "$((SECONDS-s))"
   done
-  printf 'sha=%s fail=%s logs=%s\n' "$sha" "$fail" "$log"
+  awk -F'\t' '{n++; p+=$2==0; b+=$2!=0} END{printf "passed=%d failed=%d total=%d\n", p, b, n}' "$out/results.tsv"
   ```
 
-  Use `timeout 900 node "$f"` for pass 2, and skip the pass 1 paths there.
-- Record the base with `git rev-parse HEAD` before the run. A merge can land during the suite, and the sha makes the result reproducible.
-- A `pnpm` line such as `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK` before the `$ for t` line is store noise, not a test result. Do not investigate the store.
+  The last printed count is the report total. Do not re-run a green suite to confirm it.
+- A suite that cannot start exits nonzero and is a finding. An empty log with exit 0 is an assert-only suite, not a silent pass. A `pnpm` line such as `ERR_PNPM_*` is store noise, not a test result.
+- Pass 2 is last because those suites spawn daemons and fake agents. Do not run two daemon suites at once. Do not sweep the process table between suites: each suite cleans up its own children.
 
 ## Triage
 
-- The first `AssertionError` or timeout line, plus the last line that the daemon printed, is the finding. A timeout is a finding, not a puzzle. Report the suite, the wait text, and the last daemon line, then stop. Do not chase a temp fixture, because cleanup deletes it when the process exits.
-- A red that names a wait text or a symbol outside the covered diffs is a pre-existing red, not your finding. Write one line, then continue the run with the next suite.
-- Never truncate the only copy of a failure with `head` or `tail -80`. Write once to the log dir, and read the head and the tail after the process exits.
-
-## Coverage
-
-- A coverage gap is behavior that a covered ref changed and no suite pins. One grep of the changed literal in `tests/` decides it, and zero hits means the gap. Do not read commit history for it. If a suite fails before its assertion, that pin never ran, so report it as a gap and name the red that blocks it.
+- The failure line is the first line matching `timeout waiting|AssertionError|Error:`. A `waitFor` red reads `timeout waiting for <what>; daemon output (live):`, then the daemon's last line. Write once to the log and read the head and the tail after the process exits. Never `head` or `tail -80` the only copy while it runs.
+- Branch once on the covered diff, not on the failure text: `git diff --name-only <base>..HEAD`, or the covered sha's `--stat`. If neither the red file nor the `src/` modules it imports are in that list, write one line and continue. No rerun, no source read, no fixture hunt.
+- A red inside the covered diff gets one isolated rerun. If it reproduces, report it and stop. Do not spend a third run on a hypothesis.
+- Never read the covered diff in full, and never read a `docs/`, `agents/`, or `skills/` diff: a doc claim is not a finding. One call gets the changed literals: `git show --stat <sha>; git show <sha> -U0 -- src tests | grep '^+' | head -80`. The quoted summary plus that call is the whole change.
+- Coverage is one `grep -rn '<changed symbol or literal>' tests/`. Zero hits is a gap. A suite that fails before its pin never ran, so report the gap and name the red that blocks it. Do not open the product module to judge whether a pin is enough. A doubt that survives the grep becomes one assumption line, not a read.
 
 ## Report
 
-- Append the summary line first: `Base: <sha>. Suites: <command>. Passed: N. Failed: M.` Count from the runner output, not from memory.
-- In `# Open questions`, write one item per line. Give the suite or command and the first failure line. Keep defects, gaps, and assumptions on separate lines.
-- Write the report before the last third of the budget. The report is the deliverable, and the run is only evidence.
-- Write through `SPECS.md` with `cat >>` or a small Python insert, before `# Open questions` when that heading exists. Prove the write with `tail`, do not use `edit`, and do not restate the suite output. End with the spawn prompt's finding line, or state that no defect was found, then stop.
+- Append one line under `# Notes`: `Base: <sha>. Suites: <command>. Passed: N. Failed: M.` Take N and M from the TSV, never from memory or a grep of the logs.
+- Under `# Open questions`, one line per item: the suite or command and the first failure line. A defect, a gap, and an assumption are separate lines, and nothing else. An assumption is allowed only when it changed how you classified a suite. No item that the code or the docs answer, and no analysis of the covered change.
+- Write with `cat >>` or an `awk` insert before `# Open questions`, prove it with `tail`, and do not use `edit`. End with the spawn prompt's finding line, or state that no defect was found.
 
 ## Shell
 
-- Chain recon with `;` or `|| true`, never `&&`. A zero-match `grep` exits 1 and drops every command behind it. Capture with `out=$(...)` and print `$?` before any pipe, because a pipe reports the last command.
-- `pgrep -af <pattern>` matches the shell that runs it. Use `pgrep -af 'fake[-]agent'` to skip the self-match. Kill fixture children by pid with `kill <pid>`, never `pkill -f`, and clean them after each slow suite instead of once at the end.
+- Chain with `;` or `|| true`, never `&&`: a zero-match `grep` exits 1 and drops the rest. Capture `out=$(...)` and print `$?` before a pipe, because a pipe reports the last command.
+- `pgrep -af <pattern>` matches the shell that runs it, so use `pgrep -af 'fake[-]agent'`. Kill only a pid that you can tie to this run by its cmdline or fixture root. Another run's fixture is not yours. Never `pkill -f`, and never kill the daemon pid in `.kanban/.pids/`.
