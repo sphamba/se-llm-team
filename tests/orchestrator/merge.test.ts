@@ -431,7 +431,8 @@ assert.ok(promptAL.includes("resolve the conflicts"), "the merger only resolves 
 assert.ok(promptAL.includes("conclude the replayed commit with git rebase --continue"), "the merger concludes with git rebase --continue");
 assert.ok(promptAL.includes("never start a rebase or merge yourself"), "the merger starts no merge");
 assert.ok(promptAL.includes("never change the task states"), "the merger never changes the task states");
-assert.ok(promptAL.includes("run the full test suite in your worktree"), "the merger runs the full suite after the replay");
+assert.ok(promptAL.includes("You run no test suite"), "the merger runs no test suite");
+assert.ok(!promptAL.includes("run the full test suite"), "the merger prompt names no full suite run");
 assert.ok(!promptAL.includes(rootAL) && !promptAL.includes(wtAL), "no absolute path survives rendering");
 assert.ok(!promptAL.includes("{{"), "no placeholder survives rendering");
 assert.ok(promptAL.includes("git branch --show-current"), "the merger resolves its branch in its cwd");

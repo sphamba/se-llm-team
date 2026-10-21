@@ -18,7 +18,7 @@ The orchestrator also reads the project root's `AGENTS.md`. When it exists and i
 | Integration-tester | the root checkout | [agents/integration-tester.md](../agents/integration-tester.md) |
 | Doctor | the task worktree | [agents/doctor.md](../agents/doctor.md) |
 
-The Merger runs the full test suite after it concludes the rebase. The Integration-tester runs the full project test suite on the merged base branch in the root checkout. It reports defects and coverage gaps.
+The Merger resolves rebase conflicts only and runs no test suite. The Integration-tester runs the full project test suite on the merged base branch in the root checkout. It reports defects and coverage gaps.
 
 Agent logs live in `.kanban/.logs/`. The web UI renders them readably. The orchestrator reads the role prompt from `agents/` in its own checkout at each spawn. A prompt fix on a task branch applies only after that branch merges.
 
