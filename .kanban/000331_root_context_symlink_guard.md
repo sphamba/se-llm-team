@@ -1,7 +1,7 @@
 ---
 name: "fix: the root context symlink never replaces a real file"
 priority: "medium"
-state: "to-live-test"
+state: "live-testing"
 worktree: "fix/331-root-context-symlink-guard"
 issuer: "user"
 complexity: "simple"
