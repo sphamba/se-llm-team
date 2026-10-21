@@ -46,6 +46,23 @@ const waitUntil = async (cond: () => boolean, ms: number, what: string): Promise
 
 const inState = (root: string, state: string): Task[] => listAll(root).filter((t) => t.state === state);
 
+// the generated # Specs body, read by shape: the level-2 sections, the covered-ref headings in
+// file order, and the head sentence under ## Own task
+const h2 = (specs: string): string[] => specs.split("\n").filter((line) => line.startsWith("## "));
+const entries = (specs: string): string[] => specs.split("\n").filter((line) => line.startsWith("### "));
+const entryRefs = (specs: string): string[] => entries(specs).map((line) => /^### #(\d+) /.exec(line)![1]);
+const ownSentence = (specs: string): string => {
+	const lines = specs.split("\n");
+	return lines.slice(lines.indexOf("## Own task") + 1).find((line) => line.trim() !== "")!;
+};
+const ownRefs = (specs: string): string[] => [...ownSentence(specs).matchAll(/#(\d+)/g)].map((m) => m[1]);
+const quoted = (specs: string): string[] => specs.split("\n").filter((line) => line.startsWith(">"));
+const quoteOf = (summary: string): string[] => summary.split("\n").map((line) => (line.trim() ? `> ${line}` : ">"));
+const entryOf = (root: string, task: Task): string => {
+	const fresh = parseTask(root, task.file);
+	return [`### #${taskNum(task.file)} ${fresh.name}`, "", ...quoteOf(fresh.summary)].join("\n");
+};
+
 // the one task waiting for the integration run
 const onlyWaiting = (root: string): Task => {
 	const waiting = inState(root, "to-integration-test");
@@ -85,7 +102,19 @@ const waitingTask = (root: string, ref: number, priority: string, coveredName = 
 		complexity: "simple",
 		issuer: "auto",
 		summary: `Integration test of the merged base branch after #${ref}.`,
-		specs: ["Perform integration testing following the merge of:", "", `- #${ref} ${coveredName}`, `  ${coveredSummary}`, "", "Run the project test script in the root checkout."].join("\n"),
+		specs: [
+			"## Own task",
+			"",
+			`Perform integration testing following the merge of #${ref}.`,
+			"",
+			"Run the project test script in the root checkout.",
+			"",
+			"## Covered tasks",
+			"",
+			`### #${ref} ${coveredName}`,
+			"",
+			`> ${coveredSummary}`,
+		].join("\n"),
 	});
 	setState(root, task, "to-integration-test");
 	return task;
@@ -189,18 +218,28 @@ assert.equal(created1.openQuestions, "", "empty open questions, so the task prom
 assert.equal(
 	created1.specs,
 	[
-		"Perform integration testing following the merge of:",
+		"## Own task",
 		"",
-		`- #${num1} ${covered1Fresh.name}`,
-		`  ${covered1Fresh.summary}`,
+		`Perform integration testing following the merge of #${num1}.`,
 		"",
 		"Run the project test script in the root checkout.",
 		"Report defects and coverage gaps in `# Open questions`.",
 		"Read the full task file of a covered ref when its summary is not enough.",
 		"Do not edit code. Do not commit. Do not create a task. Do not change task states.",
+		"",
+		"## Covered tasks",
+		"",
+		`### #${num1} ${covered1Fresh.name}`,
+		"",
+		`> ${covered1Fresh.summary}`,
 	].join("\n"),
-	"the Specs are the merge header, one covered-ref bullet with its summary and the four closing lines",
+	"the Specs are the own-instruction section, then a quoted entry per covered ref",
 );
+assert.deepEqual(h2(created1.specs), ["## Own task", "## Covered tasks"], "the two level-2 sections come in order");
+assert.ok(created1.specs.indexOf("## Covered tasks") < created1.specs.indexOf("### "), "both sections precede the first covered entry");
+assert.deepEqual(entryRefs(created1.specs), [`${num1}`], "one heading for the one covered ref");
+assert.deepEqual(quoted(created1.specs), quoteOf(covered1Fresh.summary), "every summary line is quoted");
+assert.deepEqual(ownRefs(created1.specs), entryRefs(created1.specs), "the head sentence names the same refs as the headings");
 console.log("integration.test.ts: ... + created-task fields and generated Specs passed");
 
 // --- part 3: a second covered ref appends to the waiting task: refs in ascending order, one
@@ -222,8 +261,8 @@ const priority3 = waiting3.priority;
 const complexity3 = waiting3.complexity;
 const file3 = waiting3.file;
 const state3 = waiting3.state;
-const oldBullet3 = `- #${numHigh3} ${parseTask(root3, high3.file).name}\n  ${parseTask(root3, high3.file).summary}`;
-assert.ok(waiting3.specs.includes(oldBullet3), "the first bullet carries the first ref and its summary");
+const oldEntry3 = entryOf(root3, high3);
+assert.ok(waiting3.specs.includes(oldEntry3), "the first entry carries the first ref and its quoted summary");
 finishLiveTest(root3, low3);
 const appended3 = getTask(root3, file3);
 assert.ok(appended3, `the waiting task ${file3} still exists after the append`);
@@ -236,16 +275,40 @@ assert.equal(appended3!.priority, priority3, "priority never changes");
 assert.equal(appended3!.complexity, complexity3, "complexity never changes");
 assert.equal(appended3!.state, state3, "the state never changes");
 assert.equal(appended3!.file, file3, "the file number never changes");
-assert.ok(appended3!.specs.includes(oldBullet3), "the existing bullet stays unchanged");
-for (const ref of [low3, high3]) {
-	const fresh = parseTask(root3, ref.file);
-	const num = taskNum(ref.file);
-	assert.equal(appended3!.specs.split("\n").filter((line) => line.startsWith(`- #${num} `)).length, 1, `exactly one bullet for #${num}`);
-	assert.ok(appended3!.specs.includes(`- #${num} ${fresh.name}`), `the bullet for #${num} names the covered task`);
-	assert.ok(appended3!.specs.includes(`  ${fresh.summary}`), `the bullet for #${num} carries the covered task's summary indented under it`);
-}
-assert.equal(appended3!.specs.split("\n").filter((line) => /^- #\d+ /.test(line)).length, 2, "one bullet per covered ref");
-console.log("integration.test.ts: ... + append with ascending refs and one bullet per ref passed");
+assert.ok(appended3!.specs.includes(oldEntry3), "the earlier entry stays byte-identical");
+assert.deepEqual(
+	appended3!.specs.split("\n").filter((line) => line.startsWith(`### #${numHigh3} `)),
+	[`### #${numHigh3} ${parseTask(root3, high3.file).name}`],
+	"the earlier entry keeps its one heading",
+);
+assert.equal(entryRefs(appended3!.specs).length, entryRefs(waiting3.specs).length + 1, "exactly one entry was added");
+assert.deepEqual(entryRefs(appended3!.specs), [`${numLow3}`, `${numHigh3}`], "one heading per ref, ascending");
+assert.deepEqual(ownRefs(appended3!.specs), entryRefs(appended3!.specs), "the head sentence names the same refs as the headings");
+assert.deepEqual(
+	quoted(appended3!.specs),
+	[...quoteOf(parseTask(root3, low3.file).summary), ...quoteOf(parseTask(root3, high3.file).summary)],
+	"every summary line of both refs is quoted, in heading order",
+);
+for (const ref of [low3, high3]) assert.ok(appended3!.specs.includes(entryOf(root3, ref)), `the entry for ${ref.file} names the ref and quotes its summary`);
+// the same ref is covered twice when a dead live-tester bounces the task back: nothing may move
+const specsAfterAppend = appended3!.specs;
+finishLiveTest(root3, low3);
+assert.equal(getTask(root3, file3)!.specs, specsAfterAppend, "a second append of the same ref changes nothing at all");
+console.log("integration.test.ts: ... + append with ascending refs and one quoted entry per ref passed");
+
+// --- part 3b: a ref the waiting task names but the board no longer holds is dropped, so the head
+// sentence and the headings keep naming the same set ---
+const root3b = fixture();
+cleaned.push(root3b);
+const ghost3b = waitingTask(root3b, 999999, "low");
+const real3b = liveTask(root3b, "feat: the surviving ref", "The summary of the ref that stays.");
+finishLiveTest(root3b, real3b);
+const rebuilt3b = getTask(root3b, ghost3b.file)!;
+assert.deepEqual(entryRefs(rebuilt3b.specs), [`${taskNum(real3b.file)}`], "the vanished ref leaves no empty entry behind");
+assert.deepEqual(ownRefs(rebuilt3b.specs), [`${taskNum(real3b.file)}`], "the head sentence names only the surviving ref");
+assert.equal(rebuilt3b.name, `test: integration of #${taskNum(real3b.file)}`, "the name names only the surviving ref");
+assert.ok(!rebuilt3b.specs.includes("999999"), "nothing quotes the vanished ref");
+console.log("integration.test.ts: ... + a ref that left the board is dropped passed");
 
 // --- part 4: a second finish opens a NEW waiting task while the first integration task runs ---
 const root4 = fixture();
@@ -278,7 +341,7 @@ const integration5 = createTask(root5, {
 	complexity: "simple",
 	issuer: "auto",
 	summary: `Integration test of the merged base branch after #${num5}.`,
-	specs: `Perform integration testing following the merge of:\n\n- #${num5} feat: covered before\n  Covered summary.\n\nRun the project test script in the root checkout.`,
+	specs: `## Own task\n\nPerform integration testing following the merge of #${num5}.\n\nRun the project test script in the root checkout.\n\n## Covered tasks\n\n### #${num5} feat: covered before\n\n> Covered summary.`,
 });
 mkdirSync(join(kanbanDir(root5), ".pids"), { recursive: true });
 setState(root5, integration5, "integration-testing");
@@ -327,7 +390,7 @@ finishLiveTest(root7, again7);
 const waiting7 = onlyWaiting(root7);
 assert.equal(waiting7.file, covering7.file, "the waiting task is the one that already covered the ref");
 assert.equal(waiting7.name, `test: integration of #${num7}`, "the ref appears once, never duplicated");
-assert.equal(waiting7.specs.split("\n").filter((line) => line.startsWith(`- #${num7} `)).length, 1, "one bullet, no duplicate");
+assert.deepEqual(entryRefs(waiting7.specs), [`${num7}`], "one entry, no duplicate");
 assert.equal(listAll(root7).filter((t) => t.name.startsWith("test: integration of ")).length, 1, "no extra integration task was created");
 // 7b: the RUNNING integration task already covers the ref
 const root7b = fixture();

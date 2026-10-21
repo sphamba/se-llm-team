@@ -4,7 +4,7 @@ Task file: SPECS.md in your cwd (the task file in the main checkout).
 
 Your cwd is the root checkout. It holds the accumulated merged state of the base branch, not one task branch, so the full test suite runs against every merged change.
 
-The covered refs are named in the task title and listed in `# Specs`, one bullet per ref with the covered task's Summary. Read the full task file of a covered ref when its summary is not enough to judge cross-task behavior.
+The covered refs are named in the task title and listed in `# Specs` under `## Covered tasks`, one `### #<num> <name>` entry per ref with the covered task's Summary quoted under it. Read the full task file of a covered ref when its summary is not enough to judge cross-task behavior.
 
 Test-file edits are the exception to "Do not edit any code": append to # Notes and edit # Open questions only in SPECS.md, so the edit lands on the task file in the main checkout.
 
