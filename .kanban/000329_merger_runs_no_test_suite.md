@@ -1,8 +1,8 @@
 ---
 name: "refactor: the merger runs no test suite"
 priority: "medium"
-state: "live-testing"
-worktree: "refactor/329-merger-runs-no-test-suite"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "merger-runs-no-test-suite"
@@ -88,6 +88,34 @@ Review of 2273595 (first pass):
 - Tests: `node tests/orchestrator/merge.test.ts` exit=0, `node tests/orchestrator/spawn.test.ts` exit=1.
 - Non-blocking: the spawn.test red is `timeout waiting for the integration task runs to done and folds into the mirror`; no `src/` path and no file that suite reads is in the change set, so it predates the change. Owning area: the integration-stage smoke in `tests/orchestrator/spawn.test.ts`.
 - Non-blocking: the two new assertion messages are `the merger runs no test suite` and `the merger prompt names no full suite run`, not the Specs' `the merger runs no suite: the integration stage owns the test gate` and `the old full-suite requirement is gone`; the assertions match, so align the messages on a later touch.
+
+## Live test
+Usage tests only, on the merged tip `2273595` against the pre-fix control `c7a71d3` (the feature's parent, archived with `git archive` to `/tmp/merger-no-suite/pre-fix`). Driver `/tmp/merger-no-suite/driver.mjs` with `/tmp/merger-no-suite/run.sh`, result JSON `/tmp/merger-no-suite/result.json`, run log `/tmp/merger-no-suite/run.log`. No test suite was run.
+
+The prompt lane is one real daemon per tree: a git fixture whose branch edits `README.md` the way `main` does, so the daemon stops the rebase and spawns the merger in the task worktree. A recorder fake agent writes the `-p` argv prompt into the worktree, so C3 and C4 sample the prompt the merger actually receives, not only the file on disk.
+
+| id | claim | actual | expected | control | result |
+| --- | --- | --- | --- | --- | --- |
+| C1 | agents/merger.md drops the full-suite clause and names the no-suite rule once | merged: "You run no test suite: the integration stage tests the merged base." x1, "run the full test suite" x0, "full test suite" x0 | new sentence x1, no full-suite text at all | pre-fix: "You run no test suite" x0, "run the full test suite in your worktree" x1 | PASS |
+| C2 | agents/merger.md has five numbered steps, no test step, and step 5 is the old step 6 | merged: steps 1,2,3,4,5; test steps 0; step 5 equals pre-fix step 6: true | steps 1,2,3,4,5, no test step, step 5 is the old step 6 | pre-fix: steps 1,2,3,4,5,6; step 5 = "When tests fail, finish normally anyway and report the failu" | PASS |
+| C3 | the merger prompt the daemon spawns carries the no-suite rule and no full-suite run | captured merger prompt: "You run no test suite" x1, "full test suite" x0, len 2437 | spawned prompt has the no-suite sentence, no "full test suite" | pre-fix prompt: "You run no test suite" x0, "run the full test suite in your worktree" x1 | PASS |
+| C4 | the spawned merger prompt keeps the rest of the conflict-only contract | missing tokens []; leaks []; len 2437 | all contract tokens present, no absolute path and no placeholder | pre-fix prompt has the same tokens | PASS |
+| C5 | docs/agents-and-tools.md and docs/architecture.md name the new contract | agents-and-tools: new x1, old x0; architecture: new x1, old x0 | both new sentences x1, both old sentences x0 | pre-fix: agents-and-tools old x1, architecture old x1 | PASS |
+| C6 | "full test suite" survives only in the Developer, Reviewer and Integration-tester lines | merged hits 3: agents/developer.md, agents/integration-tester.md, agents/reviewer.md; off-list [] | every hit is in the Developer, Reviewer or Integration-tester prompt | pre-fix hits 5: agents/developer.md, agents/integration-tester.md, agents/merger.md, agents/reviewer.md, docs/agents-and-tools.md | PASS |
+| C7 | the part AL assertions carry the two Specs lines verbatim, messages included | line 1 verbatim false; line 2 verbatim false; old positive line gone true; found: assert.ok(promptAL.includes("You run no test suite"), "the merger runs no test suite"); \|\| assert.ok(!promptAL.includes("run the full test suite"), "the merger prompt names no full suite run"); | both Specs lines present verbatim, old positive line gone | (empty) | FAIL |
+| C8 | the change set is exactly the four Specs files and touches no src/ | files ["agents/merger.md","docs/agents-and-tools.md","docs/architecture.md","tests/orchestrator/merge.test.ts"]; src files 0 | exactly ["agents/merger.md","docs/agents-and-tools.md","docs/architecture.md","tests/orchestrator/merge.test.ts"], no src/ | (archived control has no git metadata) | PASS |
+
+Assumptions:
+- C7 compares the assertion messages, because Specs item 2 says "exactly these two lines" and those lines carry messages. If only the two predicates are meant, C7 is cosmetic.
+- The control is the feature's parent `c7a71d3`. An archived tree has no git metadata, so the C8 control cell is empty.
+- The recorder agent exits without resolving, so each tree spawns one merger and no second rebase round exists. The merger cooldown and cap are not part of this change.
+- `.kanban/AGENTS.merger.md` is gitignored and Specs item 5 forbids this task from editing it, so it was not checked.
+
+Contradiction with the task's stated assumptions: none observed. The change set holds exactly the four Specs files and no `src/` file (C8).
+
+Not exercised: `node tests/orchestrator/merge.test.ts` and `node tests/orchestrator/spawn.test.ts` (acceptance 1 and 2), because live tests never run a test suite. The part AL scenario was replayed through the production spawn path instead (C3, C4) and the test file content was read (C7).
+
+Finding, non-blocking: the two replacement assertions in part AL carry the messages `the merger runs no test suite` and `the merger prompt names no full suite run`, not the Specs messages `the merger runs no suite: the integration stage owns the test gate` and `the old full-suite requirement is gone`. The predicates match the Specs and the old positive assertion is gone, so no claim flips.
 
 # Open questions
 - Assumption: the new sentence sits right after the `git rebase --continue` sentence, at the point the deleted clause held.
