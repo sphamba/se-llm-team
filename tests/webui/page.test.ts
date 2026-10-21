@@ -178,6 +178,10 @@ assert.ok(page.includes(monoRule), "code and fenced code render in an explicit m
 const monoSelectors = monoRule.slice(0, monoRule.indexOf("{")).split(",").map((s) => s.trim());
 assert.ok(monoSelectors.includes("#m-log-text code") && monoSelectors.includes("#m-log-text pre code"), "inline code and fenced code stay in the log-pane monospace selector");
 assert.ok(!monoSelectors.includes("#m-log-text pre"), "the Thinking prose and the tool args/output pres are not inside the monospace selector, they stay Inter");
+// #310 the dialog body renders quoted lines as blockquotes: a subtle left border, small left
+// padding and the soft text colour, with a vertical margin only so the paragraphs around it do not shift
+const quoteRule = "#m-body blockquote { border-left: 3px solid var(--border); padding-left: 10px; margin: 4px 0; color: var(--soft); }";
+assert.ok(page.includes(quoteRule), "the dialog body styles a blockquote with a left border, small padding and the soft text colour");
 assert.ok(page.includes("button { font-family: inherit; }"), "buttons inherit the page font instead of the UA Arial default");
 // #292 the served md must run: a String(md) presence assert cannot prove the browser has every
 // name the renderer reads, so extract the served definitions and run them on a table body

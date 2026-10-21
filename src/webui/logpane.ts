@@ -141,13 +141,24 @@ export function md(src) {
 		return cells;
 	};
 	const tableAlign = (c) => (c.startsWith(":") && c.endsWith(":") ? ' style="text-align:center"' : c.endsWith(":") ? ' style="text-align:right"' : "");
-	let html = "", list = false, fence = false;
+	let html = "", list = false, fence = false, quote = false;
 	const closeList = () => { if (list) { html += "</ul>"; list = false; } };
+	const closeQuote = () => { if (quote) { html += "</blockquote>"; quote = false; } };
 	const lines = esc(src).split("\n");
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
-		if (line.trim().slice(0, 3) === "```") { closeList(); fence = !fence; html += fence ? "<pre><code>" : "</code></pre>"; continue; }
+		if (line.trim().slice(0, 3) === "```") { closeList(); closeQuote(); fence = !fence; html += fence ? "<pre><code>" : "</code></pre>"; continue; }
 		if (fence) { html += line + "\n"; continue; }
+		// #310: consecutive `> ` lines form one blockquote, a lone `>` is the paragraph break inside
+		// it (no empty p), and any line that is not a quote line closes it
+		const q = line.match(/^&gt;(?: (.*))?$/);
+		if (q) {
+			closeList();
+			if (!quote) { html += "<blockquote>"; quote = true; }
+			if (q[1] && q[1].trim()) html += "<p>" + inline(q[1]) + "</p>";
+			continue;
+		}
+		closeQuote();
 		const h = line.match(/^(#{1,6}) (.+)$/);
 		if (h) { closeList(); html += "<h" + h[1].length + ">" + inline(h[2]) + "</h" + h[1].length + ">"; continue; }
 		const li = line.match(/^[-*] (.+)$/);
@@ -178,6 +189,7 @@ export function md(src) {
 		if (line.trim()) html += "<p>" + inline(line) + "</p>";
 	}
 	closeList();
+	closeQuote();
 	if (fence) html += "</code></pre>";
 	return html;
 }

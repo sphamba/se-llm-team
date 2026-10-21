@@ -304,6 +304,9 @@ content height; the class drops at the transition end, and reduced motion keeps 
 #m-body { font-size: 0.9375rem; line-height: 1.5; }
 #m-body h1, #m-body h2, #m-body h3 { font-size: 0.9375rem; margin: 12px 0 4px; }
 #m-body ul { margin: 4px 0; padding-left: 20px; }
+/* #310 quoted covered-task summaries render as blockquotes: a subtle left border, small left
+padding and the soft colour, with a vertical margin only so the paragraphs around it do not shift */
+#m-body blockquote { border-left: 3px solid var(--border); padding-left: 10px; margin: 4px 0; color: var(--soft); }
 #m-body pre { background: var(--code-bg); border-radius: 6px; padding: 8px 10px; overflow: auto; font-size: 0.875rem; }
 #m-body code { background: var(--code-bg); border-radius: 4px; padding: 0 4px; font-size: 0.875rem; }
 #m-body pre code { padding: 0; background: none; }

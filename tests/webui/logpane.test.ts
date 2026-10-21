@@ -324,6 +324,45 @@ assert.equal(
 	"a table inside a fenced block stays pre/code, never a rendered table",
 );
 
+// #310 blockquotes: consecutive `> ` lines form one blockquote rendered through inline(), a lone
+// `>` separates paragraphs inside that blockquote, a blank line closes it, and a `>` inside a fence
+// stays literal text
+assert.equal(
+	md("> Covered summary"),
+	"<blockquote><p>Covered summary</p></blockquote>",
+	"a quoted line renders as one blockquote paragraph, never a paragraph of literal &gt; text",
+);
+assert.equal(
+	md("> one\n>\n> two"),
+	"<blockquote><p>one</p><p>two</p></blockquote>",
+	"a lone > separates paragraphs inside one blockquote instead of emitting an empty p",
+);
+assert.equal(
+	md("> use `x` here"),
+	"<blockquote><p>use <code>x</code> here</p></blockquote>",
+	"inline code inside a quote renders a code element inside the blockquote",
+);
+assert.equal(
+	md("> **bold** [l](u)"),
+	'<blockquote><p><b>bold</b> <a href="u" target="_blank" rel="noopener">l</a></p></blockquote>',
+	"bold and links inside a quote render through inline()",
+);
+assert.equal(
+	md("```\n> not a quote\n```"),
+	"<pre><code>&gt; not a quote\n</code></pre>",
+	"a > inside a fenced block stays literal text",
+);
+assert.equal(
+	md("> quote\n\nafter the quote"),
+	"<blockquote><p>quote</p></blockquote><p>after the quote</p>",
+	"a blank line after the quote closes it, so the next line is a normal paragraph",
+);
+assert.equal(
+	md("- a\n> q"),
+	"<ul><li>a</li></ul><blockquote><p>q</p></blockquote>",
+	"a quote closes the open list first",
+);
+
 // #299 open-table merge, server half: a table whose row run reaches the end of the input is
 // marked open, so the client can absorb the rows a later chunk appends to it; any content after
 // the table closes it, and a chunk that ends mid-line splits that line off and drops the marker
