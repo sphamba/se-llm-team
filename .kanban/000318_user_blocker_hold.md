@@ -1,7 +1,7 @@
 ---
 name: "feat: hold a task on a user blocker at every stage start"
 priority: "medium"
-state: "to-merge"
+state: "to-live-test"
 worktree: "feat/318-user-blocker-hold"
 issuer: "user"
 complexity: "simple"

@@ -65,4 +65,12 @@ Review of 57bd6e4 (first pass): the Specs hold, and both pins bind real producti
 - Note: part 16's `chmod 0444` trigger needs a non-root uid, so under root the write succeeds and the `EACCES` assertion fails. Guard with `process.getuid?.() === 0` only if a root runner ever appears.
 - Note: `pnpm test` is the live tester's gate and was not run here.
 
+## Merge resolution (rebased onto 41ad23b)
+
+- One conflict, `tests/orchestrator/integration.test.ts`: both sides appended a new part at the end of the file. The base added part 16 (user hold skips the integration lane) and the replayed commit added its own part 16 and part 17. Both sides keep their tests, so the resolution keeps the base part 16 verbatim and renumbers the replayed parts to 17 and 18, with their suffixed identifiers renumbered too. The two closing summary lines became one.
+- `node tests/orchestrator/integration.test.ts` exits 0 after the rebase, all 19 parts.
+- `npm test` exits 1. The first failure line is `timeout waiting for the integration task runs to done and folds into the mirror` in `tests/orchestrator/spawn.test.ts`. This branch does not touch that file and does not touch `src`: `git diff --stat 41ad23b..HEAD` lists only `tests/orchestrator/integration.test.ts`, and the failure reproduces on base `41ad23b` alone. It is a pre-existing red on the new base, not this change.
+- The Blocker entry above was recorded against base `d51a72e`. The base now holds the user-hold commits (`c27fdb8`, `41ad23b`) and the same red is still there.
+- Durable guidance: when both sides append a numbered test part, the numbers collide and the parts are module-scope consts. Keep both sides and renumber the replayed parts, suffixed identifiers like `root17` and `waiting16Path` included.
+
 # Open questions
