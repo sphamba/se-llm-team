@@ -1,7 +1,7 @@
 ---
 name: "feat: mark a user-held task card with a dashed border"
 priority: "medium"
-state: "to-review"
+state: "to-live-test"
 worktree: "feat/320-user-blocker-hold-card"
 issuer: "#318"
 complexity: "moderate"
@@ -101,3 +101,13 @@ Worktree `feat/320-user-blocker-hold-card`, fast-forwarded to base `b7596fc` fir
 - Suites: `node tests/webui/board.test.ts` exit=0, `node tests/webui/page.test.ts` exit=0, `node scripts/test-changed.mjs` exit=0 (5 suites: agentlog, board, hub, logpane, page). The full suite stays the live tester's gate. The dashed border itself is a by-hand browser check after a daemon restart, as the Specs say.
 
 Durable finding for future Developer passes on this repo: a backtick inside a CSS comment in `page.ts` closes the `PAGE` template literal, and every import of the module then dies with `ERR_INVALID_TYPESCRIPT_SYNTAX` pointing at the comment word. Keep `PAGE` comments backtick-free.
+
+Re-review of f90f233 (the earlier pass had no work; this pass reviews the feature commit):
+- `src/webui/board.ts:462` runs the token test inline on every pass, `String(t.blockedBy || "").split(",").some((r) => r.trim().toLowerCase() === "user")`, so no new helper and no new interpolation site beside `page.ts:398`. `src/webui/page.ts:463` drops only `enter` on animationend, so the held class survives the one-shot entrance.
+- `src/webui/page.ts:152` turns the three 1px border colours transparent and `:153` paints top, right and bottom on `::after` at the 6-on/4-off rhythm, `inset: -1px -1px -1px -3px` reaching the border box from the padding box an absolute child is placed in, so `.card:hover`'s background shorthand cannot wipe it. `src/webui/page.ts:145` `.card` is untouched: the 3px `--ac` left accent, the 6px radius, the 1px size and the padding stay. Static, no animation.
+- `relationPaths` (`src/webui/board.ts:241`) and `blockedRow` (`src/webui/page.ts:698`) are unchanged and both now carry a `user` pin. The diff touches only the four in-scope files, never `src/kanban.ts`, `src/orchestrator/*`, `tests/kanban/*` or `tests/orchestrator/*`.
+- Tests: start/exit=0 `tests/webui/board.test.ts`, start/exit=0 `tests/webui/page.test.ts`, start/exit=0 `node scripts/test-changed.mjs` (5 suites: agentlog, board, hub, logpane, page), log at `/tmp/rv-*.log`.
+- Nit (non-blocking): `tests/webui/page.test.ts:594` pins the left accent and the radius on the base `.card` rule only, so an override added to `.card.user-hold` would not fail, and the `border-right-color: transparent` half of `page.ts:152` is unpinned. Upgrade path: assert that the `.card.user-hold` rule carries no `border-left` or `border-radius`, and pin the right colour too.
+- Nit (non-blocking): `page.ts:153` hardcodes the base border widths in `inset`, so a later `.card` border-width change drifts the dashes off the edges. Upgrade path: restate the insets from the border widths with `calc()`.
+- No unvoiced assumption: the developer's Notes name the transparent border colours and the `El` stub's `classList.toggle`, and the Specs' `## Split scope` and `## Unchanged` items hold.
+

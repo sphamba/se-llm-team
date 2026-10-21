@@ -6,7 +6,7 @@ worktree: "feat/318-user-blocker-hold"
 issuer: "user"
 complexity: "simple"
 shortName: "user-blocker-hold"
-blockedBy: "#319, #320"
+blockedBy: "#319"
 ---
 
 # Summary

@@ -1,7 +1,7 @@
 ---
 name: "feat: hold a task on a user blocker in the daemon gates"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "feat/319-user-blocker-hold-daemon"
 issuer: "#318"
 complexity: "moderate"
@@ -75,3 +75,14 @@ Decision: do not split. State is unchanged, so the developer starts after this p
 - Two subtasks would cost two review passes, two merge cycles and two live tests on almost the same test suites. That overhead is more than the time saved.
 - Guidance for a future Splitter on a task of this kind: first find the shared symbol and count the files that it touches. A predicate plus its call sites is one unit of work, not a fan-out.
 
+
+## Developer pass (implementation)
+
+Rebased onto main b7596fc (was 84a0c8c): stashed the five uncommitted test files, `git merge --ff-only main`, popped them back, and kept every case.
+- `src/kanban.ts`: new exported `hasUserHold(blockedBy)` before `blockedNums`. `blockedNums`, `assertNoBlockCycle`, the parse and the serialize paths are unchanged.
+- `src/orchestrator/pipeline.ts`: six guards on that one predicate. `blockedByUndone` first (so both `promoteBacklog` call sites hold the task), `startTodo` after the fresh to-do read and before the splitter branch, the reviewer branch after `ensureWorktree` as the Specs anchor says (a held task may still get a worktree), `sweepToMerge` before `const wt` so no setWorktree, rebase, fast-forward or merger slug runs, the to-live-test branch before the merged-branch test so a hold never requeues, and `sweepToIntegrationTest` first. `dropDoneBlockers` and `spawnRunAnalysis` unchanged.
+- Tests: kept the five uncommitted cases and added the missing integration-gate case as part 16 of `tests/orchestrator/integration.test.ts` (held task keeps to-integration-test, the next eligible task takes the single slot, and the released task starts its run). Red proved for part 16 with the source stashed: exit=1 at line 639, "the held task stays in to-integration-test", actual integration-testing.
+- Green: `tests/kanban/blockedby.test.ts`, `tests/orchestrator/{promote,split,sweep,merge,integration}.test.ts` all exit=0.
+- Docs: `skills/se-llm-team/SKILL.md:18`, `:33`, `:37`, `docs/architecture.md` backlog and to-do bullets, `docs/agents-and-tools.md:7` and the Splitter table row, and `agents/splitter.md` after the split steps.
+- Skipped `node scripts/test-changed.mjs`: `src/orchestrator/pipeline.ts` matches no RULES entry, so the script falls back to running every suite. Ran the six touched suites instead.
+- `tests/orchestrator/spawn.test.ts` fails at "timeout waiting for the integration task runs to done and folds into the mirror" with and without this diff (base probe: stash, run, pop, same exit=1 and the same daemon log), so it is pre-existing. It is not in the Specs test list.

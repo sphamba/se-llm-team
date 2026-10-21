@@ -1,7 +1,7 @@
 ---
 name: "fix: skip the state-pass create retry for a create that already landed"
 priority: "medium"
-state: "doing"
+state: "to-merge"
 worktree: "fix/322-create-retry-once"
 issuer: "#315"
 complexity: "simple"
@@ -40,3 +40,24 @@ Reproduce in the smoke fixture: `git log --format=%s refs/heads/meta/kanban` and
 - `git diff --stat` shows only `src/orchestrator/pipeline.ts` and `tests/orchestrator/spawn.test.ts`.
 
 # Notes
+## Run 2026-10-21
+
+- Fix in `src/orchestrator/pipeline.ts`: a `Set` records each task file whose pass-one create `commitKanban` returned true. The state pass retries a create only when the file is not in the set. The updated comment names the stale sweep-start map.
+- Pin in `tests/orchestrator/spawn.test.ts`: after the integration wait, filter `mirrorSubjects(rootA).split("\n")` for `kanban: create <integration file>` and assert exactly one.
+- Premise: `blockedBy` is empty. The Adoption section names #321. Card `000321_integration_done_mirror.md` has `state: "done"` and card `000324_integration_of_321.md` is in `to-integration-test`. The #321 change is absent: `grep -F 'showTip(rootA, f)' tests/orchestrator/spawn.test.ts` is empty, and the wait still checks the `kanban: done <integration file>` subject. The mirror tip holds `state: "done"` for the integration file, because a higher-priority whole-board fold absorbs the done label. `node tests/orchestrator/spawn.test.ts` times out at that wait on base `b7596fc` and with this fix, before the new pin runs. The 3 green runs need the #321 change.
+- Throwaway pin `tests/_scratch.test.ts` (deleted): base `b7596fc` gives 2 create subjects for the integration file, this fix gives 1.
+- `node tests/orchestrator/sweep.test.ts` exit 0. The full suite is the live tester's gate.
+
+## Review of 2dc54b8 (first pass)
+
+- `src/orchestrator/pipeline.ts:457,466,489`: the `created` Set fills only on a pass-one `commitKanban` true and gates only the state-pass retry, so a failed pass-one create still retries and `commitKanban` is untouched.
+- `tests/orchestrator/spawn.test.ts:52-54`: the pin filters `mirrorSubjects(rootA).split("\n")` for the exact integration create subject after the integration wait, as the acceptance criterion asks.
+- `git diff --stat b7596fc...HEAD` shows only `src/orchestrator/pipeline.ts` and `tests/orchestrator/spawn.test.ts`, and the tree is clean.
+- Base probe: with the two files checked out from b7596fc, the suite exits 1 with `timeout waiting for the integration task runs to done and folds into the mirror` (`tests/orchestrator/spawn.test.ts:49`), so the red predates this change.
+
+Tests: `node tests/orchestrator/spawn.test.ts` exit=1 at HEAD and exit=1 at base b7596fc, both timing out at the integration wait before the new pin runs; the pin is unverified, not failing.
+
+- Non-blocking: card 000321 is `done` but `main` b7596fc still has the subject wait (no `showTip(rootA, f)`), so this task's declared blocker never landed. Upgrade path: reopen #321 or let #324 bounce it, then re-run `spawn.test.ts` to execute the pin.
+- Non-blocking: acceptance 2 (3 green runs) and 3 (`pnpm test`) are not measurable until #321 lands, and the full suite is the live tester's gate.
+- Nit: `commitKanban` returns true for an identical tree (`src/orchestrator/board.ts:61`), so a second new file that landed under the first file's whole-board create commit enters `created` without its own create subject; multi-create sweeps still emit one create subject. Upgrade path: a separate task for per-file create events.
+
