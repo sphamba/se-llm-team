@@ -1,12 +1,12 @@
 ---
 name: "fix: end the integration task at done on every lane end, never requeue it"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "reviewing"
+worktree: "fix/312-integration-lane-done"
 issuer: "user"
 complexity: "simple"
 shortName: "integration-lane-done"
-blockedBy: "#311"
+blockedBy: ""
 ---
 
 # Summary
@@ -56,3 +56,14 @@ Check `skills/se-llm-team/SKILL.md:19` and `docs/architecture.md:28`. Update a l
 - No note about a crashed run is written to the task file. The run log and the `.dead` marker are the evidence.
 
 # Notes
+
+## Implementation
+- `src/orchestrator/liveness.ts`: `WORKING_STATES["integration-testing"].next` and `LANES["integration-testing"].next` are now `done`, with comments that the report-only lane always completes.
+- `tests/orchestrator/integration.test.ts` part 10: the crash case (pid 999999, exit 3) now asserts `done`, no lane pid, no lane exit file, nothing in `integration-testing`. A new superseded case asserts `done` and that the live pid/exit/slug pair is untouched. The part-10 log line and the final summary line are updated.
+- `docs/architecture.md:32`: the crash line no longer says a crashed integration run returns to `to-integration-test`; it says every integration lane end lands at `done`. `skills/se-llm-team/SKILL.md` already said the lane ends at `done`, so it is unchanged.
+- Logic untouched: the exit-0 path still moves to `done`, and the `.dead` marker, dead-streak bump and exit-file clear stay.
+
+## Verification
+- Red first: `node tests/orchestrator/integration.test.ts` failed at the crash assert with `to-integration-test` vs `done`.
+- Green after the change: `node tests/orchestrator/integration.test.ts` exit=0 and `node tests/orchestrator/merge.test.ts` exit=0.
+- The full suite is the live tester's gate.
