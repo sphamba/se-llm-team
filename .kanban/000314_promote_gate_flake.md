@@ -1,7 +1,7 @@
 ---
 name: "fix: make the backlog idle gate test independent of a 3 s wall clock"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "fix/314-promote-gate-flake"
 issuer: "#305"
 complexity: "simple"
@@ -44,3 +44,15 @@ Run `node tests/orchestrator/promote.test.ts` in a loop of 20 runs. All must exi
 - No change to other tests that use a small window, unless the same 3 s race exists there.
 
 # Notes
+## 314 promote gate flake
+
+Changed only `tests/orchestrator/promote.test.ts`. No source change: `promoteBacklog` and the gate logic are untouched (`git diff src/` is empty).
+
+- Part AR2: the fresh-file case runs with a 5 min window and the task file mtime pinned 1 s back with `utimesSync`; the promote case ages the file by 10 min (600 s) against that window. The `0` window case and both `backlog` state assertions stay. The `0.05 min = 3 s < 10 s` comments now read the new numbers.
+- Root cause is wider than the 3 s diagnosis in the Specs. A 5 min window alone did not fix the flake: 7 of 20 runs still failed with `1 !== 0`, and the same assertion in part AR3 or AR4 failed in 2 more. Instrumenting the gate showed the fresh file was never ranked: `promoteBacklog` skips any task file whose `statSync().mtimeMs` is above `Date.now()` (the #296 clock-skew guard, part BC). `Date.now()` is millisecond-floored and the filesystem mtime carries a sub-millisecond fraction, so a file written in the current millisecond reads as future, is skipped, `newest` stays 0, the gate opens, and the "fresh file defers" assertion fails. Pinning the fresh mtime 1 s back removes that race without touching the gate.
+- Parts AR3 and AR4 carry the identical assertion (`a fresh task file still defers promotion within the window`, `an external PM edit defers promotion within the window`), so they got the same 5 min window, 10 min aging and mtime pin. The out-of-scope line allows this ("unless the same 3 s race exists there").
+- Gate: `node tests/orchestrator/promote.test.ts` 20 runs, all exit 0, plus 10 more runs under 3 CPU hogs, all exit 0 (30 of 30). The full `pnpm test` stays the live tester's gate.
+- Follow-up candidate, not changed (out of scope per the Specs): the same `mtimeMs > Date.now()` skip also hides a task file the PM writes in the current millisecond, so that write does not defer promotion. A one-line tolerance (compare against the sweep start, or allow 1 ms) would close it.
+
+# Open questions
+- [user] Assumption: the same-millisecond "future" skip is the dominant flake, so the fix pins mtimes in the test instead of relaxing the gate. Confirm that `promoteBacklog` stays as it is, even though a same-millisecond write is then not counted as board activity.

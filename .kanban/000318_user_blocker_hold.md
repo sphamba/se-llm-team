@@ -1,7 +1,7 @@
 ---
 name: "feat: hold a task on a user blocker at every stage start"
 priority: "medium"
-state: "backlog"
+state: "to-do"
 worktree: ""
 issuer: "user"
 complexity: "moderate"
@@ -9,8 +9,10 @@ shortName: "user-blocker-hold"
 ---
 
 # Summary
-Allow `blockedBy` to carry the literal token `user` in addition to task refs. A task with the token does not start any stage: backlog to to-do, to-do (splitter and developer), to-review, to-merge, to-live-test, to-integration-test. A running agent finishes its current stage; the next gate stops it. The PM adds and removes the token on the user's request, and the board card of a held task gets a 6-on/4-off dashed top/right/bottom border with the solid 3px left accent kept.</summary>
-<specs" string="true">## Token
+Allow `blockedBy` to carry the literal token `user` in addition to task refs. A held task does not start any stage (backlog to to-do, to-do splitter and developer, to-review, to-merge, to-live-test, to-integration-test); a running agent finishes its current stage and the next gate stops it. The PM adds and removes the token on request, and the board card of a held task gets a 6-on/4-off dashed top/right/bottom border with the solid 3px left accent kept.
+
+# Specs
+## Token
 
 `Task.blockedBy` stays a comma-joined string (`src/kanban.ts:37`, parsed at `:191`, serialized at `:286-289`). A ref whose trimmed value equals `user` (case-insensitive) is a hold. It may mix with task refs (`user, #42`): the task waits for the user AND for every ref, and the refs keep their old meaning. `user` alone is valid.
 
@@ -52,8 +54,5 @@ Reword `skills/se-llm-team/SKILL.md:18` (state order), `:33` ("blockedBy only ga
 ## Out of scope
 
 No migration of existing task files. No auto-removal of `user`. No kill of a running agent. No relation line for `user`. No change to issuer, priority or complexity. No new validation of other non-numeric refs.
-
-# Specs
-
 
 # Notes
