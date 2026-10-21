@@ -1,7 +1,7 @@
 ---
 name: "fix: the root context symlink never replaces a real file"
 priority: "medium"
-state: "reviewing"
+state: "to-live-test"
 worktree: "fix/331-root-context-symlink-guard"
 issuer: "user"
 complexity: "simple"
@@ -97,5 +97,14 @@ Part A blocks the suite before part BA, so I proved the pin with the identical b
 - Not added, per the Specs: no backup file, no restore path, and no change to `clearContextSymlinks`, `ensureInfoExclude`, `cleanContextPaths` or `stripContextSymlinks`.
 - Existing part AZ assertion `the splitter cwd still links the task file` still holds, so no fixture change was needed: at a fresh root the `SPECS.md` link is missing, not a real file, so the new refusal does not fire.
 
+Review of a1ac53c (first pass):
+- `src/orchestrator/spawn.ts:59` compares resolved paths (`realpathOrSelf`), and `spawn.ts:126-127` refuses a real file at the root before the `rmSync` at `spawn.ts:130`. The `readlinkSync` check, the directory refusal and the replace path are unchanged.
+- `src/orchestrator/spawn.ts:239` resolves `rootCwd` once and uses it at `spawn.ts:240` and `spawn.ts:246`. Acceptance 5 cannot pass without this change, and a real root cwd behaves as before.
+- `tests/orchestrator/spawn.test.ts:586-621` pins the three root spellings (trailing slash, `symlinkSync` alias, plain root), the real `.worktrees/feat-x` flow, and the three refusal lines.
+- Manual repro: `ensureContextSymlinks` with a trailing-slash cwd kept both sha256 sums identical and wrote one refusal line.
+- Tests: `tests/orchestrator/spawn.test.ts` exit 1, part A wait `timeout waiting for the integration task runs to done and folds into the mirror`, pre-existing at base `2273595` (same wait in the `/tmp/baseBA` archive), so part BA does not run in the suite. A standalone copy of part BA passed (exit 0, three refusal lines). `tests/context-symlinks.test.ts` exit 0, `tests/orchestrator/merge.test.ts` exit 0, `tests/orchestrator/poll.test.ts` exit 0.
+- Note: the part A red has no owning card on the board (backlog and in-progress show no match). The owning area is the board mirror after `queued board report` in `tests/orchestrator/spawn.test.ts` part A.
+- Nit: `refusalsBA.length === 3` at `tests/orchestrator/spawn.test.ts:618` pins the order where the root `SPECS.md` repoint runs before the early return, and the #332 root cleanup can change that order. Relax it to `>= 1`, or count after a direct `repointContextSymlink` call, when #332 lands.
+- Nit: `spawn.ts:127` logs the caller's alias spelling, so the line names a path a reader cannot find. Log `realpathOrSelf(dirname(link))` if the line must name the root.
+
 # Open questions
-- `spawnAgent`'s two other `cwd === root` expressions are now a single resolved `rootCwd`. Confirm that this generalization belongs to this task. Acceptance 5 cannot exit 0 without it.
