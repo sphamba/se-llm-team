@@ -1,7 +1,7 @@
 ---
 name: "feat: integration test stage after live test"
 priority: "high"
-state: "doing"
+state: "live-testing"
 worktree: "feat/301-integration-test-stage"
 issuer: "user"
 complexity: "complex"
@@ -159,3 +159,80 @@ Why:
 Only the prose is separable: `docs/architecture.md`, `docs/agents-and-tools.md`, `README.md` and `skills/se-llm-team/SKILL.md`. It has no test and it restates facts from the code. A second task for that prose costs a full pipeline cycle, which is more than the prose work.
 
 Durable guidance for future Splitters: a new pipeline stage is one transaction. The state enum, the transition, the spawn branch, the agent prompt, the role whitelists and the docs must land together, because the suite and the live test judge the pipeline as a whole. Split a stage task only when a piece owns its own states and behaviour end to end, for example a second stage that does not change the first.
+
+## Developer pass
+
+Landed as one change on top of `f04cfb9`.
+
+- `src/kanban.ts`: `to-integration-test` and `integration-testing` join `STATES` and `IN_PROGRESS` (before `done`); `createTask` accepts issuer `auto` and an optional `notes` body the integration task carries.
+- `src/orchestrator/pipeline.ts`: `ensureIntegrationTask(root, covered)` opens the one waiting integration task (name `test: integration of #a, #b` ascending and deduplicated, shortName `integration-of-<first>`, low, simple, `auto`, no blockedBy, state `to-integration-test`) or appends one bullet and re-names the waiting task; a ref already named by a waiting or running integration task is skipped; a target that left `to-integration-test` before the write gets a fresh task. `sweepToIntegrationTest` is the single slot: one `integration-tester` alive, the `maxParallel` cap and the dead cooldown all hold the task in `to-integration-test`, otherwise it sets `integration-testing`, writes the lane slug and spawns in the root checkout with no worktree. `WORKING_CAP_STATES` gained `integration-testing`; the janitor never sweeps `integration-tester.pid` or `integration-tester.exit`; the lane pid and slug clear once no task waits in or runs the lane.
+- `src/orchestrator/liveness.ts`: `WORKING_STATES["integration-testing"]` bounces to `to-integration-test` and succeeds to `done`; a new `LANES` map makes the merger and the integration-tester share one pid/slug code path, so a lane task the slug file does not name requeues without a death record. The `live-testing -> done` branch calls `ensureIntegrationTask`; a hook failure is logged and never blocks the done move.
+- `src/orchestrator/spawn.ts`: the merger slug helpers take an optional lane name (default `merger`).
+- `agents/integration-tester.md`: report-only prompt, root checkout, full project test script, findings in `# Open questions`, no code, no commits, no tasks, no state moves.
+- Role whitelists: `newestRunRole` and `compactFinishedLogs` in `src/orchestrator/log.ts`, `AGENT_ROLE` (so `LOG_ROLES` derives it), the payload handle and doctor matchers, `ROLE_CLS` and the role CSS.
+- Web UI: `pairLayout` takes a named `TAIL_STATES = 5`, so the last column stacks the five tail states; the spinner covers `integration-testing`; two new state accents; issuer `auto` renders like `user` with no badge and no issuer link.
+- Docs: `docs/architecture.md`, `docs/agents-and-tools.md`, `README.md`, `skills/se-llm-team/SKILL.md`.
+
+Tests: new `tests/orchestrator/integration.test.ts` (creation, fields and generated Specs, append, second done while one runs, no creation from `integration-testing -> done`, no creation for a PM-moved done, already-covered ref, one run at a time, `maxParallel` gate, crash bounce) and `tests/orchestrator/report.test.ts` (an `auto` task is never a finding). Extended `tests/kanban/attributes.test.ts` (`auto` accepted, unknown issuer falls back, both integration states count as in-progress), `tests/orchestrator/spawn.test.ts` (role notes and the end-to-end markers for the new role) and `tests/helpers.ts` (the argv stub names the new role). `scripts/test-changed.mjs` already maps `agents/*.md` to the orchestrator suites, so no change was needed.
+
+Verification: every orchestrator suite, `tests/kanban/attributes.test.ts`, `tests/webui/{board,page,logpane}.test.ts` and `pnpm test` in the repo root all exit 0.
+
+Two notes for the reviewer:
+
+- `tests/orchestrator/promote.test.ts:464` ("an external PM edit defers promotion within the window") is load-sensitive: it needs less than 3 s between a raw board write and the call. It failed once while two subagents ran and passes on an idle machine. Left unchanged, out of scope.
+- `tests/helpers.ts` `killAnalyses` read an `.analysis.pid` file that the finished analysis had already removed, which surfaced once under `pnpm test`. The read is now guarded; that part of the helper is untouched otherwise.
+
+## Reviewer pass
+
+Mode: first review of `d050f72`. Claim set: every Specs line from States to Docs, plus Acceptance criteria. Test union: the touched suites plus the suites of the changed files.
+
+Verdict: the Specs hold. One defect found and fixed in this pass.
+
+| Specs line | Verdict | Evidence |
+| --- | --- | --- |
+| States | pass | `src/kanban.ts:15` states before done, `:68` in-progress set, `src/orchestrator/pipeline.ts:35` cap set and `:530` rescan branch, `src/orchestrator/liveness.ts:20` working table |
+| Transition | pass | `src/orchestrator/liveness.ts:20` next/success/role, `:220` hook after the done `setState` inside try/catch, keys on `live-testing -> done` only |
+| Create or append | pass | `src/orchestrator/pipeline.ts:100` hook reads `listAll`, lowest waiting number, skip of a covered ref, re-read guard at `:114`, fields and template at `:80`, single writer `updateTask` at `:122` |
+| Scheduling | pass | `src/orchestrator/pipeline.ts:310` one lane pid, cap gate, cooldown, state before spawn, cwd root and no worktree; order from the priority-sorted snapshot, stable sort keeps task-number order |
+| Agent prompt | pass | `agents/integration-tester.md` states root checkout, `pnpm test`, findings in `# Open questions`, no code/commit/task/state, finish message, timeout |
+| Doctor wiring | pass | `src/orchestrator/spawn.ts:29` and `:214` create `AGENTS.integration-tester.md`; analysis runs on any successful role (`liveness.ts:237`); role lists at `src/orchestrator/log.ts:27`, `:157`, `src/webui/logpane.ts:12`, `src/webui/payload.ts:254`, `:260`, `src/webui/page.ts:824`; label is the generic `agentLabel` (`src/webui/board.ts:22`) |
+| Issuer auto | pass | `src/kanban.ts:437` accepts auto, unknown falls back; `src/tools.ts:108` still offers only user and `#<num>`; `tests/orchestrator/report.test.ts` pins that auto is never a finding; no badge and no link at `src/webui/board.ts:179` and `src/webui/page.ts:705` |
+| Web UI | pass | `src/webui/board.ts:148` `TAIL_STATES = 5`, `:168` spinner, `src/webui/page.ts:329` two new accents, tail order pinned by `tests/webui/board.test.ts` |
+| Docs | pass | `docs/architecture.md`, `docs/agents-and-tools.md`, `README.md`, `skills/se-llm-team/SKILL.md` all carry the two states, the role, the PM rule and the auto issuer |
+| Acceptance | pass | every named suite is present and green |
+
+### Fix in this pass
+
+`src/orchestrator/log.ts:159`: `compactFinishedLogs` decided a run was live by `agentAlive(root, slug)`, but the integration lane writes one global pid (`.pids/integration-tester.pid`), never `<slug>.pid`. A live integration run's log was gzipped and unlinked mid-run, so the doctor analysed a truncated log and the stall check lost the plain file and could never kill a hung run. The lane role now guards on its lane pid, like the merger. New assertion in `tests/orchestrator/log.test.ts:120` (live lane log stays plain).
+
+Red proof: with the added assertion and the old guard, `node tests/orchestrator/log.test.ts` printed `exit=1`, class "assertion: an unexpected extra compaction" (`only the finished log compacted+gzipped; running, merger and integration-tester logs skipped`). After the fix the same command printed `exit=0`.
+
+Commit: `804a20e`.
+
+### Tests run (all `exit=0`)
+
+`tests/orchestrator/`: integration, report, spawn, poll, sweep, merge, worktree, promote, split, daemon, singleton, config, analysis, hub, log. `tests/kanban/`: attributes, blockedby, naming, taskfile, locking, git. `tests/webui/`: board, logpane, page, agentlog, hub. Plus `tests/plugin.test.ts` and `tests/tools.test.ts`.
+
+### Non-blocking notes
+
+- `src/webui/payload.ts:179`: `agentHistory` decides the live run by `agentAlive(root, slug)`. The integration lane's pid is global, so an in-flight run renders as a past run (check mark, no spinner) and its detail card refreshes at 5 s, not 1 s. The merger has the same shape today. Upgrade path: resolve the lane pid for lane states in `agentHistory` and `agentLogPayload`; this needs the lane map shared out of `src/orchestrator/liveness.ts:26`.
+- `docs/architecture.md:26` says the shortName is "of the first covered task". The shortName stays the number of the ref that created the task, which is not always the lowest ref after an append. Reword to "of the task that created it" at the next touch.
+- `src/orchestrator/pipeline.ts:64`: an appending target whose Specs lack the fixed tail block (a hand-written task in `to-integration-test`) keeps its old tail line and gains a second copy. The orchestrator only creates the full template, so the pipeline cannot reach it.
+- `tests/orchestrator/spawn.test.ts:305` allows `--append-system-prompt` for the integration-tester where the other roles forbid it. That is correct: the root checkout spawn carries the role notes inline (`src/orchestrator/spawn.ts:220`). Recorded so a later reader does not read it as a weakened guard.
+- Unvoiced assumption: `createTask` gained a `notes` body parameter (`src/kanban.ts:427`) beyond the Specs field table. Additive and disclosed in the Developer pass; the Notes field needs it.
+- `tests/orchestrator/promote.test.ts:464` and the `tests/helpers.ts` `killAnalyses` guard: as the Developer pass reported. Confirmed out of scope.
+
+### Durable guidance for future reviewers
+
+A new project-wide lane role (one global pid instead of `<slug>.pid`) must join two guard lists the Specs do not name: the gzip sweep guard in `src/orchestrator/log.ts` `compactFinishedLogs`, and the web UI live-run resolution in `src/webui/payload.ts` `agentHistory`. The merger shows the second gap and the integration-tester showed the first.
+
+### Re-review of `804a20e`
+
+Mode: re-review of the fix commit only. Claim set: a live integration-tester log stays plain while the lane pid is alive, and the touched suite pins it. Test union: `tests/orchestrator/log.test.ts`. First-pass evidence for the Specs lines stands.
+
+Verdict: the fix holds, no new defect, no edit in this pass.
+
+- `src/orchestrator/log.ts:165` guards an `integration-tester` role log on `integration-tester` alone, which is the lane pid: `src/orchestrator/pipeline.ts:319` writes it and `:559` clears it. A role log of that name only comes from the lane spawn (`:320`), so the per-slug guard would always be dead for it.
+- Red proof from the first pass stands: old guard printed `exit=1` (class "an unexpected extra compaction"), fixed guard `exit=0`.
+- `node tests/orchestrator/log.test.ts` printed `exit=0` on the clean tree; `git status --short` is empty.
+- Non-blocking nit: the third ternary branch duplicates the lane list that `src/orchestrator/liveness.ts:26` `LANES` already holds. Sharing it means a new `log.ts -> liveness.ts` import, so leave it until a third lane role exists.
