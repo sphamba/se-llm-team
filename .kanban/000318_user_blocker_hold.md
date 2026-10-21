@@ -1,12 +1,12 @@
 ---
 name: "feat: hold a task on a user blocker at every stage start"
 priority: "medium"
-state: "backlog"
+state: "to-do"
 worktree: "feat/318-user-blocker-hold"
 issuer: "user"
 complexity: "simple"
 shortName: "user-blocker-hold"
-blockedBy: "#319"
+blockedBy: ""
 ---
 
 # Summary
