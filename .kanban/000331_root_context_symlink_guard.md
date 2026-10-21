@@ -18,7 +18,7 @@ The root guard in ensureContextSymlinks is raw string equality, and repointConte
 
 Two defects make that guard unsafe:
 
-1. The comparison is raw string equality. A caller that passes `root + "/"`, `join(root, ".")`, or a symlinked spelling of the root falls through to the destructive branch.
+1. The comparison is raw string equality. A caller that passes `root + "/"`, or a symlinked spelling of the root, falls through to the destructive branch.
 2. `repointContextSymlink` (`spawn.ts:104-124`) does `rmSync` and then `symlinkSync`. It refuses only a directory. A real file is deleted and nothing restores it: `clearContextSymlinks` restores nothing, and `stripContextSymlinks` (`pipeline.ts:199-212`) only removes entries that `git ls-tree HEAD` reports as mode `120000`. `AGENTS.md` and `SPECS.md` are both in `.gitignore`, so a deleted real file is unrecoverable.
 
 Today no `AGENTS.md` exists at this repo's root, so the defect is latent, not live. The user decided: close it with a resolved-path comparison and a refusal at the root. Do not add a backup file.
@@ -50,26 +50,28 @@ Today no `AGENTS.md` exists at this repo's root, so the defect is latent, not li
 
 4. The worktree flow must keep working unchanged: when `cwd` is `.worktrees/<branch>`, `dirname(link)` is not the root, so no refusal fires, and the existing `update-index --skip-worktree` plus replace path stays in force.
 
-5. Add a regression part to `tests/orchestrator/spawn.test.ts`, after the existing part AZ (the splitter root guard, around line 518-585). Name it `// --- part BA: a real file at the project root is never replaced by a context symlink ---`. Cover all of these:
-   - A fixture whose root holds a real `AGENTS.md` (`# project guidance`) and a real `SPECS.md` (`# my real specs`).
-   - `ensureContextSymlinks(root, root + "/", "000313_root_specs_pointer.md", "integration-tester")`: both files are still regular files and their content is unchanged.
-   - The same call with `join(root, ".")` as the cwd: the same result.
-   - The same call with the plain `root` as the cwd: the same result.
-   - A real subdirectory cwd (`.worktrees/feat-x`): both names become symlinks, so the guard does not leak into the worktree flow.
-   - One log line per refusal in `.kanban/.logs/orchestrator.log`, naming `refusing to replace the real file`.
+5. Add a regression part to `tests/orchestrator/spawn.test.ts`, after the existing part AZ (the splitter root guard, around line 518-585). Name it `// --- part BA: a real file at the project root is never replaced by a context symlink ---`. Use a fixture whose root holds a real `AGENTS.md` (`# project guidance`) and a real `SPECS.md` (`# my real specs`), task file name `000313_root_specs_pointer.md`, role `integration-tester`. Assert these cases:
+   - cwd `root + "/"` (a trailing slash): both files are still regular files, content unchanged.
+   - cwd is a symlink alias that points at the root (create it with `symlinkSync(root, alias)`): same result. This is the case that raw string equality misses.
+   - cwd is the plain `root`: same result.
+   - cwd is a real subdirectory `<root>/.worktrees/feat-x`: both names become symlinks, so the guard does not leak into the worktree flow.
+   - One line in `.kanban/.logs/orchestrator.log` per refusal, containing `refusing to replace the real file`.
+   Beware: `join(root, ".")` is not a divergent spelling, `join` normalizes it. Use the symlink alias for that case.
 
 6. Do not change `clearContextSymlinks`, `ensureInfoExclude`, `cleanContextPaths`, or `stripContextSymlinks`. Another task owns the root `SPECS.md` cleanup.
 
-7. If any existing assertion in `tests/orchestrator/spawn.test.ts` breaks because the root `SPECS.md` is no longer replaced by a symlink in that part's fixture, fix the fixture rather than weakening the new assertions.
+7. If an existing assertion in `tests/orchestrator/spawn.test.ts` breaks because the root `SPECS.md` is no longer replaced by a symlink in that part's fixture, fix the fixture rather than weaken the new assertions.
 
 ## Acceptance
 
 Run from the task worktree. Every command must exit 0.
 
-1. `node tests/orchestrator/spawn.test.ts`. Part BA must be in the output.
+1. `node tests/orchestrator/spawn.test.ts`. Part BA must appear in the output.
 2. `node tests/context-symlinks.test.ts`, the worktree and merge context-symlink coverage.
 3. `node tests/orchestrator/merge.test.ts`, the merge lane that consumes these symlinks.
-4. Manual repro of the old defect, with the guard removed in a scratch copy only if you need to see it fail: `node -e` calling `ensureContextSymlinks` with a trailing-slash root must leave a real `AGENTS.md` byte-identical (`sha256sum` before and after).
-5. `grep -n "cwd === root" src/orchestrator/spawn.ts` returns nothing, and `grep -c "realpathOrSelf" src/orchestrator/spawn.ts` is 4
+4. Manual repro on a scratch root holding a real `AGENTS.md`: `sha256sum` before and after a `node -e` call of `ensureContextSymlinks` with a trailing-slash cwd must be identical.
+5. `! grep -q "cwd === root" src/orchestrator/spawn.ts`
+6. `grep -q "if (realpathOrSelf(cwd) === realpathOrSelf(root)) return;" src/orchestrator/spawn.ts`
+7. `grep -q "refusing to replace the real file" src/orchestrator/spawn.ts`
 
 # Notes
