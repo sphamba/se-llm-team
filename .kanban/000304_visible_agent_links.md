@@ -1,12 +1,12 @@
 ---
 name: "fix: keep agent card links visible when they curve outside the agent area"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/304-visible-agent-links"
 issuer: "user"
 complexity: "simple"
 shortName: "visible-agent-links"
-blockedBy: "#303"
+blockedBy: ""
 ---
 
 # Summary
