@@ -15,7 +15,7 @@ import { createTask, kanbanDir, parseTask, setState, taskSlug } from "../src/kan
 import { loadConfig, poll } from "../src/orchestrator.ts";
 import { rescan } from "../src/orchestrator/pipeline.ts";
 import { ensureWorktree } from "../src/orchestrator/board.ts";
-import { clearContextSymlinks, exitFilePath, renderPrompt } from "../src/orchestrator/spawn.ts";
+import { clearContextSymlinks, ensureContextSymlinks, exitFilePath, renderPrompt } from "../src/orchestrator/spawn.ts";
 
 // 000215: drop the neutral config dir so every temp-HOME part stays off the real user config
 delete process.env.XDG_CONFIG_HOME;
@@ -235,5 +235,29 @@ assert.ok(devPrompt.includes("Never commit AGENTS.md or SPECS.md"), "the develop
 assert.ok(devPrompt.includes("Work only here, in the worktree you run in"), "the prompt-scope rule stays");
 console.log("context-symlinks.test.ts: part CS5 passed (developer prompt)");
 
+// --- part CS6: a root-cwd run leaves no SPECS.md link behind ---
+const root6 = freshFixture();
+writeFileSync(join(root6, "AGENTS.md"), "# project rules\n");
+const task6 = createTask(root6, { name: "fix: root link cleanup", summary: "Root link cleanup", specs: "n/a", complexity: "simple" });
+ensureContextSymlinks(root6, root6, task6.file, "integration-tester");
+assert.equal(readlinkSync(join(root6, "SPECS.md")), join(".kanban", task6.file), "precondition: the root SPECS.md points at the task file");
+clearContextSymlinks(root6, { ...task6, worktree: "" });
+assert.ok(!existsSync(join(root6, "SPECS.md")), "a root-cwd exit removes its SPECS.md link");
+assert.ok(lstatSync(join(root6, "AGENTS.md")).isFile(), "the real AGENTS.md at the root is untouched");
+assert.equal(readFileSync(join(root6, "AGENTS.md"), "utf8"), "# project rules\n", "the real AGENTS.md content survives");
+// the root link is shared: another live root-cwd run may have repointed it since this run started
+const task6b = createTask(root6, { name: "fix: someone else", summary: "Another root run", specs: "n/a" });
+symlinkSync(join(".kanban", task6b.file), join(root6, "SPECS.md"));
+clearContextSymlinks(root6, { ...task6, worktree: "" });
+assert.equal(readlinkSync(join(root6, "SPECS.md")), join(".kanban", task6b.file), "a root link that points at another task survives");
+// the worktree case is unchanged: the link is the run's own, so it always goes
+const ensured6 = ensureWorktree(root6, task6);
+assert.ok(ensured6, "precondition: the worktree exists");
+symlinkSync(join(".kanban", task6.file), join(ensured6.wtDir, "SPECS.md"));
+symlinkSync(join(".kanban", "AGENTS.developer.md"), join(ensured6.wtDir, "AGENTS.md"));
+clearContextSymlinks(root6, { ...task6, worktree: ensured6.wt });
+assert.ok(!existsSync(join(ensured6.wtDir, "SPECS.md")) && !existsSync(join(ensured6.wtDir, "AGENTS.md")), "a worktree still loses both context links");
+console.log("context-symlinks.test.ts: part CS6 passed (root link cleanup)");
+
 cleanupAll(...cleaned);
-console.log("context-symlinks.test.ts: all parts passed (spawn exclude + unwritable exclude + merge self-heal + real AGENTS.md survives + developer prompt)");
+console.log("context-symlinks.test.ts: all parts passed (spawn exclude + unwritable exclude + merge self-heal + real AGENTS.md survives + developer prompt + root link cleanup)");

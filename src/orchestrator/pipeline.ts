@@ -4,7 +4,7 @@ import { isSelfWrite, kanbanDir, createTask, getTask, hasUserHold, listAll, PRIO
 import { agentAlive, agentPid, clearPid, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP, REVIEWER_RUN_CAP, type Config } from "./config.ts";
 import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, newestRunRole, readCounter } from "./log.ts";
-import { clearMergerSlug, readExitCode, spawnAgent, spawnRunAnalysis, writeMergerSlug } from "./spawn.ts";
+import { clearContextSymlinks, clearMergerSlug, readExitCode, spawnAgent, spawnRunAnalysis, writeMergerSlug } from "./spawn.ts";
 import { boardStatus, commitKanban, ensureWorktree, git, reconcileBoard } from "./board.ts";
 import { reportDone } from "./report.ts";
 
@@ -156,7 +156,9 @@ function startTodo(root: string, cfg: Config, task: Task): void {
 			return;
 		}
 		// a dead splitter pid file means the Splitter ran and left the task in to-do (a decline
-		// or a crash): fall through to the Developer, no second splitter pass
+		// or a crash): clear its root run link, then fall through to the Developer, no second
+		// splitter pass. liveness never sees the pid, so the cleanup happens here instead
+		clearContextSymlinks(root, fresh);
 	}
 	const ensured = ensureWorktree(root, fresh);
 	if (!ensured) return;

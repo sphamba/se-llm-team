@@ -123,16 +123,20 @@ function repointContextSymlink(root: string, link: string, target: string): void
 	}
 }
 
-// after the agent terminated: remove both context symlinks from the task's worktree, so a
-// worktree without a running agent resolves no task (the kanban tools then say so). Hooked
-// where the orchestrator clears the agent pid; the done cleanup removes the whole worktree
+// after the agent terminated: remove both context symlinks from the task's cwd (its worktree,
+// or the project root for a role that runs there), so a cwd without a running agent resolves no
+// task (the kanban tools then say so). Hooked where the orchestrator clears the agent pid; the
+// done cleanup removes the whole worktree
 export function clearContextSymlinks(root: string, task: Task): void {
-	if (!task.worktree) return;
-	const cwd = join(root, ".worktrees", task.worktree);
+	const cwd = task.worktree ? join(root, ".worktrees", task.worktree) : root;
 	for (const name of ["SPECS.md", "AGENTS.md"]) {
 		try {
 			const path = join(cwd, name);
-			if (lstatSync(path).isSymbolicLink()) rmSync(path);
+			if (!lstatSync(path).isSymbolicLink()) continue;
+			// the root link is shared by every root-cwd run, and a live one may have repointed it
+			// since this run started: remove it only while it still points at this run's task file
+			if (!task.worktree && (name !== "SPECS.md" || readlinkSync(path) !== join(".kanban", task.file))) continue;
+			rmSync(path);
 		} catch {
 			/* already gone */
 		}
