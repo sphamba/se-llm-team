@@ -1,12 +1,12 @@
 ---
 name: "refactor: scope the covered task summaries in generated integration Specs"
 priority: "medium"
-state: "backlog"
+state: "doing"
 worktree: "refactor/308-scope-covered-summaries"
 issuer: "#301"
 complexity: "simple"
 shortName: "scope-covered-summaries"
-blockedBy: "#309, #310"
+blockedBy: ""
 ---
 
 # Summary

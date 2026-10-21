@@ -1,7 +1,7 @@
 ---
 name: "refactor: rebuild the integration Specs body from the board"
 priority: "medium"
-state: "doing"
+state: "live-testing"
 worktree: "refactor/309-scope-covered-summaries-specs-body"
 issuer: "#308"
 complexity: "simple"
@@ -107,3 +107,18 @@ At live test, in the repo root: `pnpm test` exits 0.
 - No blockquote support anywhere. That is the sibling task.
 
 # Notes
+- Rewrote the generated integration Specs body (`src/orchestrator/pipeline.ts`): `## Own task` with one sentence (`INTEGRATION_HEAD` lost its trailing colon) plus the four `INTEGRATION_TAIL` lines, then `## Covered tasks` with one `### #<num> <name>` entry and a `> `-quoted summary per ref. Removed `integrationBullet` and the tail-line parsing in `integrationBullets`; `integrationSpecs` now takes the covered `Task[]` and derives the head refs and the headings from that one array.
+- Append path: refs come from the `### #<num> ` headings via the task name (unchanged `integrationRefs`), the body is rebuilt from the fresh `listAll` board. New `coveredOnBoard` drops a ref with no board task and logs `integration specs: dropped #<num>, no such task on the board`; the name, the summary and the body all use the surviving set, so the two lists cannot disagree. Every other field and both existing guards are unchanged.
+- Tests (`tests/orchestrator/integration.test.ts`): moved the `waitingTask` and part-5 fixtures and every bullet-counting assertion to the new shape, added shape helpers (`h2`, `entryRefs`, `ownRefs`, `quoted`, `entryOf`). New pins: section order, one heading per ref ascending, every summary line quoted, head sentence refs equal the heading refs, an append keeps the earlier entry byte-identical and adds exactly one entry, a repeat append of the same ref leaves the whole `specs` string unchanged, and a ref that left the board is dropped with no empty entry.
+- Reworded `agents/integration-tester.md`, `skills/se-llm-team/SKILL.md` and `docs/architecture.md` to the `## Covered tasks` / `### #<num> <name>` shape.
+- Assumption: the blockquote and `## Covered tasks` lines render as literal text until the renderer task (#308 sibling) lands. That is expected per the Specs.
+- Noted risk: a rebuild whose every ref left the board would write an empty `test: integration of .` name. Unreachable today, because the appended ref is the task that just reached done and is always on the board.
+
+Review of 1b785f2 (first pass): pass.
+- `integrationSpecs` derives the head refs and the `###` headings from one array, so the two lists cannot disagree: src/orchestrator/pipeline.ts:61, :53.
+- `coveredOnBoard` drops a ref with no board task and logs it, so name, summary and body rebuild on the survivors only: src/orchestrator/pipeline.ts:69, :128.
+- New shape pins (section order, ascending headings, quoted summaries, head refs equal headings, byte-identical earlier entry, repeat append unchanged, vanished ref dropped): tests/orchestrator/integration.test.ts:238, :278, :296, :307.
+- Tests: tests/orchestrator/integration.test.ts exit=0, tests/context-symlinks.test.ts exit=0, tests/plugin.test.ts exit=0.
+- Non-blocking: `integrationRefs` still takes the ref set from the task name, not from the `###` headings that the Specs name. The outcome is identical for new tasks and better for a legacy body that has no headings yet. Switch to the headings when no legacy integration task remains.
+- Non-blocking: the part-3 banner still says "one bullet per ref" (tests/orchestrator/integration.test.ts:246). Reword on the next touch.
+
