@@ -95,7 +95,7 @@ The server resolves the project root from its cwd. Its `orchestrator_start` pass
 
 ## Configuration
 
-The config is optional. The global file is `~/.se-llm-team/config.json` (`XDG_CONFIG_HOME` is ignored). A `se-llm-team.json` at the project root overrides it, and nested objects merge key by key. The old `.kanban/se-llm-team.json` and `~/.pi/agent/se-llm-team.json` files are not read.
+The config is optional. The global directory is `~/.se-llm-team` and it holds three fixed files: `config.json` (the settings below), `hub.json` (the daemon registry) and `hub.lock` (the single-hub lock). `XDG_CONFIG_HOME` is ignored. A `se-llm-team.json` at the project root overrides `config.json`, and nested objects merge key by key. The old `.kanban/se-llm-team.json` and `~/.pi/agent/se-llm-team.json` files are not read.
 
 ```json
 {
@@ -127,12 +127,14 @@ The config is optional. The global file is `~/.se-llm-team/config.json` (`XDG_CO
 | `reviewerCap.<complexity>` | `0`/`1`/`2`/`3` | Successful reviewer runs before a to-review task force-advances to to-merge. Defaults: trivial `0`, simple `1`, moderate `2`, complex `3`. |
 | `reviews` | `true` | Run the Reviewer stage. Off: a to-review task moves straight to to-merge. |
 | `liveTesting` | `true` | Run the Live-tester stage. Off: a merged to-live-test task moves straight to done. |
-| `integrationTesting` | `true` | Open integration-test tasks at the merge. Off: a merge opens no new integration task. |
+| `integrationTesting` | `true` | Run the Integration-tester stage. Off: a merge opens no new integration task, and a task already waiting in `to-integration-test` never starts, so it waits there until the gate is on again. |
 | `webUi.enabled` | off | Serve the web dashboard with the daemon. |
 | `webUi.host` | `localhost` | Dashboard bind host. |
 | `webUi.port` | `4242` | Dashboard port. |
 
-The Web UI fades both columns of a disabled stage. Task cards keep full opacity.
+The Web UI fades both columns of a disabled stage. The cards in `to-integration-test` fade too while `integrationTesting` is off, because the gate holds them there. A run already in `integration-testing` keeps full opacity until it finishes.
+
+An auto-created integration task takes the priority of the tasks it covers: trivial `low`, simple `medium`, moderate `high`, complex `critical`. The highest covered priority wins, and appending another task never lowers it while the task waits.
 
 ## Documentation
 
