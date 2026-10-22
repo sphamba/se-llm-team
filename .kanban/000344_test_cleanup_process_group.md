@@ -1,8 +1,8 @@
 ---
 name: "test: kill the agent's process group and register the leaked origin remotes"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "to-live-test"
+worktree: "test/344-test-cleanup-process-group"
 issuer: "user"
 complexity: "simple"
 shortName: "test-cleanup-process-group"
@@ -43,3 +43,28 @@ After the fix, kill the orphaned `fake-agent.cjs` processes and remove the stale
 5. `grep -n 'process.kill(agentPidAQ' tests/orchestrator/daemon.test.ts` finds nothing.
 
 # Notes
+
+## What changed
+- `tests/orchestrator/daemon.test.ts`: part AQ ends with `killTree(agentPidAQ, "SIGKILL")`, imported from `src/pid.ts`, plus one comment line that the pid is the wrapper's group leader.
+- `tests/orchestrator/spawn.test.ts`: `cleaned.push(remoteA)` after `remoteA` is declared.
+- `tests/orchestrator/worktree.test.ts`: `cleaned.push(remoteM)` after `remoteM` is declared.
+- Exactly 3 files, no source change.
+
+## Acceptance
+1. `pgrep -af '^node /tmp/orch-smoke'` around `node tests/orchestrator/daemon.test.ts`. Before the fix 0 -> 1 (one survivor, `node /tmp/orch-smoke-UVhwkZ/fake-agent.cjs ...`). After the fix 1 -> 1. The literal Specs pattern `pgrep -af "orch-smoke.*fake-agent"` reads 2 -> 3 and 1 -> 1, but it also matches the shell command line itself, so the anchored `^node` form is the count used here.
+2. `node tests/orchestrator/daemon.test.ts` exit=0, pass.
+3. `node tests/orchestrator/spawn.test.ts` exit=0, pass. `/tmp/orch-smoke-*` 0 -> 0, no new path. `ls -d /tmp/*-origin.git` is empty after the run.
+4. `node tests/orchestrator/worktree.test.ts` exit=0, pass. `/tmp/orch-smoke-*` 0 -> 0, and `/tmp/*-origin.git` empty after the run (that path was `/tmp/<rootM>-origin.git` before the fix).
+5. `grep -n 'process.kill(agentPidAQ' tests/orchestrator/daemon.test.ts` finds nothing.
+
+## Follow-up
+- Housekeeping: orphaned `fake-agent.cjs` 1 -> 0 (one survivor was present at the start of the fix, its `/tmp/orch-smoke-UVhwkZ` already gone, killed). Stale `/tmp/orch-smoke-*` and `*-origin.git` directories 0 -> 0: the host was already clean when this run started, so the 69 directories and 17 MB in the Specs were removed before this worktree existed.
+- Leak 2 got no red run: after the first green the suite count was spent, and the Specs record the 69 leftover directories as the evidence.
+
+Review of 94f004b (first pass):
+- tests/orchestrator/daemon.test.ts:61 ends part AQ with `killTree(agentPidAQ, "SIGKILL")` under the group-leader comment at :60. The pid comes from the pid file at :37, and src/pid.ts:109 sends `-pid` when the pid leads its group, so the wrapper and the node agent die together.
+- tests/orchestrator/spawn.test.ts:18 `cleaned.push(remoteA)`: the bare origin is registered before `git init`, and no writer unregisters it.
+- tests/orchestrator/worktree.test.ts:222 `cleaned.push(remoteM)`: the same, so `cleanupAll` now removes both origins.
+- Tests: daemon.test.ts exit=0, spawn.test.ts exit=0, worktree.test.ts exit=0, each log ending in a passed line. After each run `^node /tmp/orch-smoke` processes 0, `/tmp/orch-smoke-*` 0, `/tmp/*-origin.git` 0 (0 -> 0 throughout). Acceptance 5: `grep -n 'process.kill(agentPidAQ'` 0 matches.
+- Nit: the `try`/`catch` around `killTree` is dead, since killTree returns false on a gone pid (src/pid.ts:122) and never throws. Drop it the next time that block is touched.
+
