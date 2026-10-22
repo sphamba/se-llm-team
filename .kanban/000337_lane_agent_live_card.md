@@ -1,7 +1,7 @@
 ---
 name: "fix: the web UI shows the integration-tester as finished while it runs"
 priority: "high"
-state: "reviewing"
+state: "live-testing"
 worktree: "fix/337-lane-agent-live-card"
 issuer: "user"
 complexity: "simple"
@@ -84,3 +84,13 @@ Extra: `node tests/webui/logpane.test.ts` passes (covers the `AGENT_ROLE`/`LOG_R
 ## Notes
 - Acceptance item 2 needed one UI fix the Specs did not name: `AGENT_ROLE` had no `merging` key, so `liveRole` was undefined and every merger run read `alive: false` even with the correct pid name. One shared map entry plus a `Set` in `LOG_ROLES` fixes it without touching the orchestrator.
 - The stale-pid case runs on the integration-tester task, then the merging case reuses the same root, so the shared rule is proven once and the merger case adds only the role difference.
+
+Review of 1af61c1 (first pass):
+- `src/pid.ts:93` `agentPidName` returns the role for `merger`/`integration-tester` and the slug otherwise, with the why on `src/pid.ts:92`; both call sites use it: `src/webui/payload.ts:179` (live flag) and `src/webui/payload.ts:761` (open-line hold). `agentLogPath` returns the `role` it matched (`src/webui/payload.ts:266`) and its ceiling comment names the new pid-name rule (`src/webui/payload.ts:252-253`).
+- `grep -n "agentAlive(root, slug)" src/webui/payload.ts` exits 1: no stale call site remains.
+- `src/webui/logpane.ts:12` adds `merging: "merger"`, which the Specs' merger expectation needs (before it `liveRole` was undefined for a merging task and `history.agent` was null). `src/webui/logpane.ts:19` still resolves `LOG_ROLES` to splitter, developer, reviewer, live-tester, integration-tester, merger, doctor, so the enumerated role order and tie-break are unchanged.
+- `tests/webui/agentlog.test.ts:500-538` covers a live integration-tester lane, a stale lane pid and a live merger lane through `taskHistory`, asserting `agents` and `history.agent`; the diff stat names no orchestrator file, so Specs item 4 holds.
+Test: agentlog exit=0, page exit=0, board exit=0, logpane exit=0, hub exit=0.
+Note: `tests/webui/agentlog.test.ts:521` writes `999999`, a valid pid number, while the neighbouring stale case at `tests/webui/agentlog.test.ts:126` writes `999999999`; a host process at that pid would flip the stale assertion. Upgrade path: write `999999999`.
+Note: the `src/webui/logpane.ts` edit sits outside the Specs' numbered items but is required by the Specs' own merger case and is stated in `# Notes`; no action.
+
