@@ -1,6 +1,6 @@
 # integration-tester: role guidance
 
-The spawn prompt owns the task file, the covered refs, and the finish line. This file owns the method, the repo facts, and the report shape. The cwd is the root checkout, so the suite runs against every merged change. The role is report-only: one short file append is the deliverable. The doctor rewrites this file after each run, so never edit it.
+The spawn prompt owns the task file, the covered refs, and the finish line. This file owns the method, the repo facts, and the report shape. The cwd is the root checkout. The role is report-only: one short file append is the deliverable. The doctor rewrites this file after each run, so never edit it.
 
 ## Contract
 
@@ -12,7 +12,7 @@ The spawn prompt owns the task file, the covered refs, and the finish line. This
 ## Run
 
 - No build and no typecheck: node 24 runs `.ts` files directly. Never run `pnpm test`, `pnpm test:changed`, or npm, even though the spawn prompt names `pnpm test`: it aborts at the first red and a read-only pnpm store can fail it before any suite starts. Do not read `package.json`, `tests/helpers.ts`, or any source, and do not list the repo or `.kanban/`.
-- One call does the whole run: print the base, run every test file sequentially with a per-file timeout, then print the tally. Use this command as written, with the call's tool `timeout` set to 2400. A full run takes about five minutes and the orchestrator bounces an agent whose log is unchanged for 60 minutes, so never raise the tool timeout toward that limit: a fired tool timeout kills the run and drops the tally. This is the only suite run:
+- One call does the whole run: print the base, run every test file sequentially with a per-file timeout, then print the tally. Use this command as written, with the call's tool `timeout` set to 2400. Run the files sequentially and never parallelize, because daemon and port fixtures collide. A full run takes about five minutes and the orchestrator bounces an agent whose log is unchanged for 60 minutes, so never raise the tool timeout toward that limit: a fired tool timeout kills the run and drops the tally. This is the only suite run:
 
   ```bash
   out=/tmp/it; rm -rf "$out"; mkdir -p "$out"; : >"$out/results.tsv"
@@ -22,24 +22,23 @@ The spawn prompt owns the task file, the covered refs, and the finish line. This
   awk -F'\t' '{n++; p+=$2==0; b+=$2!=0} END{printf "passed=%d failed=%d total=%d\n", p, b, n}' "$out/results.tsv"
   ```
 
-- The exit code is the verdict. A suite that cannot start exits nonzero and is a finding. An empty log with exit 0 is an assert-only suite, not a silent pass, so never tail, `wc`, or re-run a green suite. Do not sweep the process table, because each suite cleans up its own children.
-- The base is the sha that the suite call printed, even if HEAD moves later. Never run `git log` or hunt another sha. The glob is complete, because the deepest test file is `tests/<dir>/<file>.test.ts`, so never check for a missed test file.
+- The exit code is the verdict. A suite that cannot start exits nonzero and is a finding. An empty log with exit 0 is an assert-only suite, not a silent pass, so never tail, `wc`, or re-run a green suite. Do not sweep the process table, because each suite cleans up its own children. The base is the sha that the suite call printed, even if HEAD moves later. Never run `git log` or hunt another sha. The glob is complete, because the deepest test file is `tests/<dir>/<file>.test.ts`, so never check for a missed test file.
 
 ## Triage (reds only)
 
 - One red gets one call: `git diff <base>~<K>..<base> --stat; git diff <base>~<K>..<base> -U0 -- src tests | grep '^+' | head -80; grep -n -m1 -E 'timeout waiting|AssertionError|Error:' <log>; tail -3 <log>`. Here K is the number of `### #` entries under `## Covered tasks`, because one merged task lands as one commit. The first match is the failure line and the tail holds the live daemon output, so never page the whole log.
 - Covered means direct imports only: `grep -n '^import' <red test file>`, then match a module name against the covered range's files. A module reached through another module, a prompt, or a doc never makes a suite covered. An empty overlap gets one report line and no rerun.
 - A covered red gets one isolated rerun per red, all reds in one call: `timeout 900 node <file> >/tmp/it/rerun_<name>.log 2>&1; echo $?`. Report the exit code, the first failure line, and whether it reproduced, then stop. Never run a baseline commit, a worktree, or a second sample.
-- The log line names the kind of red, not the folder: a line with `daemon output (live):` is a daemon timeout even in a fast-looking file. The kind never changes the report line. Never diagnose: do not think or write about load, timing, environment, pre-existing code, or regression. `Defect` means only "this suite exited nonzero", and an exit code is a fact, not a cause.
+- The log line names the kind of red, not the folder. The kind never changes the report line. Never diagnose: do not think or write about load, timing, environment, pre-existing code, or regression. `Defect` means only "this suite exited nonzero", and an exit code is a fact, not a cause.
 
 ## Verdict
 
-- `failed=0` is the whole verdict and it ends with the append. Never read a suite log, never grep a test file, the suite logs, or the repo for a covered literal, a pin, or a feature name, and never diff `src/`, `docs/`, `agents/`, or `skills/`. A suite log holds suite stdout, not assertion text, so a match or a no-match there says nothing either way.
+- `failed=0` ends the run. The next call is the append in Report, then the finish line. Never read a suite log, never grep a test file, the suite logs, or the repo for a covered literal, a pin, or a feature name, and never diff `src/`, `docs/`, `agents/`, or `skills/`. A suite log holds suite stdout, not assertion text, so a match or a no-match there says nothing either way.
 - A green run can never yield a finding: no coverage gap, no assumption line, and no sentence about missing, unpinned, unasserted, or "not proven" work. Do not weigh coverage on green at all. A coverage gap is possible only in a red run, where the covered range adds a pin and its suite fails before the pin runs. A missing test is a reviewer question, not an integration finding.
 
 ## Report
 
-- Append this line under `# Notes`, and copy the shape verbatim: `Base: <sha>. Suites: node per file (<total> files). Passed: N. Failed: M.` Take N, M, and the total from the printed tally. `# Notes` may already hold a line from the orchestrator, so append after the existing content. A fact that the spawn prompt or a covered task file orders recorded goes on its own line directly after it. Nothing else goes under `# Notes`.
+- When `failed=0`, append this line under `# Notes`, and copy the shape verbatim: `Base: <sha>. Suites: node per file (<total> files). Passed: N. Failed: M.` Take N, M, and the total from the printed tally. `# Notes` may already hold a line from the orchestrator, so append after the existing content. A fact that the spawn prompt or a covered task file orders recorded goes on its own line directly after it. Nothing else goes under `# Notes`.
 - Under `# Open questions`, one physical line per item, facts only, in one of these literal shapes: `- Defect: <command> exits <code> with <first failure line>. It reproduces in one isolated run (<exit code>, <duration>).` / `- Defect: <command> exits <code> with <first failure line>. It did not reproduce in one isolated run (exit 0, <duration>).` / `- Coverage gap: <pin> at <file>:<line> never runs, because the suite fails at <file>:<line>.` / `- Assumption: <the required check you skipped>.` No cause, history, or code analysis. At most one assumption line, none about a red being flaky, and no section at all when there are no findings.
 - Append in one call (`cat >> .kanban/<file>.md`, or an `awk` insert before `# Open questions`), never with `edit`. Add the `# Open questions` header only when you have an item. That append call is the last call: no tail, no `git status`, no re-read, no confirmation of any kind.
 - Finish message: when there are findings, the spawn prompt's finding line, one short line per finding. With no findings, exactly one line and nothing else: `Report appended: no defects, no coverage gaps.` No bullets, no base, no counts, and no recap of the evidence.
