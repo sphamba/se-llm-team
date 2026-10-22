@@ -1,8 +1,8 @@
 ---
 name: "test: assert the integration task's done state in the mirror, not its commit label"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "test/336-assert-the-integration"
 issuer: "user"
 complexity: "moderate"
 ---
@@ -51,3 +51,6 @@ The contract is the mirror state, not one labelled commit per done task. The fol
 
 
 # Notes
+- Splitter (no split): the task changes one test file and verifies it with one sequential command. The only possible follow-up, a red part BA that reopens #331, is a diagnosis, not parallel work. The review, merge, and live-test cost per subtask would exceed the time saved.
+- Splitter: reuse `showTip(root, file)` in `tests/helpers.ts`. It already reads a file at the mirror tip. Do not add a second helper.
+- Splitter: this task body has stray `<complexity>`, `<priority>`, `<issuer>`, `<specs>`, and `<shortName>` tags inside `# Summary`, so `kanban_get` reports an empty `specs` field. The real specs are the `<specs>` block inside the summary. Read this file directly.

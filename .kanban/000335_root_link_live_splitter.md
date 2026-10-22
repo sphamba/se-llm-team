@@ -1,8 +1,8 @@
 ---
 name: "fix: the root link cleanup must not fire for a live splitter"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/335-root-link-live-splitter"
 issuer: "user"
 complexity: "moderate"
 shortName: "root-link-live-splitter"
@@ -55,3 +55,11 @@ The live orchestrator daemon (pid 57964) started before these merges and holds t
 
 
 # Notes
+
+Splitter: no split.
+
+This is one contract change. The new `opts.rootCwd` parameter in `clearContextSymlinks` (`src/orchestrator/spawn.ts:142`) must land before the three callers can compile. The call sites in `liveness.ts:89`, `liveness.ts:186`, and `pipeline.ts:161` are three lines on one shared condition. The tests in `tests/context-symlinks.test.ts` and the gate `tests/orchestrator/split.test.ts` cover the same contract. Parallel subtasks would serialize on `spawn.ts` and collide in the same files. Three review, merge, and live-test cycles cost more than this diff.
+
+Guidance for future Splitters: do not split a fix that changes one function signature or one shared predicate. The split regression gate is a single test run. Keep such a task as one unit.
+
+After this merge, restart the orchestrator daemon (pid 57964 at task creation). It holds the pre-#332 code in memory. Do not restart it as part of this task.
