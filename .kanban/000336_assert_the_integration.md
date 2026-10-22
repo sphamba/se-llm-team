@@ -1,7 +1,7 @@
 ---
 name: "test: assert the integration task's done state in the mirror, not its commit label"
 priority: "medium"
-state: "reviewing"
+state: "to-merge"
 worktree: "test/336-assert-the-integration"
 issuer: "user"
 complexity: "moderate"
@@ -70,3 +70,11 @@ The contract is the mirror state, not one labelled commit per done task. The fol
 - The task reached done on both runs with no residual `stub-agent.cjs` child process.
 - Part BA passed on the merged base after the fix. #331 has no defect and is not reopened.
 - The one extra `assert.match` line after the wait is deliberate: the wait exits 1 with a timeout message, and the explicit assert names the mirror value in the failure. Remove it if the timeout message is enough.
+
+Review of ab33afc (first pass):
+- `tests/orchestrator/spawn.test.ts:48` part A now waits on the mirror tip: `!!f && (showTip(rootA, f) ?? "").includes('state: "done"')`, with `showTip` = `git show refs/heads/meta/kanban:.kanban/<file>` (`tests/helpers.ts:44`); no second daemon, no second wait.
+- `tests/orchestrator/spawn.test.ts:54` keeps one explicit `assert.match(..., /^state: "done"$/m, ...)` on the same mirror content, so a regression names the mirror value, not only the wait timeout.
+- `tests/orchestrator/spawn.test.ts:56-57` the create-label assertion is byte-identical to base line 53-54, and `rg -n 'kanban: done \$\{integration' tests` returns nothing; `git diff --stat main...HEAD` is one file with no `src/` hunk.
+- `tests/orchestrator/spawn.test.ts:40-43` the comment names the fold and its cause (`commitKanban` rebuilds the whole board tree and no-ops on an unchanged tree), as Specs 3 asks.
+- `node tests/orchestrator/spawn.test.ts` -> exit=0 (`/tmp/rv-spawn.log`), 8 part lines, log line 26 is `orchestrator.test.ts: ... + root real-file symlink guard passed` (part BA ran and is green; #331 needs no reopening).
+

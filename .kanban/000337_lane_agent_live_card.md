@@ -1,7 +1,7 @@
 ---
 name: "fix: the web UI shows the integration-tester as finished while it runs"
 priority: "high"
-state: "doing"
+state: "reviewing"
 worktree: "fix/337-lane-agent-live-card"
 issuer: "user"
 complexity: "simple"
@@ -68,3 +68,19 @@ Write the pid files the way the file already writes its other pids.
 4. `grep -n "agentAlive(root, slug)" src/webui/payload.ts` finds nothing.
 
 # Notes
+## What changed
+- `src/pid.ts`: `agentPidName(role, slug)` next to `agentAlive` returns the role for the two project-wide lanes and the slug otherwise.
+- `src/webui/payload.ts`: the live flag of `agentHistory` and the open-line hold of `agentLogPayload` both read liveness through `agentPidName`; `agentLogPath` returns the `role` it already matched, and its "pid file is per task" ceiling comment now states the pid-name rule.
+- `src/webui/logpane.ts`: `AGENT_ROLE` maps `merging` to `"merger"` (it had no `merging` key, so the merger lane could never read live whatever its pid file), and `LOG_ROLES` dedupes the merger the map now yields, which keeps today's role order.
+- `tests/webui/agentlog.test.ts`: a `000337` section with the three lane cases.
+
+## Acceptance
+1. `node tests/webui/agentlog.test.ts` passes. Red first: "a live integration-tester lane pid marks the newest run live" failed with `alive: false, status: 'ok'`.
+2. `node tests/webui/page.test.ts` passes.
+3. `node tests/webui/board.test.ts` passes.
+4. `grep -n "agentAlive(root, slug)" src/webui/payload.ts` finds nothing (grep exit 1).
+Extra: `node tests/webui/logpane.test.ts` passes (covers the `AGENT_ROLE`/`LOG_ROLES` edit).
+
+## Notes
+- Acceptance item 2 needed one UI fix the Specs did not name: `AGENT_ROLE` had no `merging` key, so `liveRole` was undefined and every merger run read `alive: false` even with the correct pid name. One shared map entry plus a `Set` in `LOG_ROLES` fixes it without touching the orchestrator.
+- The stale-pid case runs on the integration-tester task, then the merging case reuses the same root, so the shared rule is proven once and the merger case adds only the role difference.

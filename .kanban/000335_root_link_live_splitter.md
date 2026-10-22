@@ -1,8 +1,8 @@
 ---
 name: "fix: the root link cleanup must not fire for a live splitter"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/335-root-link-live-splitter"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "root-link-live-splitter"
@@ -90,3 +90,37 @@ Review of 9d7fc83 (first pass):
 - `tests/context-symlinks.test.ts:263-273`: part CS7 writes a live `<slug>.splitter` pid, asserts the unflagged call keeps the root link and the flagged call removes it; the two CS6 no-worktree calls at `:244` and `:251` pass `{ rootCwd: true }` and keep their meaning.
 - Tests: `tests/context-symlinks.test.ts` exit=0 (parts CS1-CS7), `tests/orchestrator/split.test.ts` exit=0 (the regression gate named in the Acceptance note).
 
+## Live test
+
+Claim table was frozen before the first run. Each expected value comes from the merged code path, not from the Specs prose. Control tree is c7b47c8 (the parent commit, which has none of this fix).
+
+| id | claim | expected | control | merged (3 runs) |
+| --- | --- | --- | --- | --- |
+| C1 | a to-do moderate task with a live <slug>.splitter pid keeps the root SPECS.md link through poll() | present | absent | present PASS |
+| C2 | poll() on an integration-testing task whose integration-tester pid is dead removes the root SPECS.md link | absent | absent | absent PASS |
+| C5 | the C2 poll leaves a real root AGENTS.md file in place | present | present | present PASS |
+| C3 | poll() on a merging task whose merger pid is dead keeps the root SPECS.md link (flag false for the merger) | present | absent | present PASS |
+| C4 | rescan() on a to-do moderate task with a dead <slug>.splitter pid removes the root SPECS.md link (dead-splitter decline path) | absent | absent | absent PASS |
+
+The control run fails C1, C3 and passes the other rows. So the fix changes exactly the two behaviors in C1 and C3, and keeps C2, C4 and C5.
+
+### Evidence
+
+- C1 is the reported regression. A `to-do` task with a live `<slug>.splitter` pid keeps `<root>/SPECS.md` pointing at `.kanban/000001_splitter_live.md` after `poll()`, and the task stays `to-do`. On the control tree the same call removes the link while the splitter pid is alive. 3 of 3 merged runs.
+- C2: a dead `integration-tester` pid on an `integration-testing` task still removes the root `SPECS.md` link, so the opt-in keeps the #332 cleanup.
+- C3: a dead `merger` pid on a `merging` task keeps the root link, because the merger runs in the task worktree. The control tree removes it.
+- C4: `rescan()` on a `to-do` moderate task with a dead `<slug>.splitter` pid removes the root link, then spawns the Developer (the task reaches `doing`). The dead-splitter decline path still cleans up.
+- C5: the real root `AGENTS.md` file survives the C2 poll.
+- Saved pids: 6 in total from the 3 merged runs (the dead-pid probe and the fake Developer of each rescan). `kill -0` fails for all 6 of them. Fixture roots and logs are under `/tmp/root-link-335`.
+
+### Assumptions
+
+- The daemon lane was not run. The trigger is the poll's pid-name lookup, so the driver called the production `poll()` and `rescan()` in-process on a fixture board, as the role guidance allows when the timers, the pid lifecycle and the CLI are not part of the claim.
+- The fixture splitter pid is the driver's own live pid, written as a bare pid. `pidEntry` reads the bare form and the `<pid> <disc>` form the same way, so the alive branch is the same.
+- The fixture tasks have `worktree: ""`. The root-link branch runs only for a task without a worktree. A real `integration-testing` task that carries a worktree never touches the root link, so that combination was not exercised.
+- A fake agent that exits 0 replaces the real splitter and the Developer. Splitter prompt text, the split outcome and a real Developer run were not exercised, and this task does not change them.
+- Nothing was restarted. The daemon that runs now (pid 57964 at task creation) holds the pre-#332 code in memory, so restart it for this fix to take effect, as the Specs say.
+
+### Result
+
+No findings. Every flow ran, and all 5 checks passed on 3 of 3 merged runs. No open user/client questions.
