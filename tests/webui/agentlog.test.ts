@@ -518,7 +518,7 @@ assert.deepEqual(
 	"a live integration-tester lane pid marks the newest run live, so its card spins",
 );
 assert.deepEqual(laneIt.agent, { role: "integration-tester", alive: true, log: `${laneSlug}.integration-tester.0` }, "the card's agent handle opens the live integration-tester run");
-writeFileSync(join(lanePids, "integration-tester.pid"), "999999");
+writeFileSync(join(lanePids, "integration-tester.pid"), "999999999");
 assert.deepEqual(
 	(await laneDetail()).agents[0],
 	{ role: "integration-tester", run: 0, alive: false, status: "ok", handle: `${laneSlug}.integration-tester.0`, tokens: null, duration: null },
