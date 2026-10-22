@@ -1,7 +1,7 @@
 ---
 name: "test: assert the integration task's done state in the mirror, not its commit label"
 priority: "medium"
-state: "live-testing"
+state: "done"
 worktree: "test/336-assert-the-integration"
 issuer: "user"
 complexity: "moderate"
@@ -78,3 +78,36 @@ Review of ab33afc (first pass):
 - `tests/orchestrator/spawn.test.ts:40-43` the comment names the fold and its cause (`commitKanban` rebuilds the whole board tree and no-ops on an unchanged tree), as Specs 3 asks.
 - `node tests/orchestrator/spawn.test.ts` -> exit=0 (`/tmp/rv-spawn.log`), 8 part lines, log line 26 is `orchestrator.test.ts: ... + root real-file symlink guard passed` (part BA ran and is green; #331 needs no reopening).
 
+## Live test (live-tester role)
+
+Test lane: test-file change. No test suite was run, because the role contract forbids running a `*.test.ts` file. The driver replays the scenario through the production functions instead.
+
+- Driver, fixture roots, logs, and the JSON per check: `/tmp/lt336/` (`report.md`, `run-merged-{1,2,3}.log`, `run-control-1.log`).
+- Replay of part A's integration lane: a git fixture root, a fast role stub (developer commits, reviewer sets to-merge, live-tester and integration-tester exit 0), and the real `src/orchestrator.ts` from the merged tree, with `--rescan-seconds 1 --poll-minutes 0.01`. The covered task `feat: smoke test` is `complexity: simple`. The mirror is read exactly as the helper reads it: `git show refs/heads/meta/kanban:.kanban/<file>`.
+- Replay of part BA: `ensureContextSymlinks(root, cwd, taskFile, "integration-tester")` from the merged tree, on a root with a real `AGENTS.md` and a real `SPECS.md`, for the three cwd spellings and one worktree cwd.
+- Control: `HEAD^` (`9d7fc83`) extracted with `git archive`, same driver, same fixture.
+
+| id | claim | expected | merged actual (3 runs) | control (pre-fix) | pass |
+| --- | --- | --- | --- | --- | --- |
+| C1 | Part A waits on the integration task's mirror state, not on a done label | showTip-wait=1 old-done-label-wait=0 fold-comment=1 | showTip-wait=1 old-done-label-wait=0 fold-comment=1 | showTip-wait=0 old-done-label-wait=1 fold-comment=0 | PASS |
+| C2 | The auto-issued integration task reaches the mirror tip as done | `state: "done"` at the mirror tip | done=1 file=`000002_integration_of_1.md` | done=1 | PASS |
+| C3 | Its own done label is skipped, the covered task's done commit folds it in, one create label | int done labels=0 int create labels=1 covered done labels=1 newest int commit=`kanban: done <covered file>` | int done labels=0 int create labels=1 covered done labels=1 newest int commit=`kanban: done 000001_smoke_test.md`, `integration-testing -> done` logged once | same | PASS |
+| C4 | Part BA: a real root file is never replaced by a context symlink | 0 root-file failures, 3 refusal lines, all naming SPECS.md, both worktree links made | 0 failures, 3 refusal lines, 3 naming SPECS.md, worktree SPECS=1 worktree AGENTS=1 | same | PASS |
+| C5 | No `kanban: done <integration file>` subject assertion remains | 0 occurrences of `kanban: done ${f}` | 0 | 1 | PASS |
+| C6 | Scope: one test file, no `src/` hunk, `split.test.ts` untouched | changed=[`tests/orchestrator/spawn.test.ts`] src-changed=0 split-changed=0 | changed=[`tests/orchestrator/spawn.test.ts`] src-changed=0 split-changed=0 | n/a, archived tree has no git metadata | PASS |
+
+Result: 6 of 6 rows pass in each of the 3 merged runs, with identical values in all runs. The control run fails only C1 and C5, so the merged edit is the change that moves part A from a done-label wait to a mirror-state wait.
+
+The Specs assumption holds in 3 of 3 runs: the newest commit that touches the integration task's file is the covered task's `kanban: done` commit, and no `kanban: done <integration file>` subject ever lands. Part BA runs green through the production function. #331 has no observed defect and is not reopened.
+
+### Assumptions
+- `complexity: simple` on the covered task skips the splitter run that part A takes at the default complexity. The splitter is not part of this change.
+- The replay uses a reduced role stub (no JSONL developer log). The developer-log, gzip, and auto-push assertions of part A are outside this change.
+- The control tree is a `git archive` of `HEAD^`, so its git-metadata row (C6) is not comparable and says so.
+
+### Not exercised
+- `node tests/orchestrator/spawn.test.ts` itself, and the final `root real-file symlink guard passed` line: the role contract forbids running a test file. The equivalent production calls were replayed instead.
+- `tests/orchestrator/split.test.ts`: untouched by the change and red for another cause, per the Specs.
+
+### Findings
+- None. No technical difficulty blocked the runs.

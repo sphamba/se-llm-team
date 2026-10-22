@@ -1,8 +1,8 @@
 ---
 name: "fix: the web UI shows the integration-tester as finished while it runs"
 priority: "high"
-state: "live-testing"
-worktree: "fix/337-lane-agent-live-card"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "lane-agent-live-card"
@@ -94,3 +94,23 @@ Test: agentlog exit=0, page exit=0, board exit=0, logpane exit=0, hub exit=0.
 Note: `tests/webui/agentlog.test.ts:521` writes `999999`, a valid pid number, while the neighbouring stale case at `tests/webui/agentlog.test.ts:126` writes `999999999`; a host process at that pid would flip the stale assertion. Upgrade path: write `999999999`.
 Note: the `src/webui/logpane.ts` edit sits outside the Specs' numbered items but is required by the Specs' own merger case and is stated in `# Notes`; no action.
 
+
+## Live test (usage) 000337
+
+Harness: `/tmp/lt337` (`driver.mjs`, `run.sh`, `gen-report.mjs`, `run.log`). Each run gets a fresh hub-only git root. The fixture uses the merged tree's `createTask` and `setState` to make two tasks: `000001_live_lane_it` in `integration-testing` with a `<slug>.integration-tester.0.log` run, and `000002_live_lane_member` in `merging` with a `<slug>.merger.0.log` run. The real hub serves the page (`startHub`, port 0) and a headless Chromium clicks each task card, waits for `#m-agent-btns .agent-card[data-handle]`, and reads the mark span class and its computed `animation-name`. A live keeper process holds each lane pid file. The stale case writes `999999999`. Three scored runs plus one control run on the pre-fix tree (`git archive HEAD^`).
+
+| id | claim | expected | actual (scored run 1) | control (pre-fix tree) | pass |
+| --- | --- | --- | --- | --- | --- |
+| C1 | a live integration-tester lane pid marks its newest run live | {"agents":{"role":"integration-tester","run":0,"alive":true,"status":"live","handle":"000001_live_lane_it.integration-tester.0","tokens":null,"duration":null},"agent":{"role":"integration-tester","alive":true,"log":"000001_live_lane_it.integration-tester.0"}} | {"agents":{"role":"integration-tester","run":0,"alive":true,"status":"live","handle":"000001_live_lane_it.integration-tester.0","tokens":null,"duration":null},"agent":{"role":"integration-tester","alive":true,"log":"000001_live_lane_it.integration-tester.0"}} | {"agents":{"role":"integration-tester","run":0,"alive":false,"status":"ok","handle":"000001_live_lane_it.integration-tester.0","tokens":null,"duration":null},"agent":{"role":"integration-tester","alive":false,"log":"000001_live_lane_it.integration-tester.0"}} | PASS |
+| C2 | a live merger lane pid marks its newest merger run live | {"entry":{"role":"merger","run":0,"alive":true,"status":"live","handle":"000002_live_lane_member.merger.0"},"agent":{"role":"merger","alive":true,"log":"000002_live_lane_member.merger.0"}} | {"entry":{"role":"merger","run":0,"alive":true,"status":"live","handle":"000002_live_lane_member.merger.0","tokens":null,"duration":null},"agent":{"role":"merger","alive":true,"log":"000002_live_lane_member.merger.0"}} | {"entry":{"role":"merger","run":0,"alive":false,"status":"ok","handle":"000002_live_lane_member.merger.0","tokens":null,"duration":null},"agent":null} | PASS |
+| C3 | a live lane run's card spins instead of showing the finished checkmark | mark "spin", class has agent-live, animation-name "spin" | mark=spin cls=agent-card agent-integration agent-live anim=spin/0.9s | mark=check cls=agent-card agent-integration agent-past anim=none/0s | PASS |
+| C4 | a stale integration-tester lane pid keeps the run finished | alive:false status:"ok" + card agent-past/check | alive=false status=ok agent={"role":"integration-tester","alive":false,"log":"000001_live_lane_it.integration-tester.0"} / dom: mark=check cls=agent-card agent-integration agent-past | alive=false status=ok agent={"role":"integration-tester","alive":false,"log":"000001_live_lane_it.integration-tester.0"} / dom: mark=check cls=agent-card agent-integration agent-past | PASS |
+| C5 | a live lane run's open log line is held back, so no fragment renders | token=false (the open text_delta record renders nothing) | token=false tools=0 text="IT RUN\n" | token=true tools=0 text="IT RUN\n\n\nLIVE-HOLD-337" | PASS |
+
+Assumptions:
+- The lane pid file holds a bare pid, so `pidAlive` reads it through the signal check. The orchestrator writes `<pid> <disc>`, and `pidEntry` parses the leading pid, so the same rule holds.
+- A lane runs once per project, so two tasks in `merging` in one root read the same `merger.pid`. The finished case therefore uses one task per lane and a stale pid.
+- The open-line hold engages only for a `message_update` `text_delta` record (`runText` in `src/webui/logpane.ts:101`), so the pane probe writes that record shape, copied from `tests/webui/agentlog.test.ts:35`. A `tool_execution_start` record renders whole and is not held; the first probe measured that and the fixture changed, the claim did not.
+- A `#m-log-text` row wait reached its bound in one scored run before the pane showed its line; the sampled value was still settled and equal in all three scored runs.
+
+Not exercised: a real daemon spawn of a merger or integration-tester (the diff touches no orchestrator file), gzip-swept logs, doctor cards, and browsers other than Chromium. No test suite was run.
