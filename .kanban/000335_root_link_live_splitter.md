@@ -1,7 +1,7 @@
 ---
 name: "fix: the root link cleanup must not fire for a live splitter"
 priority: "medium"
-state: "to-live-test"
+state: "live-testing"
 worktree: "fix/335-root-link-live-splitter"
 issuer: "user"
 complexity: "moderate"
