@@ -141,8 +141,8 @@ assert.ok(page.includes("/api/agent-log"), "page uses the agent log endpoint");
 assert.ok(page.includes('<span class="check">✓</span>'), "past agent buttons render a green checkmark");
 assert.ok(page.includes('<span class="cross">✗</span>'), "a dead run's card renders a cross instead of the check");
 assert.ok(page.includes('a.status === "dead" ? "agent-dead" : "agent-past"'), "a dead run's card carries its own class, ok keeps agent-past");
-assert.match(page, /\.cross \{ color: var\(--critical-fg\); margin-right: 5px; \}/, "the cross renders in the muted red both themes carry");
-assert.match(page, /\.agent-dead \{ color: var\(--critical-fg\); \}/, "a dead card's label text reads in the muted red too");
+assert.match(page, /\.cross \{ color: var\(--error-text\); margin-right: 5px; \}/, "the cross reads in the failed-run red");
+assert.ok(!page.includes(".agent-dead { color: var(--critical-fg); }"), "the old label-only dead rule is gone, the failed run turns the whole card red");
 assert.ok(page.includes(".agent-card-active"), "the shown agent card gets an active class");
 // 000076: the small font belongs to the log text, not the selector cards; 000120: each run is a
 // bit larger card in one wrapping row of columns, the live run last, its subs stacked below it
@@ -406,24 +406,56 @@ assert.ok(pollSrc.includes("const live = (!!liveRun && liveRun.handle === logSta
 assert.ok(pollSrc.includes('const liveDoctor = t && (t.doctors || []).find(d => d.alive);'), "pollLog's live check also matches a live doctors entry, so a live doctor log keeps polling");
 assert.ok(!pollSrc.includes("logState.sub == null"), "a sub view is no longer hard-wired non-live, which froze the pane after the first empty poll");
 assert.ok(pollSrc.includes("if (!live && logState.idle) {"), "a past run's log still stops the timer after the first empty poll");
-// 000275: the run, sub, splitter and doctor cards read their role's board column accent, the
-// same static hex in both themes; the theme blocks carry no doctor variables anymore
+// 000353: the run, sub, splitter and doctor cards read their role's stage accent and label
+// token; the accents are theme variables now, so each theme block carries the whole ladder
 const lightVars = page.match(/:root \{ --bg: [^}]*\}/)![0];
 const darkVars = page.match(/:root\[data-theme="dark"\] \{ --bg: [^}]*\}/)![0];
 const mediaVars = page.match(/:root:not\(\[data-theme="light"\]\) \{ --bg: [^}]*\}/)![0];
 assert.ok(!page.includes("--doctor-fg:") && !page.includes("--doctor-bg:") && !page.includes("--doctor-bg-strong:"), "the doctor variables are gone from the theme blocks");
+const ACCENTS = [
+	["--accent-backlog", "#828e9f", "#5a6378"],
+	["--accent-backlog-text", "#86878c", "#667381"],
+	["--accent-todo", "#eba400", "#ffb454"],
+	["--accent-todo-text", "#b37c00", "#ffb454"],
+	["--accent-review", "#fa8532", "#ff8f40"],
+	["--accent-review-text", "#cf6610", "#ff8f40"],
+	["--accent-merge", "#a37acc", "#d2a6ff"],
+	["--accent-merge-text", "#9d6fc8", "#d2a6ff"],
+	["--accent-live", "#22a4e6", "#59c2ff"],
+	["--accent-live-text", "#1a91cd", "#59c2ff"],
+	["--accent-integration", "#4cbf99", "#95e6cb"],
+	["--accent-integration-text", "#3b9b7c", "#95e6cb"],
+	["--accent-done", "#86b300", "#aad94c"],
+	["--accent-done-text", "#719700", "#aad94c"],
+	["--error", "#e65050", "#d95757"],
+	["--error-text", "#e5474f", "#d95757"],
+] as const;
+for (const [name, light, dark] of ACCENTS) {
+	assert.ok(lightVars.includes(`${name}: ${light};`), `the light theme sets ${name} to ${light} (got ${lightVars.match(new RegExp(`${name}: [^;]+`))?.[0]})`);
+	for (const [theme, block] of [["dark", darkVars], ["prefers-dark", mediaVars]] as const) {
+		assert.ok(block.includes(`${name}: ${dark};`), `the ${theme} block sets ${name} to ${dark} (got ${block.match(new RegExp(`${name}: [^;]+`))?.[0]})`);
+	}
+}
+assert.ok(!page.includes("light-dark("), "the accents use no light-dark() helper, both dark paths get their own block");
 // 000240: the light hover is a near-opaque very light grey, so a hovered card stays clear
 // against the white panel; the dark hover keeps its opaque #1b1f29
 assert.ok(lightVars.includes("--hover: rgba(233, 237, 242, .95);"), `the light hover is the very light rgba(233, 237, 242, .95) (got ${lightVars.match(/--hover: [^;]+/)![0]})`);
 for (const [theme, block] of [["dark", darkVars], ["prefers-dark", mediaVars]] as const) {
 	assert.ok(block.includes("--hover: #1b1f29;"), `the ${theme} hover stays the opaque #1b1f29`);
 }
-for (const [role, hex] of [["agent-doctor", "#22c55e"], ["agent-splitter", "#94a3b8"], ["agent-developer", "#818cf8"], ["agent-reviewer", "#d97706"], ["agent-merger", "#c026d3"], ["agent-livetest", "#0d9488"], ["agent-integration", "#e11d48"]] as const) {
-	assert.ok(page.includes(`.${role} { color: ${hex}; }`), `the ${role} card reads the board column accent ${hex} at rest, only the text and check colored`);
-	assert.ok(page.includes(`.${role}.agent-card-active { border-color: ${hex}; background: color-mix(in srgb, ${hex} 20%, var(--panel)); }`), `the active ${role} card keeps the role-colored outline and a 20% ${hex} panel mix`);
-	assert.ok(page.includes(`.${role} .check { color: ${hex}; }`), `the ${role} card's checkmark reads the role color`);
+const ROLE_ACCENTS = [["agent-doctor", "done"], ["agent-splitter", "backlog"], ["agent-developer", "todo"], ["agent-reviewer", "review"], ["agent-merger", "merge"], ["agent-livetest", "live"], ["agent-integration", "integration"]] as const;
+for (const [role, stage] of ROLE_ACCENTS) {
+	assert.ok(page.includes(`.${role} { color: var(--accent-${stage}-text); }`), `the ${role} card label reads the dark ${stage} ladder step at rest`);
+	assert.ok(page.includes(`.${role}.agent-card-active { border-color: var(--accent-${stage}); background: color-mix(in srgb, var(--accent-${stage}) 20%, var(--panel)); }`), `the active ${role} card keeps the role-colored outline and a 20% ${stage} panel mix`);
+	assert.ok(page.includes(`.${role} .check { color: var(--accent-${stage}); }`), `the ${role} card's checkmark reads the ${stage} accent`);
 	assert.ok(!page.includes(`.${role}:hover`), `the ${role} card inherits the plain .agent-card hover, no per-role hover rule`);
 }
+// 000353: a dead run turns the whole card red, so the failed rule comes after every role rule
+// and overrides the label, the active border and the active tint at two-class specificity
+const deadAt = page.indexOf(".agent-card.agent-dead {");
+assert.ok(deadAt > Math.max(...ROLE_ACCENTS.map(([role]) => page.indexOf(`.${role} .check`))), "the failed card rule lands after the last role rule");
+const deadRule = page.match(/\.agent-card\.agent-dead \{[^}]*\}/)![0];
+assert.ok(deadRule.includes("color: var(--error-text);") && deadRule.includes("border-color: var(--error);") && deadRule.includes("background: color-mix(in srgb, var(--error) 15%, var(--panel));"), "a dead run's label, outline and 15% tint all read in the error red");
 assert.ok(page.includes(".check { color: var(--low-fg); margin-right: 5px; }"), "the unscoped .check keeps var(--low-fg) for the run cards' and sub cards' checkmarks");
 assert.ok(page.includes('agentCardHtml("agent-doctor " + (d.alive ? "agent-live" : "agent-past")'), "doctor cards keep their agent-live/agent-past classes under the agent-doctor marker, so no unscoped per-variant rule sets a color on them");
 assert.ok(agentCardCss.includes("color: var(--link)") && agentCardCss.includes("border: 1px solid var(--border)") && agentCardCss.includes("background: color-mix(in srgb, var(--panel) 85%, transparent)"), "the unscoped .agent-card keeps gold text, grey outline and the main view's semi-transparent rest background for the run and sub cards");

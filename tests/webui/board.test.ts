@@ -123,13 +123,22 @@ assert.ok(page.includes(String(cardBaseHtml)) && page.includes(String(syncCardSt
 // client scope: the page ships the rank map as a value, or the backlog sort throws on refresh
 assert.ok(page.includes(`const PRIORITY_RANK = ${JSON.stringify(PRIORITY_RANK)}`), "the client defines the rank map syncBoard references");
 
-// accents: one --ac per column, declared in pipeline order in the shared style block (not inside
-// the dark palette or its media query), so both themes render the same accent pair
-const accentAt = (st: string) => page.indexOf(`.c-${st} { --ac:`);
-assert.ok(STATE_NAMES.every((st) => accentAt(st) >= 0), "every state has its own accent class");
-assert.ok(STATE_NAMES.every((st, i) => i === 0 || accentAt(st) > accentAt(STATE_NAMES[i - 1])), "the accent classes are declared in pipeline order");
-const accentColors = STATE_NAMES.map((st) => page.match(new RegExp(`\\.c-${st} \\{ --ac: (#[0-9a-f]{6}); \\}`))![1]);
-assert.equal(new Set(accentColors).size, STATE_NAMES.length, "each column has a distinct accent color");
+// accents: seven stage rules, declared in pipeline order in the shared style block (not inside
+// the dark palette or its media query), so both themes resolve the same stage accent pair
+const STAGE_ACCENTS = [
+	[".c-backlog", "--accent-backlog"],
+	[".c-to-do, .c-doing", "--accent-todo"],
+	[".c-to-review, .c-reviewing", "--accent-review"],
+	[".c-to-merge, .c-merging", "--accent-merge"],
+	[".c-to-live-test, .c-live-testing", "--accent-live"],
+	[".c-to-integration-test, .c-integration-testing", "--accent-integration"],
+	[".c-done", "--accent-done"],
+] as const;
+const accentAt = (sel: string) => page.indexOf(`${sel} { --ac: var(`);
+assert.ok(STATE_NAMES.every((st) => page.includes(`.c-${st}`)), "every state keeps its column class");
+assert.ok(STAGE_ACCENTS.every(([sel, v]) => page.includes(`${sel} { --ac: var(${v}); }`)), "each stage rule points both its states at the one stage accent variable");
+assert.ok(STAGE_ACCENTS.every(([sel], i) => i === 0 || accentAt(sel) > accentAt(STAGE_ACCENTS[i - 1][0])), "the seven stage rules are declared in pipeline order");
+assert.equal(new Set(STAGE_ACCENTS.map(([, v]) => v)).size, STAGE_ACCENTS.length, "the seven stage accents are distinct variables");
 
 // the state picks the animation: only the states the orchestrator works on carry the spinner
 assert.ok(spinnerHtml("doing").includes('<span class="spin">') && spinnerHtml("live-testing").includes('<span class="spin">') && spinnerHtml("merging").includes('<span class="spin">'), "working states render the spinner");

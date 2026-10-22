@@ -72,10 +72,12 @@ export function refreshMs(t) {
 const DARK_VARS = `
 :root[data-theme="dark"] { --bg: #10141c; --fg: #bfbdb6; --panel: #141821; --border: #1b1f29; --heading: #bfbdb6; --muted: #5a6673; --faint: #5a6673; --soft: #bfbdb6; --hover: #1b1f29; --overlay: rgba(0, 0, 0, .6); --code-bg: #010102; --link: #e6b450;
 /* 000129: medium/critical hues widened (yellow / strong red) so the priority chips read apart; -bg tints match their fg */
---low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252; }
+--low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252;
+--accent-backlog: #5a6378; --accent-backlog-text: #667381; --accent-todo: #ffb454; --accent-todo-text: #ffb454; --accent-review: #ff8f40; --accent-review-text: #ff8f40; --accent-merge: #d2a6ff; --accent-merge-text: #d2a6ff; --accent-live: #59c2ff; --accent-live-text: #59c2ff; --accent-integration: #95e6cb; --accent-integration-text: #95e6cb; --accent-done: #aad94c; --accent-done-text: #aad94c; --error: #d95757; --error-text: #d95757; }
 :root[data-theme="dark"] #theme { color: var(--link); border-color: var(--link); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #10141c; --fg: #bfbdb6; --panel: #141821; --border: #1b1f29; --heading: #bfbdb6; --muted: #5a6673; --faint: #5a6673; --soft: #bfbdb6; --hover: #1b1f29; --overlay: rgba(0, 0, 0, .6); --code-bg: #010102; --link: #e6b450;
---low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252; }
+--low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252;
+--accent-backlog: #5a6378; --accent-backlog-text: #667381; --accent-todo: #ffb454; --accent-todo-text: #ffb454; --accent-review: #ff8f40; --accent-review-text: #ff8f40; --accent-merge: #d2a6ff; --accent-merge-text: #d2a6ff; --accent-live: #59c2ff; --accent-live-text: #59c2ff; --accent-integration: #95e6cb; --accent-integration-text: #95e6cb; --accent-done: #aad94c; --accent-done-text: #aad94c; --error: #d95757; --error-text: #d95757; }
 :root:not([data-theme="light"]) #theme { color: var(--link); border-color: var(--link); } }
 `;
 
@@ -95,6 +97,8 @@ export const PAGE = `<!doctype html>
 /* Ayu Light palette (ayu-theme/ayu-colors); 000129: medium moved to a deeper yellow so the priority chips read apart */
 :root { --bg: #fcfcfc; --fg: #5c6166; --panel: #ffffff; --border: rgba(107, 125, 143, .12); --heading: #5c6166; --muted: #adaeb1; --faint: #adaeb1; --soft: #5c6166; --hover: rgba(233, 237, 242, .95); --overlay: rgba(15, 23, 42, .45); --code-bg: #ebeef0; --link: #f29718;
 --low-bg: rgba(134, 179, 0, .15); --low-fg: #86b300; --medium-bg: rgba(201, 151, 0, .15); --medium-fg: #c99700; --high-bg: rgba(250, 133, 50, .15); --high-fg: #fa8532; --critical-bg: rgba(230, 80, 80, .15); --critical-fg: #e65050;
+/* 000353: one accent per pipeline stage and agent role, plus the failed-run red; the -text step is the darker Ayu Light ladder step that keeps a label readable on the light panel */
+--accent-backlog: #828e9f; --accent-backlog-text: #86878c; --accent-todo: #eba400; --accent-todo-text: #b37c00; --accent-review: #fa8532; --accent-review-text: #cf6610; --accent-merge: #a37acc; --accent-merge-text: #9d6fc8; --accent-live: #22a4e6; --accent-live-text: #1a91cd; --accent-integration: #4cbf99; --accent-integration-text: #3b9b7c; --accent-done: #86b300; --accent-done-text: #719700; --error: #e65050; --error-text: #e5474f;
 /* 000191: motion knobs, one place to retune the entrances, the chunk fade and the pulse loop; 000194: --exit runs the closes, --shine is the whiter band mix */
 --enter: 200ms; --exit: 180ms; --fade: 150ms; --pulse: 2s; --shine: 45%; }
 ${DARK_VARS}
@@ -185,7 +189,6 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 /* 000191: a genuinely new run card rises in with the board cards' entrance */
 .agent-card.enter { animation: cardIn var(--enter) ease-out; }
 .agent-card-active { border-color: var(--link); background: color-mix(in srgb, var(--link) 20%, var(--panel)); }
-.agent-dead { color: var(--critical-fg); }
 .agent-stats { display: block; font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
 .agent-col { display: flex; flex-direction: column; gap: 8px; }
 .agent-subs { display: flex; flex-direction: column; gap: 8px; }
@@ -193,37 +196,40 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 #m-agent-btns { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; }
 #m-doctor { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; margin-top: 8px; }
 #m-doctor:empty { display: none; }
-/* 000275: run and sub cards read their role's board column accent, the same static hex in both
-themes (doctor done green, splitter backlog grey); at rest only the text and check mark take the
-role color and the plain .agent-card outline and panel background show through, while the opened
-card keeps the role-colored outline and a 20% panel mix via .agent-card-active */
-.agent-doctor { color: #22c55e; }
-.agent-doctor.agent-card-active { border-color: #22c55e; background: color-mix(in srgb, #22c55e 20%, var(--panel)); }
-.agent-doctor .check { color: #22c55e; }
-.agent-splitter { color: #94a3b8; }
-.agent-splitter.agent-card-active { border-color: #94a3b8; background: color-mix(in srgb, #94a3b8 20%, var(--panel)); }
-.agent-splitter .check { color: #94a3b8; }
-.agent-developer { color: #818cf8; }
-.agent-developer.agent-card-active { border-color: #818cf8; background: color-mix(in srgb, #818cf8 20%, var(--panel)); }
-.agent-developer .check { color: #818cf8; }
-.agent-reviewer { color: #d97706; }
-.agent-reviewer.agent-card-active { border-color: #d97706; background: color-mix(in srgb, #d97706 20%, var(--panel)); }
-.agent-reviewer .check { color: #d97706; }
-.agent-merger { color: #c026d3; }
-.agent-merger.agent-card-active { border-color: #c026d3; background: color-mix(in srgb, #c026d3 20%, var(--panel)); }
-.agent-merger .check { color: #c026d3; }
-.agent-livetest { color: #0d9488; }
-.agent-livetest.agent-card-active { border-color: #0d9488; background: color-mix(in srgb, #0d9488 20%, var(--panel)); }
-.agent-livetest .check { color: #0d9488; }
-.agent-integration { color: #e11d48; }
-.agent-integration.agent-card-active { border-color: #e11d48; background: color-mix(in srgb, #e11d48 20%, var(--panel)); }
-.agent-integration .check { color: #e11d48; }
+/* 000353: run and sub cards read their role's stage accent and the stage's darker label step;
+at rest only the text and check mark take the color and the plain .agent-card outline and panel
+background show through, while the opened card keeps the role-colored outline and a 20% panel mix
+via .agent-card-active */
+.agent-doctor { color: var(--accent-done-text); }
+.agent-doctor.agent-card-active { border-color: var(--accent-done); background: color-mix(in srgb, var(--accent-done) 20%, var(--panel)); }
+.agent-doctor .check { color: var(--accent-done); }
+.agent-splitter { color: var(--accent-backlog-text); }
+.agent-splitter.agent-card-active { border-color: var(--accent-backlog); background: color-mix(in srgb, var(--accent-backlog) 20%, var(--panel)); }
+.agent-splitter .check { color: var(--accent-backlog); }
+.agent-developer { color: var(--accent-todo-text); }
+.agent-developer.agent-card-active { border-color: var(--accent-todo); background: color-mix(in srgb, var(--accent-todo) 20%, var(--panel)); }
+.agent-developer .check { color: var(--accent-todo); }
+.agent-reviewer { color: var(--accent-review-text); }
+.agent-reviewer.agent-card-active { border-color: var(--accent-review); background: color-mix(in srgb, var(--accent-review) 20%, var(--panel)); }
+.agent-reviewer .check { color: var(--accent-review); }
+.agent-merger { color: var(--accent-merge-text); }
+.agent-merger.agent-card-active { border-color: var(--accent-merge); background: color-mix(in srgb, var(--accent-merge) 20%, var(--panel)); }
+.agent-merger .check { color: var(--accent-merge); }
+.agent-livetest { color: var(--accent-live-text); }
+.agent-livetest.agent-card-active { border-color: var(--accent-live); background: color-mix(in srgb, var(--accent-live) 20%, var(--panel)); }
+.agent-livetest .check { color: var(--accent-live); }
+.agent-integration { color: var(--accent-integration-text); }
+.agent-integration.agent-card-active { border-color: var(--accent-integration); background: color-mix(in srgb, var(--accent-integration) 20%, var(--panel)); }
+.agent-integration .check { color: var(--accent-integration); }
+/* 000353: a dead run turns the whole card red; two classes beat every role rule above, so the
+label, the outline and the active tint all lose to the failed-run red */
+.agent-card.agent-dead { color: var(--error-text); border-color: var(--error); background: color-mix(in srgb, var(--error) 15%, var(--panel)); }
 /* 000276: the sub, splitter and doctor cards read at 85% of the role cards' text, the name line
 at 0.75rem, the stats line at 0.625rem; the four role cards keep the base 0.875rem/0.75rem sizes */
 .agent-sub, .agent-splitter, .agent-doctor { font-size: 0.75rem; }
 .agent-sub .agent-stats, .agent-splitter .agent-stats, .agent-doctor .agent-stats { font-size: 0.625rem; }
 .check { color: var(--low-fg); margin-right: 5px; }
-.cross { color: var(--critical-fg); margin-right: 5px; }
+.cross { color: var(--error-text); margin-right: 5px; }
 #m-agent { position: relative; z-index: 0; margin-bottom: 12px; }
 /* 000237: the detail card's relation lines, behind the cards: the agent area is the svg's offset
 parent and its own stacking context (z-index 0), so the z-index-2 agent cards stay under the
@@ -323,19 +329,14 @@ one line, and the leftmost column pins left with a static right border as the cu
 .md-table-wrap .md-pin { position: sticky; left: 0; background: var(--panel); border-right: 1px solid var(--border); }
 /* the log pane sits on the code background, not the dialog panel, so its pinned column matches the pane */
 #m-log-text .md-table-wrap .md-pin { background: var(--code-bg); }
-/* one accent color per column, in pipeline order */
-.c-backlog { --ac: #94a3b8; }
-.c-to-do { --ac: #60a5fa; }
-.c-doing { --ac: #818cf8; }
-.c-to-review { --ac: #f59e0b; }
-.c-reviewing { --ac: #d97706; }
-.c-to-merge { --ac: #d946ef; }
-.c-merging { --ac: #c026d3; }
-.c-to-live-test { --ac: #14b8a6; }
-.c-live-testing { --ac: #0d9488; }
-.c-to-integration-test { --ac: #f43f5e; }
-.c-integration-testing { --ac: #e11d48; }
-.c-done { --ac: #22c55e; }
+/* one accent per stage, in pipeline order; the waiting and working states of a stage share it */
+.c-backlog { --ac: var(--accent-backlog); }
+.c-to-do, .c-doing { --ac: var(--accent-todo); }
+.c-to-review, .c-reviewing { --ac: var(--accent-review); }
+.c-to-merge, .c-merging { --ac: var(--accent-merge); }
+.c-to-live-test, .c-live-testing { --ac: var(--accent-live); }
+.c-to-integration-test, .c-integration-testing { --ac: var(--accent-integration); }
+.c-done { --ac: var(--accent-done); }
 /* 204: mobile, the root font size 15% smaller so every rem-based size scales down with it */
 @media (max-width: 600px) { html { font-size: 85%; } }
 /* 205: mobile, the task details popup is a full-screen sheet, flush with all four sides; the vh
