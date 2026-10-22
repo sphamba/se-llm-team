@@ -47,9 +47,10 @@ assert.deepEqual(flipDiff(stacked, stacked), {}, "an unchanged refresh animates 
 assert.ok(page.includes(String(flipDiff)), "the page ships the tested flipDiff source");
 assert.ok(page.includes('transition = "transform .4s ease"'), "sibling shifts reuse the moved-card timing");
 
-// 000047 stacked pairs, 000181 tail stack: backlog stays a single column, the other nine states
-// render as four .pair wrappers (to-do over doing, to-review over reviewing, to-merge over merging,
-// then to-live-test over live-testing over done as one stacked tail group).
+// 000047 stacked pairs, 000181 tail stack, 000354 done column: backlog stays a single column, the
+// nine middle states render as four .pair wrappers (to-do over doing, to-review over reviewing,
+// to-merge over merging, then to-live-test over live-testing over to-integration-test over
+// integration-testing), and done closes the row as its own single column.
 // El is a minimal element stub: buildShell and syncBoard only touch this DOM surface.
 class El {
 	tag: string;
@@ -103,18 +104,25 @@ assert.ok(page.includes(".col.off h2, .col.off .empty, .col.off .toggle { opacit
 assert.ok(page.includes(".col.off.c-to-integration-test .card { opacity: .4; }"), "a waiting integration card dims with the disabled column");
 assert.ok(!page.includes(".col.off.c-integration-testing .card"), "an in-flight integration card outlives the flag flip, so its column never dims cards");
 assert.ok(!page.includes(".col.off .card"), "task cards keep full opacity in every other disabled column");
-assert.deepEqual(boardEl.children.map((c) => c.className), ["col c-backlog", "pair", "pair", "pair", "pair"], "backlog stays a single side column, the other eleven states sit in three pairs and one tail group");
+assert.deepEqual(boardEl.children.map((c) => c.className), ["col c-backlog", "pair", "pair", "pair", "pair", "col c-done"], "backlog stays a single side column, the nine middle states sit in four pairs, and done closes the row alone");
 assert.deepEqual(
 	boardEl.children.slice(1, 5).map((p) => p.children.map((c) => c.className)),
-	[["col c-to-do", "col c-doing"], ["col c-to-review", "col c-reviewing"], ["col c-to-merge", "col c-merging"], ["col c-to-live-test", "col c-live-testing", "col c-to-integration-test", "col c-integration-testing", "col c-done"]],
-	"to-do over doing, to-review over reviewing, to-merge over merging, then the five tail states stacked",
+	[["col c-to-do", "col c-doing"], ["col c-to-review", "col c-reviewing"], ["col c-to-merge", "col c-merging"], ["col c-to-live-test", "col c-live-testing", "col c-to-integration-test", "col c-integration-testing"]],
+	"to-do over doing, to-review over reviewing, to-merge over merging, then the four live-test and integration states stacked",
 );
-assert.deepEqual(LAYOUT, ["backlog", ["to-do", "doing"], ["to-review", "reviewing"], ["to-merge", "merging"], ["to-live-test", "live-testing", "to-integration-test", "integration-testing", "done"]], "backlog stays single, the middle states pair two by two, the last five stack as one group");
-// the last visual column holds exactly the five tail states, in pipeline order (the integration
-// stage lands after the live test and before done, so the layout tail constant is 5, not 3)
-assert.deepEqual(LAYOUT[LAYOUT.length - 1], ["to-live-test", "live-testing", "to-integration-test", "integration-testing", "done"], "the last visual column holds exactly the five tail states, in order");
-assert.deepEqual((LAYOUT[LAYOUT.length - 1] as string[]).slice(-3), ["to-integration-test", "integration-testing", "done"], "the integration states sit between the live test and done");
-assert.deepEqual(pairLayout(STATE_NAMES), LAYOUT, "the pairs derive from the state list, with no state-specific wiring");
+assert.equal(boardEl.children.length, 6, "the board holds six groups, so the integration stack never splits into a seventh");
+assert.equal(boardEl.children[5].className, "col c-done", "the sixth group is done, a single column and the rightmost child of the board");
+assert.deepEqual(LAYOUT, ["backlog", ["to-do", "doing"], ["to-review", "reviewing"], ["to-merge", "merging"], ["to-live-test", "live-testing", "to-integration-test", "integration-testing"], "done"], "backlog stays single, the middle states pair two by two, the four live-test and integration states stack as one group, and done closes the row");
+// done is its own rightmost column, so the integration stack keeps one group and the live test
+// never splits: the layout tail constant is 4, and the last state is appended as a string
+assert.equal(LAYOUT[LAYOUT.length - 1], "done", "the last visual column holds only done");
+assert.deepEqual(LAYOUT[LAYOUT.length - 2], ["to-live-test", "live-testing", "to-integration-test", "integration-testing"], "the live test and the integration stage share one four-state group before done");
+assert.deepEqual([...pairLayout(STATE_NAMES.slice(0, -1)), STATE_NAMES[STATE_NAMES.length - 1]], LAYOUT, "the pairs derive from the state list, with done appended as the single rightmost column");
+// 000354: six groups at the 300px basis, five 10px board gaps and the 36px board padding total
+// 1886px, so the done column stays on screen at 1920 without a horizontal scrollbar
+assert.ok(page.includes(".pair { display: flex; flex-direction: column; gap: 10px; min-width: 300px; flex: 1 0 300px; }"), "a stacked pair keeps the 300px basis");
+assert.ok(page.includes(".col { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; border-top: 3px solid var(--ac); padding: 10px; min-width: 300px; flex: 1 0 300px; }"), "a single column keeps the 300px basis");
+assert.ok(6 * 300 + 5 * 10 + 36 <= 1920, "the six groups fit a 1920px screen");
 assert.ok(LAYOUT.every((part) => (typeof part === "string" ? cols[part] : part.every((st) => cols[st]))), "every layout state gets a column");
 assert.ok(page.includes(JSON.stringify(LAYOUT)), "the page ships the tested layout");
 assert.ok(page.includes(String(buildShell)) && page.includes(String(syncBoard)), "the page runs the tested shell and card pass");

@@ -140,12 +140,11 @@ export function syncDoctorCards(cards, docs, row, residual, doc) {
 }
 
 // board layout, left to right: a string is a single column, an array is a stacked group with the
-// first state on top. backlog stays a single side column, the states after it pair two by two in
+// first state on top. backlog stays a single left column, the states after it pair two by two in
 // pipeline order (to-do over doing, to-review over reviewing, ...) while more than TAIL_STATES
-// remain, and the remaining tail (the last five states: to-live-test, live-testing,
-// to-integration-test, integration-testing, done, all non-blocking for the backlog) stacks
-// together as the last group
-const TAIL_STATES = 5;
+// remain, the remaining tail (the four non-blocking live-test and integration states) stacks as
+// one group, and done closes the row as its own single column
+const TAIL_STATES = 4;
 export function pairLayout(states: readonly string[]): (string | string[])[] {
 	const layout: (string | string[])[] = [states[0]];
 	const tail = states.slice(1);
@@ -159,8 +158,9 @@ export function pairLayout(states: readonly string[]): (string | string[])[] {
 	return layout;
 }
 
-// interpolated into PAGE as JSON, so the client renders this exact layout
-export const LAYOUT = pairLayout(STATES);
+// interpolated into PAGE as JSON, so the client renders this exact layout; done is appended as a
+// single column so the tail stack never absorbs it
+export const LAYOUT = [...pairLayout(STATES.slice(0, -1)), STATES[STATES.length - 1]];
 
 // the spinner marks a task the orchestrator is working on; a task that changes column changes this
 // markup, so its animation starts or stops with the state, and prefers-reduced-motion turns the CSS
@@ -257,7 +257,7 @@ export function relationPaths(tasks, rectOf) {
 }
 
 // the board shell, built once: a single column per layout string, one .pair wrapper per stacked
-// pair; returns each column's parts, keyed by state
+// group; returns each column's parts, keyed by state
 export function buildShell(parent, doc) {
 	const cols = {};
 	const column = (st: string) => {

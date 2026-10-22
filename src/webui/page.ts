@@ -129,7 +129,7 @@ none so the card clicks pass through */
 #relations path { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-opacity: .3; stroke-dasharray: 6 4; animation: dashflow 1s linear infinite; transition: stroke-opacity .15s ease; animation-direction: reverse; }
 #relations path.relations-hot { stroke-opacity: .8; }
 @keyframes dashflow { to { stroke-dashoffset: -10; } }
-/* 000047: the middle columns stack as pairs, sized and gapped like the single columns */
+/* 000047: the middle columns stack as groups, sized and gapped like the single columns */
 .pair { display: flex; flex-direction: column; gap: 10px; min-width: 300px; flex: 1 0 300px; }
 .col { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; border-top: 3px solid var(--ac); padding: 10px; min-width: 300px; flex: 1 0 300px; }
 /* 000096: as a .pair child the .col basis would act on the height axis and floor it at 300px */
