@@ -158,7 +158,7 @@ function startTodo(root: string, cfg: Config, task: Task): void {
 		// a dead splitter pid file means the Splitter ran and left the task in to-do (a decline
 		// or a crash): clear its root run link, then fall through to the Developer, no second
 		// splitter pass. liveness never sees the pid, so the cleanup happens here instead
-		clearContextSymlinks(root, fresh);
+		clearContextSymlinks(root, fresh, { rootCwd: true });
 	}
 	const ensured = ensureWorktree(root, fresh);
 	if (!ensured) return;

@@ -138,8 +138,10 @@ function repointContextSymlink(root: string, link: string, target: string): void
 // after the agent terminated: remove both context symlinks from the task's cwd (its worktree,
 // or the project root for a role that runs there), so a cwd without a running agent resolves no
 // task (the kanban tools then say so). Hooked where the orchestrator clears the agent pid; the
-// done cleanup removes the whole worktree
-export function clearContextSymlinks(root: string, task: Task): void {
+// done cleanup removes the whole worktree. The shared root SPECS.md goes only on an explicit
+// rootCwd opt-in, from the sites that know the root-cwd run is gone (#335)
+export function clearContextSymlinks(root: string, task: Task, opts?: { rootCwd?: boolean }): void {
+	if (!task.worktree && !opts?.rootCwd) return;
 	const cwd = task.worktree ? join(root, ".worktrees", task.worktree) : root;
 	for (const name of ["SPECS.md", "AGENTS.md"]) {
 		try {

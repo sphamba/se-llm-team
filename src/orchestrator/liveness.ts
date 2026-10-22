@@ -86,7 +86,7 @@ function bounceDead(root: string, task: Task, next: TaskState, pidName: string, 
 	const fresh = getTask(root, task.file);
 	// the agent terminated: remove its cwd context symlinks from the task's worktree (the next
 	// spawn re-points them)
-	clearContextSymlinks(root, fresh ?? task);
+	clearContextSymlinks(root, fresh ?? task, { rootCwd: pidName === "integration-tester" });
 	if (!fresh || fresh.state !== task.state) return;
 	// per-run death marker for the webui's cross: the dying run is the newest run log of the
 	// bounced role (the index known at spawn); a fresh respawn (new index) is unaffected and
@@ -183,7 +183,7 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 			if (!(code === 0 && working && !working.success)) clearExitFile(root, pidName);
 			clearPid(root, pidName);
 			// the agent terminated (or its pid file is stale): remove its cwd context symlinks
-			clearContextSymlinks(root, task);
+			clearContextSymlinks(root, task, { rootCwd: pidName === "integration-tester" });
 			if (!working) {
 				// a completed run leaves its stale pidfile behind, a bounce clears it first, so a
 				// stale pidfile here means the agent advanced the task out of the mapped state by
