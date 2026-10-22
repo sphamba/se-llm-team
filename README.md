@@ -20,7 +20,7 @@ flowchart TD
         Developers --> Reviewers
         Reviewers --> Merger
         Merger --> LiveTester["Live-tester"]
-        LiveTester --> IntegrationTester["Integration-tester"]
+        Merger --> IntegrationTester["Integration-tester"]
     end
     subgraph Developers
         direction TB
@@ -30,6 +30,7 @@ flowchart TD
         direction TB
         Reviewer --> SubReviewers["Subagents"]
     end
+    Orchestrator .-> Doctor
 ```
 
 ## Setup
