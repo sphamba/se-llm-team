@@ -1,8 +1,8 @@
 ---
 name: "feat: Ayu accent colors for pipeline states, agent roles and failed runs"
 priority: "medium"
-state: "live-testing"
-worktree: "feat/353-ayu-state-role-accents"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "simple"
 shortName: "ayu-state-role-accents"

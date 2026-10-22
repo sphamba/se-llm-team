@@ -1,8 +1,8 @@
 ---
 name: "feat: move the done column to its own rightmost group"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "to-do"
+worktree: "feat/354-done-own-right-column"
 issuer: "user"
 complexity: "simple"
 shortName: "done-own-right-column"
