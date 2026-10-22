@@ -305,7 +305,7 @@ console.log("integration.test.ts: ... + priority inferred from covered complexit
 
 // --- part 3: a second covered ref appends to the waiting task: refs in ascending order, one
 // bullet per ref with its own summary, the creation attributes never move, and the priority
-// follows the highest covered complexity ---
+// follows the highest covered complexity and never drops again ---
 const root3 = fixture();
 cleaned.push(root3);
 const cfg3 = mergeCfg(root3);
@@ -361,21 +361,28 @@ setState(root3, low3, "to-merge");
 rescan(root3, cfg3);
 assert.equal(parseTask(root3, low3.file).state, "to-live-test", "the re-merge fast-forwards again");
 assert.equal(getTask(root3, file3)!.specs, specsAfterAppend, "a second merge of the same ref changes nothing at all");
+// a later append of a lower-complexity ref alone derives medium, and the critical priority stays
+const extra3 = liveTask(root3, "fix: covered third", "The third covered ref's summary.", { complexity: "simple" });
+mergeTask(root3, extra3, cfg3);
+const raised3 = getTask(root3, file3)!;
+assert.equal(raised3.priority, "critical", "the simple append keeps the waiting task critical instead of dropping it to medium");
+assert.equal(raised3.name, `test: integration of #${numLow3}, #${numHigh3}, #${taskNum(extra3.file)}`, "the appended simple ref still joins the name");
 console.log("integration.test.ts: ... + append with ascending refs and one quoted entry per ref passed");
 
 // --- part 3b: a ref the waiting task names but the board no longer holds is dropped, so the head
-// sentence and the headings keep naming the same set ---
+// sentence and the headings keep naming the same set, and the priority a vanished ref raised stays ---
 const root3b = fixture();
 cleaned.push(root3b);
 const cfg3b = mergeCfg(root3b);
-const ghost3b = waitingTask(root3b, 999999, "low");
-const real3b = liveTask(root3b, "feat: the surviving ref", "The summary of the ref that stays.");
+const ghost3b = waitingTask(root3b, 999999, "critical");
+const real3b = liveTask(root3b, "feat: the surviving ref", "The summary of the ref that stays.", { complexity: "simple" });
 mergeTask(root3b, real3b, cfg3b);
 const rebuilt3b = getTask(root3b, ghost3b.file)!;
 assert.deepEqual(entryRefs(rebuilt3b.specs), [`${taskNum(real3b.file)}`], "the vanished ref leaves no empty entry behind");
 assert.deepEqual(ownRefs(rebuilt3b.specs), [`${taskNum(real3b.file)}`], "the head sentence names only the surviving ref");
 assert.equal(rebuilt3b.name, `test: integration of #${taskNum(real3b.file)}`, "the name names only the surviving ref");
 assert.ok(!rebuilt3b.specs.includes("999999"), "nothing quotes the vanished ref");
+assert.equal(rebuilt3b.priority, "critical", "the vanished complex ref keeps the waiting task critical instead of dropping it to medium");
 console.log("integration.test.ts: ... + a ref that left the board is dropped passed");
 
 // --- part 4: a second merge opens a NEW waiting task while the first integration task runs ---

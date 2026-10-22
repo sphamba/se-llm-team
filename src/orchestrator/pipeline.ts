@@ -93,6 +93,12 @@ function integrationPriority(covered: Task[]): string {
 		.reduce((highest, priority) => ((PRIORITY_RANK[priority] ?? 4) < (PRIORITY_RANK[highest] ?? 4) ? priority : highest), "low");
 }
 
+// a waiting task's queue position only improves: a ref that leaves the board, or a
+// lower-complexity append, must not lower a priority an earlier append already raised
+function higherPriority(stored: string, next: string): string {
+	return (PRIORITY_RANK[stored] ?? 4) <= (PRIORITY_RANK[next] ?? 4) ? stored : next;
+}
+
 function createIntegrationTask(root: string, covered: Task): Task {
 	const num = taskNum(covered.file);
 	const task = createTask(root, {
@@ -137,7 +143,7 @@ export function ensureIntegrationTask(root: string, covered: Task): void {
 	const survivors = kept.map((task) => taskNum(task.file));
 	updateTask(root, fresh, {
 		name: integrationName(survivors),
-		priority: integrationPriority(kept),
+		priority: higherPriority(fresh.priority, integrationPriority(kept)),
 		summary: integrationSummary(survivors),
 		specs: integrationSpecs(kept),
 	});
