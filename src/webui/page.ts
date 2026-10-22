@@ -1,6 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { PRIORITY_RANK } from "../kanban.ts";
+import { readConfigFiles } from "../orchestrator/config.ts";
 import { esc, inline, logFixups, md } from "./logpane.ts";
 import { agentLabel, agentRowSig, agentStatsText, applyCardStats, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, makeStatsQueue, mergeCardStats, numLinkHtml, relationPaths, sortedCol, spinnerHtml, statsKey, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, taskStats, taskStatsText } from "./board.ts";
 
@@ -15,22 +14,10 @@ export interface WebUiConfig {
 	port: number;
 }
 
-// se-llm-team.json: the neutral config dir first (XDG when set, else ~/.config/se-llm-team),
-// the legacy pi path is a read-only fallback when the neutral file is absent; project
-// .kanban/se-llm-team.json overrides both; a missing file, invalid JSON or absent keys mean off
+// project root se-llm-team.json overrides ~/.se-llm-team/config.json, nested objects are
+// merged deeply; a missing file, invalid JSON or absent keys mean off
 export function loadWebUiConfig(root?: string): WebUiConfig {
-	const home = process.env.HOME ?? "";
-	const neutral = join(process.env.XDG_CONFIG_HOME || join(home, ".config"), "se-llm-team", "se-llm-team.json");
-	const paths = [existsSync(neutral) ? neutral : join(home, ".pi", "agent", "se-llm-team.json")];
-	if (root) paths.push(join(root, ".kanban", "se-llm-team.json"));
-	let webUi: { enabled?: boolean; host?: string; port?: number } | undefined;
-	for (const path of paths) {
-		try {
-			webUi = JSON.parse(readFileSync(path, "utf8")).webUi ?? webUi;
-		} catch {
-			// missing file or invalid JSON
-		}
-	}
+	const webUi = readConfigFiles(root).webUi as { enabled?: boolean; host?: string; port?: number } | undefined;
 	return { enabled: webUi?.enabled === true, host: webUi?.host ?? DEFAULT_HOST, port: webUi?.port ?? DEFAULT_PORT };
 }
 

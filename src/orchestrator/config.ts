@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { COMPLEXITIES } from "../kanban.ts";
 import { BACKENDS, type Backend } from "./backends.ts";
@@ -48,6 +49,9 @@ export interface Config {
 	retryIdleMinutes: number;
 	logStallMinutes: number;
 	maxParallel: number;
+	reviews: boolean;
+	liveTesting: boolean;
+	integrationTesting: boolean;
 	llm: LlmConfig;
 	roles: Record<string, RoleLlmConfig>;
 	reviewerCap: Record<string, number>;
@@ -76,35 +80,71 @@ function idleMinutes(root: string, value: unknown, key: string, fallback: number
 	return value;
 }
 
-// 000215: the global config lives in the agent-neutral config dir (XDG when set, else
-// ~/.config/se-llm-team); the legacy pi path is a read-only fallback for old setups
-const neutralConfigPath = () =>
-	join(process.env.XDG_CONFIG_HOME || join(process.env.HOME ?? "", ".config"), "se-llm-team", "se-llm-team.json");
-const legacyConfigPath = () => join(process.env.HOME ?? "", ".pi", "agent", "se-llm-team.json");
+// only an explicit boolean flips a stage toggle; anything else warns and keeps the default
+function flag(root: string, value: unknown, key: string, fallback: boolean): boolean {
+	if (value === undefined) return fallback;
+	if (typeof value === "boolean") return value;
+	log(root, `${key} ${JSON.stringify(value)} ignored: must be a boolean`);
+	return fallback;
+}
+
+// the global config lives in ~/.se-llm-team; a project root se-llm-team.json overrides it
+const globalConfigPath = () => join(process.env.HOME || homedir(), ".se-llm-team", "config.json");
+const projectConfigPath = (root: string) => join(root, "se-llm-team.json");
+
+type ConfigObject = Record<string, unknown>;
+
+const isConfigObject = (value: unknown): value is ConfigObject => value !== null && typeof value === "object" && !Array.isArray(value);
+
+// deep merge so a project can set one nested key without dropping the global siblings
+function mergeConfig(base: ConfigObject, extra: ConfigObject): ConfigObject {
+	const out: ConfigObject = { ...base };
+	for (const [key, value] of Object.entries(extra)) {
+		if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
+		const current = out[key];
+		out[key] = isConfigObject(current) && isConfigObject(value) ? mergeConfig(current, value) : value;
+	}
+	return out;
+}
+
+// merged raw config: the global file first, then the project root file; a missing or malformed
+// file is ignored, so the other layer still applies
+export function readConfigFiles(root?: string): ConfigObject {
+	let cfg: ConfigObject = {};
+	const paths = [globalConfigPath()];
+	if (root) paths.push(projectConfigPath(root));
+	for (const path of paths) {
+		try {
+			const parsed = JSON.parse(readFileSync(path, "utf8"));
+			if (isConfigObject(parsed)) cfg = mergeConfig(cfg, parsed);
+		} catch {
+			/* optional file */
+		}
+	}
+	return cfg;
+}
 
 // Backend selection: a config agent value that names a backend wins, then the host-passed
 // default (--default-agent), then pi. Any other config agent value is an executable override
 // (stubs, custom wrappers) and leaves the backend to the host default, with the spawned
 // executable staying that override.
 export function loadConfig(root: string, defaultAgent?: string): Config {
-	let cfg: { agent?: string; pollMinutes?: number; backlogIdleMinutes?: unknown; retryIdleMinutes?: unknown; logStallMinutes?: unknown; maxParallel?: unknown; provider?: unknown; model?: unknown; thinking?: unknown; roles?: unknown; reviewerCap?: unknown } = {};
-	// neutral global first, the legacy pi path is a read-only fallback, project .kanban/se-llm-team.json overrides both
-	const paths = [neutralConfigPath()];
-	if (!existsSync(paths[0])) {
-		const legacy = legacyConfigPath();
-		if (existsSync(legacy)) {
-			log(root, `using the legacy config at ${legacy} (${paths[0]} not found)`);
-			paths.push(legacy);
-		}
-	}
-	paths.push(join(root, ".kanban", "se-llm-team.json"));
-	for (const path of paths) {
-		try {
-			cfg = { ...cfg, ...JSON.parse(readFileSync(path, "utf8")) };
-		} catch {
-			/* optional file */
-		}
-	}
+	const cfg = readConfigFiles(root) as {
+		agent?: string;
+		pollMinutes?: number;
+		backlogIdleMinutes?: unknown;
+		retryIdleMinutes?: unknown;
+		logStallMinutes?: unknown;
+		maxParallel?: unknown;
+		reviews?: unknown;
+		liveTesting?: unknown;
+		integrationTesting?: unknown;
+		provider?: unknown;
+		model?: unknown;
+		thinking?: unknown;
+		roles?: unknown;
+		reviewerCap?: unknown;
+	};
 	const roles: Record<string, RoleLlmConfig> = {};
 	if (cfg.roles && typeof cfg.roles === "object" && !Array.isArray(cfg.roles)) {
 		for (const [role, entry] of Object.entries(cfg.roles)) {
@@ -186,6 +226,9 @@ export function loadConfig(root: string, defaultAgent?: string): Config {
 		retryIdleMinutes: idleMinutes(root, cfg.retryIdleMinutes, "retryIdleMinutes", DEFAULT_RETRY_IDLE_MINUTES),
 		logStallMinutes,
 		maxParallel,
+		reviews: flag(root, cfg.reviews, "reviews", true),
+		liveTesting: flag(root, cfg.liveTesting, "liveTesting", true),
+		integrationTesting: flag(root, cfg.integrationTesting, "integrationTesting", true),
 		llm: cleanLlm(root, cfg, " (global)"),
 		roles,
 		reviewerCap,

@@ -94,7 +94,7 @@ The server resolves the project root from its cwd. Its `orchestrator_start` pass
 
 ## Configuration
 
-The config is optional. It lives in `$XDG_CONFIG_HOME/se-llm-team/se-llm-team.json`, or in `~/.config/se-llm-team/se-llm-team.json` when `XDG_CONFIG_HOME` is unset. A `.kanban/se-llm-team.json` in the project overrides it. Old setups keep the legacy `~/.pi/agent/se-llm-team.json` as a read-only fallback.
+The config is optional. The global file is `~/.se-llm-team/config.json` (`XDG_CONFIG_HOME` is ignored). A `se-llm-team.json` at the project root overrides it, and nested objects merge key by key. The old `.kanban/se-llm-team.json` and `~/.pi/agent/se-llm-team.json` files are not read.
 
 ```json
 {
@@ -105,6 +105,9 @@ The config is optional. It lives in `$XDG_CONFIG_HOME/se-llm-team/se-llm-team.js
   "thinking": "high",
   "roles": { "developer": { "thinking": "xhigh", "complex": { "model": "big-model" } } },
   "reviewerCap": { "trivial": 0, "simple": 1, "moderate": 2, "complex": 3 },
+  "reviews": true,
+  "liveTesting": true,
+  "integrationTesting": true,
   "webUi": { "enabled": true, "host": "localhost", "port": 4242 }
 }
 ```
@@ -121,6 +124,9 @@ The config is optional. It lives in `$XDG_CONFIG_HOME/se-llm-team/se-llm-team.js
 | `roles.<type>.<key>` | unset | Override `provider`, `model`, or `thinking` for one agent type. Unset fields keep the global value. |
 | `roles.<type>.<complexity>.<key>` | unset | Same fields for one complexity: `trivial`, `simple`, `moderate`, or `complex`. Unset fields keep the role value. |
 | `reviewerCap.<complexity>` | `0`/`1`/`2`/`3` | Successful reviewer runs before a to-review task force-advances to to-merge. Defaults: trivial `0`, simple `1`, moderate `2`, complex `3`. |
+| `reviews` | `true` | Run the Reviewer stage. Off: a to-review task moves straight to to-merge. |
+| `liveTesting` | `true` | Run the Live-tester stage. Off: a merged to-live-test task moves straight to done. |
+| `integrationTesting` | `true` | Open integration-test tasks at the merge. Off: a merge opens no new integration task. |
 | `webUi.enabled` | off | Serve the web dashboard with the daemon. |
 | `webUi.host` | `localhost` | Dashboard bind host. |
 | `webUi.port` | `4242` | Dashboard port. |

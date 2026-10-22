@@ -19,7 +19,7 @@ cleaned.push(remoteA);
 execSync(`git init -q --bare ${remoteA}`, { shell: "/bin/bash" });
 execSync(`git remote add origin ${remoteA}`, { cwd: rootA, shell: "/bin/bash" });
 mkdirSync(kanbanDir(rootA), { recursive: true });
-writeFileSync(join(kanbanDir(rootA), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootA), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootA, "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootA), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskA = createTask(rootA, { name: "feat: smoke test", summary: "Pipeline smoke", specs: "Run the full pipeline" });
 setState(rootA, taskA, "to-do");
 // a legacy unsuffixed log from the old naming: never renamed or rewritten, and it never
@@ -146,14 +146,14 @@ rmSync(symDir, { recursive: true, force: true });
 console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn smoke passed");
 
 // --- part S: --no-webui / SE_LLM_TEAM_NO_WEBUI keep smoke daemons off the global webui config ---
-// the global config (like the production ~/.pi/agent/se-llm-team.json) enables the webui on a fixed
+// the global config (like the production ~/.se-llm-team/config.json) enables the webui on a fixed
 // port; a smoke daemon without the override binds it and steals the real UI
 const rootS = fixture();
 cleaned.push(rootS);
 const homeS = mkdtempSync(join(tmpdir(), "orch-home-"));
 cleaned.push(homeS);
-mkdirSync(join(homeS, ".pi", "agent"), { recursive: true });
-writeFileSync(join(homeS, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: 4277 }, backlogIdleMinutes: 0 }));
+mkdirSync(join(homeS, ".se-llm-team"), { recursive: true });
+writeFileSync(join(homeS, ".se-llm-team", "config.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: 4277 }, backlogIdleMinutes: 0 }));
 
 const sEnv = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", rootS, "--rescan-seconds", "1"], {
 	stdio: ["ignore", "pipe", "pipe"],
@@ -196,7 +196,7 @@ const homeX = mkdtempSync(join(tmpdir(), "orch-home-"));
 cleaned.push(homeX);
 mkdirSync(kanbanDir(rootX), { recursive: true });
 writeFileSync(
-	join(kanbanDir(rootX), "se-llm-team.json"),
+	join(rootX, "se-llm-team.json"),
 	JSON.stringify({
 		agent: argvStub(rootX),
 		pollMinutes: 0.01,
@@ -262,7 +262,7 @@ cleaned.push(rootAS);
 const homeAS = mkdtempSync(join(tmpdir(), "orch-home-"));
 cleaned.push(homeAS);
 mkdirSync(kanbanDir(rootAS), { recursive: true });
-writeFileSync(join(kanbanDir(rootAS), "se-llm-team.json"), JSON.stringify({ agent: argvStub(rootAS), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootAS, "se-llm-team.json"), JSON.stringify({ agent: argvStub(rootAS), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 // a bare AGENTS.md in .kanban (the pi context-file name a user might try here) is board noise
 // too: no frontmatter, so without the filter it parses as a phantom backlog task and promotes
 writeFileSync(join(kanbanDir(rootAS), "AGENTS.md"), "# notes\n");
@@ -422,7 +422,7 @@ const savedHomeAY = process.env.HOME;
 process.env.HOME = homeAY;
 try {
 	// backend resolution: a config agent key that names a backend wins, then the host default, then pi
-	const cfgFile = join(kanbanDir(rootAY), "se-llm-team.json");
+	const cfgFile = join(rootAY, "se-llm-team.json");
 	writeFileSync(cfgFile, JSON.stringify({ agent: "claude" }));
 	assert.equal(loadConfig(rootAY).backend, "claude", "a config agent key naming a backend selects that backend");
 	assert.equal(loadConfig(rootAY).agent, "claude", "the backend name is also the spawned executable");

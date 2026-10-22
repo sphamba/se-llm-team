@@ -8,9 +8,6 @@ import { agentLabel, agentRowSig, agentStatsText, boardOf, curve, doctorCol, log
 // not re-exported by the webui barrel: import directly from the logpane module
 import { esc } from "../../src/webui/logpane.ts";
 
-// 000215: the neutral config dir resolves to $HOME/.config/se-llm-team when XDG_CONFIG_HOME
-// is unset, so dropping it keeps every temp-HOME section off the real user config
-delete process.env.XDG_CONFIG_HOME;
 
 const root = mkdtempSync(join(tmpdir(), "webui-page-test-"));
 const home = mkdtempSync(join(tmpdir(), "webui-page-home-"));
@@ -26,7 +23,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 	});
 }
 
-// HOME at the temp home keeps the hub registry and lock out of the real pi agent dir
+// HOME at the temp home keeps the hub registry and lock out of the real global dir
 const task = createTask(root, { name: "feat: webui smoke", summary: "Dashboard smoke", specs: "Render the board" });
 process.env.HOME = home;
 const ui = await startHub({ name: "webui-test", root, host: "localhost", port: 0 });

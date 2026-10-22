@@ -15,9 +15,6 @@ import { PAGE } from "../../src/webui/page.ts";
 
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-merge", "merging", "to-live-test", "live-testing", "to-integration-test", "integration-testing", "done"];
 
-// 000215: the neutral config dir resolves to $HOME/.config/se-llm-team when XDG_CONFIG_HOME
-// is unset, so dropping it keeps the temp-HOME hub off the real user config
-delete process.env.XDG_CONFIG_HOME;
 
 const root = mkdtempSync(join(tmpdir(), "webui-board-"));
 const home = mkdtempSync(join(tmpdir(), "webui-board-home-"));

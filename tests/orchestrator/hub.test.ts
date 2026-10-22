@@ -16,13 +16,11 @@ const taskU2 = createTask(rootU2, { name: "fix: hub board b", summary: "Hub smok
 const realHome = process.env.HOME;
 process.env.HOME = homeU;
 // a registry left by a previous hub, carrying one long-stale entry: the new hub drops it at seed
-mkdirSync(join(homeU, ".pi", "agent"), { recursive: true });
-writeFileSync(join(homeU, ".pi", "agent", "se-llm-team-hub.json"), JSON.stringify([{ name: "stale", root: rootU1, start: Date.now() - 60000, lastHeartbeat: Date.now() - 60000 }]));
+mkdirSync(join(homeU, ".se-llm-team"), { recursive: true });
+writeFileSync(join(homeU, ".se-llm-team", "hub.json"), JSON.stringify([{ name: "stale", root: rootU1, start: Date.now() - 60000, lastHeartbeat: Date.now() - 60000 }]));
 const hubU = await startHub({ name: "a", root: rootU1, host: "127.0.0.1", port: 0, staleMs: 400, healthMs: 150 });
 assert.ok(hubU, "hub starts and returns a port");
-// 000215: the legacy registry seeded above copied to the neutral path at hub start
-assert.ok(existsSync(join(homeU, ".config", "se-llm-team", "se-llm-team-hub.json")), "the hub registry lives at the neutral path");
-assert.ok(existsSync(join(homeU, ".pi", "agent", "se-llm-team-hub.json")), "the legacy registry file is never removed");
+assert.ok(existsSync(join(homeU, ".se-llm-team", "hub.json")), "the hub registry lives at ~/.se-llm-team/hub.json");
 const hubBase = `http://127.0.0.1:${hubU.port}`;
 assert.equal(await (await fetch(`${hubBase}/health`)).text(), "ok");
 const regRes = await fetch(`${hubBase}/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "b", root: rootU2, branch: "feat/x" }) });
@@ -45,7 +43,7 @@ const registryU = readHubRegistry();
 assert.deepEqual(registryU.map((e) => e.name).sort(), ["a", "b"], "stale seed entry dropped, one entry per project");
 assert.equal(registryU.find((e) => e.name === "a")!.root, rootU1);
 assert.equal(registryU.find((e) => e.name === "b")!.root, rootU2);
-assert.deepEqual(readdirSync(join(homeU, ".config", "se-llm-team")).filter((f) => f.includes(".tmp")), [], "no atomic-rename temp litter in the neutral registry dir");
+assert.deepEqual(readdirSync(join(homeU, ".se-llm-team")).filter((f) => f.includes(".tmp")), [], "no atomic-rename temp litter in the global registry dir");
 const viaProject = await (await fetch(`${hubBase}/api/tasks?project=b`)).json();
 assert.equal(viaProject.length, 1);
 assert.equal(viaProject[0].file, taskU2.file);
@@ -80,8 +78,8 @@ const homeV = mkdtempSync(join(tmpdir(), "orch-hub-race-home-"));
 cleaned.push(rootV1, rootV2, homeV);
 const taskV2 = createTask(rootV2, { name: "fix: raced board", summary: "Election smoke", specs: "n/a" });
 const portV = await freePort();
-mkdirSync(join(homeV, ".pi", "agent"), { recursive: true });
-writeFileSync(join(homeV, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portV }, backlogIdleMinutes: 0 }));
+mkdirSync(join(homeV, ".se-llm-team"), { recursive: true });
+writeFileSync(join(homeV, ".se-llm-team", "config.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portV }, backlogIdleMinutes: 0 }));
 const hubEnv = { ...process.env, HOME: homeV, SE_LLM_TEAM_HUB_HEALTH_MS: "500" };
 delete hubEnv.SE_LLM_TEAM_NO_WEBUI; // the election needs the webui enabled; the temp HOME config picks a free port
 const dV1 = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", rootV1, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnv });
@@ -111,7 +109,7 @@ assert.equal(tasksV.length, 1);
 assert.equal(tasksV[0].file, taskV2.file);
 assert.equal((await (await fetch(`${baseV}/api/tasks?project=${nameV1}`)).json()).length, 0);
 assert.equal((await fetch(`${baseV}/api/tasks?project=nope`)).status, 404);
-const registryV = JSON.parse(readFileSync(join(homeV, ".config", "se-llm-team", "se-llm-team-hub.json"), "utf8"));
+const registryV = JSON.parse(readFileSync(join(homeV, ".se-llm-team", "hub.json"), "utf8"));
 assert.deepEqual(registryV.map((e: any) => e.name).sort(), [nameV1, nameV2].sort(), "registry file carries both entries");
 assert.ok(registryV.every((e: any) => typeof e.branch === "string" && e.branch.length > 0), "registry entries carry the root checkout's branch");
 dV1.kill("SIGTERM");
@@ -124,8 +122,8 @@ const rootW2 = fixture();
 const homeW = mkdtempSync(join(tmpdir(), "orch-hub-fail-home-"));
 cleaned.push(rootW1, rootW2, homeW);
 const portW = await freePort();
-mkdirSync(join(homeW, ".pi", "agent"), { recursive: true });
-writeFileSync(join(homeW, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portW }, backlogIdleMinutes: 0 }));
+mkdirSync(join(homeW, ".se-llm-team"), { recursive: true });
+writeFileSync(join(homeW, ".se-llm-team", "config.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portW }, backlogIdleMinutes: 0 }));
 const hubEnvW = { ...process.env, HOME: homeW, SE_LLM_TEAM_HUB_HEALTH_MS: "500", SE_LLM_TEAM_HUB_STALE_MS: "1500" };
 delete hubEnvW.SE_LLM_TEAM_NO_WEBUI;
 const dW1 = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", rootW1, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: hubEnvW });
@@ -161,8 +159,7 @@ await waitForAsync(async () => {
 	}
 }, 15000, "new hub serves only the survivor (dead entry aged out)");
 assert.equal((await fetch(`http://127.0.0.1:${portW}/api/tasks?project=${deadName}`)).status, 404, "dead project rejected by the new hub");
-assert.equal(parseInt(readFileSync(join(homeW, ".config", "se-llm-team", "se-llm-team-hub.lock"), "utf8").trim(), 10), survProc.pid, "the stale hub lock was stolen by the survivor");
-assert.ok(!existsSync(join(homeW, ".pi", "agent", "se-llm-team-hub.lock")), "the hub lock is never taken at the legacy path");
+assert.equal(parseInt(readFileSync(join(homeW, ".se-llm-team", "hub.lock"), "utf8").trim(), 10), survProc.pid, "the stale hub lock was stolen by the survivor");
 survProc.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + hub failover smoke passed");
 
@@ -185,8 +182,8 @@ assert.equal(isLinkedWorktree(nogitT), false, "a non-git root is hub-eligible");
 const homeT = mkdtempSync(join(tmpdir(), "orch-hub-wt-out-home-"));
 cleaned.push(homeT);
 const portT = await freePort();
-mkdirSync(join(homeT, ".pi", "agent"), { recursive: true });
-writeFileSync(join(homeT, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portT }, backlogIdleMinutes: 0 }));
+mkdirSync(join(homeT, ".se-llm-team"), { recursive: true });
+writeFileSync(join(homeT, ".se-llm-team", "config.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portT }, backlogIdleMinutes: 0 }));
 const envT = { ...process.env, HOME: homeT, SE_LLM_TEAM_HUB_HEALTH_MS: "300" };
 delete envT.SE_LLM_TEAM_NO_WEBUI;
 const dT = spawn(process.execPath, [join(HERE, "../src/orchestrator.ts"), "--root", wtT, "--rescan-seconds", "1", "--poll-minutes", "0.05"], { stdio: ["ignore", "pipe", "pipe"], env: envT });
@@ -197,7 +194,7 @@ dT.stderr.on("data", (d) => (outT += d));
 const exitT = new Promise<string>((r) => dT.on("exit", (code) => r(String(code))));
 await waitFor(() => outT.includes("stands down"), 15000, "worktree-outside-.worktrees daemon stands down with no hub", () => outT);
 assert.ok(!outT.includes("web ui on"), "a worktree outside .worktrees never races for the port");
-assert.ok(!existsSync(join(homeT, ".config", "se-llm-team", "se-llm-team-hub.lock")), "a worktree outside .worktrees never races for the hub lock");
+assert.ok(!existsSync(join(homeT, ".se-llm-team", "hub.lock")), "a worktree outside .worktrees never races for the hub lock");
 await new Promise((r) => setTimeout(r, 1200)); // several hub ticks: still never served
 assert.ok(!outT.includes("web ui on"), "a worktree outside .worktrees never serves the ui");
 assert.equal(await Promise.race([exitT, Promise.resolve("alive")]), "alive", "a daemon rooted outside .worktrees is not reaped as a task worktree");

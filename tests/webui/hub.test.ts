@@ -16,9 +16,6 @@ import { compactFinishedLogs } from "../../src/orchestrator.ts";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATE_NAMES = ["backlog", "to-do", "doing", "to-review", "reviewing", "to-merge", "merging", "to-live-test", "live-testing", "done"];
 
-// 000215: the neutral config dir resolves to $HOME/.config/se-llm-team when XDG_CONFIG_HOME
-// is unset, so dropping it keeps every temp-HOME section off the real user config
-delete process.env.XDG_CONFIG_HOME;
 
 const root = mkdtempSync(join(tmpdir(), "webui-test-"));
 const home = mkdtempSync(join(tmpdir(), "webui-home-"));
@@ -36,7 +33,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 	});
 }
 
-// absent or invalid config = off (HOME at the empty temp home, no board config yet)
+// absent or invalid config = off (HOME at the empty temp home, no project config yet)
 const realHome = process.env.HOME;
 process.env.HOME = home;
 assert.equal(loadWebUiConfig(root).enabled, false);
@@ -44,7 +41,7 @@ process.env.HOME = realHome;
 
 
 // the hub serves the dashboard endpoints; HOME at the temp home keeps the hub registry and
-// lock out of the real pi agent dir
+// lock out of the real global dir
 const task = createTask(root, { name: "feat: webui smoke", summary: "Dashboard smoke", specs: "Render the board" });
 process.env.HOME = home;
 const ui = await startHub({ name: "webui-test", root, host: "localhost", port: 0 });
@@ -170,8 +167,8 @@ ui.close();
 process.env.HOME = realHome;
 
 // daemon wiring: HOME at a config with webUi enabled and port 0 -> OS picks, URL logged
-mkdirSync(join(home, ".pi", "agent"), { recursive: true });
-writeFileSync(join(home, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, port: 0 } }));
+mkdirSync(join(home, ".se-llm-team"), { recursive: true });
+writeFileSync(join(home, ".se-llm-team", "config.json"), JSON.stringify({ webUi: { enabled: true, port: 0 } }));
 daemon = spawn(process.execPath, [join(HERE, "../../src/orchestrator.ts"), "--root", root], {
 	stdio: ["ignore", "pipe", "pipe"],
 	env: { ...process.env, HOME: home },
@@ -199,26 +196,30 @@ assert.equal(viaDaemon[0].file, task.file);
 daemon.kill("SIGTERM");
 await Promise.race([exited, new Promise((r) => setTimeout(r, 5000))]);
 
-// project .kanban/se-llm-team.json overrides the user file for webUi
+// the project root se-llm-team.json overrides the global ~/.se-llm-team/config.json for webUi
 process.env.HOME = home;
-writeFileSync(join(root, ".kanban", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: 4243 } }));
+const globalConfig = join(home, ".se-llm-team", "config.json");
+writeFileSync(globalConfig, JSON.stringify({ webUi: { enabled: true, host: "global-host", port: 1234 } }));
+writeFileSync(join(root, "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: 4243 } }));
 const overridden = loadWebUiConfig(root);
 assert.equal(overridden.host, "127.0.0.1");
 assert.equal(overridden.port, 4243);
-// a project file without webUi falls back to the user file
-writeFileSync(join(root, ".kanban", "se-llm-team.json"), JSON.stringify({ pollMinutes: 5 }));
-assert.equal(loadWebUiConfig(root).enabled, true);
-// 000215: the neutral config dir wins over the legacy pi path; the project file overrides both
-const neutralHome = join(home, ".config", "se-llm-team");
-mkdirSync(neutralHome, { recursive: true });
-writeFileSync(join(neutralHome, "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "neutral-host" } }));
-assert.equal(loadWebUiConfig(root).host, "neutral-host", "the neutral config is read when present");
-rmSync(join(neutralHome, "se-llm-team.json"));
-assert.equal(loadWebUiConfig(root).enabled, true, "the legacy config is read when the neutral file is absent");
-writeFileSync(join(root, ".kanban", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "project-host" } }));
-assert.equal(loadWebUiConfig(root).host, "project-host", "the project file overrides the legacy global");
-writeFileSync(join(neutralHome, "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "neutral-host" } }));
-assert.equal(loadWebUiConfig(root).host, "project-host", "the project file overrides the neutral global too");
+// a project file without webUi leaves the global webUi block intact
+writeFileSync(join(root, "se-llm-team.json"), JSON.stringify({ pollMinutes: 5 }));
+assert.equal(loadWebUiConfig(root).host, "global-host");
+assert.equal(loadWebUiConfig(root).port, 1234);
+// nested keys deep-merge: one project key keeps its global siblings
+writeFileSync(join(root, "se-llm-team.json"), JSON.stringify({ webUi: { host: "project-host" } }));
+assert.equal(loadWebUiConfig(root).enabled, true, "the global webUi.enabled survives");
+assert.equal(loadWebUiConfig(root).port, 1234, "the global webUi.port survives");
+assert.equal(loadWebUiConfig(root).host, "project-host", "the project webUi.host wins");
+// the old .kanban file and the legacy pi file are ignored
+mkdirSync(join(root, ".kanban"), { recursive: true });
+writeFileSync(join(root, ".kanban", "se-llm-team.json"), JSON.stringify({ webUi: { host: "kanban-host" } }));
+assert.equal(loadWebUiConfig(root).host, "project-host", "the .kanban config is ignored");
+mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+writeFileSync(join(home, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { host: "legacy-host" } }));
+assert.equal(loadWebUiConfig(root).host, "project-host", "the legacy config is ignored");
 process.env.HOME = realHome;
 
 // 000245 the visible subset and the done cache, in-process over taskPayload: the five cards each

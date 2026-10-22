@@ -52,7 +52,7 @@ if (prompt.includes("Reviewer agent")) {
 `,
 	{ mode: 0o755 },
 );
-writeFileSync(join(kanbanDir(rootG), "se-llm-team.json"), JSON.stringify({ agent: lingerStub, pollMinutes: 0.01, reviewerCap: { moderate: 1 }, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootG, "se-llm-team.json"), JSON.stringify({ agent: lingerStub, pollMinutes: 0.01, reviewerCap: { moderate: 1 }, backlogIdleMinutes: 0 }));
 const taskG = createTask(rootG, { name: "fix: defer merge while alive", summary: "Deferred merge smoke", specs: "n/a" });
 setState(rootG, taskG, "to-review");
 
@@ -99,7 +99,7 @@ g.daemon.kill("SIGTERM");
 const rootJ = fixture();
 cleaned.push(rootJ);
 mkdirSync(kanbanDir(rootJ), { recursive: true });
-writeFileSync(join(kanbanDir(rootJ), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootJ), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootJ, "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootJ), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskJ = createTask(rootJ, { name: "fix: conflicted task", summary: "Mid-merge conflict", specs: "n/a" });
 setState(rootJ, taskJ, "to-do");
 // simulate a mid-merge conflict on the task file itself: git leaves both markers in the
@@ -158,7 +158,7 @@ execSync("git checkout --ours README.md && git add -A && GIT_EDITOR=true git reb
 	{ mode: 0o755 },
 );
 // 0.08min = 4.8s idle cooldown; each merger exit only requeues the task, so the retry fits in the run
-writeFileSync(join(kanbanDir(rootK), "se-llm-team.json"), JSON.stringify({ agent: join(rootK, "cmd-merger.cjs"), pollMinutes: 0.01, retryIdleMinutes: 0.08, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootK, "se-llm-team.json"), JSON.stringify({ agent: join(rootK, "cmd-merger.cjs"), pollMinutes: 0.01, retryIdleMinutes: 0.08, backlogIdleMinutes: 0 }));
 const taskK = createTask(rootK, { name: "fix: stuck conflict", summary: "Merge cooldown smoke", specs: "n/a" });
 setState(rootK, taskK, "to-merge");
 setWorktree(rootK, taskK, "fix/conflict");
@@ -226,7 +226,7 @@ setTimeout(() => {
 );
 // 0.08min = 4.8s idle cooldown: each merger exit only requeues the task, so the retries (and
 // the done paths) still fit in the run
-writeFileSync(join(kanbanDir(rootK2), "se-llm-team.json"), JSON.stringify({ agent: join(rootK2, "slow-merger.cjs"), pollMinutes: 0.01, retryIdleMinutes: 0.08, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootK2, "se-llm-team.json"), JSON.stringify({ agent: join(rootK2, "slow-merger.cjs"), pollMinutes: 0.01, retryIdleMinutes: 0.08, backlogIdleMinutes: 0 }));
 // two branches that each conflict with main (each edits README.md), main advanced so the
 // worktree merges genuinely conflict, and two to-merge tasks
 execSync("git checkout -qb feat/merger-one", { cwd: rootK2, shell: "/bin/bash" });
@@ -314,7 +314,7 @@ git -C ${rootK3} commit -qm race
 `,
 	{ mode: 0o755 },
 );
-writeFileSync(join(kanbanDir(rootK3), "se-llm-team.json"), JSON.stringify({ agent: join(rootK3, "probe-live.cjs"), pollMinutes: 0.01, retryIdleMinutes: 0.08, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootK3, "se-llm-team.json"), JSON.stringify({ agent: join(rootK3, "probe-live.cjs"), pollMinutes: 0.01, retryIdleMinutes: 0.08, backlogIdleMinutes: 0 }));
 const taskK3 = createTask(rootK3, { name: "feat: base moved", summary: "Base branch race smoke", specs: "n/a" });
 setWorktree(rootK3, taskK3, "feat/race");
 setState(rootK3, taskK3, "to-merge");
@@ -352,7 +352,7 @@ execSync("git checkout -q main", { cwd: rootK4, shell: "/bin/bash" });
 writeFileSync(join(rootK4, "README.md"), "dirty\n");
 writeFileSync(join(rootK4, "noop.cjs"), `#!/usr/bin/env node\n`);
 chmodSync(join(rootK4, "noop.cjs"), 0o755);
-writeFileSync(join(kanbanDir(rootK4), "se-llm-team.json"), JSON.stringify({ agent: join(rootK4, "noop.cjs"), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootK4, "se-llm-team.json"), JSON.stringify({ agent: join(rootK4, "noop.cjs"), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskK4 = createTask(rootK4, { name: "fix: dirty root", summary: "Root merge refusal smoke", specs: "n/a" });
 setWorktree(rootK4, taskK4, "fix/dirty-root");
 setState(rootK4, taskK4, "to-merge");
@@ -379,7 +379,7 @@ execSync("git checkout -q main", { cwd: rootK5, shell: "/bin/bash" });
 execSync("git checkout -q --detach", { cwd: rootK5, shell: "/bin/bash" });
 writeFileSync(join(rootK5, "noop.cjs"), `#!/usr/bin/env node\n`);
 chmodSync(join(rootK5, "noop.cjs"), 0o755);
-writeFileSync(join(kanbanDir(rootK5), "se-llm-team.json"), JSON.stringify({ agent: join(rootK5, "noop.cjs"), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootK5, "se-llm-team.json"), JSON.stringify({ agent: join(rootK5, "noop.cjs"), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskK5 = createTask(rootK5, { name: "fix: detached root", summary: "Detached root smoke", specs: "n/a" });
 setWorktree(rootK5, taskK5, "fix/detached-root");
 setState(rootK5, taskK5, "to-merge");
@@ -408,7 +408,7 @@ writeFileSync(process.cwd() + "/merger-prompt.txt", prompt);
 `,
 );
 chmodSync(recorderAL, 0o755);
-writeFileSync(join(kanbanDir(rootAL), "se-llm-team.json"), JSON.stringify({ agent: recorderAL, pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootAL, "se-llm-team.json"), JSON.stringify({ agent: recorderAL, pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 // a branch that really conflicts with main: both edit README.md, so the rebase stops
 // and it is the merger (cwd = the task worktree) that gets the prompt
 execSync("git checkout -qb feat/merger-prompt", { cwd: rootAL, shell: "/bin/bash" });

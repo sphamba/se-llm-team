@@ -25,7 +25,7 @@ setInterval(() => {
 `,
 );
 chmodSync(fakeAQ, 0o755);
-writeFileSync(join(kanbanDir(rootAQ), "se-llm-team.json"), JSON.stringify({ agent: fakeAQ, pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootAQ, "se-llm-team.json"), JSON.stringify({ agent: fakeAQ, pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskAQ = createTask(rootAQ, { name: "fix: survive restart", summary: "Restart survival smoke", specs: "n/a", complexity: "simple" });
 setState(rootAQ, taskAQ, "to-do");
 const slugAQ = taskAQ.file.replace(/\.md$/, "");
@@ -71,9 +71,9 @@ const rootAV = fixture();
 cleaned.push(rootAV);
 const homeAV = mkdtempSync(join(tmpdir(), "orch-watch-home-"));
 cleaned.push(homeAV);
-mkdirSync(join(homeAV, ".pi", "agent"), { recursive: true });
+mkdirSync(join(homeAV, ".se-llm-team"), { recursive: true });
 const portAV = await freePort();
-writeFileSync(join(homeAV, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portAV }, backlogIdleMinutes: 0 }));
+writeFileSync(join(homeAV, ".se-llm-team", "config.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portAV }, backlogIdleMinutes: 0 }));
 const envAV = { ...process.env, HOME: homeAV, SE_LLM_TEAM_HUB_HEALTH_MS: "500" };
 delete envAV.SE_LLM_TEAM_NO_WEBUI; // the webui check needs it enabled; the temp HOME config picks a free port
 const dAV = spawn(

@@ -13,9 +13,6 @@ import { gzipSync } from "node:zlib";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-// 000215: the neutral config dir resolves to $HOME/.config/se-llm-team when XDG_CONFIG_HOME
-// is unset, so dropping it keeps every temp-HOME section off the real user config
-delete process.env.XDG_CONFIG_HOME;
 
 const root = mkdtempSync(join(tmpdir(), "webui-test-"));
 const home = mkdtempSync(join(tmpdir(), "webui-home-"));

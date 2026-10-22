@@ -14,7 +14,7 @@ import { fixture, roleStub, deadStub, runDaemon, waitFor, cleaned } from "../hel
 const rootB = fixture();
 cleaned.push(rootB);
 mkdirSync(kanbanDir(rootB), { recursive: true });
-writeFileSync(join(kanbanDir(rootB), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootB), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootB, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootB), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskB = createTask(rootB, { name: "fix: dead agent", summary: "Liveness smoke", specs: "n/a" });
 setState(rootB, taskB, "to-do");
 // a second task in live-testing with an unmerged branch: covers the poll's live-testing ->
@@ -88,7 +88,7 @@ const rootI = fixture();
 cleaned.push(rootI);
 mkdirSync(kanbanDir(rootI), { recursive: true });
 // missing executable: sh spawns fine and records exit 127 in the exit file
-writeFileSync(join(kanbanDir(rootI), "se-llm-team.json"), JSON.stringify({ agent: join(rootI, "missing-agent"), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootI, "se-llm-team.json"), JSON.stringify({ agent: join(rootI, "missing-agent"), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskI = createTask(rootI, { name: "fix: failed spawn", summary: "Missing agent smoke", specs: "n/a", complexity: "simple" });
 setState(rootI, taskI, "to-do");
 
@@ -115,7 +115,7 @@ console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared
 const rootAI = fixture();
 cleaned.push(rootAI);
 mkdirSync(join(kanbanDir(rootAI), ".logs"), { recursive: true });
-writeFileSync(join(kanbanDir(rootAI), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootAI), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootAI, "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootAI), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskAI = createTask(rootAI, { name: "fix: clear dead counter", summary: "Counter clear smoke", specs: "n/a" });
 setState(rootAI, taskAI, "to-do");
 // a stale death streak from earlier respawns: the next completed run must clear it, else the
@@ -144,7 +144,7 @@ assert.equal(pidAlive(999999, `${Number(selfStart) + 1e9}`), false, "dead pid wi
 const rootAK = fixture();
 cleaned.push(rootAK);
 mkdirSync(kanbanDir(rootAK), { recursive: true });
-writeFileSync(join(kanbanDir(rootAK), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAK), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootAK, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAK), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskAK = createTask(rootAK, { name: "fix: recycled pid", summary: "Liveness smoke", specs: "n/a" });
 setState(rootAK, taskAK, "doing");
 const slugAK = taskAK.file.replace(/\.md$/, "");

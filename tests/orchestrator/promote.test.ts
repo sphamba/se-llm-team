@@ -17,7 +17,7 @@ cleaned.push(rootR);
 mkdirSync(kanbanDir(rootR), { recursive: true });
 // the working stub completes every promoted task, so the board is never idle: promotion
 // must not wait for idle (the old failsafe did)
-writeFileSync(join(kanbanDir(rootR), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootR), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootR, "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootR), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskR0 = createTask(rootR, { name: "feat: active task", summary: "Promotion smoke", specs: "n/a" });
 setState(rootR, taskR0, "to-do");
 // two unchained backlog tasks: both promote at once, in parallel lanes
@@ -100,7 +100,7 @@ if (isReviewer) waitUntil(() => !existsSync(armed()), 10000);
 const rootAA = fixture();
 cleaned.push(rootAA);
 mkdirSync(kanbanDir(rootAA), { recursive: true });
-writeFileSync(join(kanbanDir(rootAA), "se-llm-team.json"), JSON.stringify({ agent: loopStub(rootAA), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootAA, "se-llm-team.json"), JSON.stringify({ agent: loopStub(rootAA), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskAA = createTask(rootAA, { name: "fix: reviewer cap", summary: "Reviewer run cap smoke", specs: "n/a" });
 setState(rootAA, taskAA, "to-review");
 
@@ -130,7 +130,7 @@ console.log("orchestrator.test.ts: ... + reviewer successful-run cap smoke passe
 const rootAA2 = fixture();
 cleaned.push(rootAA2);
 mkdirSync(kanbanDir(rootAA2), { recursive: true });
-writeFileSync(join(kanbanDir(rootAA2), "se-llm-team.json"), JSON.stringify({ agent: loopStub(rootAA2), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootAA2, "se-llm-team.json"), JSON.stringify({ agent: loopStub(rootAA2), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskAA2 = createTask(rootAA2, { name: "fix: re-entered to-do", summary: "Review counter reset smoke", specs: "n/a", complexity: "simple" });
 setState(rootAA2, taskAA2, "to-do");
 const slugAA2 = taskAA2.file.replace(/\.md$/, "");
@@ -183,7 +183,7 @@ if (prompt.includes("Developer agent")) appendFileSync(".marker", "dev\\n");
 `,
 );
 chmodSync(bounceStub, 0o755);
-writeFileSync(join(kanbanDir(rootAA3), "se-llm-team.json"), JSON.stringify({ agent: bounceStub, pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootAA3, "se-llm-team.json"), JSON.stringify({ agent: bounceStub, pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskAA3 = createTask(rootAA3, { name: "feat: bounce back", summary: "Reviewer bounce respawn smoke", specs: "n/a", complexity: "simple" });
 setState(rootAA3, taskAA3, "to-do");
 const aa3 = await runDaemon(rootAA3);
@@ -205,7 +205,7 @@ cleaned.push(rootAH);
 mkdirSync(kanbanDir(rootAH), { recursive: true });
 // 0.01min = 600ms poll; the dead stub keeps a promoted task cycling to-do/doing, so the drop
 // and the promotion are asserted on the log and the task file
-writeFileSync(join(kanbanDir(rootAH), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAH), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootAH, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAH), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskAH0 = createTask(rootAH, { name: "feat: blocker task", summary: "BlockedBy smoke", specs: "n/a" });
 const taskAH1 = createTask(rootAH, { name: "feat: blocked critical", priority: "critical", summary: "BlockedBy smoke", specs: "n/a", blockedBy: `#${parseInt(taskAH0.file, 10)}` });
 const taskAH2 = createTask(rootAH, { name: "feat: ghost ref", priority: "critical", summary: "BlockedBy smoke", specs: "n/a", blockedBy: "#999" });
@@ -241,7 +241,7 @@ cleaned.push(rootAH2);
 mkdirSync(kanbanDir(rootAH2), { recursive: true });
 // the dead stub keeps the blocker cycling between to-live-test and live-testing (the spawn
 // dies, the poll bounces it back), never done
-writeFileSync(join(kanbanDir(rootAH2), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAH2), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootAH2, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAH2), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const blockerAH2 = createTask(rootAH2, { name: "feat: live-test blocker", summary: "Blocker satisfaction smoke", specs: "n/a" });
 // a branch at HEAD (merged): a worktree-less to-live-test task would route to to-merge and
 // reach done through the nothing-to-merge path, so the blocker needs one to stay cycling
@@ -267,7 +267,7 @@ const rootAJ = fixture();
 cleaned.push(rootAJ);
 mkdirSync(kanbanDir(rootAJ), { recursive: true });
 writeFileSync(
-	join(kanbanDir(rootAJ), "se-llm-team.json"),
+	join(rootAJ, "se-llm-team.json"),
 	JSON.stringify({ agent: loopStub(rootAJ), pollMinutes: 0.01, backlogIdleMinutes: 0, reviewerCap: { moderate: 1, complex: -1 } }),
 );
 const taskAJSimple = createTask(rootAJ, { name: "fix: simple cap", summary: "Per-complexity cap smoke", specs: "n/a", complexity: "simple" });
@@ -296,7 +296,7 @@ const rootAJT = fixture();
 cleaned.push(rootAJT);
 mkdirSync(kanbanDir(rootAJT), { recursive: true });
 writeFileSync(
-	join(kanbanDir(rootAJT), "se-llm-team.json"),
+	join(rootAJT, "se-llm-team.json"),
 	JSON.stringify({ agent: loopStub(rootAJT), pollMinutes: 0.05, backlogIdleMinutes: 0, reviewerCap: { trivial: 0, simple: -1, moderate: 1.5 } }),
 );
 const taskAJT = createTask(rootAJT, { name: "fix: trivial cap", summary: "Trivial cap smoke", specs: "n/a", complexity: "trivial" });
@@ -437,7 +437,7 @@ console.log("orchestrator.test.ts: ... + role notes are not idle-gate activity s
 const rootAR4 = fixture();
 cleaned.push(rootAR4);
 mkdirSync(kanbanDir(rootAR4), { recursive: true });
-writeFileSync(join(kanbanDir(rootAR4), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAR4), pollMinutes: 0.01, backlogIdleMinutes: 5 }));
+writeFileSync(join(rootAR4, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAR4), pollMinutes: 0.01, backlogIdleMinutes: 5 }));
 // an empty temp HOME keeps the ambient user-level config out of loadConfig, as in part AP
 const homeAR4 = mkdtempSync(join(tmpdir(), "orch-home-"));
 cleaned.push(homeAR4);
@@ -493,7 +493,7 @@ const homeAW = mkdtempSync(join(tmpdir(), "orch-home-"));
 cleaned.push(homeAW);
 mkdirSync(kanbanDir(rootAW), { recursive: true });
 // the new board-wide gate off: the promotion this part asserts must not wait out a window
-writeFileSync(join(kanbanDir(rootAW), "se-llm-team.json"), JSON.stringify({ backlogIdleMinutes: 0 }));
+writeFileSync(join(rootAW, "se-llm-team.json"), JSON.stringify({ backlogIdleMinutes: 0 }));
 const savedHomeAW = process.env.HOME;
 process.env.HOME = homeAW;
 let cfgAW: ReturnType<typeof loadConfig>;
@@ -623,7 +623,7 @@ console.log("orchestrator.test.ts: ... + poke-forced promotion past the quiet ga
 const rootBA = fixture();
 cleaned.push(rootBA);
 mkdirSync(kanbanDir(rootBA), { recursive: true });
-writeFileSync(join(kanbanDir(rootBA), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootBA), pollMinutes: 0.01, backlogIdleMinutes: 1 }));
+writeFileSync(join(rootBA, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootBA), pollMinutes: 0.01, backlogIdleMinutes: 1 }));
 const pokedBA = createTask(rootBA, { name: "feat: poked from the daemon", summary: "Poke forces promotion", specs: "n/a" });
 const ba = await runDaemon(rootBA);
 await waitFor(() => ba.output().includes("promotion deferred"), 30000, "the daemon defers the fresh PM write", ba.output);
@@ -649,7 +649,7 @@ console.log("orchestrator.test.ts: ... + daemon poke-forced promotion smoke pass
 const rootBB = fixture();
 cleaned.push(rootBB);
 mkdirSync(kanbanDir(rootBB), { recursive: true });
-writeFileSync(join(kanbanDir(rootBB), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootBB), pollMinutes: 0.01, backlogIdleMinutes: 1 }));
+writeFileSync(join(rootBB, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootBB), pollMinutes: 0.01, backlogIdleMinutes: 1 }));
 const idleBB = createTask(rootBB, { name: "feat: idle board task", summary: "Stall probe", specs: "n/a" });
 const agedBB = new Date(Date.now() - 120_000);
 utimesSync(join(kanbanDir(rootBB), idleBB.file), agedBB, agedBB);

@@ -331,6 +331,10 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	// the base is already fast-forwarded, so the integration run starts here and overlaps the
 	// covered task's live test. Never fatal: a hook failure must not fail the merge, undo the state
 	// move, or send the task back to to-merge
+	if (!cfg.integrationTesting) {
+		log(root, `${task.file}: integration testing is off, no integration task queued`);
+		return;
+	}
 	const fresh = getTask(root, task.file) ?? task;
 	try {
 		ensureIntegrationTask(root, fresh);
@@ -518,6 +522,13 @@ export function rescan(root: string, cfg: Config, force = false): void {
 				// past the respawn cap the fresh developer waits for the idle cooldown (state unchanged)
 				if (!deadCooldownActive(root, cfg, task)) startTodo(root, cfg, task);
 			} else if (task.state === "to-review" && !deadCooldownActive(root, cfg, task)) {
+				// reviews off: the task skips the reviewer lane and goes straight to the merge
+				if (!cfg.reviews) {
+					if (hasUserHold(task.blockedBy)) continue;
+					setState(root, task, "to-merge");
+					log(root, `${task.file}: reviews are off, moving to to-merge`);
+					continue;
+				}
 				const ensured = ensureWorktree(root, task);
 				// a failed spawn would bounce or strand the task; leave the state for the next rescan to retry
 				if (!ensured) log(root, `${task.file}: worktree could not be created, reviewer not spawned (state unchanged)`);
@@ -561,6 +572,9 @@ export function rescan(root: string, cfg: Config, force = false): void {
 				if (!task.worktree || git(root, ["merge-base", "--is-ancestor", task.worktree, "HEAD"], true) === null) {
 					setState(root, task, "to-merge");
 					log(root, task.worktree ? `${task.file}: branch not merged yet, moving to to-merge for the orchestrator merge` : `${task.file}: no worktree, moving to to-merge for the orchestrator merge`);
+				} else if (!cfg.liveTesting) {
+					setState(root, task, "done");
+					log(root, `${task.file}: live testing is off, set done`);
 				} else if (!agentAlive(root, "merger") && !pidAlive(agentPid(root, slug))) {
 					// a live merger would change main under the test (and may still be writing its
 					// report), and a stale agent for this task may still write the task file: defer

@@ -17,8 +17,6 @@ import { rescan } from "../src/orchestrator/pipeline.ts";
 import { ensureWorktree } from "../src/orchestrator/board.ts";
 import { clearContextSymlinks, ensureContextSymlinks, exitFilePath, renderPrompt } from "../src/orchestrator/spawn.ts";
 
-// 000215: drop the neutral config dir so every temp-HOME part stays off the real user config
-delete process.env.XDG_CONFIG_HOME;
 
 const cleaned: string[] = [];
 
@@ -38,7 +36,7 @@ function freshFixture(): string {
 
 const projectConfig = (root: string, agent: string) => {
 	mkdirSync(kanbanDir(root), { recursive: true });
-	writeFileSync(join(kanbanDir(root), "se-llm-team.json"), JSON.stringify({ agent, pollMinutes: 0.01, retryIdleMinutes: 0.08, backlogIdleMinutes: 0 }));
+	writeFileSync(join(root, "se-llm-team.json"), JSON.stringify({ agent, pollMinutes: 0.01, retryIdleMinutes: 0.08, backlogIdleMinutes: 0 }));
 };
 
 // stub developer that just finishes (exit 0, no commits): the exclude assertions run against

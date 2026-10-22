@@ -16,7 +16,7 @@ import { fixture, mirrorSubjects, showTip, roleStub, deadStub, runDaemon, waitFo
 const rootN = fixture();
 cleaned.push(rootN);
 mkdirSync(kanbanDir(rootN), { recursive: true });
-writeFileSync(join(kanbanDir(rootN), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootN), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootN, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootN), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 // both tasks reach done inside one sweep: created in to-merge with nothing to merge
 // (no worktree, no branch), sweepToMerge sets them done directly
 const doneN1 = createTask(rootN, { name: "fix: merged task", summary: "Merged", specs: "n/a" });
@@ -61,7 +61,7 @@ assert.ok(existsSync(join(reportsDir(rootN), reportsN[0])), "the fresh report su
 const rootN2 = fixture();
 cleaned.push(rootN2);
 mkdirSync(join(kanbanDir(rootN2), ".logs"), { recursive: true });
-writeFileSync(join(kanbanDir(rootN2), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootN2), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootN2, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootN2), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const unmarkedN = createTask(rootN2, { name: "fix: unmarked done", summary: "Catch-up", specs: "n/a" });
 setState(rootN2, unmarkedN, "done");
 const markedN = createTask(rootN2, { name: "fix: marked done", summary: "Catch-up", specs: "n/a" });
@@ -86,7 +86,7 @@ console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared
 const rootO = fixture();
 cleaned.push(rootO);
 mkdirSync(kanbanDir(rootO), { recursive: true });
-writeFileSync(join(kanbanDir(rootO), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootO), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootO, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootO), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskO1 = createTask(rootO, { name: "fix: settled done task", summary: "Settled", specs: "n/a" });
 setState(rootO, taskO1, "done");
 
@@ -110,7 +110,7 @@ cleaned.push(rootT);
 // origin points at a non-repo path: every push fails fast, no SSH involved
 execSync("git remote add origin /nonexistent/se-llm-team.git", { cwd: rootT, shell: "/bin/bash" });
 mkdirSync(kanbanDir(rootT), { recursive: true });
-writeFileSync(join(kanbanDir(rootT), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootT), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootT, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootT), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 // a task per sweep: one create mirror commit (and one failed push) each, four in a row
 const s = await runDaemon(rootT);
 for (let i = 0; i < 4; i++) {
@@ -131,7 +131,7 @@ execSync("git remote add origin /nonexistent/se-llm-team.git", { cwd: rootT2, sh
 mkdirSync(join(kanbanDir(rootT2), ".logs"), { recursive: true });
 // a counter restored from a backup or left by an earlier run sits above the cap already
 writeFileSync(join(kanbanDir(rootT2), ".logs", "push-failures.count"), "5");
-writeFileSync(join(kanbanDir(rootT2), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootT2), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootT2, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootT2), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 // one task = one failed push: the stale counter never reaches equality, >= must still warn
 const sT2 = await runDaemon(rootT2);
 const taskT2 = createTask(rootT2, { name: "fix: push warn stale", summary: "Push warning smoke", specs: "n/a" });
@@ -172,7 +172,7 @@ setTimeout(() => process.exit(1), 5000);
 `,
 	{ mode: 0o755 },
 );
-writeFileSync(join(kanbanDir(rootAF), "se-llm-team.json"), JSON.stringify({ agent: guardStub, pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootAF, "se-llm-team.json"), JSON.stringify({ agent: guardStub, pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskAF = createTask(rootAF, { name: "fix: no double spawn", summary: "Double-spawn guard smoke", specs: "n/a" });
 setState(rootAF, taskAF, "to-do");
 const slugAF = taskAF.file.replace(/\.md$/, "");
@@ -211,7 +211,7 @@ console.log("orchestrator.test.ts: ... + double-spawn live-pid guard smoke passe
 const rootAG = fixture();
 cleaned.push(rootAG);
 mkdirSync(kanbanDir(rootAG), { recursive: true });
-writeFileSync(join(kanbanDir(rootAG), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAG), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootAG, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAG), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskAG = createTask(rootAG, { name: "fix: mistaken task", summary: "Removal smoke", specs: "n/a" });
 const taskAG2 = createTask(rootAG, { name: "fix: keep me", summary: "Stays on the board", specs: "n/a" });
 
@@ -264,7 +264,7 @@ const silentOrigin = createNetServer((s) => silentOriginSockets.add(s));
 await new Promise<void>((r) => silentOrigin.listen(0, "127.0.0.1", r));
 const portAM = (silentOrigin.address() as { port: number }).port;
 execSync(`git remote add origin git://127.0.0.1:${portAM}/repo.git`, { cwd: rootAM, shell: "/bin/bash" });
-writeFileSync(join(kanbanDir(rootAM), "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootAM), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootAM, "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootAM), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskAM = createTask(rootAM, { name: "fix: push hang", summary: "Non-blocking push smoke", specs: "n/a" });
 setState(rootAM, taskAM, "to-do");
 
@@ -300,7 +300,7 @@ console.log("orchestrator.test.ts: ... + non-blocking push smoke passed");
 const rootAP = fixture();
 cleaned.push(rootAP);
 mkdirSync(join(kanbanDir(rootAP), ".pids"), { recursive: true });
-writeFileSync(join(kanbanDir(rootAP), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAP), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootAP, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootAP), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const pidsAP = join(kanbanDir(rootAP), ".pids");
 const pidAP = (name: string) => join(pidsAP, `${name}.pid`);
 const doneAP = createTask(rootAP, { name: "fix: done leftovers", summary: "Janitor smoke", specs: "n/a" });

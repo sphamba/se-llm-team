@@ -45,7 +45,7 @@ cleaned.push(rootD);
 // the fixture's committed .gitignore ignores the context symlinks: the worktrees share it, so
 // an agent's blanket git add -A never stages or commits them
 mkdirSync(kanbanDir(rootD), { recursive: true });
-writeFileSync(join(kanbanDir(rootD), "se-llm-team.json"), JSON.stringify({ agent: lingerAgent(rootD), backlogIdleMinutes: 0 }));
+writeFileSync(join(rootD, "se-llm-team.json"), JSON.stringify({ agent: lingerAgent(rootD), backlogIdleMinutes: 0 }));
 const taskD = createTask(rootD, { name: "feat: shared board", summary: "Symlink smoke", specs: "n/a" });
 setState(rootD, taskD, "to-do");
 
@@ -130,7 +130,7 @@ d.daemon.kill("SIGTERM");
 const rootE = fixture();
 cleaned.push(rootE);
 mkdirSync(kanbanDir(rootE), { recursive: true });
-writeFileSync(join(kanbanDir(rootE), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootE), backlogIdleMinutes: 0 }));
+writeFileSync(join(rootE, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootE), backlogIdleMinutes: 0 }));
 const taskE = createTask(rootE, { name: "fix: review without worktree", summary: "Ensured worktree", specs: "n/a" });
 setState(rootE, taskE, "to-review");
 
@@ -161,7 +161,7 @@ e.daemon.kill("SIGTERM");
 const rootF = fixture();
 cleaned.push(rootF);
 mkdirSync(kanbanDir(rootF), { recursive: true });
-writeFileSync(join(kanbanDir(rootF), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootF), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootF, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootF), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskF = createTask(rootF, { name: "fix: unmerged live test", summary: "Unmerged branch smoke", specs: "n/a" });
 execSync("git checkout -qb feat/unmerged-live && git commit -q --allow-empty -m x && git checkout -q main", { cwd: rootF, shell: "/bin/bash" });
 setWorktree(rootF, taskF, "feat/unmerged-live");
@@ -189,7 +189,7 @@ f.daemon.kill("SIGTERM");
 const rootL = fixture();
 cleaned.push(rootL);
 mkdirSync(kanbanDir(rootL), { recursive: true });
-writeFileSync(join(kanbanDir(rootL), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootL), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootL, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootL), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskL = createTask(rootL, { name: "fix: bootstrap board", summary: "Bootstrap smoke", specs: "n/a", openQuestions: "- [user] Which API?" });
 // board content on refs/heads/meta/kanban via the same plumbing the daemon uses, then the
 // working board file removed: the daemon must materialize it on startup (fresh clone)
@@ -242,7 +242,7 @@ assert.equal(execSync("git branch --list meta/kanban", { cwd: cloneM, encoding: 
 assert.ok(execSync("git rev-parse --verify refs/remotes/origin/meta/kanban", { cwd: cloneM, encoding: "utf8" }).trim(), "precondition: clone has the remote-tracking mirror ref");
 // a fresh clone is configured before the daemon runs, like a real setup
 mkdirSync(kanbanDir(cloneM), { recursive: true });
-writeFileSync(join(kanbanDir(cloneM), "se-llm-team.json"), JSON.stringify({ agent: deadStub(cloneM), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(cloneM, "se-llm-team.json"), JSON.stringify({ agent: deadStub(cloneM), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 
 const m = await runDaemon(cloneM);
 await waitFor(() => existsSync(join(kanbanDir(cloneM), taskM.file)), 10000, "bootstrap materialized the board in a fresh clone", m.output);
@@ -273,7 +273,7 @@ console.log("orchestrator.test.ts: all smoke parts passed (pipeline + liveness +
 const rootP = fixture();
 cleaned.push(rootP);
 mkdirSync(kanbanDir(rootP), { recursive: true });
-writeFileSync(join(kanbanDir(rootP), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootP), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootP, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootP), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskP = createTask(rootP, { name: "fix: external move", summary: "Reconcile smoke", specs: "n/a", openQuestions: "- [user] Which API?" });
 const p = await runDaemon(rootP);
 await waitFor(() => mirrorSubjects(rootP) !== "", 30000, "task mirrored", p.output);
@@ -307,7 +307,7 @@ p.daemon.kill("SIGTERM");
 const rootQ = fixture();
 cleaned.push(rootQ);
 mkdirSync(kanbanDir(rootQ), { recursive: true });
-writeFileSync(join(kanbanDir(rootQ), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootQ), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootQ, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootQ), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskQ = createTask(rootQ, { name: "fix: no branch erase", summary: "Reconcile smoke", specs: "n/a" });
 const q = await runDaemon(rootQ);
 await waitFor(() => mirrorSubjects(rootQ).includes(`kanban: create ${taskQ.file}`), 30000, "task mirrored", q.output);
@@ -338,8 +338,8 @@ const rootWt = fixture();
 const homeWt = mkdtempSync(join(tmpdir(), "orch-hub-wt-home-"));
 cleaned.push(rootWt, homeWt);
 const portWt = await freePort();
-mkdirSync(join(homeWt, ".pi", "agent"), { recursive: true });
-writeFileSync(join(homeWt, ".pi", "agent", "se-llm-team.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portWt }, backlogIdleMinutes: 0 }));
+mkdirSync(join(homeWt, ".se-llm-team"), { recursive: true });
+writeFileSync(join(homeWt, ".se-llm-team", "config.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portWt }, backlogIdleMinutes: 0 }));
 // the owner task: open (openQuestions keep the sweep from promoting it), worktree attribute set
 const taskWt = createTask(rootWt, { name: "feat: worktree daemon", summary: "Hub candidacy smoke", specs: "n/a", openQuestions: "smoke: stays open" });
 setWorktree(rootWt, taskWt, "fix/1-wt");
@@ -398,7 +398,7 @@ console.log("orchestrator.test.ts: ... + worktree hub candidacy smoke passed");
 const rootZ = fixture();
 cleaned.push(rootZ);
 mkdirSync(kanbanDir(rootZ), { recursive: true });
-writeFileSync(join(kanbanDir(rootZ), "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootZ), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+writeFileSync(join(rootZ, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootZ), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskZ = createTask(rootZ, { name: "fix: restart keeps in-flight state", summary: "Restart smoke", specs: "n/a" });
 const z1 = await runDaemon(rootZ);
 await waitFor(() => mirrorSubjects(rootZ).includes(`kanban: create ${taskZ.file}`), 30000, "task mirrored before the restart", z1.output);
