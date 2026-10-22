@@ -2,7 +2,7 @@
 name: "test: assert the integration task's done state in the mirror, not its commit label"
 priority: "medium"
 state: "done"
-worktree: "test/336-assert-the-integration"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 ---
