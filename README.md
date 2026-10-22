@@ -131,6 +131,8 @@ The config is optional. The global file is `~/.se-llm-team/config.json` (`XDG_CO
 | `webUi.host` | `localhost` | Dashboard bind host. |
 | `webUi.port` | `4242` | Dashboard port. |
 
+The Web UI fades both columns of a disabled stage. Task cards keep full opacity.
+
 ## Documentation
 
 | Doc | Description |

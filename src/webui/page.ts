@@ -1,7 +1,8 @@
 import { PRIORITY_RANK } from "../kanban.ts";
-import { readConfigFiles } from "../orchestrator/config.ts";
+import { readConfigFiles, type StageFlags } from "../orchestrator/config.ts";
+export type { StageFlags };
 import { esc, inline, logFixups, md } from "./logpane.ts";
-import { agentLabel, agentRowSig, agentStatsText, applyCardStats, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, makeStatsQueue, mergeCardStats, numLinkHtml, relationPaths, sortedCol, spinnerHtml, statsKey, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, taskStats, taskStatsText } from "./board.ts";
+import { agentLabel, agentRowSig, agentStatsText, applyCardStats, applyStages, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, makeStatsQueue, mergeCardStats, numLinkHtml, relationPaths, sortedCol, spinnerHtml, statsKey, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, taskStats, taskStatsText } from "./board.ts";
 
 // the served page: PAGE interpolates the tested renderers and helpers as client source; the
 // webui config loader and the per-tab client state helpers live here too
@@ -13,6 +14,8 @@ export interface WebUiConfig {
 	host: string;
 	port: number;
 }
+
+export const DEFAULT_STAGES: StageFlags = { reviews: true, liveTesting: true, integrationTesting: true };
 
 // project root se-llm-team.json overrides ~/.se-llm-team/config.json, nested objects are
 // merged deeply; a missing file, invalid JSON or absent keys mean off
@@ -33,6 +36,7 @@ export function tabNames(projects) {
 	return projects.map((p) => ({
 		id: p.root,
 		label: seen[p.name] > 1 && p.branch ? p.name + " (" + p.branch + ")" : p.name,
+		...(p.stages ? { stages: p.stages } : {}),
 	}));
 }
 
@@ -127,6 +131,9 @@ none so the card clicks pass through */
 /* 000096: as a .pair child the .col basis would act on the height axis and floor it at 300px */
 .pair .col { flex: 0 0 auto; }
 .col h2 { font-size: 0.875rem; text-transform: uppercase; letter-spacing: .05em; margin: 0 0 10px; color: var(--heading); }
+/* a disabled stage fades the column chrome to 40%; task cards stay at full opacity */
+.col.off { background: color-mix(in srgb, var(--panel) 40%, transparent); border-color: color-mix(in srgb, var(--border) 40%, transparent); border-top-color: color-mix(in srgb, var(--ac) 40%, transparent); }
+.col.off h2, .col.off .empty, .col.off .toggle { opacity: .4; }
 .count { color: var(--faint); }
 /* 000124: positioned above the z-index-1 relation lines; the semi-transparent background lets a line passing under the card show through faintly (no --card var, --panel is the card's base color in both themes) */
 .card { position: relative; z-index: 2; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--border); border-left: 3px solid var(--ac); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
@@ -349,7 +356,8 @@ line is the fallback for the dvh line (older mobile browsers), max-height none l
 <script>
 "use strict";
 const VISIBLE = 5;
-let projects = [{ id: "", label: "" }]; // one tab per registered project; id "" is the single-project ui, one board, no tabs
+const DEFAULT_STAGES = ${JSON.stringify(DEFAULT_STAGES)};
+let projects = [{ id: "", label: "", stages: DEFAULT_STAGES }]; // one tab per registered project; id "" is the single-project ui, one board, no tabs
 let active = ""; // the active tab's id: a registry root, or "" for the single-project board
 const boards = Object.create(null);
 const esc = ${esc};
@@ -381,6 +389,7 @@ ${numLinkHtml}
 ${cardBaseHtml}
 ${cardHtml}
 ${buildShell}
+${applyStages}
 ${sortedCol}
 ${syncBoard}
 ${logFixups}
@@ -500,6 +509,8 @@ function render(skipFlip) {
 		for (const st in cols) cols[st].toggle.onclick = () => toggleCol(st);
 		window.addEventListener("resize", drawRelations);
 	}
+	const project = projects.find(t => t.id === active);
+	applyStages(cols, project?.stages ?? DEFAULT_STAGES);
 	const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 	const old = {};
 	if (!skipFlip) for (const el of cardEls.values()) {
@@ -1100,7 +1111,7 @@ function refresh() {
 		// tabs: only a real projects list replaces them
 		if (Array.isArray(list)) {
 			const tabs = tabNames(list);
-			projects = tabs.length ? tabs : [{ id: "", label: "" }]; // single project: the old ui, one board, no tabs
+			projects = tabs.length ? tabs : [{ id: "", label: "", stages: list[0]?.stages ?? DEFAULT_STAGES }]; // single project: the old ui, one board, no tabs
 		}
 		// a project that vanished from the registry closes the modal its task lived in
 		if (!projects.some(t => t.id === active)) { active = projects[0].id; closeModal(); }

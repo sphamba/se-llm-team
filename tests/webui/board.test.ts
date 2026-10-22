@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startHub } from "../../src/hub.ts";
 import { PRIORITY_RANK } from "../../src/kanban.ts";
-import { boardOf, buildShell, cardBaseHtml, cardHtml, curve, flipDiff, LAYOUT, mergeBoards, numLinkHtml, pairLayout, relationPaths, spinnerHtml, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats } from "../../src/webui.ts";
+import { applyStages, boardOf, buildShell, cardBaseHtml, cardHtml, curve, DEFAULT_STAGES, flipDiff, LAYOUT, mergeBoards, numLinkHtml, pairLayout, relationPaths, spinnerHtml, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats } from "../../src/webui.ts";
 // 000264: not re-exported by the webui barrel (pre-#263 merge): import directly from the board module
 import { applyCardStats, makeStatsQueue, mergeCardStats, sortedCol, statsKey } from "../../src/webui/board.ts";
 import { esc } from "../../src/webui/logpane.ts";
@@ -88,6 +88,19 @@ class El {
 }
 const boardEl = new El("main");
 const cols: Record<string, any> = buildShell(boardEl, { createElement: (tag: string) => new El(tag) });
+const off = (st: string) => cols[st].col.className.split(" ").includes("off");
+applyStages(cols, { reviews: false, liveTesting: true, integrationTesting: false });
+assert.deepEqual(
+	["to-review", "reviewing", "to-live-test", "live-testing", "to-integration-test", "integration-testing", "to-merge", "merging", "done"].map(off),
+	[true, true, false, false, true, true, false, false, false],
+	"reviews and integration testing fade their whole pairs; live testing and the merge pair stay on",
+);
+applyStages(cols, DEFAULT_STAGES);
+assert.ok(!off("to-review") && !off("to-integration-test"), "all-on stages restore every column");
+assert.ok(page.includes(String(applyStages)), "the page ships the tested stage toggle");
+assert.ok(page.includes(".col.off { background: color-mix(in srgb, var(--panel) 40%, transparent)"), "the disabled column chrome fades to 40%");
+assert.ok(page.includes(".col.off h2, .col.off .empty, .col.off .toggle { opacity: .4; }"), "the header, empty mark, and fold toggle fade with the column");
+assert.ok(!page.includes(".col.off .card"), "task cards keep full opacity in a disabled column");
 assert.deepEqual(boardEl.children.map((c) => c.className), ["col c-backlog", "pair", "pair", "pair", "pair"], "backlog stays a single side column, the other eleven states sit in three pairs and one tail group");
 assert.deepEqual(
 	boardEl.children.slice(1, 5).map((p) => p.children.map((c) => c.className)),
@@ -396,6 +409,12 @@ assert.deepEqual(
 	tabNames([{ name: "alpha", root: "/r1", branch: "main" }, { name: "beta", root: "/r2", branch: "dev" }]),
 	[{ id: "/r1", label: "alpha" }, { id: "/r2", label: "beta" }],
 	"unique names keep the plain label",
+);
+const flagged = { reviews: false, liveTesting: true, integrationTesting: false };
+assert.deepEqual(
+	tabNames([{ name: "alpha", root: "/r1", branch: "main", stages: flagged }, { name: "beta", root: "/r2", branch: "dev" }]),
+	[{ id: "/r1", label: "alpha", stages: flagged }, { id: "/r2", label: "beta" }],
+	"a tab carries its daemon's stage flags and an old entry stays unflagged",
 );
 // 000103: two checkouts of one repo - the label appends the branch, the identity is the root
 assert.deepEqual(

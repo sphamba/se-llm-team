@@ -57,6 +57,8 @@ export interface Config {
 	reviewerCap: Record<string, number>;
 }
 
+export type StageFlags = Pick<Config, "reviews" | "liveTesting" | "integrationTesting">;
+
 // the provider/model/thinking triple of one config object (global or a roles entry); values
 // of the wrong type and unknown thinking levels are dropped with a warning, never fatal
 function cleanLlm(root: string, entry: unknown, where = ""): LlmConfig {

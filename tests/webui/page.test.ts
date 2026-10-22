@@ -26,7 +26,8 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 // HOME at the temp home keeps the hub registry and lock out of the real global dir
 const task = createTask(root, { name: "feat: webui smoke", summary: "Dashboard smoke", specs: "Render the board" });
 process.env.HOME = home;
-const ui = await startHub({ name: "webui-test", root, host: "localhost", port: 0 });
+const stages = { reviews: false, liveTesting: true, integrationTesting: false };
+const ui = await startHub({ name: "webui-test", root, host: "localhost", port: 0, stages });
 if (!ui) throw new Error("hub did not start");
 const base = `http://localhost:${ui.port}`;
 const page = await (await fetch(`${base}/`)).text();
@@ -106,7 +107,8 @@ assert.ok(page.includes("Object.create(null)"), "the page keys per-project state
 const projects = await (await fetch(`${base}/api/projects`)).json();
 assert.equal(projects.length, 1, "the hub registry lists its own entry");
 assert.equal(projects[0].root, root);
-assert.ok(page.includes('projects = tabs.length ? tabs : [{ id: "", label: "" }]'), "the page falls back to one unnamed tab");
+assert.deepEqual(projects[0].stages, stages, "the hub registry carries the daemon's stage flags");
+assert.ok(page.includes('projects = tabs.length ? tabs : [{ id: "", label: "", stages: list[0]?.stages ?? DEFAULT_STAGES }]'), "the page falls back to one unnamed tab with the project's stages");
 assert.ok(
 	page.includes('t.id ? "/api/tasks?project=" + encodeURIComponent(t.id) : "/api/tasks"'),
 	"the single-project fallback polls /api/tasks bare",

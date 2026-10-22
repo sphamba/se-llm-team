@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isLinkedWorktree } from "./kanban.ts";
+import type { StageFlags } from "./orchestrator/config.ts";
 import { pidAlive } from "./pid.ts";
 import * as webui from "./webui.ts";
 
@@ -17,6 +18,7 @@ export interface HubEntry {
 	branch: string; // the root checkout's current branch, resolved live; "" on a detached HEAD
 	start: number; // registration time
 	lastHeartbeat: number;
+	stages?: StageFlags; // the daemon's stage toggles, absent on old entries (all on)
 }
 
 export interface HubOptions {
@@ -24,6 +26,7 @@ export interface HubOptions {
 	root: string; // this daemon's project root
 	host: string; // webUi host from the webUi config block
 	port: number | string; // webUi port
+	stages?: StageFlags; // the running daemon's stage toggles, shown by the webui
 	log?: (message: string) => void;
 	healthMs?: number; // heartbeat + failover poll + hub reap cadence
 	staleMs?: number; // registry age-out for silent entries
@@ -97,6 +100,13 @@ export function readHubRegistry(): HubEntry[] {
 	} catch {
 		return [];
 	}
+}
+
+// a stage flag is on unless the payload says false, so a missing or malformed field cannot fade a column
+function parseStageFlags(value: any): StageFlags | undefined {
+	return value && typeof value === "object"
+		? { reviews: value.reviews !== false, liveTesting: value.liveTesting !== false, integrationTesting: value.integrationTesting !== false }
+		: undefined;
 }
 
 // registry publish, hub only: sibling temp file + rename, so readers never see a partial file
@@ -263,7 +273,8 @@ async function route(
 			return;
 		}
 		const branch = typeof body?.branch === "string" ? body.branch.trim().slice(0, 200) : "";
-		const entry: HubEntry = { name, root, branch, start: Date.now(), lastHeartbeat: Date.now() };
+		const stages = parseStageFlags(body?.stages);
+		const entry: HubEntry = { name, root, branch, stages, start: Date.now(), lastHeartbeat: Date.now() };
 		entries.set(root, entry); // root is the identity: same-named checkouts register their own entries
 		flush();
 		json(res, entry);
@@ -277,6 +288,7 @@ async function route(
 		// the body's root finds the sender's own entry when names duplicate; without a root (old
 		// daemon) the name resolves it, and an unregistered sender 404s into re-registering
 		const beatRoot = typeof body?.root === "string" && isAbsolute(body.root) ? resolve(body.root) : "";
+		const stages = parseStageFlags(body?.stages);
 		const entry = beatRoot
 			? entries.get(beatRoot)
 			: typeof body?.name === "string"
@@ -287,6 +299,7 @@ async function route(
 		} else {
 			entry.lastHeartbeat = Date.now();
 			if (typeof body?.branch === "string") entry.branch = body.branch.trim().slice(0, 200); // live: the label tracks the checkout as it moves
+			if (stages) entry.stages = stages; // a restarted daemon refreshes its flags even when its old entry is still alive
 			flush();
 			json(res, entry);
 		}
@@ -304,7 +317,7 @@ export async function startHub(opts: HubOptions): Promise<{ port: number; close:
 	const now = Date.now();
 	const entries = new Map<string, HubEntry>();
 	for (const e of readHubRegistry()) if (e.root && now - e.lastHeartbeat <= staleMs) entries.set(e.root, e);
-	const self: HubEntry = { name: opts.name, root: opts.root, branch: currentBranch(opts.root), start: now, lastHeartbeat: now };
+	const self: HubEntry = { name: opts.name, root: opts.root, branch: currentBranch(opts.root), stages: opts.stages, start: now, lastHeartbeat: now };
 	entries.set(opts.root, self);
 	const flush = () => writeRegistry([...entries.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)));
 	flush();
@@ -383,7 +396,7 @@ export function joinHub(opts: HubOptions): void {
 				await fetch(`${base}/register`, {
 					method: "POST",
 					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ name: opts.name, root: opts.root, branch: currentBranch(opts.root) }),
+					body: JSON.stringify({ name: opts.name, root: opts.root, branch: currentBranch(opts.root), stages: opts.stages }),
 					signal: AbortSignal.timeout(REQUEST_TIMEOUT),
 				})
 			).ok;
@@ -397,7 +410,7 @@ export function joinHub(opts: HubOptions): void {
 				await fetch(`${base}/heartbeat`, {
 					method: "POST",
 					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ name: opts.name, root: opts.root, branch: currentBranch(opts.root) }),
+					body: JSON.stringify({ name: opts.name, root: opts.root, branch: currentBranch(opts.root), stages: opts.stages }),
 					signal: AbortSignal.timeout(REQUEST_TIMEOUT),
 				})
 			).status;

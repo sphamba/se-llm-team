@@ -11,6 +11,13 @@ import { spawnRunAnalysis } from "../src/orchestrator/spawn.ts";
 
 export const HERE = dirname(fileURLToPath(import.meta.url));
 
+// every test file runs in its own process: a temp HOME keeps the real global config and hub
+// state out of tests that do not set HOME themselves
+const isolatedHome = mkdtempSync(join(tmpdir(), "se-llm-team-test-home-"));
+process.env.HOME = isolatedHome;
+writeFileSync(join(isolatedHome, ".gitconfig"), "[init]\n\tdefaultBranch = main\n");
+process.on("exit", () => rmSync(isolatedHome, { recursive: true, force: true }));
+
 
 export function fixture(): string {
 	const root = mkdtempSync(join(tmpdir(), "orch-smoke-"));

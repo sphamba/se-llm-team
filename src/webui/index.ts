@@ -4,6 +4,7 @@ export {
 	agentLabel,
 	agentRowSig,
 	agentStatsText,
+	applyStages,
 	buildShell,
 	cardBaseHtml,
 	cardHtml,
@@ -26,4 +27,4 @@ export {
 	taskStatsText,
 } from "./board.ts";
 export { agentLogPayload, cardStatsPayload, taskDetail, taskHistory, taskPayload } from "./payload.ts";
-export { boardOf, loadWebUiConfig, mergeBoards, PAGE, refreshMs, tabNames, tabsHtml, type WebUiConfig } from "./page.ts";
+export { boardOf, DEFAULT_STAGES, loadWebUiConfig, mergeBoards, PAGE, refreshMs, tabNames, tabsHtml, type StageFlags, type WebUiConfig } from "./page.ts";

@@ -296,6 +296,19 @@ export function buildShell(parent, doc) {
 	return cols;
 }
 
+// the columns each stage toggle fades; task cards stay at full opacity for in-flight work
+export function applyStages(cols, stages) {
+	const states = {
+		reviews: ["to-review", "reviewing"],
+		liveTesting: ["to-live-test", "live-testing"],
+		integrationTesting: ["to-integration-test", "integration-testing"],
+	};
+	for (const [flag, list] of Object.entries(states)) {
+		const off = stages?.[flag] === false;
+		for (const st of list) cols[st].col.classList.toggle("off", off);
+	}
+}
+
 // 000191: a stats-only change updates the summary card's .card-stats span in place, so the live
 // run's spinner and entrance animations survive the poll (supersedes the accepted #178 restart);
 // the span joins when stats arrive and drops when they vanish, matching taskStatsText's markup.
