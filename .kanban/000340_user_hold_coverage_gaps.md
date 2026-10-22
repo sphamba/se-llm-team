@@ -1,7 +1,7 @@
 ---
 name: "test: pin the user-hold right border and the two unpinned release gates"
 priority: "low"
-state: "doing"
+state: "reviewing"
 worktree: "test/340-user-hold-coverage-gaps"
 issuer: "#325"
 complexity: "simple"
@@ -38,3 +38,20 @@ Do not weaken or reorder the existing hold assertions. The release lines go afte
 4. Revert one assertion locally and confirm the suite fails: the new right-border assertion must fail if `border-right-color` is dropped from the rule, and each release assertion must fail if the `blockedBy` clear is removed. Record the result in `# Notes`.
 
 # Notes
+`test:` code run, complexity simple. `test:` is a hint, not a classifier: the Specs name exact assertions and no read-only marker.
+
+## What changed
+- `tests/webui/page.test.ts` (Gap 1): `cssRule(".card.user-hold")` now also asserts `border-right-color: transparent`, message "the solid right border steps aside for the dashes too". The assertion sits beside the top/bottom one, and the `::after` dash assertions are unchanged.
+- `tests/orchestrator/sweep.test.ts` part UH2 (Gap 2, to-live-test): after the hold assertions, `updateTask(rootUH2, heldUH2, { blockedBy: "" })` then `rescan(rootUH2, cfgUH2)` then assert state `live-testing` and `pidPath(rootUH2, taskSlug(heldUH2.file))` exists. UH1 pattern, same `cfgUH2`.
+- `tests/orchestrator/merge.test.ts` part UH3 (Gap 2, to-merge): `updateTask` added to the `src/kanban.ts` import. After the hold assertions, clear `heldUH3`'s `blockedBy`, `rescan(rootUH3, cfgUH3)`, then assert `main` log contains `held-change` and state is `to-live-test` (asserted, not read from the log line). The branch rebases onto the moved base (`next-change` already on main) and fast-forwards with no merger.
+- No source file changed. Both gaps were coverage holes over behaviour already on `main`.
+
+## Acceptance
+1. `node tests/webui/page.test.ts` — passes (exit 0).
+2. `node tests/orchestrator/sweep.test.ts` — passes (exit 0).
+3. `node tests/orchestrator/merge.test.ts` — passes (exit 0).
+4. Red proof, each mutation reverted before the final run:
+   - Dropped `border-right-color: transparent; ` from the `.card.user-hold` rule in `src/webui/page.ts` → page suite exit 1, `AssertionError: the solid right border steps aside for the dashes too`.
+   - Commented out the UH2 `updateTask(rootUH2, heldUH2, { blockedBy: "" })` line → sweep suite exit 1, `AssertionError: the released task spawned the live-tester`.
+   - Commented out the UH3 `updateTask(rootUH3, heldUH3, { blockedBy: "" })` line → merge suite exit 1, `AssertionError: the released branch rebased onto the moved base and fast-forwarded into it`.
+   - After the restore all three suites ran green again. Only the three test files are modified (`git diff --stat`: 3 files, 10 insertions, 1 deletion).
