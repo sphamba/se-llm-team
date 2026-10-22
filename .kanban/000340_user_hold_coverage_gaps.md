@@ -1,7 +1,7 @@
 ---
 name: "test: pin the user-hold right border and the two unpinned release gates"
 priority: "low"
-state: "reviewing"
+state: "to-live-test"
 worktree: "test/340-user-hold-coverage-gaps"
 issuer: "#325"
 complexity: "simple"
@@ -55,3 +55,11 @@ Do not weaken or reorder the existing hold assertions. The release lines go afte
    - Commented out the UH2 `updateTask(rootUH2, heldUH2, { blockedBy: "" })` line → sweep suite exit 1, `AssertionError: the released task spawned the live-tester`.
    - Commented out the UH3 `updateTask(rootUH3, heldUH3, { blockedBy: "" })` line → merge suite exit 1, `AssertionError: the released branch rebased onto the moved base and fast-forwarded into it`.
    - After the restore all three suites ran green again. Only the three test files are modified (`git diff --stat`: 3 files, 10 insertions, 1 deletion).
+
+Review of 0d1b91d (first pass):
+- `tests/webui/page.test.ts:594` asserts `border-right-color: transparent` beside the top/bottom assertion at `:593`, and `src/webui/page.ts:152` is the only writer of that rule (no `classList` or reset path touches it).
+- `tests/orchestrator/sweep.test.ts:431-434` clears `blockedBy` on `heldUH2`, rescans with `cfgUH2`, and asserts `live-testing` plus the pid file, after the hold assertions at `:428-430`.
+- `tests/orchestrator/merge.test.ts:618-621` clears the hold on `heldUH3`, rescans with `cfgUH3`, asserts `held-change` on `main` and state `to-live-test`, after the hold assertions at `:613-617`; `updateTask` added to the import at `:6`.
+Suites: webui/page, orchestrator/sweep, orchestrator/merge (the three Acceptance commands; test-only diff, no source change).
+Tests: webui/page exit=0, orchestrator/sweep exit=0 (`user hold skips the live-tester spawn smoke passed`), orchestrator/merge exit=0 (`user hold skips the merge lane smoke passed`). Red proof taken from `# Notes`: dropping `border-right-color` and each `updateTask(... blockedBy: "")` line failed their suites with the recorded messages.
+
