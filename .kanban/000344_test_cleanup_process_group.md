@@ -1,7 +1,7 @@
 ---
 name: "test: kill the agent's process group and register the leaked origin remotes"
 priority: "low"
-state: "to-live-test"
+state: "live-testing"
 worktree: "test/344-test-cleanup-process-group"
 issuer: "user"
 complexity: "simple"
