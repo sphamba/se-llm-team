@@ -219,6 +219,7 @@ console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared
 const rootM = fixture();
 cleaned.push(rootM);
 const remoteM = `${rootM}-origin.git`;
+cleaned.push(remoteM);
 execSync(`git init -q --bare ${remoteM}`, { shell: "/bin/bash" });
 execSync(`git remote add origin ${remoteM}`, { cwd: rootM, shell: "/bin/bash" });
 mkdirSync(kanbanDir(rootM), { recursive: true });

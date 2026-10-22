@@ -4,7 +4,7 @@ import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rea
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask, kanbanDir, parseTask, setState } from "../../src/kanban.ts";
-import { pidAlive } from "../../src/pid.ts";
+import { killTree, pidAlive } from "../../src/pid.ts";
 import { HERE, fixture, runDaemon, waitFor, waitForAsync, freePort, daemons, cleaned } from "../helpers.ts";
 
 // --- part AQ: killing or restarting the daemon must not kill the spawned agents. The agent's
@@ -57,7 +57,8 @@ assert.ok(statSync(logAQ).size > size2AQ, "the log still grows after the restart
 assert.equal(parseTask(rootAQ, taskAQ.file).state, "doing", "the in-flight state survived the restart");
 aq2.daemon.kill("SIGTERM");
 try {
-	process.kill(agentPidAQ, "SIGKILL");
+	// the pid file holds the wrapper's pid, the group leader, so only a group kill reaches the agent
+	killTree(agentPidAQ, "SIGKILL");
 } catch {
 	/* already gone */
 }

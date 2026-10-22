@@ -15,6 +15,7 @@ const rootA = fixture();
 cleaned.push(rootA);
 // bare origin for the auto-push checks: the daemon must push only the board mirror there
 const remoteA = `${rootA}-origin.git`;
+cleaned.push(remoteA);
 execSync(`git init -q --bare ${remoteA}`, { shell: "/bin/bash" });
 execSync(`git remote add origin ${remoteA}`, { cwd: rootA, shell: "/bin/bash" });
 mkdirSync(kanbanDir(rootA), { recursive: true });
