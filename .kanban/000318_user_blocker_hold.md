@@ -159,5 +159,4 @@ Method facts:
 
 
 # Open questions
-
-- Assumed: "both subtasks are done when this task runs" means their changes are on `main`, not that both cards read `done`. #319 is in `to-live-test` and #320 in `live-testing`, and their diffs are in `main` after one ff-only merge. Please confirm this reading for verification tasks.
+Resolved 2026-10-22: both covered cards must read done. Their diffs sitting on main is not enough for a verification task to run. #318 verified while #319 and #320 were still in to-live-test and live-testing, so its reading was wrong even though both diffs were already merged.

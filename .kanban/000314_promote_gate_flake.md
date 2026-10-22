@@ -86,4 +86,4 @@ Not exercised:
 - The Specs Gate loop of 20 test runs, because the role contract forbids running a `*.test.ts` file.
 - The comment prose as a check. The diff of HEAD removes the `0.05 min = 3 s < 10 s` strings and adds `5 min < 10 min`.
 # Open questions
-- [user] Assumption: the same-millisecond "future" skip is the dominant flake, so the fix pins mtimes in the test instead of relaxing the gate. Confirm that `promoteBacklog` stays as it is, even though a same-millisecond write is then not counted as board activity.
+Resolved 2026-10-22: the gate stays as it is. A write in the same instant as the daemon clock can read as a future mtime and not defer, and that is accepted. The test pins its own file mtimes, so the suite is deterministic without a production change.
