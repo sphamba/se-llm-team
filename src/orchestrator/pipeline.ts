@@ -357,6 +357,9 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 function sweepToIntegrationTest(root: string, cfg: Config, task: Task): void {
 	// a held task keeps to-integration-test and leaves the single slot to the next waiting task
 	if (hasUserHold(task.blockedBy)) return;
+	// a task already running when the flag turns off finishes its run, so the gate acts at
+	// stage start only: the waiting task holds here, silently, on every rescan
+	if (!cfg.integrationTesting) return;
 	// at most one integration-tester at a time, project-wide
 	if (agentAlive(root, "integration-tester")) return;
 	// at the maxParallel cap the start waits: the task stays to-integration-test

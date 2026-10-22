@@ -131,9 +131,10 @@ none so the card clicks pass through */
 /* 000096: as a .pair child the .col basis would act on the height axis and floor it at 300px */
 .pair .col { flex: 0 0 auto; }
 .col h2 { font-size: 0.875rem; text-transform: uppercase; letter-spacing: .05em; margin: 0 0 10px; color: var(--heading); }
-/* a disabled stage fades the column chrome to 40%; task cards stay at full opacity */
+/* a disabled stage fades the column chrome to 40%; a waiting integration card dims too, because the gate holds it there, while an in-flight integration card keeps full opacity */
 .col.off { background: color-mix(in srgb, var(--panel) 40%, transparent); border-color: color-mix(in srgb, var(--border) 40%, transparent); border-top-color: color-mix(in srgb, var(--ac) 40%, transparent); }
 .col.off h2, .col.off .empty, .col.off .toggle { opacity: .4; }
+.col.off.c-to-integration-test .card { opacity: .4; }
 .count { color: var(--faint); }
 /* 000124: positioned above the z-index-1 relation lines; the semi-transparent background lets a line passing under the card show through faintly (no --card var, --panel is the card's base color in both themes) */
 .card { position: relative; z-index: 2; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--border); border-left: 3px solid var(--ac); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }

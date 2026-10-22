@@ -100,7 +100,9 @@ assert.ok(!off("to-review") && !off("to-integration-test"), "all-on stages resto
 assert.ok(page.includes(String(applyStages)), "the page ships the tested stage toggle");
 assert.ok(page.includes(".col.off { background: color-mix(in srgb, var(--panel) 40%, transparent)"), "the disabled column chrome fades to 40%");
 assert.ok(page.includes(".col.off h2, .col.off .empty, .col.off .toggle { opacity: .4; }"), "the header, empty mark, and fold toggle fade with the column");
-assert.ok(!page.includes(".col.off .card"), "task cards keep full opacity in a disabled column");
+assert.ok(page.includes(".col.off.c-to-integration-test .card { opacity: .4; }"), "a waiting integration card dims with the disabled column");
+assert.ok(!page.includes(".col.off.c-integration-testing .card"), "an in-flight integration card outlives the flag flip, so its column never dims cards");
+assert.ok(!page.includes(".col.off .card"), "task cards keep full opacity in every other disabled column");
 assert.deepEqual(boardEl.children.map((c) => c.className), ["col c-backlog", "pair", "pair", "pair", "pair"], "backlog stays a single side column, the other eleven states sit in three pairs and one tail group");
 assert.deepEqual(
 	boardEl.children.slice(1, 5).map((p) => p.children.map((c) => c.className)),

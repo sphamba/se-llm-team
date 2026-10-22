@@ -296,7 +296,8 @@ export function buildShell(parent, doc) {
 	return cols;
 }
 
-// the columns each stage toggle fades; task cards stay at full opacity for in-flight work
+// the columns each stage toggle fades; only a waiting integration card dims with its column, so
+// an in-flight run keeps full opacity when the flag turns off
 export function applyStages(cols, stages) {
 	const states = {
 		reviews: ["to-review", "reviewing"],

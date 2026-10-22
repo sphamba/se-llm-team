@@ -7,6 +7,7 @@ import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskS
 import { loadConfig } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline.ts";
 import { armedPath } from "../../src/orchestrator/log.ts";
+import { readMergerSlug } from "../../src/orchestrator/spawn.ts";
 import { pidPath } from "../../src/pid.ts";
 import { cleaned, deadStub, fixture } from "../helpers.ts";
 
@@ -94,4 +95,31 @@ assert.equal(listAll(root4).length, 1, "the board holds only the merged task");
 assert.ok(orchLog(root4).includes(`${task4.file}: integration testing is off, no integration task queued`), "the skip is logged");
 console.log("stages.test.ts: ... + integration testing off skips the integration task passed");
 
-console.log("stages.test.ts: stage toggle smoke passed (defaults, reviews off, live testing off, integration testing off)");
+// --- part 5: with integration testing off the integration sweep holds a waiting task in
+// to-integration-test: no state move, no merger slug, no integration-tester pid or armed file,
+// and no log line per rescan. With the flag on the same seed starts the run ---
+const root5 = fixture();
+cleaned.push(root5);
+const cfg5 = cfgFor(root5, { integrationTesting: false });
+const task5 = createTask(root5, { name: "test: integration of #5", summary: "Held.", specs: "n/a" });
+setState(root5, task5, "to-integration-test");
+rescan(root5, cfg5);
+assert.equal(parseTask(root5, task5.file).state, "to-integration-test", "integration testing off holds the waiting task in to-integration-test");
+assert.equal(readMergerSlug(root5, "integration-tester"), null, "the hold writes no integration-tester slug");
+assert.equal(existsSync(pidPath(root5, "integration-tester")), false, "the hold spawns no integration-tester");
+assert.equal(existsSync(armedPath(root5, taskSlug(task5.file))), false, "the hold arms no integration run");
+rescan(root5, cfg5);
+assert.equal(parseTask(root5, task5.file).state, "to-integration-test", "the hold survives the next rescan");
+const log5Path = join(kanbanDir(root5), ".logs", "orchestrator.log");
+assert.ok(!existsSync(log5Path) || !readFileSync(log5Path, "utf8").split("\n").some((l) => l.includes(task5.file)), "the hold writes no log line for the held task");
+const root5b = fixture();
+cleaned.push(root5b);
+const cfg5b = cfgFor(root5b, { integrationTesting: true });
+const task5b = createTask(root5b, { name: "test: integration of #6", summary: "Runs.", specs: "n/a" });
+setState(root5b, task5b, "to-integration-test");
+rescan(root5b, cfg5b);
+assert.equal(parseTask(root5b, task5b.file).state, "integration-testing", "with integration testing on the same seed starts the run");
+assert.equal(readMergerSlug(root5b, "integration-tester"), taskSlug(task5b.file), "the on case records the integration-tester slug");
+console.log("stages.test.ts: ... + the integration gate holds a waiting task passed");
+
+console.log("stages.test.ts: stage toggle smoke passed (defaults, reviews off, live testing off, integration testing off, integration gate hold)");
