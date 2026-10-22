@@ -1,7 +1,7 @@
 ---
 name: "test: pin the user-hold right border and the two unpinned release gates"
 priority: "low"
-state: "to-do"
+state: "doing"
 worktree: "test/340-user-hold-coverage-gaps"
 issuer: "#325"
 complexity: "simple"

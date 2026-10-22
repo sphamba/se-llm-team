@@ -8,11 +8,10 @@ complexity: "moderate"
 ---
 
 # Summary
-tests/orchestrator/spawn.test.ts has been red since 0b2a816: part A waits for a commit subject kanban: done <integration file> that can never exist, because commitKanban rebuilds the whole board tree and the integration task's done state lands folded inside the live-tester's commit. The mirror holds the correct state. Assert the mirror state instead, which also unblocks part BA (#331's root real-file guard), which never ran.</summary>
-<complexity>simple</complexity>
-<priority>high</priority>
-<issuer>#334</issuer>
-<specs>## Root cause (verified)
+tests/orchestrator/spawn.test.ts has been red since 0b2a816: part A waits for a commit subject kanban: done <integration file> that can never exist, because commitKanban rebuilds the whole board tree and the integration task's done state lands folded inside the live-tester's commit. The mirror holds the correct state. Assert the mirror state instead, which also unblocks part BA (#331's root real-file guard), which never ran.
+
+# Specs
+## Root cause (verified)
 
 `tests/orchestrator/spawn.test.ts` part A waits at lines 43-49 for a commit subject `kanban: done <integration file>`. That subject never exists.
 
@@ -44,11 +43,7 @@ The contract is the mirror state, not one labelled commit per done task. The fol
 
 1. `node tests/orchestrator/spawn.test.ts` passes and prints the final part line containing `root real-file symlink guard passed` (part BA). Today the file dies at part A.
 2. No `kanban: done <integration file>` subject assertion remains in the file.
-3. `node tests/orchestrator/split.test.ts` is untouched by this change (it is red for another cause, tracked separately).</specs>
-<shortName>mirror-state-done-assert</shortName>
-
-# Specs
-
+3. `node tests/orchestrator/split.test.ts` is untouched by this change (it is red for another cause, tracked separately).
 
 # Notes
 - Splitter (no split): the task changes one test file and verifies it with one sequential command. The only possible follow-up, a red part BA that reopens #331, is a diagnosis, not parallel work. The review, merge, and live-test cost per subtask would exceed the time saved.
