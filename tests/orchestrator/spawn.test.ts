@@ -37,18 +37,21 @@ const taskClean = () => mirrorSubjects(rootA).includes(`kanban: done ${taskA.fil
 // recorded exit 0. The stub transitions in milliseconds, so intermediate states are asserted
 // through the daemon log.
 await waitFor(() => readA().state === "done" && readA().worktree === "" && taskClean(), 60000, "full pipeline + merge + done mirror commit", a.output);
-// the integration stage opens its own task after the live test: let that task reach done and its
-// fold-in commit land too, so the board mirror settles before its commit log is compared
+// the integration stage opens its own task after the live test: let that task reach done, so the
+// board mirror settles before its commit log is compared. Assert its state on the mirror, never a
+// done label: commitKanban rebuilds the whole board tree and no-ops on an unchanged tree, so the
+// live-tester's done commit already folds this task's done state in and its own label is skipped
 const integrationFileA = () => listAll(rootA).find((t) => t.issuer === "auto")?.file;
 await waitFor(
 	() => {
 		const f = integrationFileA();
-		return !!f && mirrorSubjects(rootA).includes(`kanban: done ${f}`);
+		return !!f && (showTip(rootA, f) ?? "").includes('state: "done"');
 	},
 	60000,
-	"the integration task runs to done and folds into the mirror",
+	"the integration task's done state on the mirror",
 	a.output,
 );
+assert.match(showTip(rootA, integrationFileA() ?? "") ?? "", /^state: "done"$/m, `the auto-issued task mirrors as done: ${integrationFileA()}`);
 // the state-pass create retry must not re-commit a create that pass one already landed (#322)
 const integrationCreates = mirrorSubjects(rootA).split("\n").filter((s) => s === `kanban: create ${integrationFileA()}`);
 assert.equal(integrationCreates.length, 1, `exactly one create commit for ${integrationFileA()}`);
