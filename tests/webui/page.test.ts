@@ -591,6 +591,7 @@ assert.ok(cssRule("#m-box").includes("overflow-y: auto; overflow-x: hidden"), "t
 assert.ok(cssRule(".card.user-hold::after").includes("repeating-linear-gradient(90deg, var(--border) 0 6px, transparent 6px 10px)"), "the held card's top and bottom edges dash 6px on and 4px off");
 assert.ok(cssRule(".card.user-hold::after").includes("repeating-linear-gradient(0deg, var(--border) 0 6px, transparent 6px 10px)"), "the held card's right edge carries the same 6/4 dash");
 assert.ok(cssRule(".card.user-hold").includes("border-top-color: transparent") && cssRule(".card.user-hold").includes("border-bottom-color: transparent"), "the solid top and bottom border steps aside for the dashes");
+assert.ok(cssRule(".card.user-hold").includes("border-right-color: transparent"), "the solid right border steps aside for the dashes too");
 assert.ok(cssRule(".card").includes("border-left: 3px solid var(--ac)") && cssRule(".card").includes("border-radius: 6px"), "the held card keeps the 3px left accent and the 6px radius");
 assert.ok(openTaskSrc.includes('box.classList.add("grow")') && openTaskSrc.includes('box.style.height = box.offsetHeight + "px"'), "000246: openTask pins the loading height");
 assert.ok(openTaskSrc.indexOf('classList.remove("hidden")') < openTaskSrc.indexOf("box.offsetHeight"), "000246: the pin runs after the un-hide, a hidden box measures zero");

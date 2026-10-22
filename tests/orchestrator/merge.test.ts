@@ -3,7 +3,7 @@ import { spawn, execSync } from "node:child_process";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskNum, taskSlug } from "../../src/kanban.ts";
+import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskNum, taskSlug, updateTask } from "../../src/kanban.ts";
 import { loadConfig, poll } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline.ts";
 import { agentAlive, pidAlive, pidPath } from "../../src/pid.ts";
@@ -615,4 +615,8 @@ assert.equal(existsSync(join(kanbanDir(rootUH3), ".pids", `${taskSlug(heldUH3.fi
 assert.equal(readMergerSlug(rootUH3), null, "no merger slug file written for a held task");
 assert.equal(parseTask(rootUH3, nextUH3.file).state, "to-live-test", "the next eligible task still merged");
 assert.ok(execSync("git log --format=%s main", { cwd: rootUH3, encoding: "utf8" }).includes("next-change"), "the base took the eligible branch");
+updateTask(rootUH3, heldUH3, { blockedBy: "" });
+rescan(rootUH3, cfgUH3);
+assert.ok(execSync("git log --format=%s main", { cwd: rootUH3, encoding: "utf8" }).includes("held-change"), "the released branch rebased onto the moved base and fast-forwarded into it");
+assert.equal(parseTask(rootUH3, heldUH3.file).state, "to-live-test", "the released task left to-merge for its live test");
 console.log("orchestrator.test.ts: ... + user hold skips the merge lane smoke passed");

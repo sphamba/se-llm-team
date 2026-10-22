@@ -428,4 +428,8 @@ assert.equal(parseTask(rootUH2, heldUH2.file).state, "to-live-test", "the held t
 assert.equal(existsSync(pidPath(rootUH2, taskSlug(heldUH2.file))), false, "no live-tester pid file for a held task");
 assert.equal(parseTask(rootUH2, nextUH2.file).state, "live-testing", "the next eligible task started its live test");
 assert.ok(existsSync(pidPath(rootUH2, taskSlug(nextUH2.file))), "the next eligible task's live-tester pid file exists");
+updateTask(rootUH2, heldUH2, { blockedBy: "" });
+rescan(rootUH2, cfgUH2);
+assert.equal(parseTask(rootUH2, heldUH2.file).state, "live-testing", "the released task spawned the live-tester");
+assert.ok(existsSync(pidPath(rootUH2, taskSlug(heldUH2.file))), "the released task's live-tester pid file exists");
 console.log("orchestrator.test.ts: ... + user hold skips the live-tester spawn smoke passed");
