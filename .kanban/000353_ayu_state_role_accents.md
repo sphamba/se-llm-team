@@ -1,10 +1,10 @@
 ---
 name: "feat: Ayu accent colors for pipeline states, agent roles and failed runs"
 priority: "medium"
-state: "backlog"
-worktree: ""
+state: "live-testing"
+worktree: "feat/353-ayu-state-role-accents"
 issuer: "user"
-complexity: "moderate"
+complexity: "simple"
 shortName: "ayu-state-role-accents"
 ---
 
@@ -109,3 +109,56 @@ A run is failed only when its payload `status` is `"dead"` (the existing `.dead`
 - Manual check in both themes: each column top border and card left border uses its table color; each agent card label uses the text token; a dead run is fully red including border and tint; priority chips keep their old colors.
 
 # Notes
+
+## What changed
+- `src/webui/page.ts`: 16 new theme vars (light `:root`, plus `DARK_VARS` and its media-query twin, no `light-dark()`), all official Ayu tokens.
+- 12 static `.c-*` hexes replaced by 7 stage rules in pipeline order, each stage pair sharing one `--ac` variable; the card left border keeps `border-left: 3px solid var(--ac)`, no markup change.
+- 7 role rules read `--accent-<stage>-text` for the label and `--accent-<stage>` for active border, 20% tint and check.
+- `.agent-dead { color: var(--critical-fg) }` replaced by `.agent-card.agent-dead` after all role rules: `--error-text` label, `--error` border, 15% mix tint; `.cross` now uses `--error-text`.
+- Tests: `tests/webui/board.test.ts` pins the 7-rule stage mapping, order and distinct variables; `tests/webui/page.test.ts` pins all 32 theme values in all three blocks, the role label/border/tint/check variables, and the failed rule after the last role rule.
+
+## Acceptance
+- red proof: both suites exit=1 before the source edit (`page.test.ts` cross/dead pins, `board.test.ts` stage mapping).
+- `node tests/webui/page.test.ts` exit=0 (pre-commit and post-commit).
+- `node tests/webui/board.test.ts` exit=0 (pre-commit and post-commit).
+- manual color check, pre-commit: a scratch script resolved every table value from the served `PAGE` in light and both dark paths, 32/32 match, exit=0. The visual browser pass is left to the reviewer.
+- `pnpm test` skipped per the write-run rule (never the full suite). Only these two suites cover `src/webui/page.ts`: `grep -rln 'from ".*webui/page' tests/` prints just them.
+- commit `feat(webui): recolor stages, agent roles and dead runs with Ayu accents`, `git show --stat` = 3 files, working tree clean.
+
+## Live test: Ayu accents for stage columns, agent roles and dead runs
+
+Served board from `/home/phamba/repos/se-llm-team/.worktrees/feat/353-ayu-state-role-accents` (merged commit) through a hub-only fixture root: one task per pipeline state, one task with a run log for every role, a dead developer run and a doctor log. Chromium measures the computed style of the real elements in the light theme, in the `data-theme="dark"` path and in the `prefers-color-scheme: dark` path.
+
+Assumptions:
+- The Specs contrast range is quoted on #fafafa but the light panel is #ffffff, where the same steps give 3.41 to 3.93; the tints are checked against the measured mix over --panel.
+- The modal agent row is opened by clicking a card, so the agent cards are the real spawned-card markup.
+- No markup was asserted beyond the CSS surfaces the Specs name.
+
+Not exercised: a live agent run (spinner) and the stage-off fade, which the task does not change.
+
+Tree: `/home/phamba/repos/se-llm-team/.worktrees/feat/353-ayu-state-role-accents`, driver: `/tmp/ayu-state-accents-recon/driver.mjs`, wrapper: `/tmp/ayu-state-accents-recon/run.sh`. Runs: 3 merged + 1 control (pre-fix `HEAD^`).
+
+| # | Claim | Expected | Control (pre-fix) | Observed (merged) | Verdict |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Ayu Light accent vars are in the light :root | 16/16 | 0/16 | 16/16 / 16/16 / 16/16 | green |
+| 2 | Ayu Dark accent vars are in the data-theme=dark block | 16/16 | 0/16 | 16/16 / 16/16 / 16/16 | green |
+| 3 | Ayu Dark accent vars are in the prefers-color-scheme block | 16/16 | 0/16 | 16/16 / 16/16 / 16/16 | green |
+| 4 | light: --ac, column top border and card left border are the stage accent, 12 states | 36/36 | 0/36 | 36/36 / 36/36 / 36/36 | green |
+| 5 | dark attr: --ac, column top border and card left border are the stage accent, 12 states | 36/36 | 0/36 | 36/36 / 36/36 / 36/36 | green |
+| 6 | dark media: --ac, column top border and card left border are the stage accent, 12 states | 36/36 | 0/36 | 36/36 / 36/36 / 36/36 | green |
+| 7 | light: 7 role labels take their stage text token | 7/7 | 0/7 | 7/7 / 7/7 / 7/7 | green |
+| 8 | dark: 7 role labels take their stage text token | 7/7 | 0/7 | 7/7 / 7/7 / 7/7 | green |
+| 9 | role cards at rest keep the plain .agent-card border and panel background | 28/28 | 28/28 | 28/28 / 28/28 / 28/28 | green |
+| 10 | light: selected role card border, 20% tint and check take the stage accent | 21/21 | 0/21 | 21/21 / 21/21 / 21/21 | green |
+| 11 | dark: selected role card border, 20% tint and check take the stage accent | 21/21 | 0/21 | 21/21 / 21/21 / 21/21 | green |
+| 12 | light: a dead run is fully red at rest and while selected | 8/8 | 0/8 | 8/8 / 8/8 / 8/8 | green |
+| 13 | dark: a dead run is fully red at rest and while selected | 8/8 | 0/8 | 8/8 / 8/8 / 8/8 | green |
+| 14 | priority chips keep their old colours in both themes | 8/8 | 8/8 | 8/8 / 8/8 / 8/8 | green |
+| 15 | 7 stage rules pair both states to one stage accent, in pipeline order | rules=7 pairs=7 ordered=yes | rules=12 pairs=0 ordered=n/a | rules=7 pairs=7 ordered=yes / rules=7 pairs=7 ordered=yes / rules=7 pairs=7 ordered=yes | green |
+| 16 | no light-dark(), no .agent-live/.agent-past rule, .agent-card keeps --link and --border | absent\|absent\|kept | absent\|absent\|kept | absent\|absent\|kept / absent\|absent\|kept / absent\|absent\|kept | green |
+
+Red proof: none, every merged cell equals the frozen expected value and every control equals the frozen pre-fix value.
+
+Browser pids saved: 4; after cleanup 0 non-zombie member(s).
+
+Verdict: green.
