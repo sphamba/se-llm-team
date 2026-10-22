@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask, getTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskNum, taskSlug, updateTask, type Task } from "../../src/kanban.ts";
 import { loadConfig, poll } from "../../src/orchestrator.ts";
-import { rescan } from "../../src/orchestrator/pipeline.ts";
+import { ensureIntegrationTask, rescan } from "../../src/orchestrator/pipeline.ts";
 import type { Config } from "../../src/orchestrator/config.ts";
 import { killTree, pidAlive, pidEntry } from "../../src/pid.ts";
 import { cleaned, fixture } from "../helpers.ts";
@@ -242,13 +242,13 @@ assert.equal(listAll(root1).length, 2, "the board holds the covered task and the
 assert.match(created1.file, /^\d{6}_integration_of_\d+\.md$/, "the new task is a board file of the integration lane");
 console.log("integration.test.ts: ... + one waiting task opened at the merge passed");
 
-// --- part 2: the created task carries the auto issuer, the low/simple lane, no blockers, no
-// worktree, empty open questions and the generated Specs ---
+// --- part 2: the created task carries the auto issuer, the complexity-derived priority, the
+// simple lane, no blockers, no worktree, empty open questions and the generated Specs ---
 const num1 = taskNum(covered1.file);
 const covered1Fresh = parseTask(root1, covered1.file);
 assert.equal(created1.name, `test: integration of #${num1}`, "the name quotes the covered ref");
 assert.equal(created1.shortName, `integration-of-${num1}`, "the shortName quotes the covered ref");
-assert.equal(created1.priority, "low", "the integration lane runs low priority");
+assert.equal(created1.priority, "high", "a moderate covered task makes the integration run high priority");
 assert.equal(created1.complexity, "simple", "the integration lane runs simple");
 assert.equal(created1.state, "to-integration-test", "the task opens in to-integration-test, not backlog");
 assert.equal(created1.issuer, "auto", "the orchestrator is the issuer");
@@ -284,14 +284,34 @@ assert.deepEqual(quoted(created1.specs), quoteOf(covered1Fresh.summary), "every 
 assert.deepEqual(ownRefs(created1.specs), entryRefs(created1.specs), "the head sentence names the same refs as the headings");
 console.log("integration.test.ts: ... + created-task fields and generated Specs passed");
 
+// --- part 2b: the priority is inferred from the covered tasks' complexity: trivial is low,
+// simple is medium, moderate is high, complex is critical. With several covered refs the highest
+// wins, so an appended ref raises the waiting task's priority and never lowers it ---
+const root2b = fixture();
+cleaned.push(root2b);
+const map2b = [
+	["trivial", "low"],
+	["simple", "medium"],
+	["moderate", "high"],
+	["complex", "critical"],
+] as const;
+for (const [complexity, expected] of map2b) {
+	const covered2b = createTask(root2b, { name: `feat: covered ${complexity}`, complexity, summary: `The ${complexity} covered ref.`, specs: "n/a" });
+	ensureIntegrationTask(root2b, covered2b);
+	const waiting2b = onlyWaiting(root2b);
+	assert.equal(waiting2b.priority, expected, `a ${complexity} covered ref makes the integration run ${expected} priority`);
+}
+console.log("integration.test.ts: ... + priority inferred from covered complexity passed");
+
 // --- part 3: a second covered ref appends to the waiting task: refs in ascending order, one
-// bullet per ref with its own summary, and the creation attributes never move ---
+// bullet per ref with its own summary, the creation attributes never move, and the priority
+// follows the highest covered complexity ---
 const root3 = fixture();
 cleaned.push(root3);
 const cfg3 = mergeCfg(root3);
 // the higher number is covered first, so ascending order is a real reordering of the refs
-const low3 = liveTask(root3, "fix: covered first", "The first covered ref's summary.");
-const high3 = liveTask(root3, "feat: covered second", "The second covered ref's summary.");
+const low3 = liveTask(root3, "fix: covered first", "The first covered ref's summary.", { complexity: "complex" });
+const high3 = liveTask(root3, "feat: covered second", "The second covered ref's summary.", { complexity: "simple" });
 const numHigh3 = taskNum(high3.file);
 const numLow3 = taskNum(low3.file);
 assert.ok(numLow3 < numHigh3, "the second created task carries the higher number");
@@ -301,6 +321,7 @@ assert.equal(waiting3.name, `test: integration of #${numHigh3}`);
 const shortName3 = waiting3.shortName;
 const issuer3 = waiting3.issuer;
 const priority3 = waiting3.priority;
+assert.equal(priority3, "medium", "the simple covered ref opens the wait at medium priority");
 const complexity3 = waiting3.complexity;
 const file3 = waiting3.file;
 const state3 = waiting3.state;
@@ -314,7 +335,7 @@ assert.equal(appended3!.name, `test: integration of #${numLow3}, #${numHigh3}`, 
 assert.equal(appended3!.summary, `Integration test of the merged base branch after #${numLow3}, #${numHigh3}.`, "the summary names the full set");
 assert.equal(appended3!.shortName, shortName3, "shortName never changes");
 assert.equal(appended3!.issuer, issuer3, "issuer never changes");
-assert.equal(appended3!.priority, priority3, "priority never changes");
+assert.equal(appended3!.priority, "critical", "the complex appended ref raises the waiting task to critical priority");
 assert.equal(appended3!.complexity, complexity3, "complexity never changes");
 assert.equal(appended3!.state, state3, "the state never changes");
 assert.equal(appended3!.file, file3, "the file number never changes");
@@ -710,4 +731,4 @@ await stopAgent(root18, taskSlug(covered18.file));
 await stopLane(root18);
 console.log("integration.test.ts: ... + the integration-tester overlaps the covered live-tester passed");
 
-console.log("integration.test.ts: integration-test lane smoke passed (creation at the merge, fields, append, second wait, no-create, skip, one run at a time, maxParallel, crash and superseded ends, trigger moves, failed merge, user hold, hook failure, live-test overlap)");
+console.log("integration.test.ts: integration-test lane smoke passed (creation at the merge, fields, priority from complexity, append, second wait, no-create, skip, one run at a time, maxParallel, crash and superseded ends, trigger moves, failed merge, user hold, hook failure, live-test overlap)");

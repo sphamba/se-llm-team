@@ -84,12 +84,21 @@ function integrationRefs(task: Task): number[] {
 const integrationName = (refs: number[]) => `test: integration of ${refs.map((ref) => `#${ref}`).join(", ")}`;
 const integrationSummary = (refs: number[]) => `Integration test of the merged base branch after ${refs.map((ref) => `#${ref}`).join(", ")}.`;
 
+// the integration task's priority follows the covered refs' complexity, highest wins: a complex
+// covered ref makes the run critical, a trivial one low
+const PRIORITY_BY_COMPLEXITY: Record<string, string> = { trivial: "low", simple: "medium", moderate: "high", complex: "critical" };
+function integrationPriority(covered: Task[]): string {
+	return covered
+		.map((task) => PRIORITY_BY_COMPLEXITY[task.complexity] ?? "medium")
+		.reduce((highest, priority) => ((PRIORITY_RANK[priority] ?? 4) < (PRIORITY_RANK[highest] ?? 4) ? priority : highest), "low");
+}
+
 function createIntegrationTask(root: string, covered: Task): Task {
 	const num = taskNum(covered.file);
 	const task = createTask(root, {
 		name: integrationName([num]),
 		shortName: `integration-of-${num}`,
-		priority: "low",
+		priority: integrationPriority([covered]),
 		complexity: "simple",
 		summary: integrationSummary([num]),
 		specs: integrationSpecs([covered]),
@@ -128,6 +137,7 @@ export function ensureIntegrationTask(root: string, covered: Task): void {
 	const survivors = kept.map((task) => taskNum(task.file));
 	updateTask(root, fresh, {
 		name: integrationName(survivors),
+		priority: integrationPriority(kept),
 		summary: integrationSummary(survivors),
 		specs: integrationSpecs(kept),
 	});
