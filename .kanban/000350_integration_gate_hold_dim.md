@@ -1,8 +1,8 @@
 ---
 name: "fix: hold a waiting integration task when integration testing is off"
 priority: "medium"
-state: "live-testing"
-worktree: "fix/350-integration-gate-hold-dim"
+state: "done"
+worktree: ""
 issuer: "user"
 complexity: "moderate"
 shortName: "integration-gate-hold-dim"
@@ -80,3 +80,34 @@ With integrationTesting false, the integration sweep still promotes a task waiti
 
 ## Follow-up
 - `README.md`, `docs/architecture.md` and the role docs are untouched; task #352 owns those edits.
+
+### Live test: #350 integration gate hold and waiting-column fade
+
+- Worktree: `/home/phamba/repos/se-llm-team/.worktrees/fix/350-integration-gate-hold-dim` (merged commit 8b57742), run from that tree.
+- Control tree: `/tmp/live350-ig/pre-fix` (commit 1340913e538fa14dde85e17e1ddfc9e3fee56677), the first ancestor whose stat does not touch the changed files. Extracted with `git archive`.
+- Driver: `/tmp/live350-ig/driver.mjs` (`run <label> <tree> <n>` | `report`), wrapper `/tmp/live350-ig/run.sh`.
+- Runs: merged n=1,2,3; control n=1. Live fixture per run: a git repo, a fake executable agent that appends one JSON line to a capture file, a hub on port 0.
+- Assumptions: the daemon timers are not part of these claims, so the gate went through `rescan(root, loadConfig(root), true)` in-process, the same call the rescan loop makes (`src/orchestrator/main.ts:109`). The served page used `startHub` with the stage flags that `main.ts:158` passes from `cfg`. Opacity was sampled after the card entrance animation settled (two equal samples and no `.card.enter`), with the mouse at 0,0. The shared host was not counted; every check is scoped to a unique fixture root.
+- Not exercised: `pnpm test` and every `*.test.ts` file (not a live test), the production web UI port (port 0), a real LLM agent (fake executable), and the real CLI daemon process (in-process rescan).
+
+| id | claim | expected | merged value | merged ok | control value | control |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | flag off: waiting task stays after 2 rescans | `to-integration-test` | `to-integration-test` | 3/3 | `integration-testing` | ok |
+| 2 | flag off: no integration-tester slug | `none` | `none` | 3/3 | `000001_integration_of_50` | ok |
+| 3 | flag off: no integration-tester pid file | `absent` | `absent` | 3/3 | `present` | ok |
+| 4 | flag off: fake agent capture empty after 3 s | `0` | `0` | 3/3 | `1` | ok |
+| 5 | flag off: no orchestrator log line names the task | `no-line` | `no-line` | 3/3 | `line` | ok |
+| 6 | flag on: same seed moves to integration-testing | `integration-testing` | `integration-testing` | 3/3 | `integration-testing` | ok |
+| 7 | flag on: slug records the task slug | `000001_integration_of_51` | `000001_integration_of_51` | 3/3 | `000001_integration_of_51` | ok |
+| 8 | flag on: fake agent capture has one record | `1` | `1` | 3/3 | `1` | ok |
+| 9 | flag off: in-flight task survives a rescan | `integration-testing` | `integration-testing` | 3/3 | `integration-testing` | ok |
+| 10 | flag off: waiting card computed opacity | `0.4` | `0.4` | 3/3 | `1` | ok |
+| 11 | flag off: in-flight card keeps full opacity | `1` | `1` | 3/3 | `1` | ok |
+| 12 | flag off: waiting column carries the off class | `off` | `off` | 3/3 | `off` | ok |
+| 13 | flag on: waiting card computed opacity | `1` | `1` | 3/3 | `1` | ok |
+
+- Served CSS evidence (flag off): scoped `.col.off.c-to-integration-test .card { opacity: 0.4; }`; generic `.col.off .card` `(none)`; in-flight scoped `(none)`.
+- Served card geometry (flag off): wait 278x64.25 run 278x64.25 px, both columns in the same pair.
+- Red proof: no red merged row. The control is red by design on rows 1, 2, 3, 4, 5, 10 (pre-fix behaviour). All other rows agree across trees.
+- Saved-pid cleanup: merged-1: 838483=gone, 838522=gone; merged-2: 838741=gone, 838780=gone; merged-3: 838990=gone, 839037=gone; control-1: 839238=gone, 839277=gone. A state of `gone` or `Z` counts as dead. Fixture roots were removed after each run.
+- Verdict: PASS. All 13 merged rows match their expected value in all 3 runs. The control matches the pre-fix value on every row.
