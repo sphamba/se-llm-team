@@ -497,6 +497,46 @@ assert.equal(agentLabel({ role: "doctor", run: 0 }, { doctor: 2 }), "Doctor", "a
 assert.equal(agentLabel({ role: "doctor", run: 1 }, { doctor: 3 }), "Doctor", "a doctor entry stays unnumbered whatever run index it carries");
 assert.ok(page.includes(String(agentLabel)), "the page ships the tested agentLabel source");
 
+// 000337: a project-wide lane runs once per project, so its pid file is named after the role and
+// not after the task slug: a live integration-tester or merger must mark its newest run live (the
+// card spins, the log pane holds its open line), and a stale lane pid must leave the run finished
+const laneRoot = mkdtempSync(join(tmpdir(), "webui-lane-"));
+const laneTask = createTask(laneRoot, { name: "feat: lane live card", summary: "s", specs: "s" });
+const laneSlug = laneTask.file.replace(/\.md$/, "");
+const laneDetail = () => taskHistory(laneRoot, parseInt(laneTask.file, 10))!;
+const laneLogs = join(laneRoot, ".kanban", ".logs");
+const lanePids = join(laneRoot, ".kanban", ".pids");
+mkdirSync(laneLogs, { recursive: true });
+mkdirSync(lanePids, { recursive: true });
+setState(laneRoot, getTask(laneRoot, laneTask.file)!, "integration-testing");
+writeFileSync(join(laneLogs, `${laneSlug}.integration-tester.0.log`), "IT RUN\n");
+writeFileSync(join(lanePids, "integration-tester.pid"), String(process.pid));
+const laneIt = await laneDetail();
+assert.deepEqual(
+	laneIt.agents,
+	[{ role: "integration-tester", run: 0, alive: true, status: "live", handle: `${laneSlug}.integration-tester.0`, tokens: null, duration: null }],
+	"a live integration-tester lane pid marks the newest run live, so its card spins",
+);
+assert.deepEqual(laneIt.agent, { role: "integration-tester", alive: true, log: `${laneSlug}.integration-tester.0` }, "the card's agent handle opens the live integration-tester run");
+writeFileSync(join(lanePids, "integration-tester.pid"), "999999");
+assert.deepEqual(
+	(await laneDetail()).agents[0],
+	{ role: "integration-tester", run: 0, alive: false, status: "ok", handle: `${laneSlug}.integration-tester.0`, tokens: null, duration: null },
+	"a stale integration-tester lane pid leaves the finished run not live",
+);
+rmSync(join(lanePids, "integration-tester.pid"));
+setState(laneRoot, getTask(laneRoot, laneTask.file)!, "merging");
+writeFileSync(join(laneLogs, `${laneSlug}.merger.0.log`), "MG RUN\n");
+writeFileSync(join(lanePids, "merger.pid"), String(process.pid));
+const laneMg = await laneDetail();
+assert.deepEqual(
+	laneMg.agents.find((a) => a.role === "merger"),
+	{ role: "merger", run: 0, alive: true, status: "live", handle: `${laneSlug}.merger.0`, tokens: null, duration: null },
+	"a live merger lane pid marks the newest merger run live, so its card spins",
+);
+assert.deepEqual(laneMg.agent, { role: "merger", alive: true, log: `${laneSlug}.merger.0` }, "the card's agent handle opens the live merger run");
+rmSync(laneRoot, { recursive: true, force: true });
+
 // 000120 card stats: tokens render raw below 1000, kilo (42k), mega from a million (2.3M); duration
 // keeps one decimal below 10s then minutes; missing stats render empty
 assert.equal(fmtTokens(42311), "42k", "tokens render in kilo");

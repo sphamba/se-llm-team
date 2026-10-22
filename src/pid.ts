@@ -89,6 +89,11 @@ export function pidEntry(root: string, name: string): { pid: number; disc: strin
 	}
 }
 
+// a lane runs once per project, so its pid file is named after the role, not the task
+export function agentPidName(role: string | undefined, slug: string): string {
+	return role === "merger" || role === "integration-tester" ? role : slug;
+}
+
 // liveness of the agent a pid file names: the discriminator decides, so a pid recycled by
 // another process reads dead instead of wedging the gate and the state transitions
 export function agentAlive(root: string, name: string): boolean {

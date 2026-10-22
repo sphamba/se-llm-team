@@ -9,13 +9,14 @@
 export const LOG_LINES = 100;
 
 // working state -> the agent role the orchestrator spawns for it (spawnAgent, src/orchestrator.ts)
-export const AGENT_ROLE = { doing: "developer", reviewing: "reviewer", "live-testing": "live-tester", "integration-testing": "integration-tester" };
+export const AGENT_ROLE = { doing: "developer", reviewing: "reviewer", "live-testing": "live-tester", "integration-testing": "integration-tester", merging: "merger" };
 // the roles the orchestrator writes per task log: the Splitter (on the to-do task, before the
-// Developer), the state-mapped roles, then the merger; the history orders each run by its first
-// in-log record, so this enumeration order only breaks identical-timestamp ties. The doctor
-// analysis writes no per-task run log: its stream output rides next to the analysed run's log as
+// Developer), the state-mapped roles, then the doctor; the set drops the merger's duplicate, the
+// merging state maps to it. The history orders each run by its first in-log record, so this
+// enumeration order only breaks identical-timestamp ties. The doctor analysis writes no per-task
+// run log: its stream output rides next to the analysed run's log as
 // <slug>.<role>.<n>.doctor.log, enumerated by the payload builder's doctor history
-export const LOG_ROLES = ["splitter", ...Object.values(AGENT_ROLE), "merger", "doctor"];
+export const LOG_ROLES = [...new Set(["splitter", ...Object.values(AGENT_ROLE), "doctor"])];
 
 // html escape, shipped to the client and shared with the tab renderer
 export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

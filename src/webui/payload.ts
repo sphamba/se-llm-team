@@ -2,7 +2,7 @@ import { closeSync, existsSync, openSync, readFileSync, readdirSync, readSync, s
 import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { getTask, kanbanDir, listAll, PRIORITY_RANK, splitFrontmatter, STATES, taskFiles, taskNum, taskSlug, type Task } from "../kanban.ts";
-import { agentAlive } from "../pid.ts";
+import { agentAlive, agentPidName } from "../pid.ts";
 import { AGENT_ROLE, LOG_LINES, LOG_ROLES, openRun, renderLogChunk } from "./logpane.ts";
 
 // the served payloads: per-task board rows (taskPayload) and the chunked agent-log reader
@@ -176,7 +176,7 @@ async function agentHistory(root: string, t: Task, files: string[]): Promise<Age
 	const slug = taskSlug(t.file);
 	const dir = join(kanbanDir(root), ".logs");
 	const liveRole = AGENT_ROLE[t.state];
-	const live = !!liveRole && agentAlive(root, slug);
+	const live = !!liveRole && agentAlive(root, agentPidName(liveRole, slug));
 	const now = Date.now();
 	const entries: (AgentEntry & { mtime: number; start: number | null })[] = [];
 	for (const role of LOG_ROLES) {
@@ -249,8 +249,9 @@ async function doctorHistory(root: string, t: Task, files: string[]): Promise<Ag
 // rebuild the log path from the handle: the task must exist on the board and the handle must be
 // `<slug>.<role>` or `<slug>.<role>.<n>` for a role the orchestrator actually writes, or a doctor
 // log handle `<slug>.<role>.<n>.doctor` for the analysed run, so a raw client-supplied path can
-// never reach the fs; the slug rides along for the liveness check (the pid file is per task)
-function agentLogPath(root: string, handle: string): { path: string; slug: string } | null {
+// never reach the fs; the slug and role ride along for the liveness check (the pid file is per
+// task, or per role for a project-wide lane)
+function agentLogPath(root: string, handle: string): { path: string; slug: string; role: string } | null {
 	const m = handle.match(/^(.+)\.(splitter|developer|reviewer|live-tester|integration-tester|merger|doctor)(?:\.(\d+))?$/);
 	if (!m) return null;
 	let slug = m[1];
@@ -262,7 +263,7 @@ function agentLogPath(root: string, handle: string): { path: string; slug: strin
 		slug = dm[1];
 	}
 	if (!taskFiles(root).includes(`${slug}.md`)) return null;
-	return { path: runLogPath(join(kanbanDir(root), ".logs"), handle), slug };
+	return { path: runLogPath(join(kanbanDir(root), ".logs"), handle), slug, role: m[2] };
 }
 
 // pi's background Agent tool writes each subagent transcript under this dir and names it in the
@@ -753,10 +754,11 @@ export async function agentLogPayload(root: string, q: URLSearchParams): Promise
 	// the cap on a held-back mid-line run (000299): past it the fragment renders as a paragraph
 	const HOLD_MAX = 1 << 20;
 	// 000299: hold an open line back only while its run is alive, because only a live run can write
-	// the newline that closes it. Ceiling: liveness is per task slug, so a killed run's log polled
-	// while another run of the task is alive still waits; upgrade path: read the run's own .dead
-	// marker, or its newest-run index, the way agentHistory decides the live run
-	const alive = agentAlive(root, found.slug);
+	// the newline that closes it. Ceiling: liveness is per pid name (000337: the task slug, or the
+	// role for a project-wide lane), so a killed developer run polled while another run of the task
+	// is alive still waits; upgrade path: read the run's own .dead marker, or its newest-run index,
+	// the way agentHistory decides the live run
+	const alive = agentAlive(root, agentPidName(found.role, found.slug));
 	try {
 		const window = (start: number, end: number): [string, number] => {
 			if (full === null) return readRange(target, start, end);
