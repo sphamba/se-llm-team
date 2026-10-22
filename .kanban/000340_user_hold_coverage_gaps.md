@@ -1,8 +1,8 @@
 ---
 name: "test: pin the user-hold right border and the two unpinned release gates"
 priority: "low"
-state: "live-testing"
-worktree: "test/340-user-hold-coverage-gaps"
+state: "done"
+worktree: ""
 issuer: "#325"
 complexity: "simple"
 shortName: "user-hold-coverage-gaps"
@@ -63,3 +63,34 @@ Review of 0d1b91d (first pass):
 Suites: webui/page, orchestrator/sweep, orchestrator/merge (the three Acceptance commands; test-only diff, no source change).
 Tests: webui/page exit=0, orchestrator/sweep exit=0 (`user hold skips the live-tester spawn smoke passed`), orchestrator/merge exit=0 (`user hold skips the merge lane smoke passed`). Red proof taken from `# Notes`: dropping `border-right-color` and each `updateTask(... blockedBy: "")` line failed their suites with the recorded messages.
 
+## Live test (live-tester)
+
+Assumptions:
+- The three Acceptance commands run `*.test.ts` files, which this role must not run, and no source can be edited. The live test replays the same behaviour through the production functions (`startHub` + `GET /`, `rescan`, `updateTask`, `parseTask`, `pidPath`) and checks the merged test files' content at the frozen lines.
+- The commit is test-only, so the control tree (HEAD^ via `git archive`) carries identical production code: its absent content cells are the new assertions themselves, and its behaviour cells use the same fixtures without the release trigger (hold kept).
+- Acceptance 4 red proof for the border: an archived copy of the merged tree has the token `border-right-color: transparent; ` dropped from `src/webui/page.ts` (no repo edit) and the held card's computed right border then reads `rgba(107, 125, 143, 0.12)`, so the new assertion fails. For the two release rows the trigger-absent probe leaves `to-live-test` / `to-merge` with no pid file and no `held-change` on main, so each release assertion fails when the `blockedBy` clear is absent.
+- The fixture agent is a node stub that exits 0 at once, so the pid file is sampled right after `rescan`, where the spawn writes it.
+- The CSS row is measured from the hub's real `GET /` response, with two probe cards injected into that page in Playwright and the mouse moved to `0, 0` before sampling.
+
+Not exercised: the three test suites (forbidden here), the daemon CLI flags (`rescan` is the deciding path), and the page's client click flow (the change is CSS-only, no behaviour on click).
+
+Driver: `/tmp/lt340/driver.mjs`, wrapper `/tmp/lt340/run.sh`. Merged tree `/home/phamba/repos/se-llm-team/.worktrees/test/340-user-hold-coverage-gaps` at `c4f2e68`; control tree `/tmp/lt340/pre-fix` at `archived (no git metadata)` (HEAD^), created with `git archive`. Merged runs: 3. Control runs: 1.
+
+Changed files in the merged commit: tests/orchestrator/merge.test.ts, tests/orchestrator/sweep.test.ts, tests/webui/page.test.ts. No source or runtime file changed, so the control tree behaves the same and its absent cells are the new assertions themselves.
+
+| id | claim | expected | merged (3 runs) | control |
+| --- | --- | --- | --- | --- |
+| 1 | merged page.test.ts asserts the held card's right border colour is transparent | assertion present at tests/webui/page.test.ts:594 and after the top/bottom assertion at :593 | present@594, after the top/bottom one | absent |
+| 2 | the served page's .card.user-hold rule makes the right border transparent on a held card | computed border-right-color alpha 0 on .card.user-hold, non-zero on .card (src/webui/page.ts:152) | held alpha 0 (rgba(0, 0, 0, 0)), plain alpha 0.12; source hub GET / | hold kept (plain card): alpha 0.12 (rgba(107, 125, 143, 0.12)) |
+| 3 | merged sweep.test.ts part UH2 clears the hold, rescans, and asserts live-testing plus the pid file | updateTask blockedBy empty then rescan then state live-testing and pidPath exists at tests/orchestrator/sweep.test.ts:431-434 | present@433-434, after the hold lines | absent |
+| 4 | a to-live-test task released from a user hold starts its live test | state live-testing and the live-tester pid file after rescan (src/orchestrator/pipeline.ts rescan spawn) | live-testing, pid yes | hold kept: to-live-test, pid no |
+| 5 | merged merge.test.ts part UH3 clears the hold, rescans, and asserts main took held-change and the state left to-merge | updateTask blockedBy empty then rescan then main has held-change and state to-live-test at tests/orchestrator/merge.test.ts:618-621 | present@620-621, after the hold lines | absent |
+| 6 | a to-merge task released from a user hold rebases and fast-forwards into main | main log has held-change and state to-live-test after rescan (sweepToMerge fast-forward) | main has held-change, state to-live-test | hold kept: main no held-change, state to-merge |
+
+Red proof (Acceptance 4), no repo edit: the merged tree is archived to `/tmp/lt340/run/<label>-<n>/red`, the token `border-right-color: transparent; ` is dropped from `src/webui/page.ts` in that archive, and the page shell is re-rendered from that archive.
+
+- merged run 1: css source=hub GET / response (status 200 on hub port 34795); dropped=true, held right=rgba(107, 125, 143, 0.12), alpha=0.12; UH2 held-before={"held":"to-live-test","heldPid":false,"next":"live-testing","nextPid":true}; UH3 held-before state=to-merge, main has held-change=false
+- merged run 2: css source=hub GET / response (status 200 on hub port 39745); dropped=true, held right=rgba(107, 125, 143, 0.12), alpha=0.12; UH2 held-before={"held":"to-live-test","heldPid":false,"next":"live-testing","nextPid":true}; UH3 held-before state=to-merge, main has held-change=false
+- merged run 3: css source=hub GET / response (status 200 on hub port 34191); dropped=true, held right=rgba(107, 125, 143, 0.12), alpha=0.12; UH2 held-before={"held":"to-live-test","heldPid":false,"next":"live-testing","nextPid":true}; UH3 held-before state=to-merge, main has held-change=false
+
+All six rows agree across the 3 merged runs, and every control cell differs in the direction the change pins. No finding.
