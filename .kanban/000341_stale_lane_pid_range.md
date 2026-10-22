@@ -1,8 +1,8 @@
 ---
 name: "test: use a pid above pid_max for the stale lane case"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "to-live-test"
+worktree: "test/341-stale-lane-pid-range"
 issuer: "#337"
 complexity: "trivial"
 shortName: "stale-lane-pid-range"
@@ -29,3 +29,12 @@ Change nothing else: keep the assertion, its expected object and its message, ke
 3. `git diff --stat` names only `tests/webui/agentlog.test.ts`.
 
 # Notes
+Trivial run, no new pin.
+
+## What changed
+- `tests/webui/agentlog.test.ts`: the stale lane case now writes `999999999` to `integration-tester.pid`, the value the older stale case uses. That pid is above any Linux `pid_max`, so `pidAlive` stays false on every host. The assertion, its expected object, its message, the `rmSync` and the merger `process.pid` case are unchanged.
+
+## Acceptance
+- `node tests/webui/agentlog.test.ts` passes, exit 0.
+- `grep -n '"999999"' tests/webui/agentlog.test.ts` finds nothing.
+- `git diff --stat` names only `tests/webui/agentlog.test.ts`, 1 insertion and 1 deletion.
