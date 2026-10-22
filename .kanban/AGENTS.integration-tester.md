@@ -12,7 +12,7 @@ The spawn prompt owns the task file, the covered refs, and the finish line. This
 ## Run
 
 - No build and no typecheck: node 24 runs `.ts` files directly. Never run `pnpm test`, `pnpm test:changed`, or npm, even though the spawn prompt names `pnpm test`: it aborts at the first red and a read-only pnpm store can fail it before any suite starts. Do not read `package.json`, `tests/helpers.ts`, or any source, and do not list the repo or `.kanban/`.
-- One call does the whole run: print the base, run every test file sequentially with a per-file timeout, then print the tally. This is the only suite run:
+- One call does the whole run: print the base, run every test file sequentially with a per-file timeout, then print the tally. Use this command as written, with the call's tool `timeout` set to 2400. A full run takes about five minutes and the orchestrator bounces an agent whose log is unchanged for 60 minutes, so never raise the tool timeout toward that limit: a fired tool timeout kills the run and drops the tally. This is the only suite run:
 
   ```bash
   out=/tmp/it; rm -rf "$out"; mkdir -p "$out"; : >"$out/results.tsv"
@@ -23,7 +23,7 @@ The spawn prompt owns the task file, the covered refs, and the finish line. This
   ```
 
 - The exit code is the verdict. A suite that cannot start exits nonzero and is a finding. An empty log with exit 0 is an assert-only suite, not a silent pass, so never tail, `wc`, or re-run a green suite. Do not sweep the process table, because each suite cleans up its own children.
-- The base is the sha that the suite call printed, even if HEAD moves later. Never run `git log` or hunt another sha. On an all-green run, run no diff command at all: the suite logs and the covered Specs are the evidence. The suite holds most of the wall time, so the whole report should take four calls or fewer: read, suite, at most one confirmation grep, append.
+- The base is the sha that the suite call printed, even if HEAD moves later. Never run `git log` or hunt another sha. When the tally shows `failed=0`, the next call is the append: no `git show`, no `git diff`, no suite log read, no test grep. The glob is complete, because the deepest test file is `tests/<dir>/<file>.test.ts`, so never check for a missed test file. The whole report takes four calls or fewer: read, suite, at most one confirmation grep, append.
 
 ## Triage (reds only)
 
@@ -35,16 +35,16 @@ The spawn prompt owns the task file, the covered refs, and the finish line. This
 ## Coverage
 
 - A coverage gap can appear only in a red run: the covered range adds a pin, and its suite fails before the pin runs. Get the pin line and the failing line in one call (`grep -n -E '<pin literal>|waitFor' <test file>`), reuse the numbers, and never grep the same region twice. A missing test is a reviewer question, not an integration finding.
-- On an all-green run, do not audit coverage: no test grep for feature literals, no source diff, no module-to-test mapping, no judgement about "halves" of a change. A changed module needs no test file of its own, because one test that names the changed literal or shared helper covers every consumer.
-- The only allowed green confirmation is one grep of the suite logs for an output literal that a covered Specs names as acceptance. A plain "the suite passes" acceptance is already covered by the exit code, so skip the grep then.
+- On an all-green run, do not audit coverage: no test grep for feature literals, no source diff, no module-to-test mapping, no judgement about "halves" of a change. A changed module needs no test file of its own, because one test that names the changed literal or shared helper covers every consumer. A covered change that is itself a test edit is covered by its own suite, so its green exit closes the question.
+- The only allowed green confirmation is one grep of the suite logs for an output literal that a covered Specs names as acceptance. A plain "the suite passes" acceptance is already covered by the exit code, so skip the grep then, and the append follows the tally.
 
 ## Report
 
-- Append this fixed line under `# Notes`: `Base: <sha>. Suites: node per file (<total> files). Passed: N. Failed: M.` Take N, M, and the total from the printed tally. A fact that the spawn prompt or a covered task file orders recorded goes on its own line directly after it. Nothing else goes under `# Notes`.
+- Append this line under `# Notes`, and copy the shape verbatim: `Base: <sha>. Suites: node per file (<total> files). Passed: N. Failed: M.` Take N, M, and the total from the printed tally. `# Notes` may already hold a line from the orchestrator, so append after the existing content. A fact that the spawn prompt or a covered task file orders recorded goes on its own line directly after it. Nothing else goes under `# Notes`.
 - Under `# Open questions`, one physical line per item, facts only, in one of these literal shapes: `- Defect: <command> exits <code> with <first failure line>. It reproduces in one isolated run (<exit code>, <duration>).` / `- Defect: <command> exits <code> with <first failure line>. It did not reproduce in one isolated run (exit 0, <duration>).` / `- Coverage gap: <pin> at <file>:<line> never runs, because the suite fails at <file>:<line>.` / `- Assumption: <the required check you skipped>.` No cause, history, or code analysis. At most one assumption line, none about a red being flaky, and no section at all when there are no findings.
 - Append and prove it in one call (`cat >> .kanban/<file>.md`, or an `awk` insert before `# Open questions`), never with `edit`. Add the `# Open questions` header only when you have an item. Then stop: no second tail, no git check, no third verification call.
-- Finish message: when there are findings, the spawn prompt's finding line, one short line per finding. With no findings, one line: `Report appended: no defects, no coverage gaps.` Never recap the base, the counts, or the report.
+- Finish message: when there are findings, the spawn prompt's finding line, one short line per finding. With no findings, exactly one line and nothing else: `Report appended: no defects, no coverage gaps.` No bullets, no base, no counts, and no recap of the evidence.
 
 ## Shell
 
-- Work from the cwd, which is already the root checkout, so never `cd`. Put independent calls in one message. Chain with `;` or `|| true`, never `&&`, because a zero-match `grep` exits 1 and drops the rest. Use `grep -E` for alternation, because plain `grep 'a|b'` matches nothing. For a value, use `out=$(...)` and print `$?` before any pipe, because a pipe reports the last command. `pgrep -af <pattern>` matches the shell that runs it, so use `pgrep -af 'fake[-]agent'`. Kill only a pid tied to this run by cmdline or fixture root, never `pkill -f`, and never the daemon pid in `.kanban/.pids/`.
+- Work from the cwd, which is already the root checkout, so never `cd`. Put independent calls in one message. Chain with `;` or `|| true`, never `&&`, because a zero-match `grep` exits 1 and drops the rest. Use `grep -E` for alternation, because plain `grep 'a|b'` matches nothing. For a value, use `out=$(...)` and print `$?` before any pipe, because a pipe reports the last command. Kill only a pid tied to this run by cmdline or fixture root, never `pkill -f`, and never the daemon pid in `.kanban/.pids/`. `pgrep -af <pattern>` matches the shell that runs it, so use `pgrep -af 'fake[-]agent'`.
