@@ -1,7 +1,7 @@
 ---
 name: "fix: the root link cleanup must not fire for a live splitter"
 priority: "medium"
-state: "doing"
+state: "to-live-test"
 worktree: "fix/335-root-link-live-splitter"
 issuer: "user"
 complexity: "moderate"
@@ -63,3 +63,30 @@ This is one contract change. The new `opts.rootCwd` parameter in `clearContextSy
 Guidance for future Splitters: do not split a fix that changes one function signature or one shared predicate. The split regression gate is a single test run. Keep such a task as one unit.
 
 After this merge, restart the orchestrator daemon (pid 57964 at task creation). It holds the pre-#332 code in memory. Do not restart it as part of this task.
+
+## What changed
+
+- `clearContextSymlinks` (`src/orchestrator/spawn.ts:143`) takes `opts?: { rootCwd?: boolean }` and returns early when the task has no worktree and the flag is absent, so the worktree-only behaviour of pre-#332 is back. With `rootCwd: true` and no worktree, #332's behaviour stays: only a root `SPECS.md` whose `readlinkSync` equals `join(".kanban", task.file)`, never `AGENTS.md`, never a real file.
+- `src/orchestrator/pipeline.ts:161` passes `{ rootCwd: true }`. It is reached only when the splitter pid file exists and its pid is dead (the dead-splitter decline path).
+- `src/orchestrator/liveness.ts:89` (`bounceDead`) and `:186` (the poll's terminated-run path) pass `{ rootCwd: pidName === "integration-tester" }`. The splitter and the integration-tester are the only root-cwd spawns (`pipeline.ts:155` and `:349`); the merger runs in the task worktree.
+- No other caller passes the flag. A `to-do` task has no lane, so `pidName` is the bare slug and the condition is false.
+
+## Acceptance
+
+- Tests (`tests/context-symlinks.test.ts`): the two CS6 no-worktree calls now pass `{ rootCwd: true }`, so their assertions keep their meaning. New part CS7 creates a `to-do` task, writes a live `<slug>.splitter` pid, points the root `SPECS.md` at the task file, calls the form without the flag and asserts the link survives, then asserts the flag form removes it.
+- Red first: at c7b47c8 part CS7 fails with `ENOENT: no such file or directory, readlink '<root>/SPECS.md'` at the unflagged call (the bug, reproduced). After the fix it passes.
+- `node tests/context-symlinks.test.ts` exit=0 (parts CS1-CS7). `node tests/orchestrator/split.test.ts` exit=0, the regression gate is green.
+- Modified files: 4 (`src/orchestrator/spawn.ts`, `src/orchestrator/liveness.ts`, `src/orchestrator/pipeline.ts`, `tests/context-symlinks.test.ts`).
+
+## Follow-up
+
+- The live orchestrator daemon (pid 57964 at task creation) started before #332 and #335 merged and holds the pre-#332 code in memory, which is why the splitter still works there. Restart it after this merge. It was not restarted in this task, as the Specs require.
+
+Review of 9d7fc83 (first pass):
+
+- `src/orchestrator/spawn.ts:143-144`: the new `opts?: { rootCwd?: boolean }` and `if (!task.worktree && !opts?.rootCwd) return;` restore the pre-#332 guard (`git show 2273595:src/orchestrator/spawn.ts:130` is the same `if (!task.worktree) return;`). The root branch keeps the `SPECS.md`-only and `readlinkSync === join(".kanban", task.file)` conditions from #332.
+- `src/orchestrator/pipeline.ts:161`: `{ rootCwd: true }` sits on the dead-splitter decline path, after the `${slug}.splitter` pid check at `:150`. The splitter (`:155`) and the integration-tester (`:349`) are the only root-cwd spawns, so no other root run loses its link.
+- `src/orchestrator/liveness.ts:89` and `:186`: `{ rootCwd: pidName === "integration-tester" }`, and both `bounceDead` callers (`:159`, `:236`) pass the poll's `pidName`. `LANES` (`liveness.ts:29-30`) gives `merger` for `merging`, and a to-do task has no lane, so `pidName` is the bare slug and the flag is false. `rg -n 'clearContextSymlinks' src tests` shows no other caller passes the flag.
+- `tests/context-symlinks.test.ts:263-273`: part CS7 writes a live `<slug>.splitter` pid, asserts the unflagged call keeps the root link and the flagged call removes it; the two CS6 no-worktree calls at `:244` and `:251` pass `{ rootCwd: true }` and keep their meaning.
+- Tests: `tests/context-symlinks.test.ts` exit=0 (parts CS1-CS7), `tests/orchestrator/split.test.ts` exit=0 (the regression gate named in the Acceptance note).
+

@@ -1,7 +1,7 @@
 ---
 name: "test: assert the integration task's done state in the mirror, not its commit label"
 priority: "medium"
-state: "doing"
+state: "reviewing"
 worktree: "test/336-assert-the-integration"
 issuer: "user"
 complexity: "moderate"
@@ -54,3 +54,19 @@ The contract is the mirror state, not one labelled commit per done task. The fol
 - Splitter (no split): the task changes one test file and verifies it with one sequential command. The only possible follow-up, a red part BA that reopens #331, is a diagnosis, not parallel work. The review, merge, and live-test cost per subtask would exceed the time saved.
 - Splitter: reuse `showTip(root, file)` in `tests/helpers.ts`. It already reads a file at the mirror tip. Do not add a second helper.
 - Splitter: this task body has stray `<complexity>`, `<priority>`, `<issuer>`, `<specs>`, and `<shortName>` tags inside `# Summary`, so `kanban_get` reports an empty `specs` field. The real specs are the `<specs>` block inside the summary. Read this file directly.
+
+## What changed
+- `tests/orchestrator/spawn.test.ts` part A: the integration wait now reads the auto-issued task file from the mirror with the existing `showTip(root, file)` helper and waits for `state: "done"`. One explicit `assert.match` on the same mirror content states the contract after the wait.
+- The comment above the wait names the fold and its cause: `commitKanban` rebuilds the whole board tree and no-ops on an unchanged tree, so the live-tester's done commit carries the integration task's done state and the task's own done label is skipped.
+- The create-label assertion (`integrationCreates.length === 1`) and the marker list are unchanged. No `src/` change. No new helper: `showTip` already read a mirror file at the tip.
+
+## Acceptance
+1. `node tests/orchestrator/spawn.test.ts` -> exit 0, 8 part lines, and the line `orchestrator.test.ts: ... + root real-file symlink guard passed` (part BA) is present. Output at `/tmp/spawn.green.out`.
+2. `grep -n 'kanban: done ${f}' tests/orchestrator/spawn.test.ts` -> no match. The only done-subject assertion left is `taskClean()` for the covered task A.
+3. `git diff --stat` -> `tests/orchestrator/spawn.test.ts | 11 +++++++----`, one file. `tests/orchestrator/split.test.ts` is untouched.
+
+## Notes
+- Red baseline before the edit, same suite, output at `/tmp/spawn.red.out`: exit 1, `timeout waiting for the integration task runs to done and folds into the mirror`. The daemon log in that output contains `agent exited 0, integration-testing -> done`, so the integration task reached done while no done label ever landed: the Specs root cause holds.
+- The task reached done on both runs with no residual `stub-agent.cjs` child process.
+- Part BA passed on the merged base after the fix. #331 has no defect and is not reopened.
+- The one extra `assert.match` line after the wait is deliberate: the wait exits 1 with a timeout message, and the explicit assert names the mirror value in the failure. Remove it if the timeout message is enough.

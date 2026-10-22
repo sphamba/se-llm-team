@@ -1,8 +1,8 @@
 ---
 name: "fix: the web UI shows the integration-tester as finished while it runs"
 priority: "high"
-state: "backlog"
-worktree: ""
+state: "doing"
+worktree: "fix/337-lane-agent-live-card"
 issuer: "user"
 complexity: "simple"
 shortName: "lane-agent-live-card"
