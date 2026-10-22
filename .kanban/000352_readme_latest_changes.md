@@ -1,12 +1,12 @@
 ---
 name: "docs: refresh README for the latest pipeline changes"
 priority: "low"
-state: "backlog"
-worktree: ""
+state: "to-do"
+worktree: "docs/352-readme-latest-changes"
 issuer: "user"
 complexity: "trivial"
 shortName: "readme-latest-changes"
-blockedBy: "#350, #351"
+blockedBy: ""
 ---
 
 # Summary
@@ -40,6 +40,6 @@ README.md only, and only the content of the four latest delivered tasks (#346 st
 - The `integrationTesting` row says that off means no new integration task AND a waiting `to-integration-test` task does not start.
 - The fade paragraph says the `to-integration-test` cards dim while the gate is off and an in-flight `integration-testing` run keeps full opacity.
 - README.md states the complexity-to-priority mapping for integration tasks, the highest-covered rule, and that the priority never decreases while the task waits.
-- `git diff --name-only` lists `README.md` only.
+- README.md is the only changed file outside `.kanban/`.
 
 # Notes
