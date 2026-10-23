@@ -615,6 +615,7 @@ assert.ok(page.includes("@media (prefers-reduced-motion: reduce) { #m-box.grow {
 // 000304 the connector layer paints outside the agent area, bounded by the dialog card
 const cssRule = (sel: string) => (page.match(new RegExp("(?:^|\\n)" + sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " \\{[^}]*\\}")) ?? [""])[0];
 assert.ok(cssRule("#agent-relations").includes("overflow: visible"), "the connector svg no longer clips its own strokes at the agent area box");
+assert.ok(cssRule("#relations").includes("overflow: visible"), "the board overlay paints its curve bow outside its own box instead of adding scroll width");
 assert.ok(cssRule("#m-log").includes("position: relative; z-index: 2;"), "the log pane gets its own layer above the connector svg");
 assert.ok(cssRule("#m-box").includes("overflow-y: auto; overflow-x: hidden"), "the dialog card clips the strokes at its border and never grows a horizontal scrollbar");
 // 000320: a user-held card paints the relation lines' 6-on/4-off rhythm on a pseudo-element (a

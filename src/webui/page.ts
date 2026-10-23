@@ -124,7 +124,7 @@ h1 { font-size: 1.125rem; margin: 0; }
 /* relation lines: absolute in the relative board, so the overlay scrolls with the content; z-index 1
 paints them above the static .col/.pair containers and below the z-index-2 task cards, pointer-events
 none so the card clicks pass through */
-#relations { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; }
+#relations { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; overflow: visible; }
 /* 000127: the low opacity keeps the lines a subtle hint behind the semi-transparent cards; hovering either connected card raises it (.relations-hot) */
 #relations path { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-opacity: .3; stroke-dasharray: 6 4; animation: dashflow 1s linear infinite; transition: stroke-opacity .15s ease; animation-direction: reverse; }
 #relations path.relations-hot { stroke-opacity: .8; }
@@ -477,8 +477,9 @@ function hotRelations(file, on) {
 		if (p.dataset.file === file || p.dataset.blocker === file) p.classList.toggle("relations-hot", on);
 	}
 }
-// one dashed curve per drawn relation, sized to the rendered card extent (+ the loop bulge);
-// rewritten only on change, so the dash animation keeps running across refreshes
+// one dashed curve per drawn relation, sized to the rendered card extent; the bow paints outside
+// that box through overflow: visible, so the overlay adds no scroll width; rewritten only on
+// change, so the dash animation keeps running across refreshes
 function drawRelations() {
 	const board = document.getElementById("board");
 	const svg = document.getElementById("relations");
@@ -493,7 +494,7 @@ function drawRelations() {
 		return r;
 	};
 	const paths = relationPaths(activeBoard().tasks, rectOf);
-	svg.setAttribute("width", w + 40);
+	svg.setAttribute("width", w);
 	svg.setAttribute("height", h);
 	const html = paths.map(p => '<path d="' + p.d + '" data-file="' + esc(p.file) + '" data-blocker="' + esc(p.blocker) + '"/>').join("");
 	if (svg.__html !== html) { svg.innerHTML = html; svg.__html = html; }

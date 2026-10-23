@@ -279,7 +279,7 @@ assert.equal(capped[4], capped[6] - 480, "an extreme width caps both controls");
 // the page runs the tested helpers and ships the overlay wiring
 assert.ok(page.includes(String(numLinkHtml)) && page.includes(String(curve)) && page.includes(String(relationPaths)), "the page ships the tested id-link and relation helpers");
 assert.match(page, /#board \{[^}]*position: relative/, "#board is the overlay's containing block, so the lines scroll with the content");
-assert.ok(page.includes("#relations { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; }"), "the overlay stays at z-index 1, above the static columns and behind the cards, and never intercepts their clicks");
+assert.ok(page.includes("#relations { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; overflow: visible; }"), "the overlay stays at z-index 1, above the static columns and behind the cards, and never intercepts their clicks");
 assert.match(page, /\.card \{ position: relative; z-index: 2;[^}]*background: color-mix\(in srgb, var\(--panel\) 85%, transparent\)/, "task cards stack above the relation lines with a semi-transparent background, so a line under a card shows through faintly in both themes");
 assert.ok(page.includes('setAttribute("pointer-events", "none")'), "the overlay is created non-interactive");
 assert.ok(page.includes("stroke-dasharray: 6 4"), "the relation paths render dashed");
