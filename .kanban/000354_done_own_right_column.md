@@ -69,6 +69,10 @@ The board must have six groups, left to right:
 - `pnpm test` exits 0.
 - Manual check at 1920x1080 with browser zoom at 100%: all six groups show, `#board` has no horizontal scrollbar, and done is the rightmost single column. The board totals 1886px, so it fits.
 
+## Follow-up from live test (2026-10-23)
+
+Row 8 of the live test found `#board` still scrolls 11px at 1920 because the pre-existing `#relations` overlay is sized to the last card plus 40px. The user decided the relation curves must not be clipped at the SVG edge, but must not count toward the board scroll width; a curve that leaves the screen may be cut by the viewport. Filed as #355. The column-width acceptance in this task stays as is; only the overlay bulge is out of scope here.
+
 # Notes
 # Notes
 
@@ -123,4 +127,4 @@ Red proof: row 8 did not match. The merged overlap is the pre-existing relations
 Verdict: red, 1 row(s) off at 3 merged run(s) against 1 pre-fix control.
 
 # Open questions
-- The Specs acceptance says `#board` has no horizontal scrollbar at 1920. The six columns fit exactly, 1920 of 1920, but the relation overlay `#relations` is drawn 40px wider than the last card, so the board can still scroll by 11px at any group count, before and after this change. Is that residual scroll range acceptable, or should the overlay stop overflowing the board?
+
