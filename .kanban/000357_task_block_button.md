@@ -1,7 +1,7 @@
 ---
 name: "feat: block and unblock a task from its detail dialog"
 priority: "medium"
-state: "backlog"
+state: "done"
 worktree: ""
 issuer: "user"
 complexity: "simple"
@@ -99,3 +99,70 @@ Add `POST /api/task-block` to `src/hub.ts`.
 - Keep the diff to `src/hub.ts`, `src/webui/page.ts`, `docs/architecture.md`, `tests/webui/hub.test.ts`, `tests/webui/page.test.ts` and `tests/orchestrator/poll.test.ts`. Reuse `src/kanban.ts`, `src/pid.ts` and `src/orchestrator/spawn.ts` helpers. Touch those source files only if a helper must be exported.
 
 # Notes
+## What changed
+- `src/hub.ts`: `POST /api/task-block` resolves the task like `/api/task-detail`, refuses a foreign Origin with 403, a non-JSON type with 415 and a body over 1 KiB with 413, then toggles the `user` hold. Block writes the hold and the queue state in one `updateAttrs` call before it stops the state's agent, so the integration liveness rule cannot advance the task to done. Unblock writes `blockedBy` only and pokes the daemon.
+- `src/webui/page.ts`: a static `#m-actions` row between `#m-attrs` and `#m-agent`, a red Block and a green Unblock button with the inline stop and play icons, and `toggleHold` posts `{action}` and re-polls the detail.
+- `docs/architecture.md`: the dashboard is no longer called read-only, and one sentence names the block control.
+- Tests: the block endpoint part in `tests/webui/hub.test.ts`, the row and icon pins in `tests/webui/page.test.ts`, the liveness race part in `tests/orchestrator/poll.test.ts`.
+
+## Acceptance
+- pre-commit `git status --short`: 6 modified files, all in the Specs list.
+- pre-commit `grep -c 'read-only' docs/architecture.md`: 0 hits (exit 1), so the dashboard is no longer called read-only.
+- `node tests/webui/hub.test.ts` exit 0: 404, 400, 403, 415, 413, 409 on done and merging; `#42, #43` plus `user` on block; the refs survive the unblock; `.kanban/.poke` written; doing moves to to-do and the child pid is dead; to-do keeps its state and the splitter pid is dead.
+- `node tests/webui/page.test.ts` exit 0: `#m-actions` between `#m-attrs` and `#m-agent`, the red and green tinted rules, the left-aligned row, the `:empty` rule, both icons, no button for done or an unheld merging task, Unblock on a held task, and the POST with `{action}` as JSON.
+- `node tests/orchestrator/poll.test.ts` exit 0: the unblocked control advances a dead integration run to done, the blocked task stays in to-integration-test with its hold.
+- `node tests/orchestrator/hub.test.ts` exit 0: the caller suite of the changed hub module.
+- Substitution: the Specs `pnpm test` line runs as the scoped suites above, because the project rule forbids the aggregate script in a write run.
+- The live pass (button colors in both themes, the row in a real browser) is left to the reviewer: no DOM library or browser driver exists and no fixture serves the page to one, so the page pins are static.
+
+## Follow-up
+- `tests/webui/page.test.ts` moves its exact font-size pin from 11 to 12 for the new button rule.
+
+## Live test: block and unblock from the task detail dialog
+
+Merged tree: `/home/phamba/repos/se-llm-team/.worktrees/feat/357-task-block-button`
+Driver: `/tmp/357-block/driver.mjs`, wrapper: `/tmp/357-block/run.sh`, results: `/tmp/357-block/{merged,control}-*.json`
+Runs: 3 merged (merged-1, merged-2, merged-3) and 1 control (`git archive HEAD^` of the merged tree, in `/tmp/357-block-pre`). Every merged run agreed on every row.
+
+### Assumptions
+
+- Each run built a throwaway git repo under `/tmp/357-block-runs/` with one task file per state and started the merged hub in-process on `127.0.0.1` port 0, reading the bound port back. Requests are real HTTP `fetch` calls.
+- Fake agents are detached `node -e setInterval()` children, recorded with `writePid` so the stored discriminator matches `/proc`. Liveness read the `/proc/<pid>/stat` state, and `Z` or gone counts dead.
+- The page was checked in Chromium (Playwright) on the hub-served page: a card click opens the dialog, `reducedMotion: reduce` drops the entrance animation, and the mouse rests at `0, 0` before every style sample. The light palette was sampled in a default context, dark via `documentElement.dataset.theme` and again via `prefers-color-scheme` in a separate context.
+- The integration row ran on a board that holds only the integration fixture, so the poll sweep cannot start another lane. `poll(root, 60)` ran in-process.
+- Row 15 is a guard: both trees show `deadFiles=0`, because neither writes a `.dead` marker for a user block.
+- The dialog row and the two buttons were sampled, not clicked, in the table; the click path is in the supplementary note below.
+
+Not exercised: a real spawned sh-wrapper agent under the daemon (detached fake children stand in), a live daemon reacting to `.poke` (only the file write is measured), and the button's disabled window during an in-flight request (only the post-click state is measured).
+
+Supplementary user run, merged tree, not a table row: on a `doing` card, a click of the red Block button left the dialog showing Unblock on `m-action m-unblock`, enabled, and its attrs list showed the `state` cell `to-do` and the `blockedBy` cell `user`, the file at `state=to-do blockedBy=user`, the worktree kept, and the developer pid gone with its pid file gone. A click of Unblock returned the button to Block, kept `state=to-do`, and cleared `blockedBy`.
+
+| # | Claim | Expected | Control | Observed | Verdict |
+|---|---|---|---|---|---|
+| 1 | block on a doing task writes the hold, moves it to to-do, keeps the worktree | state=to-do blockedBy=user worktree=feat/405 | state=doing blockedBy=(empty) worktree=feat/405 | state=to-do blockedBy=user worktree=feat/405 | pass |
+| 2 | block on a doing task stops the live developer child | developer=dead pidfile=gone | developer=alive pidfile=present | developer=dead pidfile=gone | pass |
+| 3 | block on a to-do task with a live splitter keeps to-do and kills it | state=to-do splitter=dead | state=to-do splitter=alive | state=to-do splitter=dead | pass |
+| 4 | block keeps the other refs in order and appends user | state=to-review blockedBy=#42, #43, user | state=to-review blockedBy=#42, #43 | state=to-review blockedBy=#42, #43, user | pass |
+| 5 | unblock removes only the user hold and keeps the state | blockedBy=#42 state=to-do | blockedBy=USER, #42 state=to-do | blockedBy=#42 state=to-do | pass |
+| 6 | unblock writes .kanban/.poke | poke=yes | poke=no | poke=yes | pass |
+| 7 | block on integration-testing leaves to-integration-test and a poll does not advance it | state=to-integration-test integration=dead afterPoll=to-integration-test | state=integration-testing integration=alive afterPoll=integration-testing | state=to-integration-test integration=dead afterPoll=to-integration-test | pass |
+| 8 | block on a done task is refused | status=409 state=done | status=404 state=done | status=409 state=done | pass |
+| 9 | block on a merging task is refused | status=409 state=merging | status=404 state=merging | status=409 state=merging | pass |
+| 10 | an unknown num is 404 | status=404 error=unknown task | status=404 error=(empty) | status=404 error=unknown task | pass |
+| 11 | an invalid action is 400 | status=400 error=action must be block or unblock | status=404 error=(empty) | status=400 error=action must be block or unblock | pass |
+| 12 | a foreign Origin is 403 | status=403 error=cross-origin request refused | status=404 error=(empty) | status=403 error=cross-origin request refused | pass |
+| 13 | a non-JSON content type is 415 | status=415 error=content-type must be application/json | status=404 error=(empty) | status=415 error=content-type must be application/json | pass |
+| 14 | a body over 1 KiB is 413 | status=413 error=body too large | status=404 error=(empty) | status=413 error=body too large | pass |
+| 15 | a user block writes no .dead marker (guard) | deadFiles=0 | deadFiles=0 | deadFiles=0 | pass |
+| 16 | the dialog row sits between attrs and agent, left aligned | order=attrs,actions,agent display=flex justify=flex-start xDelta=0 | row=absent | order=attrs,actions,agent display=flex justify=flex-start xDelta=0 | pass |
+| 17 | a done task shows no block button | actionsLen=0 display=none | row=absent | actionsLen=0 display=none | pass |
+| 18 | a merging task without a hold shows no block button | actionsLen=0 display=none | row=absent | actionsLen=0 display=none | pass |
+| 19 | a doing task shows the red Block button with the stop icon (light) | text=Block icon=rect cls=m-action m-block color=rgb(229, 71, 79) border=rgb(230, 80, 80) bg=color(srgb 0.985294 0.897059 0.897059) | row=absent | text=Block icon=rect cls=m-action m-block color=rgb(229, 71, 79) border=rgb(230, 80, 80) bg=color(srgb 0.985294 0.897059 0.897059) | pass |
+| 20 | a held task shows the green Unblock button with the play icon (light) | text=Unblock icon=path cls=m-action m-unblock color=rgb(113, 151, 0) border=rgb(134, 179, 0) bg=color(srgb 0.928824 0.955294 0.85) | row=absent | text=Unblock icon=path cls=m-action m-unblock color=rgb(113, 151, 0) border=rgb(134, 179, 0) bg=color(srgb 0.928824 0.955294 0.85) | pass |
+| 21 | both buttons read in the dark theme (data-theme) | block[text=Block icon=rect cls=m-action m-block color=rgb(217, 87, 87) border=rgb(217, 87, 87) bg=color(srgb 0.194314 0.131176 0.161176)] unblock[text=Unblock icon=path cls=m-action m-unblock color=rgb(170, 217, 76) border=rgb(170, 217, 76) bg=color(srgb 0.166667 0.207647 0.154706)] | block[row=absent] unblock[row=absent] | block[text=Block icon=rect cls=m-action m-block color=rgb(217, 87, 87) border=rgb(217, 87, 87) bg=color(srgb 0.194314 0.131176 0.161176)] unblock[text=Unblock icon=path cls=m-action m-unblock color=rgb(170, 217, 76) border=rgb(170, 217, 76) bg=color(srgb 0.166667 0.207647 0.154706)] | pass |
+| 22 | both buttons read in the dark theme (media path) | block[text=Block icon=rect cls=m-action m-block color=rgb(217, 87, 87) border=rgb(217, 87, 87) bg=color(srgb 0.194314 0.131176 0.161176)] unblock[text=Unblock icon=path cls=m-action m-unblock color=rgb(170, 217, 76) border=rgb(170, 217, 76) bg=color(srgb 0.166667 0.207647 0.154706)] | block[row=absent] unblock[row=absent] | block[text=Block icon=rect cls=m-action m-block color=rgb(217, 87, 87) border=rgb(217, 87, 87) bg=color(srgb 0.194314 0.131176 0.161176)] unblock[text=Unblock icon=path cls=m-action m-unblock color=rgb(170, 217, 76) border=rgb(170, 217, 76) bg=color(srgb 0.166667 0.207647 0.154706)] | pass |
+| 23 | docs/architecture.md no longer says read-only and names the block control | readonly=0 blockSentence=yes | readonly=1 blockSentence=no | readonly=0 blockSentence=yes | pass |
+
+Red proof: the first wrapper pass marked rows 19 to 22 RED because the checker still carried a `(print)` placeholder in the expected cell. The cells were frozen from the spike print, the claim was kept, and the wrapper was rerun once. The final pass has no red row and exits 0. No run failed.
+
+Verdict: pass. Every row matches the Specs acceptance, and the control tree differs on every row but the labelled guard.
