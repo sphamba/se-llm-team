@@ -6,6 +6,7 @@ worktree: "test/221-claude-cli-smoke-run"
 issuer: "#216"
 complexity: "moderate"
 shortName: "claude-cli-smoke-run"
+blockedBy: "user"
 ---
 
 # Summary
