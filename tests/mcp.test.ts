@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -166,6 +166,22 @@ assert.ok(!calls[0].args.includes("--watch"), "no node --watch supervisor");
 assert.deepEqual(calls[0].args.slice(1, 3), ["--root", root]);
 assert.deepEqual(calls[0].args.slice(-2), ["--default-agent", "claude"], "the MCP server passes claude as the default agent");
 assert.match(started.text, /^Orchestrator starting \(pid 4242\)/);
+
+// a read-only .git refuses the start before any fork, .logs or .pids write
+(globalThis as any).__spawnCalls = [];
+try {
+	chmodSync(join(root, ".git"), 0o555);
+	const refused = await TOOLS.orchestrator_start.run({}, { cwd: root, defaultAgent: "claude" });
+	assert.equal(((globalThis as any).__spawnCalls as unknown[]).length, 0, "a read-only .git spawns no daemon");
+	assert.match(refused.text, /^Cannot start the orchestrator: \.git is not writable at .*\.git \(EACCES\)$/);
+	// the already-running reply stays first: an idempotent start reports it even with a read-only .git
+	writeFileSync(join(root, ".kanban", ".orchestrator.lock"), String(process.pid));
+	const already = await TOOLS.orchestrator_start.run({}, { cwd: root, defaultAgent: "claude" });
+	assert.match(already.text, /^Orchestrator already running \(pid \d+\)$/);
+	assert.equal(((globalThis as any).__spawnCalls as unknown[]).length, 0, "an already-running daemon is not spawned again");
+} finally {
+	chmodSync(join(root, ".git"), 0o755);
+}
 
 rmSync(root, { recursive: true, force: true });
 console.log("mcp.test.ts: all assertions passed");

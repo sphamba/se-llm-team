@@ -106,6 +106,32 @@ export function isLinkedWorktree(root: string): boolean {
 	}
 }
 
+// why a start must be refused before its first board write instead of failing deep in a sweep.
+// A real temp-file write, not access(W_OK), which lies on a read-only mount, for root, and for
+// a metadata-only permission check. Both git dirs come from git because root/.git is a file in
+// a linked worktree. Null when git cannot resolve them: a git-less root keeps its old behavior
+export function gitWritableError(root: string): string | null {
+	let dirs: string[];
+	try {
+		const rev = (arg: string): string =>
+			execFileSync("git", ["rev-parse", arg], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+		const abs = (out: string): string => (isAbsolute(out) ? out : join(root, out));
+		dirs = [...new Set([abs(rev("--absolute-git-dir")), abs(rev("--git-common-dir"))])];
+	} catch {
+		return null;
+	}
+	for (const dir of dirs) {
+		const probe = join(dir, `.orchestrator-write-probe-${process.pid}`);
+		try {
+			writeFileSync(probe, "");
+			unlinkSync(probe);
+		} catch (err) {
+			return `${dir} (${(err as NodeJS.ErrnoException).code ?? (err as Error).message})`;
+		}
+	}
+	return null;
+}
+
 export function taskFiles(root: string): string[] {
 	try {
 		return readdirSync(kanbanDir(root))

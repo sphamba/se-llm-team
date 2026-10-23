@@ -8,7 +8,7 @@ import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:f
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyseLog } from "./efficiency-analysis.ts";
-import { createTask, getTask, kanbanDir, listAll, listTasks, pmProcessedPath, resolveTaskFromCwd, setState, setWorktree, taskNum, updateTask, STATES, type Scope, type TaskState } from "./kanban.ts";
+import { createTask, getTask, gitWritableError, kanbanDir, listAll, listTasks, pmProcessedPath, resolveTaskFromCwd, setState, setWorktree, taskNum, updateTask, STATES, type Scope, type TaskState } from "./kanban.ts";
 import { pidAlive, procPgrp } from "./pid.ts";
 import { removeTask } from "./orchestrator.ts";
 import { loadConfig, resolveLlm } from "./orchestrator/config.ts";
@@ -233,7 +233,7 @@ export const TOOLS: Record<string, ToolDef> = {
 
 	orchestrator_start: {
 		description:
-			"Start the se-llm-team orchestrator daemon for this project. It watches .kanban/, spawns a Splitter agent for moderate or complex to-do tasks (the task stays in to-do while the Splitter decomposes it or declines; the Developer starts after the Splitter exits), Developer agents for the remaining to-do tasks, Reviewer agents for to-review tasks, one Merger agent for to-merge tasks, and Live-tester agents for to-live-test tasks on the merged commit, and polls agent liveness. Pipeline order: review -> merge -> live-test. When webUi.enabled is set in the global config (~/.se-llm-team/config.json) or the project root se-llm-team.json it also starts an in-process web dashboard for the board. Exits early if it already runs for this project.",
+			"Start the se-llm-team orchestrator daemon for this project. It watches .kanban/, spawns a Splitter agent for moderate or complex to-do tasks (the task stays in to-do while the Splitter decomposes it or declines; the Developer starts after the Splitter exits), Developer agents for the remaining to-do tasks, Reviewer agents for to-review tasks, one Merger agent for to-merge tasks, and Live-tester agents for to-live-test tasks on the merged commit, and polls agent liveness. Pipeline order: review -> merge -> live-test. When webUi.enabled is set in the global config (~/.se-llm-team/config.json) or the project root se-llm-team.json it also starts an in-process web dashboard for the board. Exits early if it already runs for this project, and refuses to start when the git directory is not writable.",
 		parameters: { type: "object", properties: {} },
 		async run(_params: Record<string, never>, ctx) {
 			const root = resolveRoot(ctx.cwd);
@@ -241,6 +241,8 @@ export const TOOLS: Record<string, ToolDef> = {
 			const pid = readPid(root);
 			// 000253: the daemon is a plain node process, so no supervisor check is needed
 			if (pid && pidAlive(pid)) return ok(`Orchestrator already running (pid ${pid})`);
+			const gitReason = gitWritableError(root);
+			if (gitReason) return ok(`Cannot start the orchestrator: .git is not writable at ${gitReason}`);
 			let log: number;
 			try {
 				for (const dir of [".logs", ".pids"]) mkdirSync(join(kanbanDir(root), dir), { recursive: true });

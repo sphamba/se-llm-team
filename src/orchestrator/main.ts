@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { kanbanDir, listAll, splitWorktreeRoot } from "../kanban.ts";
+import { gitWritableError, kanbanDir, listAll, splitWorktreeRoot } from "../kanban.ts";
 import { joinHub } from "../hub.ts";
 import { pidAlive } from "../pid.ts";
 import { loadWebUiConfig } from "../webui.ts";
@@ -83,6 +83,14 @@ export function main(argv: string[]): void {
 		process.exit(0);
 	};
 	reapIfTaskEnded();
+	// before loadConfig, the lock and every board write: a read-only git dir fails at the first
+	// worktree add or mirror commit deep in a sweep, long after agents already spawned
+	const gitReason = gitWritableError(root);
+	if (gitReason) {
+		process.stderr.write(`Cannot start the orchestrator: .git is not writable at ${gitReason}\n`);
+		process.exitCode = 1;
+		return;
+	}
 	const cfg = loadConfig(root, args.defaultAgent);
 	const pollMinutes = args.pollMinutes ?? cfg.pollMinutes;
 	const rescanSeconds = args.rescanSeconds ?? 10;
