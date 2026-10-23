@@ -156,7 +156,7 @@ assert.ok(logCss.includes("font-size: 0.9375rem") && !/font-size: 0\.(75|8125|87
 const sizeCounts = [...page.matchAll(/font-size: ([\d.]+)rem/g)].map((m) => m[1]);
 const gotSizes: Record<string, number> = {};
 for (const s of sizeCounts) gotSizes[s] = (gotSizes[s] ?? 0) + 1;
-assert.deepEqual(gotSizes, { "0.625": 1, "0.75": 5, "0.8125": 1, "0.875": 11, "0.9375": 4, "1.0625": 1, "1.125": 1 }, "every served font-size matches the rem mapping (12->0.75, 13->0.8125, 14->0.875, 15->0.9375, 17->1.0625, 18->1.125)");
+assert.deepEqual(gotSizes, { "0.625": 1, "0.75": 5, "0.8125": 1, "0.875": 12, "0.9375": 4, "1.0625": 1, "1.125": 1 }, "every served font-size matches the rem mapping (12->0.75, 13->0.8125, 14->0.875, 15->0.9375, 17->1.0625, 18->1.125)");
 // 204: mobile, zooming blocked and the root font size 15% smaller under 600px
 assert.ok(page.includes('<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">'), "the viewport meta blocks zooming on mobile");
 assert.ok(page.includes("@media (max-width: 600px) { html { font-size: 85%; } }"), "mobile screens render the root font size 15% smaller");
@@ -986,5 +986,39 @@ mkdirSync(join(root, ".kanban", ".logs"), { recursive: true });
 const logFile = join(root, ".kanban", ".logs", `${slug}.developer.log`);
 const logText = Array.from({ length: 350 }, () => "H".repeat(63) + "\n").join(""); // 64-byte lines: far under the old byte chunk, so the collapsed-line cap is what pages
 writeFileSync(logFile, logText);
+
+// the task detail block control: a static row between the attributes and the agent cards,
+// red to hold and green to release, with the two inline icons
+const atAttrs = page.indexOf('<div id="m-attrs"></div>');
+const atActions = page.indexOf('<div id="m-actions"></div>');
+const atAgent = page.indexOf('<div id="m-agent">');
+assert.ok(atAttrs >= 0 && atActions > atAttrs && atAgent > atActions, "#m-actions sits between #m-attrs and #m-agent");
+assert.ok(cssRule("#m-actions").includes("display: flex; justify-content: flex-start;"), "the block row is left aligned");
+assert.ok(cssRule("#m-actions:empty").includes("display: none"), "an empty block row leaves no gap");
+assert.ok(
+	cssRule(".m-block").includes("color: var(--error-text)") &&
+		cssRule(".m-block").includes("border: 1px solid var(--error)") &&
+		cssRule(".m-block").includes("background: color-mix(in srgb, var(--error) 15%, var(--panel))"),
+	"the block button is red tinted from the existing error variables",
+);
+assert.ok(
+	cssRule(".m-unblock").includes("color: var(--accent-done-text)") &&
+		cssRule(".m-unblock").includes("border: 1px solid var(--accent-done)") &&
+		cssRule(".m-unblock").includes("background: color-mix(in srgb, var(--accent-done) 15%, var(--panel))"),
+	"the unblock button is green tinted from the existing done variables",
+);
+assert.ok(page.includes('<rect x="1.5" y="1.5" width="9" height="9" rx="1.5" fill="currentColor"/>'), "the block button carries the stop icon");
+assert.ok(page.includes('<path d="M2.5 1.5v9l8-4.5z" fill="currentColor"/>'), "the unblock button carries the play icon");
+assert.ok(page.includes('if (t.state === "done") return "";'), "a done task offers no block button");
+assert.ok(page.includes('if (t.state === "merging") return "";'), "a merging task with no user hold offers no block button");
+assert.ok(page.includes('Unblock</button>'), "a held task shows Unblock");
+assert.ok(page.includes('"m-action m-block"'), "an unheld task shows Block");
+assert.ok(
+	page.includes('"/api/task-block?num=" + parseInt(modalFile.slice(0, 6), 10) + projectParam()'),
+	"the toggle posts to the block endpoint with the open task number",
+);
+assert.ok(page.includes("body: JSON.stringify({ action })") && page.includes('headers: { "content-type": "application/json" }'), "the toggle sends the action as JSON");
+assert.ok(page.includes('document.getElementById("m-actions").innerHTML = actionsHtml(t)'), "the head write redraws the block row from the task");
+assert.ok(page.includes("btn.disabled = false"), "a failed toggle re-enables the button");
 
 console.log("page.test.ts: all assertions passed");

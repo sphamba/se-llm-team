@@ -309,6 +309,12 @@ content height; the class drops at the transition end, and reduced motion keeps 
 #m-attrs { font-size: 0.875rem; color: var(--soft); margin-bottom: 12px; }
 #m-attrs div { padding: 3px 0; }
 #m-attrs span:not(.chip):not(.num-link) { display: inline-block; min-width: 80px; color: var(--faint); }
+#m-actions { display: flex; justify-content: flex-start; margin-bottom: 12px; }
+#m-actions:empty { display: none; }
+.m-action { display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; padding: 4px 12px; font-size: 0.875rem; font-family: inherit; cursor: pointer; }
+.m-action:disabled { opacity: 0.6; cursor: default; }
+.m-block { color: var(--error-text); border: 1px solid var(--error); background: color-mix(in srgb, var(--error) 15%, var(--panel)); }
+.m-unblock { color: var(--accent-done-text); border: 1px solid var(--accent-done); background: color-mix(in srgb, var(--accent-done) 15%, var(--panel)); }
 #m-body { font-size: 0.9375rem; line-height: 1.5; }
 #m-body h1, #m-body h2, #m-body h3 { font-size: 0.9375rem; margin: 12px 0 4px; }
 #m-body ul { margin: 4px 0; padding-left: 20px; }
@@ -352,6 +358,7 @@ line is the fallback for the dvh line (older mobile browsers), max-height none l
 <div id="modal" class="hidden"><div id="m-box">
 <div id="m-head"><h2 id="m-title"></h2><button id="m-close" onclick="closeModal()">Close</button></div>
 <div id="m-attrs"></div>
+<div id="m-actions"></div>
 <div id="m-agent"><svg id="agent-relations"></svg><div id="m-agent-btns"></div><div id="m-doctor"></div><div id="m-log-meta" class="hidden"></div><div id="m-log" class="hidden"><div id="m-log-text"></div></div></div>
 <div id="m-body"></div>
 </div></div>
@@ -545,6 +552,34 @@ function writeHead(t) {
 	document.getElementById("m-title").textContent = t.name;
 	document.getElementById("m-attrs").innerHTML = attrsHtml(t);
 	for (const a of document.querySelectorAll("#m-attrs .num-link")) a.onclick = () => openTask(a.dataset.task);
+	document.getElementById("m-actions").innerHTML = actionsHtml(t);
+}
+// the hold toggle, outside #m-attrs and #m-agent because the poll rebuilds both: a held task
+// offers Unblock, a done or unheld merging task offers nothing, and every other state Block
+function actionsHtml(t) {
+	if (t.state === "done") return "";
+	const held = String(t.blockedBy || "").split(",").some(p => p.trim().toLowerCase() === "user");
+	if (held) return '<button class="m-action m-unblock" onclick="toggleHold(this)" title="Remove the user hold">' +
+		'<svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 1.5v9l8-4.5z" fill="currentColor"/></svg>Unblock</button>';
+	if (t.state === "merging") return "";
+	return '<button class="m-action m-block" onclick="toggleHold(this)" title="Hold this task and stop its agent">' +
+		'<svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>Block</button>';
+}
+// the detail poll redraws the row from the file once the hold lands; a failure keeps the button
+// usable and names the error in the header's status line
+function toggleHold(btn) {
+	const action = btn.classList.contains("m-unblock") ? "unblock" : "block";
+	btn.disabled = true;
+	fetch("/api/task-block?num=" + parseInt(modalFile.slice(0, 6), 10) + projectParam(), {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ action })
+	}).then(r => r.json().then(b => r.ok ? b : Promise.reject(b)))
+		.then(() => pollDetail())
+		.catch(e => {
+			document.getElementById("updated").textContent = "block failed: " + ((e && e.error) || "request failed");
+			btn.disabled = false;
+		});
 }
 // the attrs rows, shared by openTask and the 5 s refresh of the open card
 function attrsHtml(t) {

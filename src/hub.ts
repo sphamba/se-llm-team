@@ -1,12 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isLinkedWorktree } from "./kanban.ts";
+import { getTask, isLinkedWorktree, kanbanDir, taskFiles, taskNum, taskSlug, updateAttrs } from "./kanban.ts";
 import type { StageFlags } from "./orchestrator/config.ts";
-import { pidAlive } from "./pid.ts";
+import { readMergerSlug } from "./orchestrator/spawn.ts";
+import { agentPidName, clearPid, killTree, pidAlive, pidEntry } from "./pid.ts";
 import * as webui from "./webui.ts";
 
 // Hub backend: daemons register on spawn, the hub is elected by a lock race, the registry is
@@ -155,8 +156,8 @@ function releaseHubLock(): void {
 // 0.0.0.0 and :: are bind addresses, not dial addresses: self-requests go to the loopback
 const dialHost = (host: string) => (host === "0.0.0.0" || host === "::" || host === "" ? "127.0.0.1" : host);
 
-const json = (res: ServerResponse, body: unknown): void => {
-	res.writeHead(200, { "content-type": "application/json; charset=utf-8", connection: "close" });
+const json = (res: ServerResponse, body: unknown, status = 200): void => {
+	res.writeHead(status, { "content-type": "application/json; charset=utf-8", connection: "close" });
 	res.end(JSON.stringify(body));
 };
 
@@ -167,6 +168,123 @@ const readBody = (req: IncomingMessage): Promise<string> =>
 		req.on("end", () => resolve(data));
 		req.on("error", reject);
 	});
+
+// The user hold the task dialog toggles. A block backs a working state up to its own queue
+// state and stops that state's agent; every other allowed state keeps its state. The integration
+// lane is project-wide, so only the task its slug file names owns that pid.
+const USER_HOLD = "user";
+const BLOCK_STATE: Record<string, string> = {
+	doing: "to-do",
+	reviewing: "to-review",
+	"live-testing": "to-live-test",
+	"integration-testing": "to-integration-test",
+};
+const BLOCK_ROLE: Record<string, string> = {
+	"to-do": "splitter",
+	doing: "developer",
+	reviewing: "reviewer",
+	"live-testing": "live-tester",
+};
+const BLOCK_BODY_CAP = 1024;
+
+const withoutUserHold = (blockedBy: string): string[] =>
+	String(blockedBy || "")
+		.split(",")
+		.map((part) => part.trim())
+		.filter((part) => part && part.toLowerCase() !== USER_HOLD);
+
+// stop the process an agent name owns: a stale pid whose discriminator no longer matches is left
+// alone, a live one takes its whole process group down and loses its pid file
+function stopAgent(root: string, name: string, log?: (message: string) => void): void {
+	const { pid, disc } = pidEntry(root, name);
+	if (!pid || !pidAlive(pid, disc)) return;
+	if (!killTree(pid)) log?.(`task-block: kill of ${name} (pid ${pid}) failed`);
+	clearPid(root, name);
+}
+
+// the daemon re-evaluates at once, the same rm+create as orchestrator_poke, so fs.watch fires
+function pokeDaemon(root: string): void {
+	try {
+		const poke = join(kanbanDir(root), ".poke");
+		try {
+			unlinkSync(poke);
+		} catch {
+			/* first poke */
+		}
+		closeSync(openSync(poke, "a"));
+	} catch {
+		/* no board yet */
+	}
+}
+
+// the body read stops at the cap too, so a chunked upload cannot slip past a missing length
+const readCapped = (req: IncomingMessage): Promise<string | null> =>
+	new Promise((resolve) => {
+		let data = "";
+		req.on("data", (chunk) => {
+			data += chunk;
+			if (data.length > BLOCK_BODY_CAP) resolve(null);
+		});
+		req.on("end", () => resolve(data));
+		req.on("error", () => resolve(null));
+	});
+
+async function taskBlock(
+	opts: HubOptions,
+	entries: Map<string, HubEntry>,
+	url: URL,
+	req: IncomingMessage,
+	res: ServerResponse,
+): Promise<void> {
+	const fail = (status: number, error: string): void => json(res, { error }, status);
+	// same-origin only: a present Origin must name this host, and the UI's own fetch sends none
+	const origin = req.headers.origin;
+	if (origin) {
+		let host = "";
+		try {
+			host = new URL(origin).host;
+		} catch {
+			/* malformed origin: refused below */
+		}
+		if (host !== req.headers.host) return fail(403, "cross-origin request refused");
+	}
+	if (String(req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase() !== "application/json")
+		return fail(415, "content-type must be application/json");
+	if (Number(req.headers["content-length"] ?? 0) > BLOCK_BODY_CAP) return fail(413, "body too large");
+	const raw = await readCapped(req);
+	if (raw === null || raw.length > BLOCK_BODY_CAP) return fail(413, "body too large");
+	let body: any;
+	try {
+		body = JSON.parse(raw);
+	} catch {
+		return fail(400, "invalid JSON");
+	}
+	const action = body?.action;
+	if (action !== "block" && action !== "unblock") return fail(400, "action must be block or unblock");
+	const entry = resolveEntry(entries, url.searchParams.get("project") ?? opts.root);
+	const num = Number(url.searchParams.get("num"));
+	const file = entry && Number.isInteger(num) ? taskFiles(entry.root).find((f) => taskNum(f) === num) : undefined;
+	const task = entry && file ? getTask(entry.root, file) : undefined;
+	if (!entry || !task) return fail(404, "unknown task");
+	const refs = withoutUserHold(task.blockedBy);
+	if (action === "unblock") {
+		updateAttrs(entry.root, task, { blockedBy: refs.join(", ") });
+		pokeDaemon(entry.root);
+		return json(res, { ok: true });
+	}
+	if (task.state === "done" || task.state === "merging") return fail(409, `cannot block a ${task.state} task`);
+	// one task write: the hold and the queue state land together, before any kill, so the
+	// integration lane's liveness rule cannot advance the task to done in between
+	const blockedBy = [...refs, USER_HOLD].join(", ");
+	const next = BLOCK_STATE[task.state];
+	updateAttrs(entry.root, task, next ? { blockedBy, state: next } : { blockedBy });
+	const role = BLOCK_ROLE[task.state];
+	const slug = taskSlug(task.file);
+	if (role) stopAgent(entry.root, agentPidName(role, slug), opts.log);
+	if (task.state === "integration-testing" && readMergerSlug(entry.root, "integration-tester") === slug)
+		stopAgent(entry.root, "integration-tester", opts.log);
+	json(res, { ok: true });
+}
 
 // project selects by root (the tab identity); a bare name still finds its entry when unique, so
 // name-only clients keep working. With duplicate names a bare name is ambiguous and answers none
@@ -248,6 +366,9 @@ async function route(
 			const files = (url.searchParams.get("files") ?? "").split(",").filter(Boolean);
 			json(res, await webui.cardStatsPayload(entry.root, files));
 		}
+	} else if (req.method === "POST" && path === "/api/task-block") {
+		// the detail dialog's hold toggle: one task write, then the agent stop
+		await taskBlock(opts, entries, url, req, res);
 	} else if (req.method === "GET" && path === "/api/agent-log") {
 		const entry = resolveEntry(entries, project);
 		const payload = entry ? await webui.agentLogPayload(entry.root, url.searchParams) : null;

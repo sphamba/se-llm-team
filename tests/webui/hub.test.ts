@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
-import { createTask, setState } from "../../src/kanban.ts";
+import { createTask, parseTask, setState, taskSlug, updateAttrs } from "../../src/kanban.ts";
 import { startHub } from "../../src/hub.ts";
+import { agentPidName, pidAlive, pidPath, writePid } from "../../src/pid.ts";
 import { loadWebUiConfig, taskHistory, taskPayload } from "../../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the payload module
 import { logStats, MAX_LOG_CACHES, statsCache, subagentLogs, subsCache } from "../../src/webui/payload.ts";
@@ -350,4 +351,97 @@ rmSync(bndRoot, { recursive: true, force: true });
 cleanup();
 rmSync(statsRoot, { recursive: true, force: true });
 rmSync(doneRoot, { recursive: true, force: true });
+
+// --- part: POST /api/task-block adds and removes the user hold, requeues the task and stops
+// its agent: the single task write lands before the kill ---
+const blockRoot = mkdtempSync(join(tmpdir(), "webui-block-"));
+// the file's first hub closed at ui.close(); the block part serves its own board
+const blockUi = await startHub({ name: "block-test", root: blockRoot, host: "localhost", port: 0 });
+assert.ok(blockUi, "the block fixture hub starts on port 0");
+const blockBase = `http://localhost:${blockUi.port}`;
+const blockUrl = (num: number) => `${blockBase}/api/task-block?num=${num}`;
+const blockReq = (num: number, body: unknown, headers: Record<string, string> = { "content-type": "application/json" }) =>
+	fetch(blockUrl(num), { method: "POST", headers, body: typeof body === "string" ? body : JSON.stringify(body) });
+const numOf = (file: string) => parseInt(file, 10);
+const seeded = (name: string, state: string) => {
+	const t = createTask(blockRoot, { name, summary: "Block smoke", specs: "n/a" });
+	setState(blockRoot, t, state as any);
+	return t.file;
+};
+const gone = async (pid: number) => {
+	for (let i = 0; i < 60 && pidAlive(pid); i++) await new Promise((r) => setTimeout(r, 50));
+	return !pidAlive(pid);
+};
+const doneFile = seeded("fix: done block", "done");
+const mergeFile = seeded("fix: merging block", "merging");
+const doingFile = seeded("fix: doing block", "doing");
+const todoFile = seeded("fix: to-do block", "to-do");
+const refsFile = seeded("fix: refs block", "to-review");
+updateAttrs(blockRoot, parseTask(blockRoot, refsFile), { blockedBy: "#42, #43" });
+const holdFile = seeded("fix: held block", "to-review");
+updateAttrs(blockRoot, parseTask(blockRoot, holdFile), { blockedBy: "#42, user" });
+
+assert.equal((await blockReq(9999, { action: "block" })).status, 404, "an unknown task number answers 404");
+assert.equal((await blockReq(numOf(doingFile), { action: "nope" })).status, 400, "an unknown action answers 400");
+assert.equal(
+	(await blockReq(numOf(doingFile), { action: "block" }, { "content-type": "application/json", origin: "http://evil.example" })).status,
+	403,
+	"a foreign Origin is rejected",
+);
+assert.equal((await blockReq(numOf(doingFile), "block", { "content-type": "text/plain" })).status, 415, "a non-JSON body is rejected");
+assert.equal((await blockReq(numOf(doingFile), { action: "block", pad: "x".repeat(2000) })).status, 413, "a body over 1 KiB is rejected");
+assert.equal((await blockReq(numOf(doneFile), { action: "block" })).status, 409, "a done task refuses a block");
+assert.equal((await blockReq(numOf(mergeFile), { action: "block" })).status, 409, "a merging task refuses a block");
+
+const refsBlock = await blockReq(numOf(refsFile), { action: "block" });
+assert.equal(refsBlock.status, 200, "a block on a to-review task answers 200");
+assert.equal((await refsBlock.json()).ok, true, "the block response carries ok");
+assert.equal(parseTask(blockRoot, refsFile).blockedBy, "#42, #43, user", "the block keeps every ref and appends the user token");
+assert.equal(parseTask(blockRoot, refsFile).state, "to-review", "a to-review block keeps the state");
+const refsUnblock = await blockReq(numOf(refsFile), { action: "unblock" });
+assert.equal(refsUnblock.status, 200, "an unblock answers 200");
+assert.equal(parseTask(blockRoot, refsFile).blockedBy, "#42, #43", "the unblock removes only the user token and keeps every other ref");
+assert.equal(parseTask(blockRoot, refsFile).state, "to-review", "the unblock keeps the state");
+assert.equal((await blockReq(numOf(holdFile), { action: "unblock" })).status, 200, "an unblock on a held task answers 200");
+assert.equal(parseTask(blockRoot, holdFile).blockedBy, "#42", "an unblock leaves the remaining ref");
+assert.equal(parseTask(blockRoot, holdFile).state, "to-review", "the held task keeps its state on unblock");
+assert.ok(existsSync(join(blockRoot, ".kanban", ".poke")), "the unblock pokes the daemon");
+
+const doingName = agentPidName("developer", taskSlug(doingFile));
+const devChild = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { detached: true, stdio: "ignore" });
+devChild.unref();
+writePid(blockRoot, doingName, devChild.pid!);
+try {
+	assert.equal((await blockReq(numOf(doingFile), { action: "block" })).status, 200, "a block on a doing task answers 200");
+	assert.equal(parseTask(blockRoot, doingFile).state, "to-do", "the block moves doing back to its to-do queue state");
+	assert.equal(parseTask(blockRoot, doingFile).blockedBy.trim().toLowerCase(), "user", "the block adds the user hold");
+	assert.ok(!existsSync(pidPath(blockRoot, doingName)), "the block clears the developer pid file");
+	assert.ok(await gone(devChild.pid!), "the block kills the developer process");
+} finally {
+	try {
+		devChild.kill("SIGKILL");
+	} catch {
+		/* already gone */
+	}
+}
+
+const todoName = agentPidName("splitter", taskSlug(todoFile));
+const splitChild = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { detached: true, stdio: "ignore" });
+splitChild.unref();
+writePid(blockRoot, todoName, splitChild.pid!);
+try {
+	assert.equal((await blockReq(numOf(todoFile), { action: "block" })).status, 200, "a block on a to-do task answers 200");
+	assert.equal(parseTask(blockRoot, todoFile).state, "to-do", "a to-do block keeps the state");
+	assert.ok(!existsSync(pidPath(blockRoot, todoName)), "the block clears the splitter pid file");
+	assert.ok(await gone(splitChild.pid!), "the block kills the splitter process");
+} finally {
+	try {
+		splitChild.kill("SIGKILL");
+	} catch {
+		/* already gone */
+	}
+}
+cleanup();
+blockUi.close();
+rmSync(blockRoot, { recursive: true, force: true });
 console.log("hub.test.ts: all assertions passed");
