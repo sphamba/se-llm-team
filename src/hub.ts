@@ -193,12 +193,12 @@ const withoutUserHold = (blockedBy: string): string[] =>
 		.map((part) => part.trim())
 		.filter((part) => part && part.toLowerCase() !== USER_HOLD);
 
-// stop the process an agent name owns: a stale pid whose discriminator no longer matches is left
-// alone, a live one takes its whole process group down and loses its pid file
+// stop the process an agent name owns: a live pid takes its whole process group down, a stale
+// one is not signalled, and either way the pid file goes
 function stopAgent(root: string, name: string, log?: (message: string) => void): void {
 	const { pid, disc } = pidEntry(root, name);
-	if (!pid || !pidAlive(pid, disc)) return;
-	if (!killTree(pid)) log?.(`task-block: kill of ${name} (pid ${pid}) failed`);
+	if (!pid) return;
+	if (pidAlive(pid, disc) && !killTree(pid)) log?.(`task-block: kill of ${name} (pid ${pid}) failed`);
 	clearPid(root, name);
 }
 
@@ -217,16 +217,25 @@ function pokeDaemon(root: string): void {
 	}
 }
 
-// the body read stops at the cap too, so a chunked upload cannot slip past a missing length
-const readCapped = (req: IncomingMessage): Promise<string | null> =>
+// the body read stops at the cap too, so a chunked upload cannot slip past a missing length:
+// the chunk that would pass the cap resolves null and every later chunk is drained, not stored
+export const readCapped = (req: IncomingMessage): Promise<string | null> =>
 	new Promise((resolve) => {
 		let data = "";
-		req.on("data", (chunk) => {
+		let settled = false;
+		const settle = (value: string | null) => {
+			if (settled) return;
+			settled = true;
+			data = "";
+			resolve(value);
+		};
+		req.on("data", (chunk: Buffer) => {
+			if (settled) return;
+			if (data.length + chunk.length > BLOCK_BODY_CAP) return settle(null);
 			data += chunk;
-			if (data.length > BLOCK_BODY_CAP) resolve(null);
 		});
-		req.on("end", () => resolve(data));
-		req.on("error", () => resolve(null));
+		req.on("end", () => settle(data));
+		req.on("error", () => settle(null));
 	});
 
 async function taskBlock(

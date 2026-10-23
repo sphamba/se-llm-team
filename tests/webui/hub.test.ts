@@ -4,9 +4,11 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFi
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { request as httpRequest } from "node:http";
+import { Readable } from "node:stream";
 import { gzipSync } from "node:zlib";
 import { createTask, parseTask, setState, taskSlug, updateAttrs } from "../../src/kanban.ts";
-import { startHub } from "../../src/hub.ts";
+import { readCapped, startHub } from "../../src/hub.ts";
 import { agentPidName, pidAlive, pidPath, writePid } from "../../src/pid.ts";
 import { loadWebUiConfig, taskHistory, taskPayload } from "../../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the payload module
@@ -441,6 +443,51 @@ try {
 		/* already gone */
 	}
 }
+// a dead pid on a doing task: the block clears the stale file and kills nothing
+const staleFile = seeded("fix: stale block", "doing");
+const staleName = agentPidName("developer", taskSlug(staleFile));
+const dead = spawn(process.execPath, ["-e", "0"], { stdio: "ignore" });
+await new Promise((r) => dead.on("exit", r));
+assert.ok(!pidAlive(dead.pid!), "the stale pid names a dead process");
+writePid(blockRoot, staleName, dead.pid!);
+assert.equal((await blockReq(numOf(staleFile), { action: "block" })).status, 200, "a block with a stale agent pid answers 200");
+assert.equal(parseTask(blockRoot, staleFile).state, "to-do", "the stale-pid block moves the task to its to-do queue state");
+assert.ok(!existsSync(pidPath(blockRoot, staleName)), "the block clears the stale pid file");
+
+// the reader stops converting chunks the moment the next one would pass the cap
+const stringified: number[] = [];
+const fakeChunk = (n: number) => ({
+	length: 600,
+	toString: () => {
+		stringified.push(n);
+		return "x".repeat(600);
+	},
+});
+const chunkStream = new Readable({ objectMode: true, read() {} });
+const capRead = readCapped(chunkStream as any);
+for (const n of [1, 2, 3, 4]) chunkStream.push(fakeChunk(n));
+chunkStream.push(null);
+assert.equal(await capRead, null, "a body over the cap reads as null");
+assert.deepEqual(stringified, [1], "the reader stops at the cap and stores no later chunk");
+
+// no content-length, so the chunked encoding is the only length on the wire
+const chunkedStatus = await new Promise<number>((resolve, reject) => {
+	let status = 0;
+	const req = httpRequest(
+		{ host: "localhost", port: blockUi.port, path: `/api/task-block?num=${numOf(staleFile)}`, method: "POST", headers: { "content-type": "application/json" } },
+		(res) => {
+			status = res.statusCode ?? 0;
+			res.resume();
+			res.on("end", () => resolve(status));
+			res.on("error", () => resolve(status));
+		},
+	);
+	req.on("error", (err) => (status ? resolve(status) : reject(err)));
+	req.write('{"action":"block","pad":"');
+	req.write("x".repeat(2000));
+	req.end();
+});
+assert.equal(chunkedStatus, 413, "a chunked body over 1 KiB answers 413");
 cleanup();
 blockUi.close();
 rmSync(blockRoot, { recursive: true, force: true });
