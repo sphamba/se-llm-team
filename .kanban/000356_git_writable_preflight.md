@@ -1,7 +1,7 @@
 ---
 name: "fix: refuse to spawn the orchestrator when .git is not writable"
 priority: "medium"
-state: "backlog"
+state: "done"
 worktree: ""
 issuer: "user"
 complexity: "simple"
@@ -64,3 +64,49 @@ shortName: "git-writable-preflight"
 - The daemon check runs after the worktree self-reap, so a finished worktree daemon still exits 0 instead of 1.
 
 # Notes
+## What changed
+- `src/kanban.ts`: `gitWritableError(root)` resolves `--absolute-git-dir` and `--git-common-dir`, dedupes them, and returns `<dir> (<code>)` when an empty probe file cannot be written and unlinked. Null for a writable repo or a root git cannot resolve.
+- `src/tools.ts`: `orchestrator_start` refuses after the already-running check and before the `.logs`/`.pids` mkdir/open. One description sentence added.
+- `src/orchestrator/main.ts`: refuses after `reapIfTaskEnded()` and before `loadConfig` and `acquireLock`, with stderr message and `process.exitCode = 1`.
+- `tests/kanban/git.test.ts`: main-checkout and linked-worktree refusal cases, both restored to `0o755` in `finally`.
+- `tests/mcp.test.ts`: read-only `.git` spawns nothing, message pinned, plus the already-running reply stays first under a read-only `.git`.
+- `tests/orchestrator/singleton.test.ts`: part C2, direct daemon start exits 1 and leaves no `.kanban` dir.
+
+## Acceptance
+- red before the source edit: `node tests/kanban/git.test.ts` exit=1 (missing export), `node tests/mcp.test.ts` exit=1 (spawn recorded), `node tests/orchestrator/singleton.test.ts` exit=1 (no exit within 10 s).
+- green after the edit: `tests/kanban/git.test.ts` exit=0, `tests/mcp.test.ts` exit=0, `tests/orchestrator/singleton.test.ts` exit=0.
+- caller suites green: `tests/tools.test.ts` exit=0, `tests/orchestrator/daemon.test.ts` exit=0, `tests/orchestrator/hub.test.ts` exit=0, `tests/orchestrator/worktree.test.ts` exit=0.
+- Substitution: the Specs `pnpm test` line ran as those suites, not the aggregate script (write run).
+- pre-commit `git diff --stat`: 6 files, 113 insertions, 8 deletions, no probe file and 0 leftover fixture daemons (`find`, anchored `pgrep`).
+- commit `fix: refuse an orchestrator start when the git dir is not writable`: `git show --stat --oneline HEAD` shows the same 6 files and `git status --short` is clean after it.
+
+## Live test: git-writable-preflight (merged d97d0ee)
+
+- Tree: `/home/phamba/repos/se-llm-team/.worktrees/fix/356-git-writable-preflight`
+- Driver: `/tmp/356-git-writable-preflight/driver.mjs`, wrapper: `/tmp/356-git-writable-preflight/run.sh`
+- Runs: merged 3 (labels merged-1, merged-2, merged-3), control 1 (tree `/tmp/356-git-writable-preflight-pre`)
+- Assumptions:
+  - Every fixture is a fresh temp repo (`git init -b main`, local `user.name`/`user.email`, `commit.gpgsign false`), `HOME` points at a fixture dir so no global config is read, and `SE_LLM_TEAM_NO_WEBUI=1`.
+  - The user-facing surface for `orchestrator_start` is the stdio MCP server (`node src/mcp.ts`, cwd = fixture); the pi extension calls the same `TOOLS.orchestrator_start` handler.
+  - uid 1000 (not root), so `chmod 0o555` on the git dir yields a real EACCES without a read-only mount.
+  - "no process started" = a `pgrep -af` scoped to the fixture root returns 0 and `.kanban`/`.kanban/.logs` are absent.
+  - The already-running stand-in is a live `sleep 30` pid in `.kanban/.orchestrator.lock`.
+  - Control cells carry per-run pids and fixture paths; the driver normalizes them to `pid N`, `$R` and `$T`.
+  - Rows 3, 4, 5, 8 are guards: both trees show the same value, as Specs expects (unchanged behaviour).
+  - No `*.test.ts` file and no suite was run; these are live runs of the merged code.
+- Not exercised: the pi extension host (`index.ts`); a `.git` that turns read-only mid-run (out of scope per Specs); the web UI (not part of this change).
+
+| # | Claim | Expected | Observed | Verdict | Control |
+| --- | --- | --- | --- | --- | --- |
+| 1 | read-only .git: orchestrator_start refuses and creates no .kanban | text=refusal kanban=absent logs=absent | text=refusal kanban=absent logs=absent | green | text=start kanban=present logs=present |
+| 2 | the refusal is the pinned message and starts no daemon process | msg=exact procs=0 | msg=exact procs=0 | green | msg="Orchestrator starting (pid N), log: $R/.kanban/.logs/orchestrator.lo" procs=1 |
+| 3 | already running still wins under a read-only .git (guard) | text=already procs=0 | text=already procs=0 | green | text=already procs=0 |
+| 4 | a writable main checkout starts as today (guard) | text=start lock=present procs=1 | text=start lock=present procs=1 | green | text=start lock=present procs=1 |
+| 5 | a writable linked worktree starts as today (guard) | text=start | text=start | green | text=start |
+| 6 | gitWritableError: null on a writable linked worktree, names the per-worktree dir when read-only | writable=null readonly=names-wt-dir | writable=null readonly=names-wt-dir | green | writable=noexport readonly=noexport |
+| 7 | a direct daemon start on a read-only .git exits 1 with the message and no .kanban | exit=1 msg=exact kanban=absent | exit=1 msg=exact kanban=absent | green | exit=alive msg="[$T] orchestrator started (root=$R, agent=pi, ba" kanban=present |
+| 8 | a direct daemon start on a writable repo stays alive as today (guard) | exit=alive lock=present | exit=alive lock=present | green | exit=alive lock=present |
+| 9 | the commit touches only the six allowed files: no README, docs or dependency change | files=src/kanban.ts,src/orchestrator/main.ts,src/tools.ts,tests/kanban/git.test.ts,tests/mcp.test.ts,tests/orchestrator/singleton.test.ts | files=src/kanban.ts,src/orchestrator/main.ts,src/tools.ts,tests/kanban/git.test.ts,tests/mcp.test.ts,tests/orchestrator/singleton.test.ts | green | files=(n/a: not a repo) |
+| 10 | the orchestrator_start tool description states the refusal | desc=present | desc=present | green | desc=absent |
+
+Verdict: green: 10/10 rows match the frozen expected cells across 3 merged runs
