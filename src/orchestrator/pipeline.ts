@@ -39,6 +39,16 @@ function runningCount(root: string): number {
 	return listAll(root).filter((task) => WORKING_CAP_STATES.has(task.state)).length;
 }
 
+// the later pipeline stage first, so a task closer to done never waits behind one that has not
+// started. Every other state shares one fallback rank: none of them spawns from the board order
+// loop, so their relative order does not matter, and a missing rank never yields NaN
+const STAGE_RANK: Record<string, number> = { "to-integration-test": 0, "to-live-test": 1, "to-merge": 2, "to-review": 3, "to-do": 4 };
+
+// one global board order: priority, then stage, then creation order (the name sort from
+// taskFiles, kept by the stable sort because a full tie returns 0)
+export const boardOrder = (a: Task, b: Task) =>
+	(PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) || (STAGE_RANK[a.state] ?? 5) - (STAGE_RANK[b.state] ?? 5);
+
 // the integration-test task the live test opens or extends: its own instruction section, then one
 // quoted entry per covered ref, both derived from the one covered array so they cannot disagree
 const INTEGRATION_HEAD = "Perform integration testing following the merge of";
@@ -353,7 +363,7 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 // the integration-test sweep: one project-wide run at a time, on the merged base branch, in the
 // root checkout (the tree the merger merges into) and with no worktree. The global
 // integration-tester pid is the single slot; the poll requeues a lane task whose run was
-// superseded. The loop snapshot is already priority-first, then creation order, so the highest
+// superseded. The loop snapshot is already in board order (priority, then stage), so the highest
 // priority waiting task takes the free slot
 function sweepToIntegrationTest(root: string, cfg: Config, task: Task): void {
 	// a held task keeps to-integration-test and leaves the single slot to the next waiting task
@@ -502,10 +512,8 @@ export function rescan(root: string, cfg: Config, force = false): void {
 			log(root, `error handling ${task.file} (create): ${err instanceof Error ? err.message : err}`);
 		}
 	}
-	// priority-first state pass: critical, high, medium, low, with creation order (the name
-	// sort from taskFiles) inside a tier. Array.prototype.sort is stable, so equal ranks keep
-	// that order without a second key
-	const ordered = [...tasks].sort((a, b) => (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4));
+	// priority-first state pass: priority, then the later pipeline stage, then creation order
+	const ordered = [...tasks].sort(boardOrder);
 	for (const task of ordered) {
 		try {
 			// a conflicted file parses bogus values (duplicate keys resolve last-wins, the merged-in
@@ -768,7 +776,9 @@ export function promoteBacklog(root: string, tasks: Task[], backlogIdleMinutes =
 	// the gate opened (or a forced sweep skipped it): the episode is over, the next deferral logs
 	deferredRoots.delete(root);
 	const promoted: Task[] = [];
-	for (const task of tasks) {
+	// the same global order as the state pass, so the higher priority promotes first. A task
+	// promoted here seats in the next sweep, because this pass runs after the state loop
+	for (const task of [...tasks].sort(boardOrder)) {
 		// conflicted files parse bogus state values: never promotable
 		if (task.conflicted || task.state !== "backlog") continue;
 		// unanswered open questions mean the task waits for the user: never promote it

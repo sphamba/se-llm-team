@@ -773,3 +773,99 @@ assert.deepEqual(promoteBacklog(rootBI, listAll(rootBI)).map((t) => t.file), [he
 assert.equal(parseTask(rootBI, heldBI.file).state, "to-do", "the released task reached to-do");
 cleanupAll(rootBI);
 console.log("orchestrator.test.ts: ... + user hold on a backlog task smoke passed");
+
+// --- part BJ (362): equal priority seats the later stage first. Cap 1 with one high to-review
+// and one high to-do, and the to-do file sorts first by name: the reviewer takes the slot, the
+// developer waits, and the to-do file keeps its state ---
+const rootBJ = fixture();
+cleaned.push(rootBJ);
+const homeBJ = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeBJ);
+mkdirSync(kanbanDir(rootBJ), { recursive: true });
+const savedHomeBJ = process.env.HOME;
+process.env.HOME = homeBJ;
+let cfgBJ: ReturnType<typeof loadConfig>;
+try {
+	cfgBJ = loadConfig(rootBJ);
+} finally {
+	process.env.HOME = savedHomeBJ;
+}
+cfgBJ.backlogIdleMinutes = 0;
+cfgBJ.maxParallel = 1;
+cfgBJ.agent = deadStub(rootBJ);
+const todoBJ = createTask(rootBJ, { name: "feat: high to do", priority: "high", complexity: "simple", summary: "Stage order smoke", specs: "n/a" });
+setState(rootBJ, todoBJ, "to-do");
+// moderate, so the reviewer spawn is not skipped by the simple cap
+const reviewBJ = createTask(rootBJ, { name: "feat: high to review", priority: "high", complexity: "moderate", summary: "Stage order smoke", specs: "n/a" });
+setState(rootBJ, reviewBJ, "to-review");
+assert.ok(todoBJ.file < reviewBJ.file, "precondition: the to-do file sorts first by name");
+rescan(rootBJ, cfgBJ);
+assert.equal(parseTask(rootBJ, reviewBJ.file).state, "reviewing", "the high to-review took the only slot");
+assert.ok(existsSync(pidPath(rootBJ, taskSlug(reviewBJ.file))), "the reviewer pid file exists");
+assert.equal(parseTask(rootBJ, todoBJ.file).state, "to-do", "the high to-do keeps its state at the cap");
+assert.ok(!existsSync(pidPath(rootBJ, taskSlug(todoBJ.file))), "the developer did not spawn at the cap");
+setState(rootBJ, reviewBJ, "done");
+rescan(rootBJ, cfgBJ);
+assert.equal(parseTask(rootBJ, todoBJ.file).state, "doing", "the to-do developer starts once the slot frees");
+assert.ok(existsSync(pidPath(rootBJ, taskSlug(todoBJ.file))), "the developer pid file exists");
+cleanupAll(rootBJ);
+console.log("orchestrator.test.ts: ... + stage order tie-break smoke passed");
+
+// --- part BK (362): priority dominates stage. Cap 1 with a critical to-do and a high
+// to-live-test whose branch is already merged: the developer takes the slot ---
+const rootBK = fixture();
+cleaned.push(rootBK);
+const homeBK = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeBK);
+mkdirSync(kanbanDir(rootBK), { recursive: true });
+const savedHomeBK = process.env.HOME;
+process.env.HOME = homeBK;
+let cfgBK: ReturnType<typeof loadConfig>;
+try {
+	cfgBK = loadConfig(rootBK);
+} finally {
+	process.env.HOME = savedHomeBK;
+}
+cfgBK.backlogIdleMinutes = 0;
+cfgBK.maxParallel = 1;
+cfgBK.agent = deadStub(rootBK);
+const liveBK = createTask(rootBK, { name: "feat: high live test", priority: "high", complexity: "moderate", summary: "Priority over stage smoke", specs: "n/a" });
+setState(rootBK, liveBK, "to-live-test");
+// an eligible live test runs on a branch already merged into the base: a branch at HEAD
+// qualifies, so only the cap can hold it back
+execSync("git branch merged-test", { cwd: rootBK, shell: "/bin/bash" });
+setWorktree(rootBK, liveBK, "merged-test");
+const criticalBK = createTask(rootBK, { name: "feat: critical to do", priority: "critical", complexity: "simple", summary: "Priority over stage smoke", specs: "n/a" });
+setState(rootBK, criticalBK, "to-do");
+rescan(rootBK, cfgBK);
+assert.equal(parseTask(rootBK, criticalBK.file).state, "doing", "the critical developer took the only slot");
+assert.ok(existsSync(pidPath(rootBK, taskSlug(criticalBK.file))), "the critical developer pid file exists");
+assert.equal(parseTask(rootBK, liveBK.file).state, "to-live-test", "the eligible live test waits at the cap");
+assert.ok(!existsSync(pidPath(rootBK, taskSlug(liveBK.file))), "the live-tester did not spawn at the cap");
+cleanupAll(rootBK);
+console.log("orchestrator.test.ts: ... + priority over stage smoke passed");
+
+// --- part BL (362): promotion follows the global order, so the higher priority promotes first
+// whatever the creation order ---
+const rootBL = fixture();
+cleaned.push(rootBL);
+mkdirSync(kanbanDir(rootBL), { recursive: true });
+const lowBL = createTask(rootBL, { name: "feat: low backlog", priority: "low", summary: "Promotion order smoke", specs: "n/a" });
+const highBL = createTask(rootBL, { name: "feat: high backlog", priority: "high", summary: "Promotion order smoke", specs: "n/a" });
+assert.deepEqual(promoteBacklog(rootBL, listAll(rootBL)).map((t) => t.file), [highBL.file, lowBL.file], "the higher priority promotes first");
+cleanupAll(rootBL);
+console.log("orchestrator.test.ts: ... + promotion order smoke passed");
+
+// --- part BM (362): the pure global order: five high tasks, one per schedulable state, created
+// in reverse stage order, come out integration-test, live-test, merge, review, to-do ---
+const rootBM = fixture();
+cleaned.push(rootBM);
+mkdirSync(kanbanDir(rootBM), { recursive: true });
+for (const state of ["to-do", "to-review", "to-merge", "to-live-test", "to-integration-test"] as const) {
+	const task = createTask(rootBM, { name: `feat: ${state.replaceAll("-", " ")}`, priority: "high", summary: "Board order smoke", specs: "n/a" });
+	setState(rootBM, task, state);
+}
+const { boardOrder } = await import("../../src/orchestrator/pipeline.ts");
+assert.deepEqual([...listAll(rootBM)].sort(boardOrder).map((t) => t.state), ["to-integration-test", "to-live-test", "to-merge", "to-review", "to-do"], "the global order runs later stage first");
+cleanupAll(rootBM);
+console.log("orchestrator.test.ts: ... + board order smoke passed");
