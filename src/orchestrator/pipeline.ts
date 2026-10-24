@@ -3,7 +3,7 @@ import { isAbsolute, join } from "node:path";
 import { isSelfWrite, kanbanDir, createTask, getTask, hasUserHold, listAll, PRIORITY_RANK, setState, setWorktree, taskFiles, taskNum, taskSlug, updateAttrs, updateTask, ROLE_NOTES_RE, type Task } from "../kanban.ts";
 import { agentAlive, agentPid, clearPid, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP, REVIEWER_RUN_CAP, type Config } from "./config.ts";
-import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, newestRunRole, readCounter } from "./log.ts";
+import { armedPath, bumpCounter, classifyRunLog, compactFinishedLogs, counterPath, log, newestRunLogPath, newestRunRole, readCounter } from "./log.ts";
 import { clearContextSymlinks, clearMergerSlug, readExitCode, spawnAgent, spawnRunAnalysis, writeMergerSlug } from "./spawn.ts";
 import { boardStatus, commitKanban, ensureWorktree, git, reconcileBoard } from "./board.ts";
 import { reportDone } from "./report.ts";
@@ -11,7 +11,7 @@ import { reportDone } from "./report.ts";
 // consumes the armed marker at the state the armed reviewer wrote itself (back to to-review,
 // or forward to to-merge on approval): a pid match counts one successful reviewer run; a
 // mismatch (died run: the poll clears the pidfile first, or a later developer spawn overwrote
-// it) only drops the marker
+// it) only drops the marker, and so does a run whose log ends in a terminal error
 function consumeReviewerRun(root: string, slug: string): void {
 	const path = armedPath(root, slug);
 	let armed = 0;
@@ -22,7 +22,7 @@ function consumeReviewerRun(root: string, slug: string): void {
 	}
 	rmSync(path);
 	const pid = agentPid(root, slug);
-	if (armed > 0 && armed === pid) bumpCounter(root, `${slug}.reviewer-runs`);
+	if (armed > 0 && armed === pid && !classifyRunLog(newestRunLogPath(root, slug, "reviewer"))) bumpCounter(root, `${slug}.reviewer-runs`);
 }
 // moderate and complex to-do tasks meet the Splitter first: the task stays in to-do while the
 // Splitter decomposes it (or declines), and the dead splitter pid file routes the fallback to

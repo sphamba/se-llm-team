@@ -29,7 +29,7 @@ The daemon watches `.kanban/` and rescans every 10 s. The `orchestrator_poke` to
 - **integration-testing**: the Integration-tester runs the full project test suite on the merged base branch in the root checkout, with no worktree. It is report-only: it reports defects and coverage gaps, and it never edits code, commits, or merges. Its run counts as one `maxParallel` slot.
 - **done**: the daemon removes the worktree and the merged branch. It commits the task file.
 
-A successful finish moves the developer to to-review. It moves the live-tester and the integration-tester to done. A merger returns the task to to-merge. The Reviewer sets its own state. A crash moves the task back one step. The integration lane is report-only, so its every end, a crash included, lands at done. A log that does not grow for `logStallMinutes` counts as a crash. After 5 respawns, the daemon waits `retryIdleMinutes` before the next spawn.
+A successful finish moves the developer to to-review. It moves the live-tester and the integration-tester to done. A merger returns the task to to-merge. The Reviewer sets its own state. A crash moves the task back one step. pi exits 0 when the final assistant response fails, so the daemon reads the run log too. A terminal error in that log counts as a crash and never as a successful review. The integration lane is report-only, so a crash there lands at done. A terminal error there returns the task to to-integration-test. A log that does not grow for `logStallMinutes` counts as a crash. After 5 respawns, the daemon waits `retryIdleMinutes` before the next spawn.
 
 A task file with conflict markers stays untouched. The daemon spawns no agent and writes nothing for it until the merger or the user resolves the conflict.
 

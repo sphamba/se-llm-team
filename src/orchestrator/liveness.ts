@@ -3,22 +3,25 @@ import { join } from "node:path";
 import { getTask, kanbanDir, listAll, setState, taskSlug, type Task, type TaskState } from "../kanban.ts";
 import { clearPid, killTree, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP } from "./config.ts";
-import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, logPath, newestRunRole, nextRunIndex, readCounter } from "./log.ts";
+import { armedPath, bumpCounter, classifyRunLog, compactFinishedLogs, counterPath, log, logPath, newestRunLogPath, newestRunRole, nextRunIndex, readCounter } from "./log.ts";
 import { clearContextSymlinks, clearExitFile, readExitCode, readMergerSlug, spawnRunAnalysis } from "./spawn.ts";
 import { dropDoneBlockers, promoteBacklog } from "./pipeline.ts";
 
 // the working states with an agent out: next is the one-state-back bounce target when the
-// agent dies, success is the state the orchestrator moves the task to on a successful finish
-// (exit 0), role is the agent role whose per-run log (.kanban/.logs/<slug>.<role>.<n>.log)
-// the stall check samples. The reviewer has no success move: it sets the state itself via
-// kanban_set_state, so the orchestrator leaves the task for the PM on its exit-0 finish.
-// The integration lane is report-only, so every end, a crash included, is a completion
-const WORKING_STATES: Partial<Record<TaskState, { next: TaskState; success: TaskState | null; role: string }>> = {
+// agent dies, failure is the bounce target of a run that ended in a terminal error (the same
+// crash path; only the integration lane differs, it retries instead of completing), success is
+// the state the orchestrator moves the task to on a successful finish (exit 0 with a clean run
+// log), role is the agent role whose per-run log (.kanban/.logs/<slug>.<role>.<n>.log) the
+// stall check samples and the terminal-error classifier reads. The reviewer has no success
+// move: it sets the state itself via kanban_set_state, so the orchestrator leaves the task for
+// the PM on its exit-0 finish. The integration lane is report-only, so a non-zero exit there is
+// still a completion; only a classified terminal error retries
+const WORKING_STATES: Partial<Record<TaskState, { next: TaskState; failure?: TaskState; success: TaskState | null; role: string }>> = {
 	doing: { next: "to-do", success: "to-review", role: "developer" },
 	reviewing: { next: "to-review", success: null, role: "reviewer" },
 	"live-testing": { next: "to-live-test", success: "done", role: "live-tester" },
 	merging: { next: "to-merge", success: "to-merge", role: "merger" },
-	"integration-testing": { next: "done", success: "done", role: "integration-tester" },
+	"integration-testing": { next: "done", failure: "to-integration-test", success: "done", role: "integration-tester" },
 };
 
 // the project-wide single-lane agents: one run at a time, one global pid/exit/slug trio under
@@ -162,25 +165,30 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 				}
 				continue;
 			}
-			// a dead or missing pid: the exit file decides between a successful finish and a crash
+			// a dead or missing pid: the exit file decides between a successful finish and a crash,
+			// but pi's JSON mode exits 0 on a terminal assistant error, so an exit-0 run is a success
+			// only when its run log shows no terminal error. The classifier runs before any state
+			// decision or counter update, so a failed run takes the crash path below
 			dropLogSamples(slug);
 			const hadPid = pid > 0;
 			const code = readExitCode(root, pidName);
+			const failedRun = code === 0 && working !== undefined && classifyRunLog(newestRunLogPath(root, slug, working.role));
 			// an armed reviewer's run just ended (this dead pid is the armed reviewer's): consume
 			// the marker here, so the pid-file clear below cannot lose the count before a sweep's
 			// consume runs (the approval lands the task in to-merge, where the poll is the first
-			// to see the run end). Counted on a successful end (exit 0) only, like the sweeps
+			// to see the run end). Counted on a successful end (exit 0 and a clean log) only, like
+			// the sweeps
 			try {
 				if (pid > 0 && parseInt(readFileSync(armedPath(root, slug), "utf8").trim(), 10) === pid) {
 					rmSync(armedPath(root, slug));
-					if (code === 0) bumpCounter(root, `${slug}.reviewer-runs`);
+					if (code === 0 && !failedRun) bumpCounter(root, `${slug}.reviewer-runs`);
 				}
 			} catch {
 				/* no armed marker for this task */
 			}
 			// the reviewer exception (exit 0, no success move) keeps the exit file: the next
 			// pass re-takes the exception path instead of crash-bouncing the now pid-less task
-			if (!(code === 0 && working && !working.success)) clearExitFile(root, pidName);
+			if (!(code === 0 && !failedRun && working && !working.success)) clearExitFile(root, pidName);
 			clearPid(root, pidName);
 			// the agent terminated (or its pid file is stale): remove its cwd context symlinks
 			clearContextSymlinks(root, task, { rootCwd: pidName === "integration-tester" });
@@ -202,7 +210,7 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 				}
 				continue;
 			}
-			if (code === 0) {
+			if (code === 0 && !failedRun) {
 				// successful finish: the pid files are cleared before the state move, so an
 				// interleaving sweep cannot spawn the task's next agent and lose its pid file
 				ended = true;
@@ -229,11 +237,20 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 				spawnRunAnalysis(root, slug, working.role);
 				continue;
 			}
-			// non-zero or missing exit code: a crash, today's dead-pid bounce. The bounce is
-			// unconditional: a frozen mid-flight task is worse than a bounced one
-			log(root, code === null ? `${slug}: agent pid=${pid} dead without state update, ${task.state} -> ${working.next}` : `${slug}: agent pid=${pid} exited ${code} without success, ${task.state} -> ${working.next}`);
+			// a classified terminal error, or a non-zero or missing exit code: a failed run, today's
+			// dead-pid bounce. The bounce is unconditional: a frozen mid-flight task is worse than
+			// a bounced one
+			const target = failedRun ? (working.failure ?? working.next) : working.next;
+			log(
+				root,
+				failedRun
+					? `${slug}: agent exited 0 after a terminal error, ${task.state} -> ${target}`
+					: code === null
+						? `${slug}: agent pid=${pid} dead without state update, ${task.state} -> ${target}`
+						: `${slug}: agent pid=${pid} exited ${code} without success, ${task.state} -> ${target}`,
+			);
 			ended = true;
-			bounceDead(root, task, working.next, pidName, pid, false);
+			bounceDead(root, task, target, pidName, pid, false);
 		} catch (err) {
 			log(root, `error polling ${task.file} (${task.state}): ${err instanceof Error ? err.message : err}`);
 		}
