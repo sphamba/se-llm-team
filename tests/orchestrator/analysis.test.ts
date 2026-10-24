@@ -57,8 +57,8 @@ const finishedRunAT2 = (slug: string, role: string) => {
 	writeFileSync(join(pidsAT2, `${role === "merger" ? "merger" : slug}.exit`), "0");
 	if (role === "merger") writeFileSync(join(pidsAT2, "merger.slug"), `${slug}\n`);
 };
-// one task per working state: doing (developer), reviewing (reviewer, success null left
-// for the PM), merging (merger), live-testing (live-tester)
+// one task per working state: doing (developer), reviewing (reviewer, which sets its own
+// state; a no-move exit 0 bounces to to-review), merging (merger), live-testing (live-tester)
 const rolesAT2: Array<{ role: string; state: "doing" | "reviewing" | "merging" | "live-testing" }> = [
 	{ role: "developer", state: "doing" },
 	{ role: "reviewer", state: "reviewing" },
@@ -119,11 +119,11 @@ try {
 		assert.ok(pidAlive(pid, rest.join(" ")), `the ${role} analysis runner is alive`);
 	}
 	assert.equal(orchLogAT2().split("spawned analysis pid=").length - 1, 4, "one analysis spawned per finished run");
-	// the exit-0 state moves happened before the spawn: the orchestrator's own moves, the
-	// reviewer exception sticky (exit file kept) and the reviewer left for the PM
+	// the exit-0 state moves happened before the spawn: the orchestrator's own moves, and the
+	// reviewer's no-move bounce to to-review
 	assert.equal(parseTask(rootAT2, taskFilesAT2.developer).state, "to-review", "the developer's exit 0 moved doing -> to-review");
-	assert.equal(parseTask(rootAT2, taskFilesAT2.reviewer).state, "reviewing", "the reviewer's exit 0 left the task for the PM");
-	assert.ok(existsSync(join(pidsAT2, `${slugsAT2.reviewer}.exit`)), "the reviewer exception keeps the exit file, so the next pass re-takes it");
+	assert.equal(parseTask(rootAT2, taskFilesAT2.reviewer).state, "to-review", "the reviewer's no-move exit 0 bounced it to to-review");
+	assert.ok(!existsSync(join(pidsAT2, `${slugsAT2.reviewer}.exit`)), "every end clears the exit file, the reviewer's included");
 	assert.equal(parseTask(rootAT2, taskFilesAT2.merger).state, "to-merge", "the merger's exit 0 kept merging -> to-merge");
 	assert.equal(parseTask(rootAT2, taskFilesAT2["live-tester"]).state, "done", "the live-tester's exit 0 moved live-testing -> done");
 	// wait for every detached analysis: the runner's exit file, the doctor stream and the report
@@ -146,13 +146,16 @@ try {
 		const report = readFileSync(files.report, "utf8");
 		assert.ok(report.includes("## Analysis") && report.includes("S: x"), `the ${role} report carries the doctor answer`);
 	}
-	// exactly once: the sticky reviewer exit file makes the second poll re-take the exception
-	// path, but the finished analysis is never re-fired (no new pid file). The second poll's
+	// exactly once: the finished analysis is never re-fired (no new pid file). One run ends on
+	// this pass, because the reviewer's bounce left no sticky exit file to re-take, and the
 	// sweep gzips the finished analysis's doctor log like any role log, content intact (000250)
+	const taskLateAT2 = createTask(rootAT2, { name: "feat: auto-run late developer", summary: "Auto-run analysis smoke", specs: "n/a" });
+	setState(rootAT2, taskLateAT2, "doing");
+	finishedRunAT2(taskSlug(taskLateAT2.file), "developer");
 	const reviewerFilesAT2 = analysisFilesAT2(`${slugsAT2.reviewer}.reviewer.0`);
 	const doctorMtimeAT2 = statSync(reviewerFilesAT2.doctor).mtimeMs;
 	poll(rootAT2, 5, Date.now(), 0);
-	assert.equal(parseTask(rootAT2, taskFilesAT2.reviewer).state, "reviewing", "the reviewer task still waits for the PM on the second poll");
+	assert.equal(parseTask(rootAT2, taskFilesAT2.reviewer).state, "to-review", "the bounced reviewer task stays in to-review on the second poll");
 	assert.ok(!existsSync(reviewerFilesAT2.pid), "the second poll spawned no new analysis for the reviewer run");
 	assert.ok(existsSync(`${reviewerFilesAT2.doctor}.gz`) && !existsSync(reviewerFilesAT2.doctor), "the second poll's sweep gzipped the finished analysis's doctor log");
 	assert.ok(gunzipSync(readFileSync(`${reviewerFilesAT2.doctor}.gz`)).toString().includes("Struggle: none"), "the gzipped doctor log keeps the stub's output");

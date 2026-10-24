@@ -13,9 +13,9 @@ import { dropDoneBlockers, promoteBacklog } from "./pipeline.ts";
 // the state the orchestrator moves the task to on a successful finish (exit 0 with a clean run
 // log), role is the agent role whose per-run log (.kanban/.logs/<slug>.<role>.<n>.log) the
 // stall check samples and the terminal-error classifier reads. The reviewer has no success
-// move: it sets the state itself via kanban_set_state, so the orchestrator leaves the task for
-// the PM on its exit-0 finish. The integration lane is report-only, so a non-zero exit there is
-// still a completion; only a classified terminal error retries
+// move: it sets the state itself via kanban_set_state, so an exit-0 run that left the task in
+// reviewing never moved it and bounces to next. The integration lane is report-only, so a
+// non-zero exit there is still a completion; only a classified terminal error retries
 const WORKING_STATES: Partial<Record<TaskState, { next: TaskState; failure?: TaskState; success: TaskState | null; role: string }>> = {
 	doing: { next: "to-do", success: "to-review", role: "developer" },
 	reviewing: { next: "to-review", success: null, role: "reviewer" },
@@ -176,19 +176,18 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 			// an armed reviewer's run just ended (this dead pid is the armed reviewer's): consume
 			// the marker here, so the pid-file clear below cannot lose the count before a sweep's
 			// consume runs (the approval lands the task in to-merge, where the poll is the first
-			// to see the run end). Counted on a successful end (exit 0 and a clean log) only, like
-			// the sweeps
+			// to see the run end). A run counts one pass only when its state move landed: an armed
+			// marker on an exit-0 run that left the task in reviewing never moved it
 			try {
 				if (pid > 0 && parseInt(readFileSync(armedPath(root, slug), "utf8").trim(), 10) === pid) {
 					rmSync(armedPath(root, slug));
-					if (code === 0 && !failedRun) bumpCounter(root, `${slug}.reviewer-runs`);
+					if (code === 0 && getTask(root, task.file)?.state !== "reviewing") bumpCounter(root, `${slug}.reviewer-runs`);
 				}
 			} catch {
 				/* no armed marker for this task */
 			}
-			// the reviewer exception (exit 0, no success move) keeps the exit file: the next
-			// pass re-takes the exception path instead of crash-bouncing the now pid-less task
-			if (!(code === 0 && !failedRun && working && !working.success)) clearExitFile(root, pidName);
+			// every end clears the exit file: no path leaves a stale exit code for the next pass
+			clearExitFile(root, pidName);
 			clearPid(root, pidName);
 			// the agent terminated (or its pid file is stale): remove its cwd context symlinks
 			clearContextSymlinks(root, task, { rootCwd: pidName === "integration-tester" });
@@ -223,17 +222,18 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 						setState(root, fresh, working.success);
 						log(root, `${slug}: agent exited 0, ${task.state} -> ${working.success}`);
 					}
-				} else {
+				} else if (getTask(root, task.file)?.state === "reviewing") {
 					// the reviewer sets the state itself; exit 0 with the task still in reviewing
-					// means its state move never landed: leave the task for the PM, no orchestrator
-					// move. The kept exit file makes the exception sticky, so the task waits here
-					// until the PM (or a fresh reviewer spawn, which clears the file) moves it
-					log(root, `${slug}: reviewer exited 0 with the task still in reviewing; left for the PM`);
+					// means its state move never landed, so the run failed and bounces to to-review
+					// like a crash. Its clean log is still analysed first, like any finished run
+					log(root, `${slug}: reviewer exited 0 with the task still in reviewing, reviewing -> to-review`);
+					spawnRunAnalysis(root, slug, working.role);
+					bounceDead(root, task, "to-review", pidName, pid, false);
+					continue;
 				}
 				clearDeadStreak(root, slug);
 				// every successful agent run gets its log analysed (analyst + doctor), detached so
-				// the poll never blocks on it; the spawn skips already-analysed runs itself, so the
-				// sticky reviewer exit file never re-fires it
+				// the poll never blocks on it; the spawn skips already-analysed runs itself
 				spawnRunAnalysis(root, slug, working.role);
 				continue;
 			}

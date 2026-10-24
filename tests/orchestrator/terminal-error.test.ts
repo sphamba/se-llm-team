@@ -110,13 +110,75 @@ const orchLog = (root: string) => {
 	assert.equal(parseTask(root, task.file).state, "to-review", "a terminal error with exit 0 bounces reviewing -> to-review");
 	assert.ok(existsSync(join(logs, `${slug}.reviewer.${n}.dead`)), "the bounced reviewer run carries its .dead marker");
 	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 0, "a failed reviewer run never bumps .reviewer-runs");
-	// the cap cannot force-advance through consumeReviewerRun either: the failed run is not
-	// counted, so the to-review sweep finds the counter below the cap and respawns instead
+	// the cap cannot force-advance through consumeReviewerRun either: a failed run that never
+	// moved the task leaves it in reviewing, so the poll bounces it and the marker is consumed
+	// without a count; the to-review sweep then finds no marker and respawns instead
+	setState(root, task, "reviewing");
 	endRun(root, slug, "reviewer", terminalLog());
 	writeFileSync(armedPath(root, slug), "999999");
+	poll(root, 5);
+	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 0, "a failed reviewer run never bumps .reviewer-runs");
 	rescan(root, loadConfig(root));
 	assert.notEqual(parseTask(root, task.file).state, "to-merge", "a reached cap of failed runs never force-advances the task");
 	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 0, "consumeReviewerRun counts no failed reviewer run");
+}
+
+// --- a reviewer that exits 0 without moving the task is a failed run: it bounces to to-review ---
+{
+	const { root, logs } = caseRoot();
+	const task = startTask(root, "reviewing", "simple");
+	const slug = taskSlug(task.file);
+	const n = endRun(root, slug, "reviewer", healthyLog());
+	writeFileSync(armedPath(root, slug), "999999");
+	poll(root, 5);
+	assert.equal(parseTask(root, task.file).state, "to-review", "a reviewer exit 0 with the task still in reviewing bounces to to-review");
+	assert.ok(existsSync(join(logs, `${slug}.reviewer.${n}.dead`)), "the no-move reviewer run carries its .dead marker");
+	assert.equal(readFileSync(join(logs, `${slug}.dead.count`), "utf8").trim(), "1", "the no-move bounce bumps the dead counter");
+	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 0, "a run that never left reviewing counts no pass");
+	assert.ok(!existsSync(exitFilePath(root, slug)), "every end clears the exit file");
+	assert.ok(
+		orchLog(root).includes(`${slug}: reviewer exited 0 with the task still in reviewing, reviewing -> to-review`),
+		"the no-move bounce logs the exit code and the unchanged state",
+	);
+	poll(root, 5);
+	assert.equal(parseTask(root, task.file).state, "to-review", "a second poll in to-review does not bounce again");
+	assert.equal(orchLog(root).split("reviewing -> to-review").length - 1, 1, "the bounce is logged once, not again on the next pass");
+	assert.ok(!orchLog(root).includes("agent pid=0 dead without state update"), "no spurious dead-pid bounce for the pid-less to-review task");
+}
+
+// --- a reviewer move that landed counts a pass even when the run then ends in a terminal error ---
+{
+	const { root, logs } = caseRoot();
+	const task = startTask(root, "to-merge", "simple");
+	const slug = taskSlug(task.file);
+	endRun(root, slug, "reviewer", terminalLog());
+	writeFileSync(armedPath(root, slug), "999999");
+	poll(root, 5);
+	assert.equal(parseTask(root, task.file).state, "to-merge", "a landed approval with a terminal error keeps to-merge");
+	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 1, "a landed approval counts one pass despite the terminal error");
+	assert.ok(!existsSync(join(logs, `${slug}.reviewer.0.dead`)), "a landed move writes no .dead marker");
+}
+{
+	const { root, logs } = caseRoot();
+	const task = startTask(root, "to-review", "simple");
+	const slug = taskSlug(task.file);
+	endRun(root, slug, "reviewer", healthyLog());
+	writeFileSync(armedPath(root, slug), "999999");
+	poll(root, 5);
+	assert.equal(parseTask(root, task.file).state, "to-review", "the reviewer's own move back to to-review stands");
+	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 1, "a reviewer move back to to-review counts one pass");
+	assert.ok(!existsSync(join(logs, `${slug}.reviewer.0.dead`)), "a landed self-move writes no .dead marker");
+}
+// the sweep counts the same landed move: the to-review consume raises the count to the cap
+{
+	const { root } = caseRoot();
+	const task = startTask(root, "to-review", "simple");
+	const slug = taskSlug(task.file);
+	endRun(root, slug, "reviewer", terminalLog());
+	writeFileSync(armedPath(root, slug), "999999");
+	rescan(root, loadConfig(root));
+	assert.equal(parseTask(root, task.file).state, "to-merge", "the sweep counts a landed reviewer move with a terminal error, so the cap advances");
+	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 0, "the forced advance resets the run counter");
 }
 
 // --- the cap still force-advances on counted successes (control for the case above) ---
@@ -310,12 +372,15 @@ const { classifyRunLog } = await import("../../src/orchestrator/log.ts");
 	assert.equal(classifyRunLog(root), false, "a directory is no terminal error");
 }
 {
-	// acceptance on the real runs: the failed developer run, and a clean live-tester run
+	// acceptance on the real runs: the failed 504 developer run, a clean live-tester run, and the
+	// 429 reviewer run of this task itself
 	const failed = join(HERE, "../.kanban/.logs/000321_integration_done_mirror.developer.0.log.gz");
 	const clean = join(HERE, "../.kanban/.logs/000321_integration_done_mirror.live-tester.0.log.gz");
-	if (existsSync(failed) && existsSync(clean)) {
+	const reviewer = join(HERE, "../.kanban/.logs/000359_terminal_error_not_success.reviewer.0.log.gz");
+	if (existsSync(failed) && existsSync(clean) && existsSync(reviewer)) {
 		assert.equal(classifyRunLog(failed), true, "the real 504 developer run classifies as a terminal error");
 		assert.equal(classifyRunLog(clean), false, "the real clean live-tester run classifies as no terminal error");
+		assert.equal(classifyRunLog(reviewer), true, "the real 429 reviewer run of this task classifies as a terminal error");
 	} else console.log("terminal-error.test.ts: real .kanban run logs absent, acceptance check skipped");
 }
 

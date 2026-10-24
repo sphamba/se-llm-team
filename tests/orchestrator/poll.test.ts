@@ -382,18 +382,24 @@ assert.equal(parseTask(rootAT, taskAT.file).state, "to-review");
 assert.ok(!existsSync(pidPath(rootAT, slugAT)) && !existsSync(exitFilePath(rootAT, slugAT)), "the success clears the pid and exit files");
 assert.equal(deadCountAT(), "0", "a completed run clears the dead-agent counter");
 
-// the reviewer exception: exit 0 with the task still in reviewing stays for the PM. The
-// exit file stays too, so every later pass re-takes the exception path instead of
-// crash-bouncing the now pid-less task; a fresh spawn clears it
+// a reviewer that exits 0 without moving the task is a failed run: the poll bounces it to
+// to-review under the crash rules, so reviewing never holds a slot with no live agent. The
+// exit file clears on every path, so the next pass reads no stale code
 setState(rootAT, taskAT, "reviewing");
+writeFileSync(join(kanbanDir(rootAT), ".logs", `${slugAT}.reviewer.0.log`), JSON.stringify({ type: "message_end", message: { role: "assistant", content: "review done" } }) + "\n");
 writeFileSync(exitFilePath(rootAT, slugAT), "0");
 poll(rootAT, 5);
-assert.ok(orchLogAT().includes(`${slugAT}: reviewer exited 0 with the task still in reviewing; left for the PM`), "the reviewer's exit 0 with the task still reviewing is logged");
-assert.equal(parseTask(rootAT, taskAT.file).state, "reviewing");
-assert.ok(existsSync(exitFilePath(rootAT, slugAT)), "the exception pass keeps the exit file");
+assert.ok(
+	orchLogAT().includes(`${slugAT}: reviewer exited 0 with the task still in reviewing, reviewing -> to-review`),
+	"the reviewer's exit 0 with the task still reviewing is a bounce, not a PM hand-off",
+);
+assert.equal(parseTask(rootAT, taskAT.file).state, "to-review");
+assert.ok(existsSync(join(kanbanDir(rootAT), ".logs", `${slugAT}.reviewer.0.dead`)), "the no-move run carries its .dead marker");
+assert.equal(deadCountAT(), "1", "the no-move bounce bumps the dead-agent counter");
+assert.ok(!existsSync(exitFilePath(rootAT, slugAT)), "the bounce clears the exit file");
 poll(rootAT, 5);
-assert.equal(parseTask(rootAT, taskAT.file).state, "reviewing", "the exception is sticky: no crash bounce on the next pass");
-assert.ok(!orchLogAT().includes("agent pid=0 dead without state update"), "no spurious dead-pid bounce for the pid-less reviewing task");
+assert.equal(parseTask(rootAT, taskAT.file).state, "to-review", "the second poll in to-review does not bounce again");
+assert.ok(!orchLogAT().includes("agent pid=0 dead without state update"), "no spurious dead-pid bounce for the pid-less to-review task");
 console.log("orchestrator.test.ts: ... + exit-code file smoke passed");
 
 // --- part: the block closes the integration lane's liveness race. The state write lands
