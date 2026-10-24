@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { getTask, kanbanDir, listAll, PRIORITY_RANK, splitFrontmatter, STATES, taskFiles, taskNum, taskSlug, type Task } from "../kanban.ts";
 import { agentAlive, agentPidName } from "../pid.ts";
-import { AGENT_ROLE, LOG_LINES, LOG_ROLES, openRun, renderLogChunk } from "./logpane.ts";
+import { AGENT_ROLE, LOG_LINES, LOG_ROLES, openRun, renderLogChunk, runText } from "./logpane.ts";
 
 // the served payloads: per-task board rows (taskPayload) and the chunked agent-log reader
 // (agentLogPayload) over run logs, subagent transcripts and per-file usage stats
@@ -437,6 +437,7 @@ export async function logStats(path: string): Promise<LogStats> {
 }
 
 const SCAN_WINDOW = 81920; // bytes per backward read in the collapsed-line scan
+const SNAP_MAX = 1 << 20; // the most bytes a window head may walk back: the same cap as HOLD_MAX
 
 // [start, end) raw bytes of a plain log, fewer on a mid-read shrink; the decompressed .gz buffer
 // arrives whole, so the scan slices it in memory
@@ -473,6 +474,45 @@ function lastBoundary(full: Buffer | null, target: string, size: number): number
 		if (lo === 0) return 0;
 		lo = Math.max(0, lo - SCAN_WINDOW);
 	}
+}
+
+// 000360: md renders each window on its own, so a head that lands inside a markdown line, or inside
+// a table, renders the first rows as paragraphs. The head walks back to its line start, and over a
+// table line to the header row, so the older page's tail (this same head) and the newer page's head
+// sit on one block boundary and a table renders whole in one page. Ceiling: a block over SNAP_MAX
+// keeps today's fragment paragraph; upgrade path: render the partial row with a marker the client
+// replaces in place when the row completes
+function snapHead(full: Buffer | null, target: string, head: number): number {
+	if (head === 0) return 0;
+	const lo = Math.max(0, head - SNAP_MAX);
+	const win = readBytes(full, target, lo, head);
+	const first = lo === 0 ? 0 : win.indexOf(0x0a) + 1; // the first whole record inside the cap
+	if (first === 0 && lo > 0) return head; // one record over the whole span: over the cap
+	const at: number[] = [];
+	const rec: (string | null)[] = [];
+	for (let s = first, i = first; i < win.length; i++) {
+		if (win[i] !== 0x0a) continue;
+		at.push(lo + s);
+		rec.push(runText(win.toString("utf8", s, i)));
+		s = i + 1;
+	}
+	// the span's markdown text, its record texts joined as renderLogChunk joins them, and where each
+	// record's text starts in it
+	let all = "";
+	const off = rec.map((t) => {
+		const o = all.length;
+		all += t ?? "";
+		return o;
+	});
+	// a head is a block start when the record above it carries no text (md flushes there), or when it
+	// opens a line and the line above it holds no table pipe
+	const blockStart = (o: number) => all[o - 1] === "\n" && !all.slice(all.lastIndexOf("\n", o - 2) + 1, o - 1).includes("|");
+	for (let k = rec.length; k >= 0; k--) {
+		if (k === 0 && lo > 0) return head; // the walk ran past the capped span
+		const o = k === rec.length ? all.length : off[k];
+		if (k === 0 || rec[k - 1] === null || blockStart(o)) return k === rec.length ? head : at[k];
+	}
+	return head;
 }
 
 // 000158: the byte offset that starts `count` collapsed lines before a record-boundary tail: a
@@ -732,7 +772,7 @@ export async function agentLogPayload(root: string, q: URLSearchParams): Promise
 	let head: number, tail: number;
 	if (q.get("before") === "1") {
 		tail = off ?? 0;
-		head = linesBack(full, target, tail, LOG_LINES);
+		head = snapHead(full, target, linesBack(full, target, tail, LOG_LINES));
 	} else {
 		let size = 0;
 		try {
@@ -747,7 +787,7 @@ export async function agentLogPayload(root: string, q: URLSearchParams): Promise
 			// 000158: init serves the last LOG_LINES collapsed lines; an unterminated tail record
 			// is not a line yet, so counting starts at the boundary below it
 			tail = lastBoundary(full, target, size);
-			head = linesBack(full, target, tail, LOG_LINES);
+			head = snapHead(full, target, linesBack(full, target, tail, LOG_LINES));
 		}
 	}
 	let next = tail;
@@ -807,7 +847,7 @@ export async function agentLogPayload(root: string, q: URLSearchParams): Promise
 			}
 			text = renderLogChunk(text);
 			if (text || head === 0 || !walk) break;
-			head = linesBack(full, target, head, LOG_LINES);
+			head = snapHead(full, target, linesBack(full, target, head, LOG_LINES));
 		}
 		tail = next;
 	} catch {

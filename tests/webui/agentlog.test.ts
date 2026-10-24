@@ -200,7 +200,7 @@ assert.ok((await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${splitL
 // 000299: a poll or init window whose last text record carries no newline holds that line's
 // records back instead of rendering a partial row; the tail reports the boundary before them, so
 // the next poll re-reads them and the line renders whole, exactly once (000084's rule, one level
-// down). A before=1 history page keeps the fragment: it renders as a paragraph, no open marker
+// down). A before=1 history page never lands inside a line: 000360 snaps its head to a block start
 const deltaRow = (t: string) => JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: t } }) + "\n";
 const tableHead = deltaRow("| a | b |\n| --- | --- |\n| 1 | 2 |\n");
 const tableCut = deltaRow("| 3 | 4");
@@ -216,10 +216,59 @@ const cutPoll = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${c
 assert.equal(cutPoll.text, "<p>| 3 | 4 |</p>", "the next poll renders the held line whole, exactly once");
 const cutAgain = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${cutPoll.tail}`)).json();
 assert.equal(cutAgain.text, "", "the held line is not served twice");
-const cutHist = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${(tableHead + tableCut).length}&before=1`)).json();
-assert.equal(cutHist.head, 0);
-assert.ok(cutHist.text.endsWith("<p>| 3 | 4</p>"), "a history page keeps the mid-line cut as a fragment paragraph");
-assert.ok(!cutHist.text.includes("data-open"), "the history page's table takes no open marker, the pane never absorbs the fragment");
+// 000360: md renders each window on its own, so a head inside a line or inside a table renders the
+// first rows as paragraphs. Every head snaps back to a block start (a line start, or the header row
+// above a table line), so the older page's tail (this same head) and the newer page's head sit on
+// one boundary and a table renders whole in one page
+const rowRec = (i: number) => deltaRow(`| ${i} | v${i} |\n`);
+const fillerRecs = (tag: string, n: number) => Array.from({ length: n }, (_, i) => deltaRow(`${tag}${i}\n`)).join("");
+const tableTop = deltaRow("| n | v |\n") + deltaRow("| --- | --- |\n");
+const cellsOf = (text: string) => (text.match(/<td[^>]*>/g) ?? []).length;
+const rowParagraph = (text: string) => /<p> *\|/.test(text);
+// the head lands between the two records of row 2, so the base cut splits one row across the pages
+const seamLog = fillerRecs("p", 40) + tableTop + rowRec(0) + rowRec(1) + deltaRow("| 2") + deltaRow(" | v2 |\n") + fillerRecs("q", 99);
+writeFileSync(logFile, seamLog);
+const seamInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.equal(seamInit.head, seamLog.indexOf(tableTop), "the head snaps back from the split row to the table's header row");
+assert.equal(cellsOf(seamInit.text), 6, "the table renders whole in one page: three rows, two cells each");
+assert.ok(!rowParagraph(seamInit.text), "no page renders a table row as a paragraph");
+const seamHist = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${seamInit.head}&before=1`)).json();
+assert.equal(seamHist.tail, seamInit.head, "the older page's tail is the newer page's snapped head: a record is served neither twice nor never");
+assert.ok(!rowParagraph(seamHist.text) && !seamHist.text.includes("<table>"), "the history page holds no row fragment and no half table");
+assert.ok(seamHist.atStart, "the history page reaches the start of the log");
+// the header row sits in the older page and the separator row in the newer one before the fix
+const hdrLog = fillerRecs("h", 3) + tableTop + rowRec(0) + rowRec(1) + rowRec(2) + fillerRecs("s", 96);
+writeFileSync(logFile, hdrLog);
+const hdrInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.equal(hdrInit.head, hdrLog.indexOf(tableTop), "a head on the separator row snaps back to the header row");
+assert.equal(cellsOf(hdrInit.text), 6, "the header, the separator and the three rows render as one table");
+assert.ok(hdrInit.text.includes("<thead>"), "the table keeps its header row");
+const hdrHist = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${hdrInit.head}&before=1`)).json();
+assert.ok(!hdrHist.text.includes("| n |"), "the header is served once, in the newer page");
+assert.equal(hdrHist.tail, hdrInit.head, "the older page's tail meets the newer page's head");
+// a history page that starts inside the table above it snaps its own head to that table's header row
+const twoLog = fillerRecs("u", 3) + tableTop + Array.from({ length: 60 }, (_, i) => rowRec(i)).join("") + fillerRecs("w", 20) + tableTop + Array.from({ length: 100 }, (_, i) => rowRec(100 + i)).join("") + fillerRecs("y", 10);
+writeFileSync(logFile, twoLog);
+const twoInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+const twoHist = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${twoInit.head}&before=1`)).json();
+assert.equal(cellsOf(twoInit.text), 200, "the newer page renders the second table whole");
+assert.equal(cellsOf(twoHist.text), 120, "the history page renders the table above it whole, sixty rows in two cells");
+assert.ok(!rowParagraph(twoHist.text) && !twoHist.text.includes("v100"), "the history page holds no row paragraph and no row of the newer table");
+// a table that spans three pages at the base head: every page renders complete rows, none as a paragraph
+const bigLog = fillerRecs("a", 60) + tableTop + Array.from({ length: 250 }, (_, i) => rowRec(i)).join("") + fillerRecs("b", 40);
+writeFileSync(logFile, bigLog);
+const bigInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+const bigHist = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${bigInit.head}&before=1`)).json();
+const bigHist2 = await (await fetch(`${base}/api/agent-log?file=${enc}&offset=${bigHist.head}&before=1`)).json();
+const bigPages = [bigInit, bigHist, bigHist2];
+assert.ok(!bigPages.some((p) => rowParagraph(p.text)), "no page of the three renders a row as a paragraph");
+assert.equal(bigPages.reduce((n, p) => n + cellsOf(p.text), 0), 500, "every row is rendered exactly once across the pages");
+assert.equal(bigInit.text.match(/<tr>/g)?.length, 251, "the page that holds the table renders its header row and all 250 rows");
+// a line over the 1 MiB snap cap keeps today's fragment paragraph, no open marker
+writeFileSync(logFile, fillerRecs("c", 3) + deltaRow("| 0 |" + "x".repeat(1 << 20)) + deltaRow("| 0 | tail |\n") + fillerRecs("d", 99));
+const capInit = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
+assert.ok(capInit.text.startsWith("<p>| 0 | tail |</p>"), "a head inside a line over the cap keeps the fragment paragraph");
+assert.ok(!capInit.text.includes("data-open"), "the fragment takes no open marker, the pane never absorbs it as a row");
 // a row still streaming keeps the hold across polls, not just the init window: every poll of the
 // open line reports the same offset, so no fragment row renders, and the closed line lands whole
 writeFileSync(logFile, tableHead + deltaRow("| 3 "));

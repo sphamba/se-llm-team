@@ -90,7 +90,7 @@ export const inline = (s) => s
 // 000299: the text a record adds to a chunk's pending markdown run, null when it adds none; every
 // content block must be text, so a record that also carries a tool call or a thinking block is
 // never swept into a held-back line
-function runText(line: string): string | null {
+export function runText(line: string): string | null {
 	let rec: Record<string, any>;
 	try {
 		rec = JSON.parse(line);
@@ -211,9 +211,8 @@ export function renderLogChunk(text: string): string {
 	lines.pop(); // split's last element is the trailing-newline sentinel or a byte-split partial record, not content
 	// 000299: a run of records whose text carries no newline yet ends mid-line, so it cannot be a
 	// table row: it leaves md()'s input and renders as one paragraph, and the table before it ends at
-	// its last complete row. Ceiling: a row split mid-row across a history page boundary still
-	// renders as two fragment paragraphs; upgrade path: line-aware page boundaries that carry the
-	// render state across pages.
+	// its last complete row. 000360 leaves the page boundaries to the server, which snaps every head
+	// to a block start, so a window never begins inside a line or inside a table.
 	const hold = openRun(lines);
 	const held = hold ? lines.splice(lines.length - hold, hold) : [];
 	const seenTools = new Set<string>();
