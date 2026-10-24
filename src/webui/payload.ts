@@ -794,10 +794,10 @@ export async function agentLogPayload(root: string, q: URLSearchParams): Promise
 	// the cap on a held-back mid-line run (000299): past it the fragment renders as a paragraph
 	const HOLD_MAX = 1 << 20;
 	// 000299: hold an open line back only while its run is alive, because only a live run can write
-	// the newline that closes it. Ceiling: liveness is per pid name (000337: the task slug, or the
-	// role for a project-wide lane), so a killed developer run polled while another run of the task
-	// is alive still waits; upgrade path: read the run's own .dead marker, or its newest-run index,
-	// the way agentHistory decides the live run
+	// the newline that closes it. Ceiling: liveness is per pid name (000337/000361: the task slug for
+	// the per-task roles, <slug>.splitter for the Splitter, the role for a project-wide lane), so a
+	// killed developer run polled while another run of the task is alive still waits; upgrade path:
+	// read the run's own .dead marker, or its newest-run index, the way agentHistory decides it
 	const alive = agentAlive(root, agentPidName(found.role, found.slug));
 	try {
 		const window = (start: number, end: number): [string, number] => {

@@ -89,8 +89,10 @@ export function pidEntry(root: string, name: string): { pid: number; disc: strin
 	}
 }
 
-// a lane runs once per project, so its pid file is named after the role, not the task
+// a lane runs once per project, so its pid file is named after the role, not the task; the
+// Splitter runs detached at the project root and keeps its task's slug in the name (000361)
 export function agentPidName(role: string | undefined, slug: string): string {
+	if (role === "splitter") return `${slug}.splitter`;
 	return role === "merger" || role === "integration-tester" ? role : slug;
 }
 

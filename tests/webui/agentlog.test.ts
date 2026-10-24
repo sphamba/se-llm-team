@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTask, getTask, setState } from "../../src/kanban.ts";
 import { startHub } from "../../src/hub.ts";
+import { agentPidName } from "../../src/pid.ts";
 import { agentLabel, agentLogPayload, fmtDur, fmtTokens, LOG_LINES, taskHistory, taskStats } from "../../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the logpane module
 import { LOG_ROLES } from "../../src/webui/logpane.ts";
@@ -582,6 +583,89 @@ assert.deepEqual(
 );
 assert.deepEqual(laneMg.agent, { role: "merger", alive: true, log: `${laneSlug}.merger.0` }, "the card's agent handle opens the live merger run");
 rmSync(laneRoot, { recursive: true, force: true });
+
+// 000361: the Splitter and the Merger hold their open line too. The Splitter spawns detached at the
+// project root under the composite pid name <slug>.splitter, the Merger under the project-wide
+// "merger", so the hold gate and agentHistory's live flag read the names the spawn writes. A to-do
+// task's stage is the Splitter, so the state-to-role map names it and its card spins
+const holdRoot = mkdtempSync(join(tmpdir(), "webui-hold-"));
+const holdTask = createTask(holdRoot, { name: "feat: hold the open line", summary: "s", specs: "s" });
+const holdSlug = holdTask.file.replace(/\.md$/, "");
+const holdLogs = join(holdRoot, ".kanban", ".logs");
+const holdPids = join(holdRoot, ".kanban", ".pids");
+mkdirSync(holdLogs, { recursive: true });
+mkdirSync(holdPids, { recursive: true });
+const holdDetail = () => taskHistory(holdRoot, parseInt(holdTask.file, 10))!;
+const holdRead = async (handle: string, offset?: number) => {
+	const q = new URLSearchParams({ file: handle });
+	if (offset != null) q.set("offset", String(offset));
+	return JSON.parse((await agentLogPayload(holdRoot, q))!);
+};
+const holdRow = (t: string) => JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: t } }) + "\n";
+const holdHead = holdRow("| a | b |\n| --- | --- |\n| 1 | 2 |\n");
+const holdCut = holdRow("| 3 | 4");
+// the four working-state roles keep their pid names untouched
+for (const role of ["developer", "reviewer", "live-tester"]) assert.equal(agentPidName(role, holdSlug), holdSlug, `${role} keeps its per-task pid name`);
+assert.equal(agentPidName("integration-tester", holdSlug), "integration-tester", "the integration-tester lane keeps its role name");
+assert.equal(agentPidName("merger", holdSlug), "merger", "the merger lane keeps its role name");
+assert.equal(agentPidName("splitter", holdSlug), `${holdSlug}.splitter`, "the splitter's read-side pid name matches its spawn name");
+// a live splitter run on a to-do task: the live flag spins its card, and the pane keeps polling
+setState(holdRoot, getTask(holdRoot, holdTask.file)!, "to-do");
+const splHoldLog = join(holdLogs, `${holdSlug}.splitter.0.log`);
+const splHandle = `${holdSlug}.splitter.0`;
+writeFileSync(splHoldLog, holdHead + holdRow("| 3 "));
+writeFileSync(join(holdPids, `${holdSlug}.splitter.pid`), String(process.pid));
+const holdSpl = await holdDetail();
+assert.deepEqual(
+	holdSpl.agents.find((a) => a.role === "splitter"),
+	{ role: "splitter", run: 0, alive: true, status: "live", handle: splHandle, tokens: null, duration: null },
+	"a live <slug>.splitter pid marks the to-do splitter run live, so its card spins and the pane keeps polling",
+);
+assert.deepEqual(holdSpl.agent, { role: "splitter", alive: true, log: splHandle }, "the to-do card's agent handle opens the live splitter run");
+const splInit = await holdRead(splHandle);
+assert.ok(splInit.text.includes('<div class="md-table-wrap" data-open="tbl">'), "the splitter's table renders with the open marker, so the held row can join it");
+assert.equal(splInit.tail, holdHead.length, "init holds the splitter's open row and points at its first record");
+writeFileSync(splHoldLog, holdHead + holdRow("| 3 ") + holdRow("| 4 "));
+const splHeld = await holdRead(splHandle, splInit.tail);
+assert.equal(splHeld.text, "", "a mid-row splitter poll holds the row, never a fragment");
+assert.equal(splHeld.tail, splInit.tail, "the held splitter poll reports the same offset, so nothing renders twice");
+writeFileSync(splHoldLog, holdHead + holdRow("| 3 ") + holdRow("| 4 ") + holdRow("|\n"));
+const splDone = await holdRead(splHandle, splHeld.tail);
+assert.equal(splDone.text, "<p>| 3 | 4 |</p>", "the splitter's row lands whole, exactly once, on the poll that closes it");
+assert.equal((await holdRead(splHandle, splDone.tail)).text, "", "the closed splitter row is not served a second time");
+// a live merger run: the project-wide "merger" pid name holds its open row the same way
+setState(holdRoot, getTask(holdRoot, holdTask.file)!, "merging");
+const mgHoldLog = join(holdLogs, `${holdSlug}.merger.0.log`);
+const mgHandle = `${holdSlug}.merger.0`;
+writeFileSync(mgHoldLog, holdHead + holdRow("| 3 "));
+writeFileSync(join(holdPids, "merger.pid"), String(process.pid));
+assert.deepEqual(
+	(await holdDetail()).agents.find((a) => a.role === "merger"),
+	{ role: "merger", run: 0, alive: true, status: "live", handle: mgHandle, tokens: null, duration: null },
+	"a live merger pid marks the merging task's merger run live",
+);
+const mgInit = await holdRead(mgHandle);
+assert.equal(mgInit.tail, holdHead.length, "init holds the merger's open row and points at its first record");
+writeFileSync(mgHoldLog, holdHead + holdRow("| 3 ") + holdRow("| 4 "));
+const mgHeld = await holdRead(mgHandle, mgInit.tail);
+assert.equal(mgHeld.text, "", "a mid-row merger poll holds the row, never a fragment");
+assert.equal(mgHeld.tail, mgInit.tail, "the held merger poll reports the same offset, so nothing renders twice");
+writeFileSync(mgHoldLog, holdHead + holdRow("| 3 ") + holdRow("| 4 ") + holdRow("|\n"));
+const mgDone = await holdRead(mgHandle, mgHeld.tail);
+assert.equal(mgDone.text, "<p>| 3 | 4 |</p>", "the merger's row lands whole, exactly once, on the poll that closes it");
+assert.equal((await holdRead(mgHandle, mgDone.tail)).text, "", "the closed merger row is not served a second time");
+// a dead run of either role never writes the newline that closes its line: no hold, the fragment
+rmSync(join(holdPids, "merger.pid"));
+writeFileSync(mgHoldLog, holdHead + holdCut);
+const mgDead = await holdRead(mgHandle);
+assert.ok(mgDead.text.endsWith("<p>| 3 | 4</p>"), "a finished merger's open line renders as a fragment paragraph");
+assert.ok(!mgDead.text.includes("data-open"), "the merger's fragment takes no open marker, the pane never absorbs it as a row");
+rmSync(join(holdPids, `${holdSlug}.splitter.pid`));
+writeFileSync(splHoldLog, holdHead + holdCut);
+const splDead = await holdRead(splHandle);
+assert.ok(splDead.text.endsWith("<p>| 3 | 4</p>"), "a finished splitter's open line renders as a fragment paragraph");
+assert.ok(!splDead.text.includes("data-open"), "the splitter's fragment takes no open marker either");
+rmSync(holdRoot, { recursive: true, force: true });
 
 // 000120 card stats: tokens render raw below 1000, kilo (42k), mega from a million (2.3M); duration
 // keeps one decimal below 10s then minutes; missing stats render empty
