@@ -106,7 +106,7 @@ html, body { height: 100%; }
 body { display: flex; flex-direction: column; margin: 0; background: var(--bg); color: var(--fg); font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
 /* 000147: buttons inherit the page font instead of the UA Arial default */
 button { font-family: inherit; }
-header { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 6px; background: var(--code-bg); }
+header { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 6px; }
 h1 { font-size: 1.125rem; margin: 0; }
 #theme { margin-left: auto; border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.875rem; }
 #theme:hover { background: var(--hover); }
