@@ -27,4 +27,5 @@ export {
 	taskStatsText,
 } from "./board.ts";
 export { agentLogPayload, cardStatsPayload, taskDetail, taskHistory, taskPayload } from "./payload.ts";
+export { CSS } from "./theme.ts";
 export { boardOf, DEFAULT_STAGES, loadWebUiConfig, mergeBoards, PAGE, refreshMs, tabNames, tabsHtml, type StageFlags, type WebUiConfig } from "./page.ts";

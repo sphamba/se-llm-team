@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask, getTask, setState } from "../../src/kanban.ts";
@@ -437,6 +437,12 @@ for (const [name, light, dark] of ACCENTS) {
 	}
 }
 assert.ok(!page.includes("light-dark("), "the accents use no light-dark() helper, both dark paths get their own block");
+// 363: the dark palette is written once in theme.ts and emitted twice into the served page
+const darkTokens = darkVars.slice(':root[data-theme="dark"] { '.length, -2);
+const themeSrc = readFileSync(new URL("../../src/webui/theme.ts", import.meta.url), "utf8");
+assert.equal(page.split(darkTokens).length - 1, 2, "the served page carries the dark token list twice: the explicit selector and the media-query fallback");
+assert.equal(themeSrc.split(darkTokens).length - 1, 1, "theme.ts holds the dark token list once and expands it at emit time");
+assert.equal(themeSrc.split("@media (prefers-color-scheme: dark)").length - 1, 1, "theme.ts writes the dark media query once");
 // 000240: the light hover is a near-opaque very light grey, so a hovered card stays clear
 // against the white panel; the dark hover keeps its opaque #1b1f29
 assert.ok(lightVars.includes("--hover: rgba(233, 237, 242, .95);"), `the light hover is the very light rgba(233, 237, 242, .95) (got ${lightVars.match(/--hover: [^;]+/)![0]})`);
