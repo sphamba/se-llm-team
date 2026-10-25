@@ -44,6 +44,33 @@ const CODE_ROOT = (() => {
 	}
 })();
 
+// 000372: the self-hosted faces, keyed by the exact basename the page's @font-face asks for.
+// The request text only selects a map entry, so an unknown or traversal-shaped name is a miss.
+const FONT_DIR = join(CODE_ROOT, "src/webui/fonts");
+const FONT_FILES: Record<string, string> = {
+	"space-grotesk-400.woff2": "space-grotesk-400.woff2",
+	"space-grotesk-500.woff2": "space-grotesk-500.woff2",
+	"space-grotesk-700.woff2": "space-grotesk-700.woff2",
+	"ibm-plex-mono-400.woff2": "ibm-plex-mono-400.woff2",
+	"ibm-plex-mono-500.woff2": "ibm-plex-mono-500.woff2",
+};
+const fontCache = new Map<string, Buffer>();
+
+function fontBytes(name: string): Buffer | undefined {
+	const file = FONT_FILES[name];
+	if (!file) return undefined;
+	let bytes = fontCache.get(file);
+	if (!bytes) {
+		try {
+			bytes = readFileSync(join(FONT_DIR, file));
+		} catch {
+			return undefined;
+		}
+		fontCache.set(file, bytes);
+	}
+	return bytes;
+}
+
 const REGISTRY_FILE = "hub.json";
 const LOCK_FILE = "hub.lock";
 const DEFAULT_HEALTH_MS = 5000;
@@ -327,6 +354,19 @@ async function route(
 		// no-cache: a browser reload re-fetches the page instead of serving a stale one
 		res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache", connection: "close" });
 		res.end(webui.PAGE);
+	} else if (req.method === "GET" && path.startsWith("/fonts/")) {
+		const bytes = fontBytes(path.slice("/fonts/".length));
+		if (!bytes) {
+			res.writeHead(404).end();
+		} else {
+			// immutable: the filename carries the face, so a changed file needs a new name
+			res.writeHead(200, {
+				"content-type": "font/woff2",
+				"cache-control": "public, max-age=31536000, immutable",
+				connection: "close",
+			});
+			res.end(bytes);
+		}
 	} else if (req.method === "GET" && path === "/api/hub") {
 		// 000165: the serving hub's identity, so a stale-code hub or a failover is visible at a glance
 		json(res, { pid: process.pid, root: CODE_ROOT, commit: currentCommit(CODE_ROOT) });
