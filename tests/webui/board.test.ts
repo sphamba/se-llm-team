@@ -130,6 +130,8 @@ assert.match(themeCss, /@media \(max-width: 1099px\) \{[^}]*#board \{[^}]*minmax
 assert.match(themeCss, /\.spine \{[^}]*grid-column: 1 \/ -1/, "the hairline spans every station as one grid item");
 assert.ok(!/\.st-head[^{]*\{[^}]*border-top/.test(themeCss), "the hairline is not a per-station top border");
 assert.match(themeCss, /\.station \.cards \{[^}]*overflow-y: auto/, "vertical spill scrolls inside each station");
+assert.match(themeCss, /\.c-top \{[^}]*flex-wrap: wrap/, "the top row wraps the live cell instead of clipping it at 150px");
+assert.match(themeCss, /\.c-meta \{[^}]*flex-wrap: wrap/, "the meta row wraps instead of clipping the labels at 150px");
 assert.match(themeCss, /#board \{[^}]*overflow-y: hidden/, "the board never scrolls the page vertically");
 assert.match(themeCss, /#board \{[^}]*overflow-x: auto/, "below 1100px the board scrolls horizontally on its own");
 assert.match(themeCss, /\.station\.live \.st-head::before \{[^}]*background: var\(--ac\)/, "a station with a running agent accents its tick");
@@ -156,13 +158,17 @@ assert.ok(page.includes(String(applyStages)), "the page ships the tested stage t
 const WORKING = ["doing", "reviewing", "live-testing", "merging", "integration-testing"];
 assert.ok(WORKING.every((st) => spinnerHtml(st).includes('<span class="spin">')), "every working state renders the spinner");
 assert.ok(STATES.filter((st) => !WORKING.includes(st)).every((st) => spinnerHtml(st) === ""), "no waiting or finished state renders one");
+// PAGE interpolates spinnerHtml as source, so the served copy must resolve with no module scope
+const servedSpinner = new Function(page.match(/function spinnerHtml\([\s\S]*?\n\}/)![0] + "; return spinnerHtml;")() as (st: string) => string;
+assert.equal(servedSpinner("doing"), '<span class="spin"></span>', "the served spinner source runs in the page scope (no module constant)");
+assert.equal(servedSpinner("to-do"), "", "the served spinner source returns empty for an idle state");
 
 // the card anatomy (000366): number, ruler and live cell on top, the name, the context line, the
 // run row, then the meta row; every optional row drops when empty
 const liveRun = { role: "developer", run: 0, alive: true, status: "live", handle: "h", tokens: 4242, duration: 1500 };
 const rich = cardBaseHtml({ file: "000047_fix_x.md", name: "a & b", priority: "high", summary: "the board is rebuilt", complexity: "complex", agents: [liveRun] }, "doing");
 assert.ok(rich.startsWith('<div class="c-top">') && rich.includes('<span class="num-link num" data-task="000047_fix_x.md">#47</span>'), "the top row leads with the task number as a link");
-assert.ok((rich.match(/<i class="on">/g) ?? []).length === 3 && rich.includes('class="ruler p-high"'), "the four-step ruler fills three steps for a high priority");
+assert.ok((rich.match(/<i class="on">/g) ?? []).length === 3 && rich.includes('class="ruler pr-high"'), "the four-step ruler fills three steps for a high priority");
 assert.ok(rich.includes('<span class="c-live"><span class="c-live-text"></span></span>'), "a live run gets the top-right live cell, filled only by the in-place pass");
 assert.ok(rich.includes('<div class="name">a &amp; b</div>'), "the name is escaped and carries no priority tint");
 assert.ok(rich.includes('<div class="ctx">the board is rebuilt</div>'), "an idle card shows its summary as the context line");

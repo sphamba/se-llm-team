@@ -98,8 +98,9 @@ card clicks pass through */
 creation and the page drops it on animationend, so a poll or a reorder never replays it */
 .card.enter { animation: cardIn var(--enter) ease-out; }
 @keyframes cardIn { from { opacity: 0; transform: translateY(3px); } }
-/* the top row: spinner, number, the held marker, the priority ruler, then the live cell pushed right */
-.c-top { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; }
+/* the top row: spinner, number, the held marker, the priority ruler, then the live cell pushed right;
+   it wraps so a narrow station never clips the live cell */
+.c-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.75rem; }
 .held { border: 1px dashed var(--dim); color: var(--dim); padding: 0 4px; font-size: 0.6875rem; font-family: ${MONO}; }
 .c-live { margin-left: auto; color: var(--ac); font-family: ${MONO}; font-size: 0.75rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ruler { display: inline-flex; gap: 2px; align-items: center; }
@@ -115,8 +116,8 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 /* the run row: a live run in the station accent, a finished run red and neutral about the card */
 .c-run { margin-top: 4px; font-size: 0.75rem; font-family: ${MONO}; color: var(--dim); }
 .c-run.dead { color: var(--error-text); }
-/* the meta row: the sub-state marker for a non-primary state, then the priority and complexity labels and the issuer at the right */
-.c-meta { display: flex; align-items: center; gap: 8px; margin-top: 5px; font-size: 0.75rem; font-family: ${MONO}; }
+/* the meta row: the sub-state marker for a non-primary state, then the priority and complexity labels and the issuer at the right; it wraps so the labels survive a narrow station */
+.c-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 5px; font-size: 0.75rem; font-family: ${MONO}; }
 .c-meta > span { background: none; padding: 0; border-radius: 0; }
 .c-meta .c-p { color: var(--text); }
 .c-meta .p-critical { color: var(--critical-fg); }

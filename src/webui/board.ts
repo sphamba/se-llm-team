@@ -168,10 +168,10 @@ export function sortStation(tasks: Task[]): Task[] {
 
 // the spinner marks a task the orchestrator is working on; a task that changes station changes this
 // markup, so its animation starts or stops with the state, and prefers-reduced-motion turns the CSS
-// animation off underneath
-const WORKING = ["doing", "reviewing", "live-testing", "merging", "integration-testing"];
+// animation off underneath. PAGE interpolates this source, so the state list stays inside the
+// function: a module-scope constant would be undefined in the client
 export function spinnerHtml(st: string) {
-	return WORKING.includes(st) ? '<span class="spin"></span>' : "";
+	return ["doing", "reviewing", "live-testing", "merging", "integration-testing"].includes(st) ? '<span class="spin"></span>' : "";
 }
 
 // #366 the four-step priority ruler: the filled steps count down from critical, the colour comes
@@ -180,7 +180,7 @@ export function priorityRuler(priority: string) {
 	const rank = PRIORITY_RANK[priority] ?? 4;
 	let bars = "";
 	for (let i = 0; i < 4; i++) bars += '<i class="' + (i < 4 - rank ? "on" : "") + '"></i>';
-	return '<span class="ruler p-' + esc(priority) + '" aria-hidden="true">' + bars + "</span>";
+	return '<span class="ruler pr-' + esc(priority) + '" aria-hidden="true">' + bars + "</span>";
 }
 
 // one card's markup; the live values (elapsed, tokens) stay out of it, so a poll never rewrites the
