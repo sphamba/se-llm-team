@@ -1,8 +1,9 @@
 import { closeSync, existsSync, openSync, readFileSync, readdirSync, readSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
-import { getTask, kanbanDir, listAll, PRIORITY_RANK, splitFrontmatter, STATES, taskFiles, taskNum, taskSlug, type Task } from "../kanban.ts";
+import { getTask, kanbanDir, listAll, splitFrontmatter, taskFiles, taskNum, taskSlug, type Task } from "../kanban.ts";
 import { agentAlive, agentPidName } from "../pid.ts";
+import { sortStation, STATIONS } from "./board.ts";
 import { AGENT_ROLE, LOG_LINES, LOG_ROLES, openRun, renderLogChunk, runText } from "./logpane.ts";
 
 // the served payloads: per-task board rows (taskPayload) and the chunked agent-log reader
@@ -648,23 +649,21 @@ function lightRow(root: string, t: Task) {
 	};
 }
 
-const VISIBLE_CARDS = 5; // the cards each column renders before "show more" (the client's VISIBLE)
+const VISIBLE_CARDS = 5; // the cards each station renders before "+N more" (the client's VISIBLE)
 
-// the files the board renders before "show more": the first five per column, the same sort
-// syncBoard runs (backlog priority-first, every other column newest-first)
+// the files the board renders before "+N more": the first five per station, in the same order
+// syncBoard sorts (a held task first, then priority, then newest update)
 function visibleCards(rows: ReturnType<typeof lightRow>[]): Set<string> {
 	const visible = new Set<string>();
-	for (const st of STATES) {
-		const inState = rows
-			.filter((r) => r.state === st)
-			.sort((a, b) => (st === "backlog" ? (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) : 0) || b.updated - a.updated);
-		for (const r of inState.slice(0, VISIBLE_CARDS)) visible.add(r.file);
+	for (const s of STATIONS) {
+		const inStation = sortStation(rows.filter((r) => s.states.includes(r.state)) as unknown as Task[]);
+		for (const r of inStation.slice(0, VISIBLE_CARDS)) visible.add(r.file);
 	}
 	return visible;
 }
 
 // one light row per task (000242 light, 000245 stats): no body, no doctor entries, no log parsing
-// except the visible subset's (the cards each column renders before "show more"), so a large board
+// except the visible subset's (the cards each station renders before "+N more"), so a large board
 // opens fast and the 5 s poll stays cheap; the heavy data loads per task through taskDetail
 export async function taskPayload(root: string) {
 	const tasks = listAll(root);
@@ -683,8 +682,8 @@ export async function taskPayload(root: string) {
 	return served;
 }
 
-// 000263: the batched lazy-stats endpoint: the client fetches the cards behind "show more" when
-// a column unfolds, so every requested on-board file answers with the same per-file agents
+// 000263: the batched lazy-stats endpoint: the client fetches the cards behind "+N more" when
+// a station unfolds, so every requested on-board file answers with the same per-file agents
 // taskPayload attaches to the visible rows; no cache of its own, cardAgents carries the done memo
 // and the incremental parse, and files not on the board are omitted
 export async function cardStatsPayload(root: string, files: string[]) {

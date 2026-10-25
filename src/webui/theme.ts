@@ -1,5 +1,7 @@
 // the served stylesheet and its palette, split out of PAGE so a redesign task edits one block
 
+import { STATIONS } from "./board.ts";
+
 // Space Grotesk carries the prose and the labels; IBM Plex Mono the numbers, the log and the code
 const SANS = `"Space Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
 const MONO = `"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace`;
@@ -54,41 +56,76 @@ h1 { font-size: 1.0625rem; font-weight: 500; margin: 0; }
 .tab { border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px 6px 0 0; padding: 4px 12px; font-size: 0.875rem; cursor: pointer; }
 .tab:hover { background: var(--raised); }
 .tab.active { border-color: var(--link); color: var(--link); }
-#board { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; padding: 10px 18px 18px; overflow-x: auto; align-items: flex-start; position: relative; }
+/* #366 the station spine: seven tracks, six even and done slightly wider; below 1100px the board alone scrolls horizontally with a 150px station floor, so the page never scrolls sideways (000247). The heads share one hairline grid item and each station body scrolls on its own */
+#board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)) minmax(0, 1.15fr); grid-template-rows: 1px minmax(0, 1fr); gap: 0 18px; padding: 10px 18px 18px; overflow-x: auto; overflow-y: hidden; position: relative; }
+@media (max-width: 1099px) { #board { grid-template-columns: repeat(6, minmax(150px, 1fr)) minmax(150px, 1.15fr); } }
+.spine { grid-column: 1 / -1; grid-row: 1; background: var(--hairline); }
+/* a disabled integration stage narrows its own track to a strip; below 1100px the floor still wins */
+#board.off-integration { grid-template-columns: repeat(5, minmax(0, 1fr)) 48px minmax(0, 1.15fr); }
+@media (max-width: 1099px) { #board.off-integration { grid-template-columns: repeat(5, minmax(150px, 1fr)) 48px minmax(150px, 1.15fr); } }
 /* relation lines: absolute in the relative board, so the overlay scrolls with the content; z-index 1
-paints them above the static .col/.pair containers and below the z-index-2 task cards, pointer-events
-none so the card clicks pass through */
+paints them above the station bodies and below the z-index-2 task cards, pointer-events none so the
+card clicks pass through */
 #relations { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; overflow: visible; }
 /* 000127: the low opacity keeps the lines a subtle hint behind the semi-transparent cards; hovering either connected card raises it (.relations-hot) */
 #relations path { fill: none; stroke: var(--dim); stroke-width: 1.5; stroke-opacity: .3; stroke-dasharray: 6 4; animation: dashflow 1s linear infinite; transition: stroke-opacity .15s ease; animation-direction: reverse; }
 #relations path.relations-hot { stroke-opacity: .8; }
 @keyframes dashflow { to { stroke-dashoffset: -10; } }
-/* 000047: the middle columns stack as groups, sized and gapped like the single columns */
-.pair { display: flex; flex-direction: column; gap: 10px; min-width: 300px; flex: 1 0 300px; }
-.col { background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px; border-top: 3px solid var(--ac); padding: 10px; min-width: 300px; flex: 1 0 300px; }
-/* 000096: as a .pair child the .col basis would act on the height axis and floor it at 300px */
-.pair .col { flex: 0 0 auto; }
-.col h2 { font-size: 0.8125rem; font-weight: 500; text-transform: uppercase; letter-spacing: .05em; margin: 0 0 10px; color: var(--dim); }
-/* a disabled stage fades the column chrome to 40%; a waiting integration card dims too, because the gate holds it there, while an in-flight integration card keeps full opacity */
-.col.off { background: color-mix(in srgb, var(--panel) 40%, transparent); border-color: color-mix(in srgb, var(--hairline) 40%, transparent); border-top-color: color-mix(in srgb, var(--ac) 40%, transparent); }
-.col.off h2, .col.off .empty, .col.off .toggle { opacity: .4; }
-.col.off.c-to-integration-test .card { opacity: .4; }
+/* #366 one station per phase: the head keeps the tick, the label and the count while the body scrolls; --ac comes from the station class at the end of this sheet */
+.station { grid-row: 2; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.station + .station { border-left: 1px solid var(--hairline); }
+.st-head { display: flex; align-items: baseline; gap: 8px; padding: 4px 0 10px; position: relative; flex: 0 0 auto; background: var(--canvas); z-index: 2; }
+.st-head h2 { flex: 1 1 auto; min-width: 0; font-size: 0.8125rem; font-weight: 500; text-transform: uppercase; letter-spacing: .05em; margin: 0; color: var(--dim); display: flex; align-items: center; gap: 6px; }
+/* the tick crosses the shared hairline; only a station with a running agent accents it and its label */
+.st-head::before { content: ""; position: absolute; left: 0; top: -9px; width: 1px; height: 18px; background: var(--hairline); }
+.station.live .st-head::before { background: var(--ac); box-shadow: 0 0 6px var(--ac); }
+.station.live .st-head h2 { color: var(--ac); }
+.station .cards { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
+/* a disabled stage dims its station but keeps the cards reachable */
+.station.dim .cards, .station.dim .count { opacity: .4; }
+/* a disabled integration stage is a narrow labeled strip with no cards and no count */
+.station.strip { border-left: 1px dashed var(--hairline); }
+.station.strip .cards, .station.strip .toggle, .station.strip .count { display: none; }
+.station.strip .st-head { flex-direction: column; align-items: center; }
+.station.strip .st-head h2 { writing-mode: vertical-rl; color: var(--faint); }
 .count { font-size: 2rem; font-weight: 500; font-family: ${MONO}; font-variant-numeric: tabular-nums; color: var(--dim); }
-/* 000124: positioned above the z-index-1 relation lines; the semi-transparent background lets a line passing under the card show through faintly (no --card var, --panel is the card's base color in both themes) */
-.card { position: relative; z-index: 2; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--hairline); border-left: 3px solid var(--ac); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
+/* #366 a card is a row, not a box: no border, no radius, no state tint, its group ends with a hairline. 000124: positioned above the z-index-1 relation lines; the semi-transparent background lets a line passing under the card show through faintly (no --card var, --panel is the card's base color in both themes) */
+.card { position: relative; z-index: 2; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 0; border-bottom: 1px solid var(--hairline); border-radius: 0; padding: 8px 2px 10px; cursor: pointer; }
 .card:hover { background: color-mix(in srgb, var(--raised) 85%, transparent); }
-/* 000320: a task held by the user blockedBy token: the 1px top, right and bottom border turns dashed
-at the relation lines' 6-on/4-off rhythm. A plain border-style: dashed cannot do 6/4, so the dashes
-paint on a pseudo-element, which .card:hover's background shorthand cannot wipe; the border colors go
-transparent so the size, the 3px left accent and the 6px radius stay (the negative insets reach the
-border box from the padding box an absolute child is placed in) */
-.card.user-hold { border-top-color: transparent; border-right-color: transparent; border-bottom-color: transparent; }
-.card.user-hold::after { content: ""; position: absolute; inset: -1px -1px -1px -3px; border-radius: 6px; pointer-events: none; background: repeating-linear-gradient(90deg, var(--hairline) 0 6px, transparent 6px 10px) left top / 100% 1px no-repeat, repeating-linear-gradient(90deg, var(--hairline) 0 6px, transparent 6px 10px) left bottom / 100% 1px no-repeat, repeating-linear-gradient(0deg, var(--hairline) 0 6px, transparent 6px 10px) right top / 1px 100% no-repeat; }
+/* 000320: a task held by the user blockedBy token pins to the top of its station and ends with its own rule; the inline held marker carries the dashed form */
+.card.user-hold { border-bottom-color: var(--dim); }
 /* 000191: genuinely new cards fade and rise in once at insertion; syncBoard adds .enter only at
 creation and the page drops it on animationend, so a poll or a reorder never replays it */
 .card.enter { animation: cardIn var(--enter) ease-out; }
 @keyframes cardIn { from { opacity: 0; transform: translateY(3px); } }
-.name { font-size: 0.9375rem; font-weight: 500; line-height: 1.35; margin-bottom: 6px; }
+/* the top row: spinner, number, the held marker, the priority ruler, then the live cell pushed right */
+.c-top { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; }
+.held { border: 1px dashed var(--dim); color: var(--dim); padding: 0 4px; font-size: 0.6875rem; font-family: ${MONO}; }
+.c-live { margin-left: auto; color: var(--ac); font-family: ${MONO}; font-size: 0.75rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ruler { display: inline-flex; gap: 2px; align-items: center; }
+.ruler i { display: block; width: 8px; height: 3px; background: var(--hairline); }
+.ruler i.on { background: currentColor; }
+.ruler.pr-critical { color: var(--critical-fg); }
+.ruler.pr-high { color: var(--high-fg); }
+.ruler.pr-medium { color: var(--medium-fg); }
+.ruler.pr-low { color: var(--low-fg); }
+.name { font-size: 0.9375rem; font-weight: 500; line-height: 1.35; margin: 4px 0 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* the idle card's summary: one dim line, the context the name cannot carry */
+.ctx { font-size: 0.75rem; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the run row: a live run in the station accent, a finished run red and neutral about the card */
+.c-run { margin-top: 4px; font-size: 0.75rem; font-family: ${MONO}; color: var(--dim); }
+.c-run.dead { color: var(--error-text); }
+/* the meta row: the sub-state marker for a non-primary state, then the priority and complexity labels and the issuer at the right */
+.c-meta { display: flex; align-items: center; gap: 8px; margin-top: 5px; font-size: 0.75rem; font-family: ${MONO}; }
+.c-meta > span { background: none; padding: 0; border-radius: 0; }
+.c-meta .c-p { color: var(--text); }
+.c-meta .p-critical { color: var(--critical-fg); }
+.c-meta .p-high { color: var(--high-fg); }
+.c-meta .p-medium { color: var(--medium-fg); }
+.c-meta .p-low { color: var(--low-fg); }
+.c-cx { color: var(--dim); }
+.c-issuer { margin-left: auto; color: var(--faint); }
+.sub-state { color: var(--dim); }
 .num { font-size: 0.75rem; font-family: ${MONO}; font-variant-numeric: tabular-nums; color: var(--dim); margin-right: 4px; }
 .num-link { color: var(--link); cursor: pointer; }
 .num-link:hover { text-decoration: underline; }
@@ -99,9 +136,9 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .chip.issuer { background: var(--code-bg); color: var(--dim); }
 .chip.cx { background: var(--code-bg); color: var(--dim); }
 .issued { color: var(--dim); }
-.card-stats { display: block; font-size: 0.75rem; font-family: ${MONO}; font-variant-numeric: tabular-nums; color: var(--dim); margin-top: 6px; animation: statsIn var(--fade) ease-out; }
-/* 000264: lazily-fetched stats fade in when the span joins (syncCardStats); the height shift glides via the FLIP diff */
-@keyframes statsIn { from { opacity: 0; transform: translateY(2px); } }
+/* #366 the run row's totals (taskStats): the value already sits in the span, so no entrance animation runs on a poll */
+.card-stats { font-variant-numeric: tabular-nums; }
+.card-stats:empty { display: none; }
 .p-low { background: var(--low-bg); color: var(--low-fg); }
 .p-medium { background: var(--medium-bg); color: var(--medium-fg); }
 .p-high { background: var(--high-bg); color: var(--high-fg); }
@@ -113,8 +150,8 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .chip.cx-moderate { background: var(--medium-bg); color: var(--medium-fg); }
 .chip.cx-complex { background: var(--critical-bg); color: var(--critical-fg); }
 .empty { font-size: 0.75rem; color: var(--dim); }
-.toggle { display: block; width: 100%; margin-top: 2px; border: 1px solid var(--hairline); background: var(--panel); color: var(--link); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.875rem; }
-.toggle:hover { background: var(--raised); }
+.toggle { display: block; width: 100%; margin-top: 4px; border: 0; border-top: 1px solid var(--hairline); background: none; color: var(--link); border-radius: 0; padding: 6px 0; cursor: pointer; font-size: 0.75rem; font-family: ${MONO}; text-align: left; }
+.toggle:hover { color: var(--text); }
 /* 000120: each run as a card, its subagent cards stacked below it in the same column;
    000238: the main view card's translucent rest background lets the relation lines show through
    faintly, hover and active keep their own looks */
@@ -271,13 +308,8 @@ one line, and the leftmost column pins left with a static right border as the cu
 /* the log pane sits on the code background, not the dialog panel, so its pinned column matches the pane */
 #m-log-text .md-table-wrap .md-pin { background: var(--code-bg); }
 /* one accent per stage, in pipeline order; the waiting and working states of a stage share it */
-.c-backlog { --ac: var(--accent-backlog); }
-.c-to-do, .c-doing { --ac: var(--accent-todo); }
-.c-to-review, .c-reviewing { --ac: var(--accent-review); }
-.c-to-merge, .c-merging { --ac: var(--accent-merge); }
-.c-to-live-test, .c-live-testing { --ac: var(--accent-live); }
-.c-to-integration-test, .c-integration-testing { --ac: var(--accent-integration); }
-.c-done { --ac: var(--accent-done); }
+/* #366 each station points --ac at its stage token, generated from the station table so the mapping lives in one place */
+${STATIONS.map((s) => `.s-${s.id} { --ac: var(--accent-${s.accent}); }`).join("\n")}
 /* 204: mobile, the root font size 15% smaller so every rem-based size scales down with it */
 @media (max-width: 600px) { html { font-size: 85%; } }
 /* 205: mobile, the task details popup is a full-screen sheet, flush with all four sides; the vh

@@ -1,8 +1,8 @@
-// the lazy card-stats group split out of tests/webui/board.test.ts (#364): the sortedCol,
+// the lazy card-stats group split out of tests/webui/board.test.ts (#364): the sortStation,
 // statsKey, applyCardStats, mergeCardStats and makeStatsQueue helpers over stubbed storage and a
 // stubbed fetch. No hub and no DOM, so this group needs no page fixture.
 import assert from "node:assert/strict";
-import { applyCardStats, makeStatsQueue, mergeCardStats, sortedCol, statsKey } from "../../src/webui/board.ts";
+import { applyCardStats, makeStatsQueue, mergeCardStats, sortStation, statsKey, STATIONS } from "../../src/webui/board.ts";
 import { PAGE } from "../../src/webui/page.ts";
 
 // over stubbed storage (no DOM, no hub; the endpoint is stubbed until #263 merges)
@@ -25,18 +25,26 @@ const csAgents = [{ role: "developer", tokens: 42, duration: 3 }];
 assert.equal(statsKey("/repo-a", "000001_probe.md"), "card-stats|/repo-a|000001_probe.md");
 assert.notEqual(statsKey("/repo-a", "000001_probe.md"), statsKey("/repo-b", "000001_probe.md"));
 
-// the column's rows in board order: backlog priority-first, every other column newest-first
+// the station's rows in board order (#366): priority first, then newest update, a held task pinned
 const csBacklog = [
 	{ file: "000001_a.md", state: "backlog", priority: "medium", updated: 3 },
 	{ file: "000002_b.md", state: "backlog", priority: "critical", updated: 1 },
 	{ file: "000003_c.md", state: "backlog", priority: "high", updated: 5 },
 ];
-assert.deepEqual(sortedCol(csBacklog, "backlog").map((t) => t.file), ["000002_b.md", "000003_c.md", "000001_a.md"]);
+assert.deepEqual(sortStation(csBacklog).map((t) => t.file), ["000002_b.md", "000003_c.md", "000001_a.md"]);
 const csDoneCol = [
 	{ file: "000001_a.md", state: "done", priority: "low", updated: 2 },
 	{ file: "000002_b.md", state: "done", priority: "critical", updated: 9 },
 ];
-assert.deepEqual(sortedCol(csDoneCol, "done").map((t) => t.file), ["000002_b.md", "000001_a.md"]);
+assert.deepEqual(sortStation(csDoneCol).map((t) => t.file), ["000002_b.md", "000001_a.md"]);
+assert.deepEqual(
+	sortStation([
+		{ file: "000003_c.md", state: "to-do", priority: "critical", updated: 1 },
+		{ file: "000004_d.md", state: "to-do", priority: "low", updated: 9, blockedBy: "user" },
+	]).map((t) => t.file),
+	["000004_d.md", "000003_c.md"],
+	"a held task pins above a higher priority sibling",
+);
 
 // an agent-less row takes the known stats, the payload's eager agents win over them
 const csKnown = Object.create(null);
@@ -128,10 +136,12 @@ const csNewQueue = () => {
 	return { queue, calls, applied };
 };
 
-// one file per request, top to bottom, never in the caller's stack
+// one file per request, top to bottom, never in the caller's stack; the queue takes the station
+// whose beyond-fold cards it fetches, so it shares the board's station order
+const csWork = STATIONS.find((s) => s.id === "work");
 const csSeq = csNewQueue();
 const csCol7 = ["a", "b", "c", "d", "e", "f", "g"].map((n, i) => ({ file: `cs_${n}.md`, state: "doing", updated: 10 - i }));
-csSeq.queue.enqueueCol("p", csCol7, "doing", 5);
+csSeq.queue.enqueueStation("p", csCol7, csWork, 5);
 assert.equal(csSeq.calls.length, 0, "the drain defers off the caller's path");
 csFlush();
 assert.deepEqual(csSeq.calls.map((c) => c.file), ["cs_f.md"], "one file per request, the top beyond-fold card first");
@@ -146,10 +156,10 @@ await csSettle();
 
 // an enqueue during an in-flight fetch never starts a second concurrent request
 const csOne = csNewQueue();
-csOne.queue.enqueueCol("p", [{ file: "cs4_a.md", state: "doing", updated: 1 }], "doing", 0);
+csOne.queue.enqueueStation("p", [{ file: "cs4_a.md", state: "doing", updated: 1 }], csWork, 0);
 csFlush();
 assert.deepEqual(csOne.calls.map((c) => c.file), ["cs4_a.md"], "the first card fetches");
-csOne.queue.enqueueCol("p", [{ file: "cs4_z.md", state: "doing", updated: 0 }], "doing", 0);
+csOne.queue.enqueueStation("p", [{ file: "cs4_z.md", state: "doing", updated: 0 }], csWork, 0);
 csFlush();
 assert.equal(csOne.calls.length, 1, "no second request while the first is in flight");
 csOne.calls[0].d.resolve({ "cs4_a.md": { agents: csAgents } });
@@ -162,28 +172,28 @@ await csSettle();
 // a task arriving at position 6 in an expanded column re-queues on the next pass; a fetched file never does
 const csArr = csNewQueue();
 const csFive = ["a", "b", "c", "d", "e"].map((n, i) => ({ file: `cs2_${n}.md`, state: "doing", updated: 10 - i }));
-csArr.queue.enqueueCol("p", csFive, "doing", 5);
+csArr.queue.enqueueStation("p", csFive, csWork, 5);
 assert.equal(csArr.calls.length, 0, "the eager first five never fetch");
 const csSix = [...csFive, { file: "cs2_f.md", state: "doing", updated: 0 }];
-csArr.queue.enqueueCol("p", csSix, "doing", 5);
+csArr.queue.enqueueStation("p", csSix, csWork, 5);
 assert.equal(csArr.calls.length, 0, "the arrival queues deferred");
 csFlush();
 assert.deepEqual(csArr.calls.map((c) => c.file), ["cs2_f.md"], "a task arriving at position 6 fetches on the next pass");
 csArr.calls[0].d.resolve({ "cs2_f.md": { agents: [] } });
 await csSettle();
-csArr.queue.enqueueCol("p", csSix, "doing", 5);
+csArr.queue.enqueueStation("p", csSix, csWork, 5);
 csFlush();
 assert.equal(csArr.calls.length, 1, "a fetched file does not re-queue");
 
 // a failed fetch drops out of the fetched-or-in-flight set, the next pass retries it
 const csRetry = csNewQueue();
 const csFailCol = ["a", "b", "c", "d", "e", "f"].map((n, i) => ({ file: `cs3_${n}.md`, state: "doing", updated: 10 - i }));
-csRetry.queue.enqueueCol("p", csFailCol, "doing", 5);
+csRetry.queue.enqueueStation("p", csFailCol, csWork, 5);
 csFlush();
 assert.deepEqual(csRetry.calls.map((c) => c.file), ["cs3_f.md"], "the beyond-fold card fetches");
 csRetry.calls[0].d.resolve(null);
 await csSettle();
-csRetry.queue.enqueueCol("p", csFailCol, "doing", 5);
+csRetry.queue.enqueueStation("p", csFailCol, csWork, 5);
 assert.equal(csRetry.calls.length, 1, "the retry defers off the caller's path");
 csFlush();
 assert.deepEqual(csRetry.calls.map((c) => c.file), ["cs3_f.md", "cs3_f.md"], "a failed fetch retries on the next pass");
@@ -203,12 +213,12 @@ assert.equal(csPolled[0].agents.length, 1, "the poll's agent-less rows take the 
 
 // the served page wires the apply pass ahead of the board pass, the per-file queue, its poll
 // re-enqueue and the stats entrance (reduced motion included)
-assert.ok(PAGE.includes("function sortedCol("), "sortedCol interpolates into the page");
+assert.ok(PAGE.includes("function sortStation("), "sortStation interpolates into the page");
 assert.ok(PAGE.includes("function statsKey("), "statsKey interpolates into the page");
 assert.ok(PAGE.includes("function applyCardStats("), "applyCardStats interpolates into the page");
 assert.ok(PAGE.includes("function mergeCardStats("), "mergeCardStats interpolates into the page");
 assert.ok(PAGE.includes("function makeStatsQueue("), "makeStatsQueue interpolates into the page");
-assert.ok(PAGE.indexOf("applyCardStats(tab.tasks") < PAGE.indexOf("syncBoard(cols, tab.tasks"), "the apply pass runs before the board pass");
+assert.ok(PAGE.indexOf("applyCardStats(tab.tasks") < PAGE.indexOf("syncBoard(stations, tab.tasks"), "the apply pass runs before the board pass");
 assert.ok(PAGE.includes('"/api/card-stats?files=" + encodeURIComponent(file)'), "each queued file fetches the pinned endpoint");
-assert.ok(PAGE.includes("statsQueue.enqueueCol(active, b.tasks, st, VISIBLE)"), "the unfold enqueues the column's beyond-fold cards");
-assert.ok(PAGE.includes("queueExpanded()"), "each poll re-queues the already-expanded columns");
+assert.ok(PAGE.includes("statsQueue.enqueueStation(active, b.tasks, STATIONS.find(s => s.id === id), VISIBLE)"), "the unfold enqueues the station's beyond-fold cards");
+assert.ok(PAGE.includes("queueExpanded()"), "each poll re-queues the already-expanded stations");

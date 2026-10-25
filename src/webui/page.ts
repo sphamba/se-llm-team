@@ -2,7 +2,7 @@ import { PRIORITY_RANK } from "../kanban.ts";
 import { readConfigFiles, type StageFlags } from "../orchestrator/config.ts";
 export type { StageFlags };
 import { esc, inline, logFixups, md } from "./logpane.ts";
-import { agentLabel, agentRowSig, agentStatsText, applyCardStats, applyStages, buildShell, cardBaseHtml, cardHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, LAYOUT, makeStatsQueue, mergeCardStats, numLinkHtml, relationPaths, sortedCol, spinnerHtml, statsKey, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, taskStats, taskStatsText } from "./board.ts";
+import { agentLabel, agentRowSig, agentStatsText, applyCardStats, applyStages, buildShell, cardBaseHtml, curve, doctorCol, flipDiff, fmtDur, fmtTokens, isHeld, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, statsKey, STATIONS, syncAgentStats, syncBoard, syncCardStats, syncDoctorCards, syncStatsLine, taskStats } from "./board.ts";
 import { CSS } from "./theme.ts";
 
 // the served page: PAGE interpolates the tested renderers and helpers as client source; the
@@ -117,21 +117,22 @@ const inline = ${inline};
 ${md}
 // FLIP across a refresh: measure old positions, sync the cards, invert, play. Every card whose
 // board-content position changed moves, the siblings shifting when a card enters or leaves a
-// column included; positions are board-content relative, so a scrolled refresh animates nothing.
+// station included; positions are board-content relative, so a scrolled refresh animates nothing.
 ${flipDiff}
 ${curve}
 ${relationPaths}
 // board layout and the card pass, interpolated as source so the client runs the tested code;
 // constants go in as values, the functions as source
-const LAYOUT = ${JSON.stringify(LAYOUT)};
+const STATIONS = ${JSON.stringify(STATIONS)};
 const PRIORITY_RANK = ${JSON.stringify(PRIORITY_RANK)};
 ${spinnerHtml}
 ${numLinkHtml}
+${priorityRuler}
+${isHeld}
 ${cardBaseHtml}
-${cardHtml}
 ${buildShell}
 ${applyStages}
-${sortedCol}
+${sortStation}
 ${syncBoard}
 ${logFixups}
 ${tabNames}
@@ -143,7 +144,6 @@ ${fmtTokens}
 ${fmtDur}
 ${agentStatsText}
 ${taskStats}
-${taskStatsText}
 ${agentRowSig}
 ${syncAgentStats}
 ${syncStatsLine}
@@ -169,9 +169,9 @@ function switchTab(name) {
 	render(true); // no FLIP across boards: positions belong to the project just left
 }
 function activeBoard() { return boardOf(boards, active); }
-// fold choice keyed by state name, so the 5 s refresh keeps it
-function toggleCol(st) { const b = activeBoard(); if (b.expanded.has(st)) b.expanded.delete(st); else b.expanded.add(st); render(); if (b.expanded.has(st)) queueStats(st); }
-// 000271: the lazy stats queue, one file per request in each column's top-to-bottom board order,
+// fold choice keyed by station id, so the 5 s refresh keeps it
+function toggleStation(id) { const b = activeBoard(); if (b.expanded.has(id)) b.expanded.delete(id); else b.expanded.add(id); render(); if (b.expanded.has(id)) queueStats(id); }
+// 000271: the lazy stats queue, one file per request in each station's top-to-bottom board order,
 // drained off the click/render path; the queue dedupes on the fetched-or-in-flight keys (a
 // successful file stays fetched) and skips done cards with known stats. A failed fetch drops its
 // key, so the next poll's re-enqueue retries it; each response merges and re-renders
@@ -180,12 +180,12 @@ const statsQueue = makeStatsQueue(
 	(project, file) => fetch("/api/card-stats?files=" + encodeURIComponent(file) + (project ? "&project=" + encodeURIComponent(project) : "")).then(r => r.ok ? r.json() : null).catch(() => null),
 	(project, stats) => { mergeCardStats(stats, boardOf(boards, project).tasks, statsKnown, localStorage, project); render(); },
 );
-function queueStats(st) { const b = activeBoard(); statsQueue.enqueueCol(active, b.tasks, st, VISIBLE); }
+function queueStats(id) { const b = activeBoard(); statsQueue.enqueueStation(active, b.tasks, STATIONS.find(s => s.id === id), VISIBLE); }
 function queueExpanded() { const b = activeBoard(); for (const st of b.expanded) queueStats(st); }
 // one element per task file, kept across refreshes: an unchanged card keeps its node, so its
 // spinner animation and in-flight FLIP transform are never restarted
 const cardEls = new Map();
-let cols = null;
+let stations = null;
 // 000264: the lazily-known card stats, keyed per project and task (statsKey)
 const statsKnown = Object.create(null);
 function makeCard(file) {
@@ -193,6 +193,9 @@ function makeCard(file) {
 	el.className = "card";
 	el.dataset.file = file;
 	el.onclick = () => openTask(file);
+	// #366: the card is a link in the tab order, so Enter opens the card under the focus ring
+	el.tabIndex = 0;
+	el.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); openTask(file); } };
 	el.onmouseenter = () => hotRelations(file, true);
 	el.onmouseleave = () => hotRelations(file, false);
 	// 000191: the entrance class is one-shot, dropped on animationend so a later poll or reorder
@@ -201,12 +204,16 @@ function makeCard(file) {
 	return el;
 }
 // board-content relative: page scroll cancels, board scroll is added back, so a refresh after
-// scrolling measures identical positions and animates nothing; w/h feed the relation geometry
+// scrolling measures identical positions and animates nothing; w/h feed the relation geometry.
+// #366 a card inside a scrolled station moves with that station's own scroll, so every scroll
+// ancestor up to the board adds its offset too
 function cardBox(el) {
 	const board = document.getElementById("board");
 	const boardRect = board.getBoundingClientRect();
 	const r = el.getBoundingClientRect();
-	return { x: r.left - boardRect.left + board.scrollLeft, y: r.top - boardRect.top + board.scrollTop, w: r.width, h: r.height };
+	let dx = board.scrollLeft, dy = board.scrollTop;
+	for (let p = el.parentElement; p && p !== board; p = p.parentElement) { dx += p.scrollLeft; dy += p.scrollTop; }
+	return { x: r.left - boardRect.left + dx, y: r.top - boardRect.top + dy, w: r.width, h: r.height };
 }
 // hovering a card raises the opacity of the lines it connects to, in and out, mouseleave reverts
 // (000127, 000144); the paths carry both endpoint files as data, so the match needs no selector
@@ -222,12 +229,14 @@ function hotRelations(file, on) {
 function drawRelations() {
 	const board = document.getElementById("board");
 	const svg = document.getElementById("relations");
-	if (!svg || !cols) return;
+	if (!svg || !stations) return;
 	let w = 0, h = 0;
 	const rectOf = file => {
 		const el = cardEls.get(file);
 		if (!el) return null;
 		const r = cardBox(el);
+		// a card with no box (a collapsed station, a hidden row) has no drawn line either
+		if (!r.w || !r.h) return null;
 		w = Math.max(w, r.x + r.w);
 		h = Math.max(h, r.y + r.h);
 		return r;
@@ -242,17 +251,17 @@ function render(skipFlip) {
 	renderTabs();
 	const tab = activeBoard();
 	const board = document.getElementById("board");
-	if (!cols) {
-		cols = buildShell(board, document);
+	if (!stations) {
+		stations = buildShell(board, document);
 		const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
 		svg.id = "relations";
 		svg.setAttribute("pointer-events", "none");
 		board.insertBefore(svg, board.firstChild);
-		for (const st in cols) cols[st].toggle.onclick = () => toggleCol(st);
+		for (const id in stations) stations[id].toggle.onclick = () => toggleStation(id);
 		window.addEventListener("resize", drawRelations);
 	}
 	const project = projects.find(t => t.id === active);
-	applyStages(cols, project?.stages ?? DEFAULT_STAGES);
+	applyStages(stations, project?.stages ?? DEFAULT_STAGES);
 	const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 	const old = {};
 	if (!skipFlip) for (const el of cardEls.values()) {
@@ -263,7 +272,7 @@ function render(skipFlip) {
 	// 000264: the lazily-known stats land on the rows before the board pass, so the 5 s poll's
 	// agent-less cards 6+ never wipe revealed stats; the payload's eager first-5 agents win
 	applyCardStats(tab.tasks, statsKnown, localStorage, active);
-	syncBoard(cols, tab.tasks, tab.expanded, cardEls, makeCard, VISIBLE, document);
+	syncBoard(stations, tab.tasks, tab.expanded, cardEls, makeCard, VISIBLE, document);
 	const now = {};
 	for (const el of cardEls.values()) now[el.dataset.file] = cardBox(el);
 	const diff = flipDiff(old, now);
@@ -891,7 +900,7 @@ function refresh() {
 	}).then(rows => {
 		mergeBoards(boards, rows);
 		render();
-		queueExpanded(); // 000271: each poll re-queues the expanded columns, retrying failed files
+		queueExpanded(); // 000271: each poll re-queues the expanded stations, retrying failed files
 		// the open card's task still on the board, else the card closes (000242: the light rows
 		// carry no agent data, so the heavy blocks re-derive from the poll's detail re-fetch below)
 		let open = null;

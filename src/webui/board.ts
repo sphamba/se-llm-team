@@ -1,7 +1,7 @@
-import { PRIORITY_RANK, STATES, type Task } from "../kanban.ts";
+import { PRIORITY_RANK, type Task } from "../kanban.ts";
 import { esc } from "./logpane.ts";
 
-// board chrome: the column layout, task cards, agent-card formatters, relation curves and the
+// board chrome: the station spine, task cards, agent-card formatters, relation curves and the
 // FLIP diff; PAGE interpolates these as client source so the page runs the tested code
 // FLIP diff, interpolated into PAGE so the client ships this exact source: which files changed
 // board-content position between renders; new files and unchanged positions get no transform
@@ -59,13 +59,6 @@ export function taskStats(t) {
 	const dur = agents.reduce((s, a) => s + (typeof a.duration === "number" ? a.duration : 0), 0);
 	if (!toks && !dur) return "";
 	return agentStatsText(toks, dur);
-}
-
-// the summary card's stats line under the chips: taskStats wrapped in the span, empty when the
-// stats are hidden; syncBoard's in-place pass assigns taskStats to the span's textContent
-export function taskStatsText(t) {
-	const stats = taskStats(t);
-	return stats ? '<span class="card-stats">' + stats + "</span>" : "";
 }
 
 // the open detail card's poll cadence (000142): a live agent's tokens and duration advance with
@@ -139,70 +132,84 @@ export function syncDoctorCards(cards, docs, row, residual, doc) {
 	return true;
 }
 
-// board layout, left to right: a string is a single column, an array is a stacked group with the
-// first state on top. backlog stays a single left column, the states after it pair two by two in
-// pipeline order (to-do over doing, to-review over reviewing, ...) while more than TAIL_STATES
-// remain, the remaining tail (the four non-blocking live-test and integration states) stacks as
-// one group, and done closes the row as its own single column
-const TAIL_STATES = 4;
-export function pairLayout(states: readonly string[]): (string | string[])[] {
-	const layout: (string | string[])[] = [states[0]];
-	const tail = states.slice(1);
-	let i = 0;
-	while (tail.length - i > TAIL_STATES) {
-		layout.push(tail.slice(i, i + 2));
-		i += 2;
-	}
-	const rest = tail.slice(i);
-	if (rest.length) layout.push(rest.length > 1 ? rest : rest[0]);
-	return layout;
+// #366 the process spine: one station per phase, each grouping the phase's waiting and working
+// states. primary is the state a card shows without a sub-state marker, accent is the stage token
+// the stylesheet points --ac at, empty names the station's job when it holds nothing. The order is
+// the pipeline order and the keyboard tab order
+export interface Station {
+	id: string;
+	label: string;
+	states: readonly string[];
+	primary: string;
+	accent: string;
+	empty: string;
+}
+export const STATIONS: readonly Station[] = [
+	{ id: "queue", label: "Queue", states: ["backlog", "to-do"], primary: "to-do", accent: "todo", empty: "nothing waiting to start" },
+	{ id: "work", label: "Work", states: ["doing"], primary: "doing", accent: "todo", empty: "no agent is working" },
+	{ id: "review", label: "Review", states: ["to-review", "reviewing"], primary: "to-review", accent: "review", empty: "nothing waiting for a reviewer" },
+	{ id: "merge", label: "Merge", states: ["to-merge", "merging"], primary: "to-merge", accent: "merge", empty: "nothing waiting to merge" },
+	{ id: "test", label: "Test", states: ["to-live-test", "live-testing"], primary: "to-live-test", accent: "live", empty: "nothing waiting for a live test" },
+	{ id: "integration", label: "Integration", states: ["to-integration-test", "integration-testing"], primary: "to-integration-test", accent: "integration", empty: "nothing waiting for an integration test" },
+	{ id: "done", label: "Done", states: ["done"], primary: "done", accent: "done", empty: "nothing finished yet" },
+];
+
+// 000320 the user hold: the blockedBy `user` token, any case, alone or mixed with task refs
+export function isHeld(t: Task) {
+	return String(t.blockedBy || "").split(",").some((r) => r.trim().toLowerCase() === "user");
 }
 
-// interpolated into PAGE as JSON, so the client renders this exact layout; done is appended as a
-// single column so the tail stack never absorbs it
-export const LAYOUT = [...pairLayout(STATES.slice(0, -1)), STATES[STATES.length - 1]];
+// the station's rows in board order: a held task pins first, then priority-desc, then update-desc;
+// the sort is stable and the payload arrives in task-number order, so equal keys keep that order.
+// syncBoard and the payload's eager card set share it
+export function sortStation(tasks: Task[]): Task[] {
+	return tasks.sort((a, b) => (isHeld(b) ? 1 : 0) - (isHeld(a) ? 1 : 0) || (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) || b.updated - a.updated);
+}
 
-// the spinner marks a task the orchestrator is working on; a task that changes column changes this
+// the spinner marks a task the orchestrator is working on; a task that changes station changes this
 // markup, so its animation starts or stops with the state, and prefers-reduced-motion turns the CSS
 // animation off underneath
+const WORKING = ["doing", "reviewing", "live-testing", "merging", "integration-testing"];
 export function spinnerHtml(st: string) {
-	return st === "doing" || st === "reviewing" || st === "live-testing" || st === "merging" || st === "integration-testing" ? '<span class="spin"></span>' : "";
+	return WORKING.includes(st) ? '<span class="spin"></span>' : "";
 }
 
-// one card's markup without the trailing stats line: the card's structural identity across a
-// refresh (syncBoard compares it), so a stats-only change can update the span in place and the
-// run's spinner and entrance animations survive the poll. user-issued cards stay full contrast,
-// task-issued ones (issuer "#<num>") dim the name and carry a small #<num> badge instead of the
-// plain chip; the orchestrator's own "auto" issuer gets a plain chip labelled "auto", with no
-// badge and no link, and the complexity chip renders quiet next to the priority chip
+// #366 the four-step priority ruler: the filled steps count down from critical, the colour comes
+// from the priority token, so the four steps read apart in both themes
+export function priorityRuler(priority: string) {
+	const rank = PRIORITY_RANK[priority] ?? 4;
+	let bars = "";
+	for (let i = 0; i < 4; i++) bars += '<i class="' + (i < 4 - rank ? "on" : "") + '"></i>';
+	return '<span class="ruler p-' + esc(priority) + '" aria-hidden="true">' + bars + "</span>";
+}
+
+// one card's markup; the live values (elapsed, tokens) stay out of it, so a poll never rewrites the
+// card and its spinner keeps its animation (000191); syncCardStats fills the live cell and the run
+// row in place. Every optional row drops when empty: the number, ruler and live cell on top, the
+// name, the summary as the context line, the run row, then the meta row with the sub-state marker
+// (a non-primary state only) and the priority, complexity and issuer labels
 export function cardBaseHtml(t: Task, st: string) {
 	const issued = !!t.issuer && /^#\d+$/.test(t.issuer);
+	const live = (t.agents || []).some((a) => a.alive);
+	const primary = STATIONS.some((s) => s.primary === st);
 	return (
-		'<div class="name' +
-		(issued ? " issued" : "") +
-		'">' +
+		'<div class="c-top">' +
 		spinnerHtml(st) +
 		numLinkHtml(t.file, "num") +
-		esc(t.name) +
-		'</div> <span class="chip p-' +
-		esc(t.priority) +
-		'">' +
-		esc(t.priority) +
-		'</span> <span class="chip cx cx-' +
-		esc(t.complexity || "moderate") +
-		'">' +
-		esc(t.complexity || "moderate") +
-		'</span> <span class="chip' +
-		(issued ? " issuer" : "") +
-		'">' +
-		(issued ? esc(t.issuer) : esc(t.issuer || "user")) +
-		"</span>"
+		(isHeld(t) ? '<span class="held">held</span>' : "") +
+		priorityRuler(t.priority) +
+		(live ? '<span class="c-live"><span class="c-live-text"></span></span>' : "") +
+		"</div>" +
+		'<div class="name' + (issued ? " issued" : "") + '">' + esc(t.name) + "</div>" +
+		(t.summary ? '<div class="ctx">' + esc(t.summary) + "</div>" : "") +
+		(t.agents && t.agents.length ? '<div class="c-run' + (live ? "" : " dead") + '"><span class="card-stats"></span></div>' : "") +
+		'<div class="c-meta">' +
+		(primary ? "" : '<span class="sub-state">' + esc(st) + "</span>") +
+		'<span class="c-p p-' + esc(t.priority) + '">' + esc(t.priority) + "</span>" +
+		'<span class="c-cx cx-' + esc(t.complexity || "moderate") + '">' + esc(t.complexity || "moderate") + "</span>" +
+		'<span class="c-issuer">' + esc(t.issuer || "user") + "</span>" +
+		"</div>"
 	);
-}
-
-// one card's markup; this string is the card's identity across a refresh, see syncBoard
-export function cardHtml(t: Task, st: string) {
-	return cardBaseHtml(t, st) + taskStatsText(t);
 }
 
 // a task id as a link: clicking opens that task's card in place of the shown one; data-task carries
@@ -214,11 +221,11 @@ export function numLinkHtml(file: string, cls = "") {
 
 // the bezier between two rendered cards, running blocked -> blocker so the dash animation flows
 // towards the blocker: always out of the blocked card's right edge and into the blocker's left
-// edge, whatever the column pair, so one uniform wrap shape serves every relation
+// edge, whatever the station pair, so one uniform wrap shape serves every relation
 export function curve(from, to) {
 	const mid = (r) => r.y + r.h / 2;
 	const bow = 40;
-	// 000127: a fixed bow flattens into a near-straight diagonal over a long cross-column span, so
+	// 000127: a fixed bow flattens into a near-straight diagonal over a long cross-station span, so
 	// scale the offset with the span (capped so extreme widths stay sane) and the curve bends into
 	// an S that hugs the cards at both ends and crosses in the middle; near spans keep the bow
 	const sBend = (a, b) => Math.max(bow, Math.min(Math.abs(b - a) * 0.35, 480));
@@ -256,78 +263,78 @@ export function relationPaths(tasks, rectOf) {
 	return out;
 }
 
-// the board shell, built once: a single column per layout string, one .pair wrapper per stacked
-// group; returns each column's parts, keyed by state
+// the board shell, built once: one hairline element across the station heads, then one station per
+// phase holding its head (tick, label, live dot, count), its scrolling card list and its fold
+// toggle; returns each station's parts keyed by station id
 export function buildShell(parent, doc) {
-	const cols = {};
-	const column = (st: string) => {
-		const col = doc.createElement("section");
-		col.className = "col c-" + st;
-		// #364: the state hook, so a reader or a test finds a column by data-state, not by class
-		col.dataset.state = st;
+	const spine = doc.createElement("div");
+	spine.className = "spine";
+	parent.appendChild(spine);
+	const stations = {};
+	for (const s of STATIONS) {
+		const el = doc.createElement("section");
+		el.className = "station s-" + s.id;
+		// #364: the phase hook, so a reader or a test finds a station by data-station, not by class
+		el.dataset.station = s.id;
+		const head = doc.createElement("div");
+		head.className = "st-head";
 		const h2 = doc.createElement("h2");
-		h2.textContent = st + " ";
+		h2.textContent = s.label;
+		const dot = doc.createElement("span");
+		dot.className = "spin";
+		dot.style.display = "none";
+		h2.appendChild(dot);
 		const count = doc.createElement("span");
 		count.className = "count";
-		h2.appendChild(count);
+		count.textContent = "0";
+		head.appendChild(h2);
+		head.appendChild(count);
 		const cards = doc.createElement("div");
 		cards.className = "cards";
 		const empty = doc.createElement("div");
 		empty.className = "empty";
-		empty.textContent = "\u2014";
+		empty.textContent = s.empty;
 		cards.appendChild(empty);
 		const toggle = doc.createElement("button");
 		toggle.className = "toggle";
 		toggle.style.display = "none";
-		col.appendChild(h2);
-		col.appendChild(cards);
-		col.appendChild(toggle);
-		cols[st] = { col, count, cards, empty, toggle };
-		return col;
-	};
-	for (const part of LAYOUT) {
-		if (typeof part === "string") {
-			parent.appendChild(column(part));
-			continue;
-		}
-		const pair = doc.createElement("div");
-		pair.className = "pair";
-		for (const st of part) pair.appendChild(column(st));
-		parent.appendChild(pair);
+		el.appendChild(head);
+		el.appendChild(cards);
+		el.appendChild(toggle);
+		parent.appendChild(el);
+		stations[s.id] = { el, count, cards, empty, toggle, dot };
 	}
-	return cols;
+	return stations;
 }
 
-// the columns each stage toggle fades; only a waiting integration card dims with its column, so
-// an in-flight run keeps full opacity when the flag turns off
-export function applyStages(cols, stages) {
-	const states = {
-		reviews: ["to-review", "reviewing"],
-		liveTesting: ["to-live-test", "live-testing"],
-		integrationTesting: ["to-integration-test", "integration-testing"],
-	};
-	for (const [flag, list] of Object.entries(states)) {
-		const off = stages?.[flag] === false;
-		for (const st of list) cols[st].col.classList.toggle("off", off);
-	}
+// #366 the config switch: the integration station turns into a narrow labeled strip with no cards
+// and no count, and the board narrows its grid track; a disabled review or live test stage dims its
+// station but keeps the cards reachable
+export function applyStages(stations, stages) {
+	const strip = stages?.integrationTesting === false;
+	const part = stations.integration;
+	part.el.classList.toggle("strip", strip);
+	part.el.parentElement?.classList.toggle("off-integration", strip);
+	const label = strip ? "integration test: off in config" : "";
+	part.el.setAttribute("title", label);
+	part.el.setAttribute("aria-label", label);
+	stations.review.el.classList.toggle("dim", stages?.reviews === false);
+	stations.test.el.classList.toggle("dim", stages?.liveTesting === false);
 }
 
-// 000191: a stats-only change updates the summary card's .card-stats span in place, so the live
-// run's spinner and entrance animations survive the poll (supersedes the accepted #178 restart);
-// the span joins when stats arrive and drops when they vanish, matching taskStatsText's markup.
-// doc is injected so tests run this without a DOM
-export function syncCardStats(el, t, doc) {
-	const stats = taskStats(t);
-	const span = [...el.children].find((c) => c.className === "card-stats");
-	if (span) {
-		if (stats) span.textContent = stats;
-		else span.remove();
-	} else if (stats) {
-		const s = doc.createElement("span");
-		s.className = "card-stats";
-		s.textContent = stats;
-		el.appendChild(s);
-	}
+// 000191/000366: the in-place live pass. The top-right live cell carries the role and the elapsed
+// time, the run row the task's token totals; both update without touching the card markup, so the
+// live .spin node keeps its animation across a poll (supersedes the accepted #178 restart)
+export function syncCardStats(el, t) {
+	const runs = t.agents || [];
+	const live = runs.find((a) => a.alive);
+	const count = runs.reduce((m, a) => ((m[a.role] = (m[a.role] || 0) + 1), m), {});
+	const cell = el.querySelector(".c-live-text");
+	const meta = live ? [agentLabel(live, count), fmtDur(live.duration)].filter(Boolean).join(" · ") : "";
+	if (cell && cell.textContent !== meta) cell.textContent = meta;
+	const stats = el.querySelector(".card-stats");
+	const text = taskStats(t);
+	if (stats && stats.textContent !== text) stats.textContent = text;
 }
 
 // 000264 the localStorage key of a done task's cached stats: per project (boards are per-project
@@ -426,42 +433,38 @@ export function makeStatsQueue(key, fetchStats, applyStats, setTimer = setTimeou
 		pending.push({ project, file, key: k });
 		if (!timer && !busy) timer = setTimer(drain, 0);
 	};
-	// the column's beyond-fold cards, in board order, skipping done cards with known stats
-	const enqueueCol = (project, tasks, st, visible) => {
-		for (const t of sortedCol(tasks, st).slice(visible)) {
+	// the station's beyond-fold cards, in board order, skipping done cards with known stats
+	const enqueueStation = (project, tasks, station, visible) => {
+		for (const t of sortStation(tasks.filter((t) => station.states.includes(t.state))).slice(visible)) {
 			if (t.state === "done" && t.agents) continue;
 			enqueue(project, t.file);
 		}
 	};
-	return { enqueueCol };
+	return { enqueueStation };
 }
 
-// the column's rows in board order: backlog priority-first (critical above high above medium above
-// low), every other column newest-first only; the sort is stable and the payload arrives in
-// task-number order, so equal keys keep that order. syncBoard and the lazy stats fetch share it
-export function sortedCol(tasks: Task[], st: string): Task[] {
-	return tasks
-		.filter((t) => t.state === st)
-		.sort((a, b) => (st === "backlog" ? (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) : 0) || b.updated - a.updated);
-}
-
-// one refresh pass: place every task's card in its column and update counts and the fold toggle. A
-// card is rewritten only when its markup changed, so an unchanged card keeps its DOM node and with
-// it its running spinner animation and in-flight FLIP transform; a stats-only change updates the
-// .card-stats span in place (syncCardStats), and orders are fixed by moving nodes, so a card
-// entering a column never rebuilds the cards already in it. A genuinely new card gains the
-// "enter" class for the page's one-shot entrance animation. The caller measures card positions
-// before and after this pass to animate the moves
-export function syncBoard(cols, tasks, expanded, els, make, visible, doc) {
+// one refresh pass: place every task's card in its station and update the counts, the glow and the
+// fold toggle. A card is rewritten only when its markup changed, so an unchanged card keeps its DOM
+// node and with it its running spinner animation and in-flight FLIP transform; the live values
+// update in place (syncCardStats), and orders are fixed by moving nodes, so a card entering a
+// station never rebuilds the cards already in it. A genuinely new card gains the "enter" class for
+// the page's one-shot entrance animation. The caller measures card positions before and after this
+// pass to animate the moves
+export function syncBoard(stations, tasks, expanded, els, make, visible, doc) {
 	const live = new Set();
-	for (const st of Object.keys(cols)) {
-		const inState = sortedCol(tasks, st);
-		const shown = expanded.has(st) ? inState : inState.slice(0, visible);
-		const part = cols[st];
-		part.count.textContent = inState.length;
+	for (const s of STATIONS) {
+		const part = stations[s.id];
+		const inStation = sortStation(tasks.filter((t) => s.states.includes(t.state)));
+		const shown = expanded.has(s.id) ? inStation : inStation.slice(0, visible);
+		const running = inStation.some((t) => spinnerHtml(t.state) !== "");
+		part.count.textContent = String(inStation.length);
 		part.empty.style.display = shown.length ? "none" : "";
-		part.toggle.style.display = inState.length > visible ? "" : "none";
-		part.toggle.textContent = expanded.has(st) ? "show less" : "show all (" + inState.length + ")";
+		part.toggle.style.display = inStation.length > visible ? "" : "none";
+		// done unfolds in place for now; the archive view task replaces this button
+		part.toggle.textContent = expanded.has(s.id) ? "show less" : "+" + (inStation.length - visible) + " more";
+		// #366 only a station with a running agent glows: its tick, its label and the live dot
+		part.el.classList.toggle("live", running);
+		part.dot.style.display = running ? "" : "none";
 		let prev = null;
 		for (const t of shown) {
 			live.add(t.file);
@@ -475,20 +478,16 @@ export function syncBoard(cols, tasks, expanded, els, make, visible, doc) {
 			}
 			// #364: the card's own hooks, refreshed every pass, so a reader finds it by data-num and data-state
 			el.dataset.num = String(parseInt(t.file, 10));
-			el.dataset.state = st;
-			// 000320: the `user` blockedBy token holds the task, so the toggle runs every pass: a poll adds
-			// and removes the dashed outline live, and the one-shot "enter" class stays untouched
-			el.classList.toggle("user-hold", String(t.blockedBy || "").split(",").some((r) => r.trim().toLowerCase() === "user"));
-			const html = cardHtml(t, st);
+			el.dataset.state = t.state;
+			// 000320: the `user` blockedBy token holds the task, so the toggle runs every pass: a poll
+			// adds and removes the held marker live, and the one-shot "enter" class stays untouched
+			el.classList.toggle("user-hold", isHeld(t));
+			const html = cardBaseHtml(t, t.state);
 			if (el.__html !== html) {
-				const base = cardBaseHtml(t, st);
-				// 000191: matching base markup means only the stats line changed, so the span updates
-				// in place and the spinner node keeps its animation; a brand-new card has no base yet
-				if (el.__base === base) syncCardStats(el, t, doc);
-				else el.innerHTML = html;
+				el.innerHTML = html;
 				el.__html = html;
-				el.__base = base;
 			}
+			syncCardStats(el, t);
 			const next = prev ? prev.nextSibling : part.cards.firstChild;
 			if (next !== el) part.cards.insertBefore(el, next);
 			prev = el;
