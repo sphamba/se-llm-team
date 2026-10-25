@@ -16,7 +16,7 @@ ${themeButton(':root:not([data-theme="light"])')} }
 
 export const CSS = `* { box-sizing: border-box; }
 /* Ayu Light palette (ayu-theme/ayu-colors); 000129: medium moved to a deeper yellow so the priority chips read apart */
-:root { --bg: #fcfcfc; --fg: #5c6166; --panel: #ffffff; --border: rgba(107, 125, 143, .12); --heading: #5c6166; --muted: #adaeb1; --faint: #adaeb1; --soft: #5c6166; --hover: rgba(233, 237, 242, .95); --overlay: rgba(15, 23, 42, .45); --code-bg: #ebeef0; --link: #f29718;
+:root { --bg: #fcfcfc; --fg: #5c6166; --panel: #ffffff; --border: rgba(107, 125, 143, .12); --heading: #5c6166; --muted: #adaeb1; --faint: #adaeb1; --soft: #5c6166; --hover: rgba(233, 237, 242, .95); --overlay: rgba(15, 23, 42, .45); --code-bg: #ebeef0; --link: #f29718; --shine-hi: #ffffff;
 --low-bg: rgba(134, 179, 0, .15); --low-fg: #86b300; --medium-bg: rgba(201, 151, 0, .15); --medium-fg: #c99700; --high-bg: rgba(250, 133, 50, .15); --high-fg: #fa8532; --critical-bg: rgba(230, 80, 80, .15); --critical-fg: #e65050;
 /* 000353: one accent per pipeline stage and agent role, plus the failed-run red; the -text step is the darker Ayu Light ladder step that keeps a label readable on the light panel */
 --accent-backlog: #828e9f; --accent-backlog-text: #86878c; --accent-todo: #eba400; --accent-todo-text: #b37c00; --accent-review: #fa8532; --accent-review-text: #cf6610; --accent-merge: #a37acc; --accent-merge-text: #9d6fc8; --accent-live: #22a4e6; --accent-live-text: #1a91cd; --accent-integration: #4cbf99; --accent-integration-text: #3b9b7c; --accent-done: #86b300; --accent-done-text: #719700; --error: #e65050; --error-text: #e5474f;
@@ -189,7 +189,7 @@ so the band passing reads as letters brightening, never a highlight bar; the det
 selectors outrank the muted color rule (color: transparent must stick there) and --shine-base
 follows the block's own color; 000198: flat shoulders (base 0-33% and 67-100%) so the 300%
 window sits on flat base at both loop endpoints, no partial-bright tail at the wrap */
-#m-log-text > .pulse, #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { --shine-base: var(--fg); background-image: linear-gradient(90deg, var(--shine-base) 0%, var(--shine-base) 33%, color-mix(in srgb, #fff var(--shine), var(--shine-base)) 50%, var(--shine-base) 67%, var(--shine-base) 100%); background-size: 300% 100%; background-repeat: no-repeat; -webkit-background-clip: text; background-clip: text; color: transparent; animation: chunkIn var(--fade) ease-out, shimmer var(--pulse) linear infinite; }
+#m-log-text > .pulse, #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { --shine-base: var(--fg); background-image: linear-gradient(90deg, var(--shine-base) 0%, var(--shine-base) 33%, color-mix(in srgb, var(--shine-hi) var(--shine), var(--shine-base)) 50%, var(--shine-base) 67%, var(--shine-base) 100%); background-size: 300% 100%; background-repeat: no-repeat; -webkit-background-clip: text; background-clip: text; color: transparent; animation: chunkIn var(--fade) ease-out, shimmer var(--pulse) linear infinite; }
 #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { --shine-base: var(--muted); }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 #modal { position: fixed; inset: 0; z-index: 3; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
@@ -233,6 +233,9 @@ content height; the class drops at the transition end, and reduced motion keeps 
 #m-actions { display: flex; justify-content: flex-start; margin-bottom: 12px; }
 #m-actions:empty { display: none; }
 .m-action { display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; padding: 4px 12px; font-size: 0.875rem; font-family: inherit; cursor: pointer; }
+/* #364 keyboard focus: every element the stylesheet marks with cursor: pointer answers Tab with the
+same visible ring, so the pointer cue is never the only cue */
+#theme:focus-visible, .tab:focus-visible, .card:focus-visible, .num-link:focus-visible, .toggle:focus-visible, .agent-card:focus-visible, #m-log-text summary:focus-visible, #m-close:focus-visible, .m-action:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 .m-action:disabled { opacity: 0.6; cursor: default; }
 .m-block { color: var(--error-text); border: 1px solid var(--error); background: color-mix(in srgb, var(--error) 15%, var(--panel)); }
 .m-unblock { color: var(--accent-done-text); border: 1px solid var(--accent-done); background: color-mix(in srgb, var(--accent-done) 15%, var(--panel)); }

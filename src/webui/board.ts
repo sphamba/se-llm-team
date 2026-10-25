@@ -263,6 +263,8 @@ export function buildShell(parent, doc) {
 	const column = (st: string) => {
 		const col = doc.createElement("section");
 		col.className = "col c-" + st;
+		// #364: the state hook, so a reader or a test finds a column by data-state, not by class
+		col.dataset.state = st;
 		const h2 = doc.createElement("h2");
 		h2.textContent = st + " ";
 		const count = doc.createElement("span");
@@ -471,6 +473,9 @@ export function syncBoard(cols, tasks, expanded, els, make, visible, doc) {
 				el.className += " enter";
 				els.set(t.file, el);
 			}
+			// #364: the card's own hooks, refreshed every pass, so a reader finds it by data-num and data-state
+			el.dataset.num = String(parseInt(t.file, 10));
+			el.dataset.state = st;
 			// 000320: the `user` blockedBy token holds the task, so the toggle runs every pass: a poll adds
 			// and removes the dashed outline live, and the one-shot "enter" class stays untouched
 			el.classList.toggle("user-hold", String(t.blockedBy || "").split(",").some((r) => r.trim().toLowerCase() === "user"));
