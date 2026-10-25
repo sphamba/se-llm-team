@@ -61,7 +61,7 @@ assert.ok(zOf("#modal") > zOf("#relations") && zOf("#modal") > zOf(".card"), "th
 // and every raw hex value sits in a token block. --ac and --shine-base stay rule-local: the column
 // classes and the pulse rules set them per element
 const themeCss = page.match(/<style>([\s\S]*?)<\/style>/)![1].replace(/\/\*[\s\S]*?\*\//g, "");
-const tokenBlocks = themeCss.match(/\{ --bg: [^}]*\}/g)!;
+const tokenBlocks = themeCss.match(/\{ --canvas: [^}]*\}/g)!;
 const tokenNames = (block: string) => new Set([...block.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
 const declared = new Set([...page.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
 const used = new Set([...page.matchAll(/var\((--[\w-]+)/g)].map((m) => m[1]));

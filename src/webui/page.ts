@@ -77,9 +77,8 @@ export const PAGE = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Software Engineering LLM Team</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap" rel="stylesheet">
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/space-grotesk-500.woff2">
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/ibm-plex-mono-400.woff2">
 <style>
 ${CSS}</style>
 </head>
