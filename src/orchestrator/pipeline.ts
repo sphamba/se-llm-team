@@ -49,15 +49,8 @@ const STAGE_RANK: Record<string, number> = { "to-integration-test": 0, "to-live-
 export const boardOrder = (a: Task, b: Task) =>
 	(PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) || (STAGE_RANK[a.state] ?? 5) - (STAGE_RANK[b.state] ?? 5);
 
-// the integration-test task the live test opens or extends: its own instruction section, then one
-// quoted entry per covered ref, both derived from the one covered array so they cannot disagree
-const INTEGRATION_HEAD = "Perform integration testing following the merge of";
-const INTEGRATION_TAIL = [
-	"Run the project test script in the root checkout.",
-	"Report defects and coverage gaps in `# Open questions`.",
-	"Read the full task file of a covered ref when its summary is not enough.",
-	"Do not edit code. Do not commit. Do not create a task. Do not change task states.",
-];
+// the integration-test task's Specs hold only the covered refs and their summaries. The procedure
+// lives in agents/integration-tester.md, so it is not copied into every generated task.
 
 // one covered entry: its ref and name as a level-3 heading, its summary as a blockquote (a blank
 // summary line becomes a lone ">", so the quote never breaks)
@@ -70,9 +63,8 @@ function integrationEntry(task: Task): string {
 }
 
 function integrationSpecs(covered: Task[]): string {
-	const refs = covered.map((task) => `#${taskNum(task.file)}`).join(", ");
 	const entries = covered.map(integrationEntry).join("\n\n");
-	return ["## Own task", "", `${INTEGRATION_HEAD} ${refs}.`, "", ...INTEGRATION_TAIL, "", "## Covered tasks", "", entries].join("\n");
+	return ["## Covered tasks", "", entries].join("\n");
 }
 
 // a ref whose task left the board has no name or summary to quote: drop it rather than emit an
