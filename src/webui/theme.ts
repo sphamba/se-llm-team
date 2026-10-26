@@ -117,8 +117,8 @@ body.panel-open #archive { padding-right: calc(18px + var(--panel-w)); }
 #p-outside { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; border: 1px solid var(--hairline); border-radius: 6px; padding: 4px 8px; color: var(--dim); font-size: 0.8125rem; }
 #p-outside.hidden { display: none; }
 #p-outside .m-action { margin-left: auto; }
-/* #366 the station spine: seven tracks, six even and done slightly wider. #374 the floor is derived, not a breakpoint: 9.375rem per station, so at any width too narrow for seven 150px tracks plus the 18px gaps and side padding the board alone scrolls horizontally (000247) and the page never does. The heads share one hairline grid item and each station body scrolls on its own */
-#board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(9.375rem, 1fr)) minmax(9.375rem, 1.15fr); grid-template-rows: 1px minmax(0, 1fr); gap: 0 18px; padding: var(--sp-3) 18px var(--sp-5); overflow-x: auto; overflow-y: hidden; position: relative; }
+/* #366 the station spine: seven tracks, six even and done slightly wider. #374 the floor is derived, not a breakpoint: 9.375rem per station, so at any width too narrow for seven 150px tracks plus the separators and side padding the board alone scrolls horizontally (000247) and the page never does. The heads share one hairline grid item and each station body scrolls on its own */
+#board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(9.375rem, 1fr)) minmax(9.375rem, 1.15fr); grid-template-rows: 1px minmax(0, 1fr); gap: 0; padding: var(--sp-3) 18px var(--sp-5); overflow-x: auto; overflow-y: hidden; position: relative; }
 .spine { grid-column: 1 / -1; grid-row: 1; background: var(--hairline); position: relative; overflow: hidden; }
 /* #369 the sweep is one gradient element on the spine's own hairline, so the loop has one animation node the poll never touches */
 .spine::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 20%; background: linear-gradient(90deg, transparent, var(--link), transparent); }
@@ -140,13 +140,15 @@ stays readable; the active card and its rimmed blockers keep full strength */
 /* #366 one station per phase: the head keeps the tick, the label and the count while the body scrolls; --ac comes from the station class at the end of this sheet */
 .station { grid-row: 2; display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; min-height: 0; }
 .station + .station { border-left: 1px solid var(--hairline); }
-.st-head { display: flex; align-items: baseline; gap: 8px; padding: var(--sp-2) 0 var(--sp-3); position: relative; flex: 0 0 auto; background: var(--canvas); z-index: 2; }
+.st-head { display: flex; align-items: baseline; gap: 8px; padding: var(--sp-2) var(--sp-4) var(--sp-3); position: relative; flex: 0 0 auto; background: var(--canvas); z-index: 2; }
 .st-head h2 { flex: 1 1 auto; min-width: 0; font-size: 0.8125rem; font-weight: 500; text-transform: uppercase; letter-spacing: .05em; margin: 0; color: var(--dim); display: flex; align-items: center; gap: 6px; }
 /* the tick crosses the shared hairline; only a station with a running agent accents it and its label */
 .st-head::before { content: ""; position: absolute; left: 0; top: -9px; width: 1px; height: 18px; background: var(--hairline); }
 .station.live .st-head::before { background: var(--ac); box-shadow: 0 0 6px var(--ac); }
 .station.live .st-head h2 { color: var(--ac); }
-.station .cards { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
+/* #385 the scrollbar inset would push a scrolled card off the separator, so the wheel, the trackpad and the keyboard do the scrolling */
+.station .cards { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; scrollbar-width: none; }
+.station .cards::-webkit-scrollbar { width: 0; }
 /* a disabled stage dims its station but keeps the cards reachable */
 .station.dim .cards, .station.dim .count { opacity: .4; }
 /* a disabled integration stage is a narrow labeled strip with no cards and no count */
@@ -240,7 +242,7 @@ names the reason where the station is wide enough */
 .chip.cx-simple { background: var(--low-bg); color: var(--low-fg); }
 .chip.cx-moderate { background: var(--medium-bg); color: var(--medium-fg); }
 .chip.cx-complex { background: var(--critical-bg); color: var(--critical-fg); }
-.empty { font-size: 0.75rem; color: var(--dim); }
+.empty { padding: 0 var(--sp-4); font-size: 0.75rem; color: var(--dim); }
 .toggle { display: block; width: 100%; margin-top: 4px; border: 0; border-top: 1px solid var(--hairline); background: none; color: var(--link); border-radius: 0; padding: 6px 0; cursor: pointer; font-size: 0.75rem; font-family: ${MONO}; text-align: left; }
 .toggle:hover { color: var(--text); }
 /* the panel's run rows: one row per agent run, sub run and doctor run. #353 kept one accent per
@@ -399,6 +401,7 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
 .st-head { align-items: baseline; padding: 10px 0 6px; }
 .st-head h2 { font-size: 0.875rem; }
 .st-head::before { left: -13px; top: 16px; width: 12px; height: 1px; }
+.empty { padding: 0; }
 .count { font-size: 0.8125rem; }
 /* the touch floor: every control clears 44px and its neighbours sit at least 8px apart */
 .m-action, .seg, .run-row, .arch-row, .toggle, .card, .c-wait, #c-text summary { min-height: 44px; }

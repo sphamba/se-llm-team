@@ -952,10 +952,18 @@ assert.ok(script.includes("handleEl.onclick = toggleConsoleSheet"), "the console
 for (const tok of ["--sp-1: 4px", "--sp-2: 6px", "--sp-3: 8px", "--sp-4: 12px", "--sp-5: 16px", "--sp-6: 24px"])
 	assert.ok(tokenBlocks[0].includes(tok), `the light :root block declares ${tok.split(":")[0]}, the one spacing scale`);
 const spacingRule = (sel: string) => themeCss.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " \\{([^}]*)\\}"))?.[1] ?? "";
-for (const sel of ["header", "#filters", "#board", ".st-head", ".station", ".card", ".arch-row"])
+for (const sel of ["header", "#filters", "#board", ".st-head", ".station", ".card", ".arch-row", ".empty"])
 	assert.ok(spacingRule(sel).includes("var(--sp-"), `${sel} reads its spacing from the scale`);
 assert.match(spacingRule(".card"), /padding: var\(--sp-3\) var\(--sp-4\) var\(--sp-4\)/, "the card takes 12px of side padding from the scale, so its text clears the station hairline");
 assert.equal(spacingRule(".station").includes("gap: var(--sp-4)"), true, "the station head gap belongs to the column, so it holds at every scroll position");
 assert.equal(spacingRule(".station .cards").includes("padding-top"), false, "the scrolling cards container carries no gap of its own");
+// #385 the column edge: no horizontal board gap, and the head, the empty line and the card share one 12px inset
+assert.equal(spacingRule("#board").includes("gap: 0;"), true, "the board carries no column gap, so a card's right edge reaches the next station's separator");
+assert.equal(spacingRule(".st-head").includes("padding: var(--sp-2) var(--sp-4) var(--sp-3)"), true, "the station head takes the card's 12px inset, so the title and the count sit on the card text line");
+assert.equal(spacingRule(".empty").includes("padding: 0 var(--sp-4)"), true, "the empty line shares the card's 12px inset");
+assert.equal(spacingRule(".station .cards").includes("scrollbar-width: none"), true, "a scrolled station hides its scrollbar, so the cards stay flush on the right");
+assert.match(themeCss, /\.station \.cards::-webkit-scrollbar \{ width: 0; \}/, "webkit gets the same zero scrollbar inset");
+const phoneSheet = themeCss.slice(themeCss.indexOf(`@media (max-width: ${MOBILE_MAX}px)`));
+assert.match(phoneSheet, /\.empty \{ padding: 0; \}/, "the phone block pins the empty line back to the station's own 12px inset");
 
 console.log("page.test.ts: all assertions passed");
