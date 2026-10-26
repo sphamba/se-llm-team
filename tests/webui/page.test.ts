@@ -571,7 +571,27 @@ assert.deepEqual(pressed(), ["medium"], "after the confirmation the control foll
 const writeGatedSrc = page.match(/function writeGated\(el, html\) \{[\s\S]*?\n\}/)![0];
 const groupRunsSrc = page.match(/function groupRuns\(agents, doctors\) \{[\s\S]*?\n\}/)![0];
 const runsSrc = groupRunsSrc + page.slice(page.indexOf("const ROLE_CLS = "), page.indexOf("// the panel heading"));
-const runsEl: Record<string, any> = { __html: undefined, innerHTML: "", querySelectorAll: () => [] };
+const liveSpans: Record<string, any>[] = [];
+const makeSpan = (handle: string) => {
+	const span: Record<string, any> = { dataset: { liveHandle: handle }, firstChild: null };
+	Object.defineProperty(span, "textContent", {
+		get: () => (span.firstChild ? span.firstChild.data : ""),
+		set: (v: string) => {
+			if (!v) span.firstChild = null;
+			else if (!span.firstChild || span.firstChild.data !== v) span.firstChild = { data: v };
+		},
+	});
+	return span;
+};
+const runsEl: Record<string, any> = { __html: undefined, __dom: "", querySelectorAll: (sel: string) => (sel === ".row-meta[data-live-handle]" ? liveSpans : []) };
+Object.defineProperty(runsEl, "innerHTML", {
+	get: () => runsEl.__dom,
+	set: (v: string) => {
+		liveSpans.length = 0;
+		for (const m of v.matchAll(/data-live-handle="([^"]*)"/g)) liveSpans.push(makeSpan(m[1]));
+		runsEl.__dom = v;
+	},
+});
 const runLog = { handle: "t.dev.1", sub: null as number | null };
 let subFetches: string[] = [];
 const makeRuns = () => new Function("esc", "fmtDur", "fmtTokens", "logState", "agentLabel", "document", "fetch", "encodeURIComponent", "projectParam", "openConsole",
@@ -591,8 +611,12 @@ runs.writeRuns();
 const liveRow = runsEl.innerHTML as string;
 assert.ok(liveRow.includes("agent-developer") && liveRow.includes("agent-live") && liveRow.includes('<span class="spin"></span>'), "a live run keeps its role class and its spinner");
 assert.ok(liveRow.includes('data-handle="t.dev.1"') && liveRow.includes('data-role="developer"'), "the row carries the run handle and role the console click needs");
-assert.ok(liveRow.includes(fmtTokens(1234)) && liveRow.includes(fmtDur(65000)) && liveRow.includes(new Date(1700000000000).toLocaleTimeString()), "the row shows the start, the duration and the tokens");
-assert.ok(liveRow.indexOf(fmtTokens(1234)) < liveRow.indexOf(fmtDur(65000)), "the run row reads the start, then the tokens before the time");
+// #420 a live row's numbers move in place, so its html carries an empty slot and no values
+assert.ok(liveRow.includes('<span class="row-meta" data-live-handle="t.dev.1"></span>'), "a live run's meta text is an empty slot that carries its handle");
+assert.ok(!liveRow.includes(fmtTokens(1234)) && !liveRow.includes(fmtDur(65000)), "a live run's html carries neither the tokens nor the duration");
+assert.equal(liveSpans.length, 1, "the runs block holds one live slot");
+assert.equal(liveSpans[0].textContent, [new Date(1700000000000).toLocaleTimeString(), fmtTokens(1234), fmtDur(65000)].join(" · "), "the slot shows the start, the duration and the tokens");
+assert.ok(liveSpans[0].textContent.indexOf(fmtTokens(1234)) < liveSpans[0].textContent.indexOf(fmtDur(65000)), "the run row reads the start, then the tokens before the time");
 const headEls: Record<string, any> = { "c-title": {}, "c-state": {}, "c-tokens": {} };
 const makeHead = new Function("fmtDur", "fmtTokens", "logState", "document",
 	"let openDetail = null, panelFile = null;\n" + page.match(/function writeConsoleHead\(\) \{[\s\S]*?\n\}/)![0] +
@@ -605,7 +629,30 @@ makeHead.open = { file: "000263_task.md", agents: [{ role: "developer", handle: 
 makeHead.write();
 assert.equal(headEls["c-tokens"].textContent, `${fmtTokens(1234)} · ${fmtDur(65000)}`, "the console head reads the tokens before the time");
 assert.equal(subFetches.length, 1, "a run with no cached sub list starts exactly one fetch");
-const rowOf = new Function("esc", "fmtDur", "fmtTokens", "logState", "ROLE_CLS", "startText", page.slice(page.indexOf("function runRowHtml("), page.indexOf("// the subagent rows of one run")) + "; return runRowHtml;")(esc, fmtDur, fmtTokens, runLog, { developer: "agent-developer", reviewer: "agent-reviewer" }, (ms: number) => "T" + ms);
+// #420 the pulse runs on one node: the live row's html stays byte-identical across a poll and
+// only the slot's text moves, while a dead row keeps its values inline
+const before = runsEl.innerHTML as string;
+const slot = liveSpans[0];
+runs.open = { file: "000263_task.md", agents: [{ role: "developer", handle: "t.dev.1", run: 0, alive: true, start: 1700000000000, duration: 66000, tokens: 1244 }] };
+runs.writeRuns();
+assert.equal(runsEl.innerHTML, before, "a poll that only advances the numbers keeps the live row's html");
+assert.equal(liveSpans[0], slot, "the unchanged html keeps the slot node itself");
+assert.equal(slot.textContent, [new Date(1700000000000).toLocaleTimeString(), fmtTokens(1244), fmtDur(66000)].join(" · "), "the slot's text moves to the new numbers");
+const sameNode = slot.firstChild;
+runs.writeRuns();
+assert.equal(slot.firstChild, sameNode, "an unchanged poll leaves the slot's text node in place");
+runs.open = { file: "000263_task.md", agents: [{ role: "developer", handle: "t.dev.1", run: 0, alive: true }] };
+runs.writeRuns();
+assert.ok((runsEl.innerHTML as string).includes('data-live-handle="t.dev.1"'), "an alive run with no numbers still renders its slot");
+assert.equal(liveSpans[0].textContent, "", "a live run with no numbers leaves its slot empty, with no stray separator");
+runs.open = { file: "000263_task.md", agents: [{ role: "developer", handle: "t.dev.1", run: 0, alive: false, status: "dead", start: 1700000000000, duration: 65000, tokens: 1234 }] };
+runs.writeRuns();
+assert.ok(!(runsEl.innerHTML as string).includes("data-live-handle"), "a dead run renders no live slot");
+assert.ok((runsEl.innerHTML as string).includes(fmtTokens(1234)) && (runsEl.innerHTML as string).includes(fmtDur(65000)), "a dead run keeps its values inline");
+runs.open = { file: "000263_task.md", agents: [{ role: "developer", handle: "t.dev.1", run: 0, alive: true, start: 1700000000000, duration: 65000, tokens: 1234 }] };
+runs.writeRuns();
+const rowOf = new Function("esc", "fmtDur", "fmtTokens", "logState", "ROLE_CLS", "startText", "runMeta", page.slice(page.indexOf("function runRowHtml("), page.indexOf("// the subagent rows of one run")) + "; return runRowHtml;")(esc, fmtDur, fmtTokens, runLog, { developer: "agent-developer", reviewer: "agent-reviewer" }, (ms: number) => "T" + ms,
+	new Function("startText", "fmtTokens", "fmtDur", page.match(/const runMeta = .*?\n/)![0] + "; return runMeta;")((ms: number) => "T" + ms, fmtTokens, fmtDur));
 assert.ok(rowOf({ role: "developer", handle: "d", status: "dead", tokens: 0, duration: 0 }, "", "Developer", null).includes("agent-dead"), "a dead run keeps its red marker");
 assert.ok(rowOf({ role: "developer", handle: "d", status: "dead", tokens: 0, duration: 0 }, "", "Developer", null).includes("cross"), "the dead marker is the cross");
 assert.ok(rowOf({ role: "developer", handle: "d", status: "done", tokens: 0, duration: 0 }, "", "Developer", null).includes("agent-past"), "a finished run keeps the past marker");

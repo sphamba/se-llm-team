@@ -903,15 +903,17 @@ function setPriority(p) {
 // payload role to row marker class; a run, its sub rows and a doctor row share the run's role class
 const ROLE_CLS = { splitter: "agent-splitter", developer: "agent-developer", reviewer: "agent-reviewer", merger: "agent-merger", "live-tester": "agent-livetest", "integration-tester": "agent-integration" };
 const startText = ms => typeof ms === "number" && Number.isFinite(ms) ? new Date(ms).toLocaleTimeString() : "";
+const runMeta = a => [startText(a.start), fmtTokens(a.tokens), fmtDur(a.duration)].filter(Boolean).join(" · ");
 // one run row: the role label, then the start time, the tokens and the duration at the right; a
 // live run spins, a dead one turns red, and a click opens the console on that run's log
 function runRowHtml(a, extra, label, sub) {
 	const mark = '<span class="run-mark">' + (a.alive ? '<span class="spin"></span>' : a.status === "dead" ? '<span class="cross">✗</span>' : '<span class="check">✓</span>') + "</span>";
-	const meta = [startText(a.start), fmtTokens(a.tokens), fmtDur(a.duration)].filter(Boolean).join(" · ");
+	const live = a.alive && sub == null;
+	const meta = live ? "" : runMeta(a);
 	const activeRow = logState && logState.handle === a.handle && (logState.sub ?? null) === (sub ?? null) ? " agent-row-active" : "";
 	return '<button class="run-row ' + (ROLE_CLS[a.role] || "") + " " + extra + (a.alive ? " agent-live" : a.status === "dead" ? " agent-dead" : " agent-past") + activeRow +
 		'" data-handle="' + esc(a.handle) + '" data-role="' + esc(a.role) + '"' + (sub == null ? "" : ' data-sub="' + sub + '"') + ">" + mark +
-		'<span class="row-role">' + esc(label) + "</span>" + (meta ? '<span class="row-meta">' + esc(meta) + "</span>" : "") + "</button>";
+		'<span class="row-role">' + esc(label) + "</span>" + (live ? '<span class="row-meta" data-live-handle="' + esc(a.handle) + '"></span>' : meta ? '<span class="row-meta">' + esc(meta) + "</span>" : "") + "</button>";
 }
 // the subagent rows of one run, fetched once per handle: /api/agent-log?sub=list answers the run's
 // Agent calls in log order with their token and duration totals
@@ -926,6 +928,15 @@ function loadSubs(handle) {
 }
 function bindRows(el) {
 	for (const b of el.querySelectorAll(".run-row")) b.onclick = () => openConsole(b.dataset.handle, b.dataset.sub == null ? null : Number(b.dataset.sub), b.dataset.role);
+}
+// the live run's numbers move in place, so its row html and its spinning dot survive the poll
+function syncLiveMeta(el, agents) {
+	const want = {};
+	for (const a of agents) if (a.alive && a.handle) want[a.handle] = runMeta(a);
+	for (const span of el.querySelectorAll(".row-meta[data-live-handle]")) {
+		const text = want[span.dataset.liveHandle] || "";
+		if (span.textContent !== text) span.textContent = text;
+	}
 }
 // the runs block: one group per run, oldest first and the live run last (the payload order); a
 // group holds the run row, its subagent rows, then its doctor row, and the doctors whose run is
@@ -950,6 +961,7 @@ function writeRuns() {
 		? '<div class="run-note">no matching run</div>' + unmatched.map(d => runRowHtml(d, "agent-doctor", agentLabel(d, docCount), null)).join("")
 		: "");
 	if (writeGated(el, html)) bindRows(el);
+	syncLiveMeta(el, t.agents || []);
 }
 // the panel heading: the number and the name, and the focus target on open. The text is only
 // assigned when it changes, so a poll leaves the focused heading and its text node in place
