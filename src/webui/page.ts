@@ -486,9 +486,6 @@ function tickCards() {
 }
 // 000264: the lazily-known card stats, keyed per project and task (statsKey)
 const statsKnown = Object.create(null);
-// #398 a coarse pointer cannot hover: a tap synthesises mouseenter with no mouseleave, and the sheet
-// restores focus to the card, so the reveal is press-scoped there instead of hover- or focus-scoped
-const coarsePointer = () => matchMedia("(hover: none)").matches;
 function makeCard(file) {
 	const el = document.createElement("div");
 	el.className = "card";
@@ -499,14 +496,16 @@ function makeCard(file) {
 	// #366: the card is a link in the tab order, so Enter opens the card under the focus ring
 	el.tabIndex = 0;
 	el.onkeydown = (e) => { if (e.key === "Enter" && !onMarker(e)) { e.preventDefault(); openTask(file); } };
-	el.onmouseenter = () => { if (!coarsePointer()) hotRelations(file, true); };
-	el.onmouseleave = () => { if (!coarsePointer()) hotRelations(file, false); };
-	// #373 keyboard focus runs the same reveal as hover, so the connectors are reachable without a mouse
-	el.onfocus = () => { if (!coarsePointer()) hotRelations(file, true); };
-	el.onblur = () => { if (!coarsePointer()) hotRelations(file, false); };
-	// #398 on a coarse pointer the reveal lives for the press alone, so the finger lift always clears it
-	el.onpointerdown = () => { if (coarsePointer()) hotRelations(file, true); };
-	el.onpointerup = el.onpointercancel = el.ontouchend = () => { if (coarsePointer()) hotRelations(file, false); };
+	// #402 the reveal follows the event, not the device: a mouse hover arms and clears, a finger or a
+	// pen arms only while pressed, so a hybrid device keeps both behaviours, one per input
+	el.onpointerenter = (e) => { if (e.pointerType === "mouse") hotRelations(file, true); };
+	el.onpointerleave = (e) => { if (e.pointerType === "mouse") hotRelations(file, false); };
+	el.onpointerdown = (e) => { if (e.pointerType === "touch" || e.pointerType === "pen") hotRelations(file, true); };
+	el.onpointerup = el.onpointercancel = (e) => { if (e.pointerType === "touch" || e.pointerType === "pen") hotRelations(file, false); };
+	// #373 #402 focus arms only the keyboard's own focus: :focus-visible is true after Tab and false
+	// after a pointer or a tap, so the sheet's focus restore cannot re-arm the touched card
+	el.onfocus = () => { if (el.matches(":focus-visible")) hotRelations(file, true); };
+	el.onblur = () => hotRelations(file, false);
 	// 000191: the entrance class is one-shot, dropped on animationend so a later poll or reorder
 	// never replays it
 	el.onanimationend = () => { el.classList.remove("enter"); el.onanimationend = null; };
@@ -543,7 +542,7 @@ function hotRelations(file, on) {
 	}
 }
 // #398 the panel path clears the reveal through the same switch, so an open or a close cannot leave a
-// card selected on a device that never fires the hover exit
+// card selected on any input
 const clearReveal = () => hotRelations(null, false);
 // #370 the phone layout stacks every card in one column, so no relation curve has a span to cross
 const verticalSpine = () => matchMedia("(max-width: " + MOBILE_MAX + "px)").matches;
