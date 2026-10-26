@@ -698,19 +698,20 @@ function waitRows(t) {
 			: '<div class="wait-row">' + num + cells + "</div>";
 	}).join("");
 }
-// the panel sits above its card when there is room and below it otherwise, so it never covers the card
-// it belongs to; the phone layout puts it under the card at full width instead of floating it
+// #393 both axes come from the marker rect: a card is taller than the one-row popover, so a
+// card-anchored top lands a card height above the row the popover belongs to; the phone layout
+// puts it under the card at full width instead of floating it
 function placeWaits(pop, card) {
 	const m = card.querySelector(".c-wait").getBoundingClientRect();
-	const c = card.getBoundingClientRect();
 	if (verticalSpine()) {
+		const c = card.getBoundingClientRect();
 		pop.style.left = "8px";
 		pop.style.right = "8px";
 		pop.style.top = Math.round(c.bottom + 4) + "px";
 		return;
 	}
 	pop.style.left = Math.round(Math.max(8, Math.min(m.left, innerWidth - pop.offsetWidth - 8))) + "px";
-	pop.style.top = Math.round(c.top > pop.offsetHeight + 8 ? c.top - pop.offsetHeight - 4 : c.bottom + 4) + "px";
+	pop.style.top = Math.round(m.top >= pop.offsetHeight + 12 ? m.top - pop.offsetHeight - 8 : m.bottom + 8) + "px";
 }
 function closeWaits(restore) {
 	const pop = document.getElementById("waits-pop");
@@ -755,8 +756,11 @@ function toggleWaits(file) {
 	if (waitFile === file) closeWaits(true);
 	else openWaits(file);
 }
-// escape and an outside click close the popover; a click on a marker is the toggle's own business
+// escape, an outside click and a scroll close the popover; a click on a marker is the toggle's own
+// business. #393 the popover is fixed while the cards move, so a scroll of #board or of a station
+// body closes it instead of leaving it at a stale position, and capture reaches both
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && waitFile) closeWaits(true); });
+document.addEventListener("scroll", () => { if (waitFile) closeWaits(false); }, true);
 document.addEventListener("click", (e) => {
 	if (!waitFile) return;
 	const pop = document.getElementById("waits-pop");

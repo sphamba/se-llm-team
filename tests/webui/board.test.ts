@@ -335,6 +335,34 @@ assert.match(themeCss, new RegExp(`@media \\(max-width: ${MOBILE_MAX}px\\) \\{[\
 assert.ok(page.includes('pop.id = "waits-pop"') && page.includes("if (waitFile === file) closeWaits(true)"), "the client ships one popover at a time, keyed by file");
 assert.ok(page.includes("function closeWaits(restore)") && page.includes(".scrollIntoView({ block: \"nearest\""), "the close restores focus and a rendered row reaches the blocker card");
 
+// #393 the popover anchors to the marker row: both axes come from the marker rect, so a card that
+// is taller than the one-row popover cannot push it a card height above the row it belongs to
+const popAt = (marker: any, cardRect: any) => {
+	const pop = { offsetWidth: 200, offsetHeight: 40, style: {} as any };
+	const place = new Function("verticalSpine", "innerWidth", page.match(/function placeWaits\(pop, card\) \{[\s\S]*?\n\}/)![0] + "; return placeWaits;")(
+		() => false,
+		1000,
+	) as (pop: any, card: any) => void;
+	place(pop, { querySelector: () => ({ getBoundingClientRect: () => marker }), getBoundingClientRect: () => cardRect });
+	return pop.style;
+};
+const above = popAt({ left: 300, top: 500, bottom: 528 }, { left: 100, top: 100, bottom: 460 });
+assert.equal(above.top, "452px", "with room above, the desktop popover sits 8px over the marker row, not the card");
+assert.equal(above.left, "300px", "the left edge comes from the same marker rect");
+const below = popAt({ left: 300, top: 20, bottom: 48 }, { left: 100, top: 10, bottom: 400 });
+assert.equal(below.top, "56px", "without room above the marker, the popover drops under the marker row");
+
+// #393 the popover is fixed while the cards move, so a scroll of the board or of a station body
+// closes it the same way an outside click does, instead of leaving it at a stale position
+const scrollHandler = page.match(/addEventListener\("scroll", (.+?), true\)/)![1];
+const scrollClose = (file: string | null, calls: string[]) =>
+	(new Function("waitFile", "closeWaits", `return ${scrollHandler}`) as any)(file, (restore: unknown) => calls.push(String(restore)));
+const scrollCalls: string[] = [];
+scrollClose(null, scrollCalls)();
+assert.deepEqual(scrollCalls, [], "a scroll with no popover open closes nothing");
+scrollClose("000002_b.md", scrollCalls)();
+assert.deepEqual(scrollCalls, ["false"], "an open popover closes on a scroll without taking focus back");
+
 // 000127/000236: far-apart cards bend the line into an S (the control offsets scale with the
 // span, capped); same-row pairs clamp the offset inside the span, because a same-row cubic is
 // collinear and any control past an endpoint retraces the line
