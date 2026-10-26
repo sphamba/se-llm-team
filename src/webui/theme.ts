@@ -89,8 +89,11 @@ h1 { font-size: 1.0625rem; font-weight: 500; margin: 0; }
 .arch-head { display: flex; align-items: baseline; gap: 10px; padding: 2px 0 8px; font-size: 0.875rem; }
 #arch-count { color: var(--dim); font-size: 0.75rem; font-family: ${MONO}; font-variant-numeric: tabular-nums; }
 .arch-head .m-action { margin-left: auto; }
-.arch-row { display: flex; align-items: baseline; gap: 10px; width: 100%; margin: 0; border: 0; border-bottom: 1px solid var(--hairline); background: none; color: var(--text); padding: 6px 2px; font-family: inherit; font-size: 0.8125rem; text-align: left; }
+.arch-row { display: flex; align-items: baseline; gap: var(--sp-3); width: 100%; margin: 0; border: 0; border-bottom: 1px solid var(--hairline); background: none; color: var(--text); padding: var(--sp-2) 2px; font-family: inherit; font-size: 0.8125rem; text-align: left; }
 .arch-row:hover { background: var(--raised); }
+.arch-cx { flex: 0 0 auto; }
+.arch-tok, .arch-dur { flex: 0 0 auto; width: 4rem; text-align: right; white-space: nowrap; color: var(--dim); font-size: 0.75rem; font-family: ${MONO}; font-variant-numeric: tabular-nums; }
+.arch-dur { width: 5rem; }
 .arch-num, .pal-num { color: var(--link); font-family: ${MONO}; font-variant-numeric: tabular-nums; }
 .arch-name, .pal-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .arch-date, .pal-state { color: var(--dim); font-size: 0.75rem; font-family: ${MONO}; }

@@ -61,6 +61,35 @@ export function taskStats(t) {
 	return agentStatsText(toks, dur);
 }
 
+// #380 the done archive's two stat cells, tokens then duration: the sum across the task's agents
+// with the taskStats convention, so an archive number matches the card's, and a dash in each cell
+// for a task that never ran or carries no usage record
+export function archStatsText(agents) {
+	const list = agents || [];
+	if (!list.some((a) => typeof a.tokens === "number" && Number.isFinite(a.tokens))) return ["-", "-"];
+	const toks = list.reduce((s, a) => s + (typeof a.tokens === "number" ? a.tokens : 0), 0);
+	const dur = list.reduce((s, a) => s + (typeof a.duration === "number" ? a.duration : 0), 0);
+	return [fmtTokens(toks) || "-", fmtDur(dur) || "-"];
+}
+
+// #380 one done archive row: number, name, complexity chip, the two stat cells and the finish date;
+// the date is formatted by the caller, so this stays pure and the chip reuses the per-value palette
+// the detail panel's complexity chip uses
+export function archRowHtml(t, date) {
+	const s = archStatsText(t.agents);
+	const cx = t.complexity || "moderate";
+	return (
+		'<button class="arch-row" data-task="' + esc(t.file) + '">' +
+		'<span class="arch-num">#' + parseInt(t.file, 10) + "</span>" +
+		'<span class="arch-name">' + esc(t.name || "") + "</span>" +
+		'<span class="arch-cx chip cx cx-' + esc(cx) + '">' + esc(cx) + "</span>" +
+		'<span class="arch-tok">' + s[0] + "</span>" +
+		'<span class="arch-dur">' + s[1] + "</span>" +
+		'<span class="arch-date">' + esc(date) + "</span>" +
+		"</button>"
+	);
+}
+
 // the open detail card's poll cadence (000142): a live agent's tokens and duration advance with
 // the run log, so while the open task has one the poll ticks at 1 s; otherwise the 5 s board poll
 export function refreshMs(t) {

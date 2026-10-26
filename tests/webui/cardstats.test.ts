@@ -2,7 +2,8 @@
 // statsKey, applyCardStats, mergeCardStats and makeStatsQueue helpers over stubbed storage and a
 // stubbed fetch. No hub and no DOM, so this group needs no page fixture.
 import assert from "node:assert/strict";
-import { applyCardStats, makeStatsQueue, mergeCardStats, sortStation, statsKey, STATIONS } from "../../src/webui/board.ts";
+import { applyCardStats, archRowHtml, archStatsText, fmtDur, fmtTokens, makeStatsQueue, mergeCardStats, sortStation, statsKey, STATIONS } from "../../src/webui/board.ts";
+import { esc } from "../../src/webui/logpane.ts";
 import { PAGE } from "../../src/webui/page.ts";
 
 // over stubbed storage (no DOM, no hub; the endpoint is stubbed until #263 merges)
@@ -222,3 +223,26 @@ assert.ok(PAGE.indexOf("applyCardStats(tab.tasks") < PAGE.indexOf("syncBoard(sta
 assert.ok(PAGE.includes('"/api/card-stats?files=" + encodeURIComponent(file)'), "each queued file fetches the pinned endpoint");
 assert.ok(PAGE.includes("statsQueue.enqueueStation(active, b.tasks, STATIONS.find(s => s.id === id), VISIBLE)"), "the unfold enqueues the station's beyond-fold cards");
 assert.ok(PAGE.includes("queueExpanded()"), "each poll re-queues the already-expanded stations");
+
+// #380 the done archive rows: the two stat cells sum like the card's run row, a dash in each cell
+// until the batch lands and for a task that never ran, and every row carries its complexity
+assert.deepEqual(archStatsText(undefined), ["-", "-"], "no agents shows two dashes");
+assert.deepEqual(archStatsText([]), ["-", "-"], "a task that never ran shows dashes, not zeros");
+assert.deepEqual(archStatsText([{ tokens: 420, duration: 1500 }]), ["420", "2s"], "one agent shows its own totals");
+assert.deepEqual(archStatsText([{ tokens: 420, duration: 1500 }, { tokens: 1580, duration: 2000 }]), ["2k", "4s"], "several agents sum the way taskStats does");
+assert.deepEqual(archStatsText([{ role: "developer" }]), ["-", "-"], "an agent with no usage record shows dashes, like the card shows no stats");
+const archRow = archRowHtml({ file: "000047_fix_x.md", name: "a & b", complexity: "complex", agents: [{ tokens: 420, duration: 1500 }] }, "1/2/2026");
+assert.ok(archRow.includes('<span class="arch-cx chip cx cx-complex">complex</span>'), "the archive row emits the per-value complexity chip");
+assert.ok(archRow.includes('<span class="arch-tok">420</span>') && archRow.includes('<span class="arch-dur">2s</span>'), "the two stat cells carry the tokens and the duration");
+assert.ok(archRow.includes('<span class="arch-name">a &amp; b</span>') && archRow.includes('<span class="arch-date">1/2/2026</span>'), "the name is escaped and the date keeps the far right cell");
+assert.ok(archRowHtml({ file: "000048_m.md", name: "m" }, "d").includes('<span class="arch-cx chip cx cx-moderate">moderate</span>'), "a task with no complexity falls back to moderate, like the card");
+assert.ok(PAGE.includes("function archRowHtml(") && PAGE.includes("function archStatsText("), "both archive helpers interpolate into the page");
+assert.ok(PAGE.includes('encodeURIComponent(want.join(","))'), "the archive fetches its whole page of files in one batched request, not one per row");
+// the served copies resolve with their interpolated deps only, so no module-scope constant leaks in
+const servedArch = new Function(
+	"fmtTokens",
+	"fmtDur",
+	"esc",
+	PAGE.match(/function archStatsText\(agents\) \{[\s\S]*?\n\}/)![0] + PAGE.match(/function archRowHtml\(t, date\) \{[\s\S]*?\n\}/)![0] + "; return archRowHtml;",
+)(fmtTokens, fmtDur, esc) as typeof archRowHtml;
+assert.equal(servedArch({ file: "000047_fix_x.md", name: "x", complexity: "simple" }, "d"), archRowHtml({ file: "000047_fix_x.md", name: "x", complexity: "simple" }, "d"), "the served archive row matches the module copy");

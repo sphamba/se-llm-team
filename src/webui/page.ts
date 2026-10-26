@@ -2,7 +2,7 @@ import { PRIORITY_RANK } from "../kanban.ts";
 import { readConfigFiles, type StageFlags } from "../orchestrator/config.ts";
 export type { StageFlags };
 import { esc, inline, logFixups, md } from "./logpane.ts";
-import { agentLabel, agentStatsText, applyCardStats, applyStages, blockerTasks, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, groupRuns, isHeld, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, stationFor, statsKey, STATIONS, syncBoard, syncCardStats, taskStats, waitsOnText } from "./board.ts";
+import { agentLabel, agentStatsText, applyCardStats, applyStages, archRowHtml, archStatsText, blockerTasks, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, groupRuns, isHeld, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, stationFor, statsKey, STATIONS, syncBoard, syncCardStats, taskStats, waitsOnText } from "./board.ts";
 import { ARCHIVE_PAGE, archivePage, archiveTasks, decodeFilters, emptyFilters, encodeFilters, FILTER_COMPLEXITIES, FILTER_DEBOUNCE, FILTER_PRIORITIES, FILTERS_KEY, filterReason, filterTasks, filtersActive, filtersCount, matchesFilters, PALETTE_MAX, paletteResults } from "./filters.ts";
 import { CSS, MOBILE_MAX } from "./theme.ts";
 
@@ -194,6 +194,8 @@ ${agentStatsText}
 ${fmtTokens}
 ${fmtDur}
 ${taskStats}
+${archStatsText}
+${archRowHtml}
 ${syncCardStats}
 ${statsKey}
 ${applyCardStats}
@@ -380,6 +382,27 @@ function showView(archive) {
 	syncPanelTop();
 	if (archive) renderArchive();
 }
+// #380 the archive's stats batch: one /api/card-stats request for the files of the rendered page
+// that the session map does not know yet, merged into the same statsKnown map the cards use and
+// applied onto the rows, then the archive re-renders in place; a file in flight is never asked
+// twice, and a failed batch drops its files so the next render retries
+const archAsked = new Set();
+function queueArchiveStats(rows) {
+	const project = active;
+	const key = file => statsKey(project, file);
+	const want = rows.filter(t => !t.agents && !statsKnown[key(t.file)] && !archAsked.has(key(t.file))).map(t => t.file);
+	if (!want.length) return;
+	for (const f of want) archAsked.add(key(f));
+	const drop = () => { for (const f of want) archAsked.delete(key(f)); };
+	fetch("/api/card-stats?files=" + encodeURIComponent(want.join(",")) + (project ? "&project=" + encodeURIComponent(project) : ""))
+		.then(r => r.ok ? r.json() : null)
+		.then(stats => {
+			if (!stats) { drop(); return; }
+			mergeCardStats(stats, boardOf(boards, project).tasks, statsKnown, localStorage, project);
+			applyCardStats(boardOf(boards, project).tasks, statsKnown, localStorage, project);
+			renderArchive();
+		}, drop);
+}
 function renderArchive() {
 	const all = activeBoard().tasks;
 	const rows = archiveTasks(all, filters);
@@ -389,7 +412,7 @@ function renderArchive() {
 	const count = document.getElementById("arch-count");
 	if (count) { const text = filtersActive(filters) ? rows.length + " of " + done + " done tasks match" : done + " done tasks"; if (count.textContent !== text) count.textContent = text; }
 	const list = document.getElementById("arch-list");
-	const html = win.rows.map(t => '<button class="arch-row" data-task="' + esc(t.file) + '"><span class="arch-num">#' + String(parseInt(t.file, 10)) + '</span><span class="arch-name">' + esc(t.name || "") + '</span><span class="arch-date">' + esc(archDate(t.updated)) + "</span></button>").join("");
+	const html = win.rows.map(t => archRowHtml(t, archDate(t.updated))).join("");
 	if (list && writeGated(list, html)) for (const b of list.children) b.onclick = () => openTask(b.dataset.task);
 	const empty = document.getElementById("arch-empty");
 	if (empty) { const text = rows.length ? "" : filtersActive(filters) ? filterReason(filters) : "nothing finished yet"; if (empty.textContent !== text) empty.textContent = text; empty.classList.toggle("hidden", !!rows.length); }
@@ -399,6 +422,7 @@ function renderArchive() {
 	if (older) older.hidden = win.page >= win.pages - 1;
 	const newer = document.getElementById("arch-newer");
 	if (newer) newer.hidden = win.page <= 0;
+	queueArchiveStats(win.rows);
 }
 const bind = (id, ev, fn) => { const el = document.getElementById(id); if (el) el[ev] = fn; };
 const typingTarget = el => !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable === true);
