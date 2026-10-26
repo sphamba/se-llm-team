@@ -388,8 +388,9 @@ ${STATIONS.map((s) => `.s-${s.id} { --ac: var(--accent-${s.accent}); --ac-t: var
    vertically in pipeline order and the hairline becomes the connector on the left edge. The root
    keeps the 16px base, so the type scale needs no mobile override except the station count */
 @media (max-width: ${MOBILE_MAX}px) {
+:root { --ctl-h: 32px; }
 header { flex-wrap: wrap; padding: 10px 12px 6px; }
-#theme { min-height: 44px; padding: 0 14px; }
+#theme { min-height: var(--ctl-h); }
 #hub { padding: 2px 12px 8px; }
 #tabs { flex-wrap: nowrap; gap: 8px; overflow-x: auto; padding: 6px 12px 0; }
 .tab { min-height: 44px; padding: 0 16px; }
@@ -416,11 +417,15 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
    row takes no band: on a 29px pitch the next row's band starts 21px into the current row's box, so the
    bottom of a run row would open the row below. The card takes no band either, because its content
    already clears 44px and its ::after is the running progress line. A nested run row draws its
-   connector in ::after and a more specific rule, so it keeps the connector and goes without a band */
-.m-action, .seg, .toggle, .c-wait, #c-text summary { position: relative; }
-.m-action::after, .seg::after, .toggle::after, .c-wait::after, #c-text summary::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; margin-top: -22px; }
+   connector in ::after and a more specific rule, so it keeps the connector and goes without a band.
+   #405 the theme toggle, the filter button, the chips and the close buttons take the one 32px --ctl-h
+   box and lean on the same band for the 44px floor */
+.m-action, .seg, .toggle, .c-wait, #c-text summary, #theme, #f-toggle, .f-chip, #p-close, #c-close { position: relative; }
+.m-action::after, .seg::after, .toggle::after, .c-wait::after, #c-text summary::after, #theme::after, #f-toggle::after, .f-chip::after, #p-close::after, #c-close::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; margin-top: -22px; }
 /* the neighbours still sit at least 8px apart */
 #p-actions, .f-group, #tabs, .c-top, .c-meta { gap: 8px; }
+/* #405 a wrapped chip row sits two band overhangs apart, so two chips' bands touch and never overlap */
+.f-group { gap: 12px; }
 /* #373 the popover becomes a full width block under its card, never a floating panel */
 #waits-pop { min-width: 0; max-width: none; }
 }
@@ -430,31 +435,33 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
 #panel { top: 0; bottom: 0; left: 0; width: auto; z-index: 5; border-left: 0; padding: 0 12px calc(12px + env(safe-area-inset-bottom)); }
 #p-head { gap: 12px; padding: calc(18px + env(safe-area-inset-top)) 0 8px; }
 #p-handle { display: block; position: absolute; top: calc(6px + env(safe-area-inset-top)); left: 50%; width: 40px; height: 4px; margin-left: -20px; border-radius: 2px; background: var(--hairline); }
-#p-close { min-width: 44px; min-height: 44px; }
+#p-close { min-width: var(--ctl-h); min-height: var(--ctl-h); }
 body.panel-open #board, body.panel-open #archive { padding-right: 12px; }
 }
 /* #370 the console: collapsed to one status line until a tap on the handle raises the bottom sheet to
-   at most 70% of the viewport; the close control stays visible and the log keeps its scroll */
+   at most 70% of the viewport, or a drag sets its own height; the close control stays visible and the
+   log keeps its scroll. #405 the sheet reads its own variable, so a phone drag never moves the dock */
 @media (max-width: ${MOBILE_MAX}px) {
-#console { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; height: calc(92px + env(safe-area-inset-bottom)); overflow: hidden; border-radius: 12px 12px 0 0; }
+body { --console-h-touch: calc(92px + env(safe-area-inset-bottom)); }
+#console { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; height: var(--console-h-touch, calc(92px + env(safe-area-inset-bottom))); overflow: hidden; border-radius: 12px 12px 0 0; }
 #console.raised { height: 70vh; }
 #c-handle { position: relative; height: 44px; background: none; }
 #c-handle:hover { background: none; }
 #c-handle::before { content: ""; position: absolute; top: 10px; left: 50%; width: 40px; height: 4px; margin-left: -20px; border-radius: 2px; background: var(--hairline); }
 #c-head { align-items: center; min-height: 44px; gap: 8px; padding: 0 12px; }
-#c-close { min-width: 44px; min-height: 44px; }
+#c-close { min-width: var(--ctl-h); min-height: var(--ctl-h); }
 #c-text { padding: 6px 12px calc(10px + env(safe-area-inset-bottom)); }
 }
 /* #370 the filter bar collapses behind one button with an active-count badge; its sheet repeats the
    same controls with an apply and a clear, and the palette goes full screen with an autofocused input */
 @media (max-width: ${MOBILE_MAX}px) {
-#f-toggle { display: inline-flex; align-items: center; gap: 8px; margin: 6px 12px; min-height: 44px; border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 8px; padding: 0 14px; font-family: inherit; font-size: 0.875rem; cursor: pointer; }
+#f-toggle { display: inline-flex; align-items: center; gap: 8px; margin: 6px 12px; min-height: var(--ctl-h); border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 8px; padding: 0 14px; font-family: inherit; font-size: 0.875rem; cursor: pointer; }
 #f-toggle[aria-expanded="true"] { border-color: var(--link); color: var(--link); }
 #f-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--link); color: var(--canvas); font-family: ${MONO}; font-size: 0.75rem; line-height: 20px; text-align: center; }
 #filters { display: none; }
 body.filters-open #filters { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 7; flex-direction: column; align-items: stretch; gap: 10px; max-height: 80vh; overflow-y: auto; padding: 14px 12px calc(14px + env(safe-area-inset-bottom)); background: var(--panel); border-top: 1px solid var(--hairline); border-radius: 12px 12px 0 0; }
 #f-q { flex: 0 0 auto; min-width: 0; min-height: 44px; font-size: 1rem; }
-.f-chip { min-height: 44px; padding: 0 16px; }
+.f-chip { min-height: var(--ctl-h); }
 #f-clear { margin-left: 0; }
 #f-apply { display: inline-flex; align-items: center; margin-left: auto; }
 #palette { padding: 0; align-items: stretch; }

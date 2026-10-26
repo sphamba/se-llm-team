@@ -1250,16 +1250,21 @@ function pullLog(qs, mode) {
 // key and clamped between the minimum and 60vh
 const CONSOLE_KEY = "consoleHeight";
 const CONSOLE_MIN = 120;
+// #405 the phone sheet starts collapsed at 92px, so that is its floor and a drag from the collapsed
+// sheet does not jump; the desktop dock keeps 120
+const CONSOLE_MIN_TOUCH = 92;
 const consoleMax = () => Math.round(innerHeight * 0.6);
 let consoleH = 240;
-const clampConsole = h => Math.max(CONSOLE_MIN, Math.min(Math.round(h) || CONSOLE_MIN, consoleMax()));
+const consoleMin = () => verticalSpine() ? CONSOLE_MIN_TOUCH : CONSOLE_MIN;
+const clampConsole = h => Math.max(consoleMin(), Math.min(Math.round(h) || consoleMin(), consoleMax()));
 function applyConsoleH(h) {
 	consoleH = clampConsole(h);
+	const narrow = verticalSpine();
 	const c = document.getElementById("console");
-	if (c && !c.classList.contains("hidden")) document.body.style.setProperty("--console-h", consoleH + "px");
+	if (c && !c.classList.contains("hidden")) document.body.style.setProperty(narrow ? "--console-h-touch" : "--console-h", consoleH + "px");
 	const handle = document.getElementById("c-handle");
 	if (handle) {
-		handle.setAttribute("aria-valuemin", String(CONSOLE_MIN));
+		handle.setAttribute("aria-valuemin", String(consoleMin()));
 		handle.setAttribute("aria-valuemax", String(consoleMax()));
 		handle.setAttribute("aria-valuenow", String(consoleH));
 	}
@@ -1280,11 +1285,14 @@ function toggleConsoleSheet() {
 }
 // the drag handle: a pointer drag on the top edge, and the arrow keys step it while Home and End
 // jump to the limits
-let dragging = false;
+let dragging = false, dragged = false, dragY = 0;
 const handleEl = document.getElementById("c-handle");
-handleEl.onclick = toggleConsoleSheet;
-handleEl.onpointerdown = e => { dragging = true; if (handleEl.setPointerCapture) handleEl.setPointerCapture(e.pointerId); e.preventDefault(); };
-handleEl.onpointermove = e => { if (dragging) applyConsoleH(innerHeight - e.clientY); };
+// #405 a pointer that clears 3px is a drag, so the click that ends it does not also raise the sheet;
+// the tap stays the quick raise and collapse, and the keyboard path is unchanged
+const handleTap = () => { if (dragged) { dragged = false; return; } toggleConsoleSheet(); };
+handleEl.onclick = handleTap;
+handleEl.onpointerdown = e => { dragging = true; dragged = false; dragY = e.clientY; if (handleEl.setPointerCapture) handleEl.setPointerCapture(e.pointerId); e.preventDefault(); };
+handleEl.onpointermove = e => { if (!dragging) return; if (Math.abs(e.clientY - dragY) > 3) dragged = true; applyConsoleH(innerHeight - e.clientY); };
 handleEl.onpointerup = handleEl.onpointercancel = () => { dragging = false; };
 handleEl.onkeydown = e => {
 	const step = e.key === "ArrowUp" ? 24 : e.key === "ArrowDown" ? -24 : 0;

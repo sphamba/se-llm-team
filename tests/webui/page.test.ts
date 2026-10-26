@@ -656,21 +656,22 @@ class StubEl {
 	classList = { contains: (c: string) => this.className.split(" ").includes(c) };
 }
 const heightSrc = page.slice(page.indexOf("const CONSOLE_KEY = "), page.indexOf("try { const stored = Number(localStorage"));
-const bodyVars: Record<string, string> = {};
 const heightStore: Record<string, string> = {};
-const makeHeight = (visible: boolean) => {
+const makeHeight = (visible: boolean, narrow = false) => {
 	const consoleEl = new StubEl();
 	const handleEl = new StubEl();
 	if (!visible) consoleEl.className = "hidden";
-	const api = new Function("document", "innerHeight", "localStorage", heightSrc + "\n; return { applyConsoleH: applyConsoleH, get h() { return consoleH; } };")(
+	const vars: Record<string, string> = {};
+	const api = new Function("document", "innerHeight", "localStorage", "verticalSpine", heightSrc + "\n; return { applyConsoleH: applyConsoleH, get h() { return consoleH; } };")(
 		{
 			getElementById: (id: string) => (id === "console" ? consoleEl : id === "c-handle" ? handleEl : null),
-			body: { style: { setProperty: (k: string, v: string) => { bodyVars[k] = v; } } },
+			body: { style: { setProperty: (k: string, v: string) => { vars[k] = v; } } },
 		},
 		900,
 		{ setItem: (k: string, v: string) => { heightStore[k] = v; } },
+		() => narrow,
 	);
-	return { api, handleEl, consoleEl };
+	return { api, handleEl, consoleEl, vars };
 };
 const shown = makeHeight(true);
 shown.api.applyConsoleH(10);
@@ -678,14 +679,22 @@ assert.equal(shown.api.h, 120, "a drag below the floor clamps to the 120px minim
 shown.api.applyConsoleH(9999);
 assert.equal(shown.api.h, 540, "a drag above the ceiling clamps to 60 percent of the viewport");
 shown.api.applyConsoleH(300);
-assert.equal(bodyVars["--console-h"], "300px", "the visible console carries its height in the page variable");
+assert.equal(shown.vars["--console-h"], "300px", "the visible console carries its height in the page variable");
 assert.equal(shown.handleEl.attrs["aria-valuenow"], "300", "the handle exposes its position to assistive technology");
 assert.equal(shown.handleEl.attrs["aria-valuemin"], "120", "the handle names the minimum");
 assert.equal(shown.handleEl.attrs["aria-valuemax"], "540", "the handle names the maximum");
 assert.equal(heightStore.consoleHeight, "300", "the height persists under one key");
 const hiddenHeight = makeHeight(false);
 hiddenHeight.api.applyConsoleH(300);
-assert.equal(bodyVars["--console-h"], "300px", "a closed console writes no height, so the panel keeps the full viewport");
+assert.deepEqual(hiddenHeight.vars, {}, "a closed console writes no height, so the panel keeps the full viewport");
+// #405 the phone sheet floors at the collapsed height and carries its own variable, so the two widths
+// never write each other's height
+const phoneHeight = makeHeight(true, true);
+phoneHeight.api.applyConsoleH(10);
+assert.equal(phoneHeight.api.h, 92, "a phone drag below the floor clamps to the collapsed 92px sheet, not the desktop 120px");
+assert.equal(phoneHeight.handleEl.attrs["aria-valuemin"], "92", "the phone handle names the same 92px minimum the drag clamps to");
+phoneHeight.api.applyConsoleH(300);
+assert.deepEqual([phoneHeight.vars["--console-h-touch"], phoneHeight.vars["--console-h"]], ["300px", undefined], "at phone width the drag writes the touch height only, so the desktop dock keeps its own");
 
 // 19. the routing: an empty hash closes the panel, #task/<num> opens the matching task once the
 // board has served, an unknown number writes the not-found line, and a superseded response never
@@ -816,7 +825,7 @@ assert.ok(!page.includes('id="f-phases"') && !page.includes("togglePhase"), "#37
 assert.ok(page.includes('id="f-prio" class="f-group" role="group" aria-label="Priority"') && page.includes('id="f-cx" class="f-group" role="group" aria-label="Complexity"'), "#378 priority and complexity are labelled chip groups");
 assert.ok(page.includes('id="f-user" class="f-chip" aria-pressed="false">user<'), "#378 one user chip replaces the issuer select");
 assert.ok(page.indexOf('id="f-q"') < page.indexOf('id="f-prio"') && page.indexOf('id="f-prio"') < page.indexOf('id="f-cx"') && page.indexOf('id="f-cx"') < page.indexOf('id="f-user"') && page.indexOf('id="f-user"') < page.indexOf('id="f-held"'), "#378 the bar reads search, priority, complexity, user, held left to right");
-assert.match(themeCss, /\.f-chip \{[^}]*min-height: 28px/, "#378 a desktop chip clears the 28px pointer floor, and the phone block raises it to 44px");
+assert.match(themeCss, /\.f-chip \{[^}]*min-height: 28px/, "#378 a desktop chip clears the 28px pointer floor");
 for (const hue of ["pr-critical", "pr-high", "pr-medium", "pr-low", "cx-trivial", "cx-simple", "cx-moderate", "cx-complex"])
 	assert.ok(themeCss.includes(`.f-chip.${hue}[aria-pressed="true"]`), `#378 a pressed ${hue} chip takes its own value hue`);
 // one click applies: the second chip joins the set and a second click drops it, against the served source
@@ -943,11 +952,10 @@ assert.ok(page.includes("relationPaths(activeBoard().tasks, rectOf, verticalSpin
 assert.ok(page.includes('<div id="p-handle"') && page.includes('id="p-close"'), "the panel sheet carries a drag handle and keeps its visible close button");
 assert.match(themeCss, /#panel \{[^}]*top: 0[^}]*bottom: 0/, "the phone panel is a full-screen sheet");
 assert.match(themeCss, /#console\.raised \{[^}]*70vh/, "a tap raises the console into a bottom sheet of at most 70 percent of the viewport");
+assert.match(themeCss, /#console \{[^}]*height: var\(--console-h-touch, calc\(92px \+ env\(safe-area-inset-bottom\)\)\)/, "#405 the phone console reads its own height variable and falls back to the collapsed 92px line, so a phone drag never moves the desktop dock");
 assert.match(themeCss, /body\.filters-open #filters \{[^}]*display: flex/, "the filter bar collapses behind one button that opens its sheet");
-assert.match(themeCss, /#f-toggle \{[^}]*min-height: 44px/, "the filter button clears the 44px touch floor");
 assert.match(themeCss, /#palette \{[^}]*padding: 0/, "the palette goes full screen on a phone");
 assert.ok((themeCss.match(/env\(safe-area-inset-(top|bottom)\)/g) ?? []).length >= 4, "the sheets and the console respect the safe-area insets");
-assert.ok((themeCss.match(/min-height: 44px/g) ?? []).length >= 10, "every phone control the layer restyles clears the 44px touch floor");
 assert.ok(page.includes('id="f-toggle"') && page.includes('id="f-count"') && page.includes('id="f-apply"'), "the phone filter button carries its count badge, and the sheet carries an apply control next to the clear");
 assert.ok(page.includes('aria-controls="filters"') && page.includes('id="f-apply" class="f-chip"'), "the filter button names the sheet it opens and the apply control is a chip");
 // the client side of the two sheets, run against the served source
@@ -969,7 +977,22 @@ assert.deepEqual([fBody.contains("filters-open"), fBtn.attrs["aria-expanded"], f
 sheetApi.closeFilters();
 assert.deepEqual([fBody.contains("filters-open"), fBadge.textContent], [false, "2"], "apply closes the sheet and the badge keeps its count");
 assert.ok(script.includes('c.classList.remove("raised")') && script.includes('c.classList.toggle("raised")'), "the console opens as one status line and a tap on the handle raises the sheet");
-assert.ok(script.includes("handleEl.onclick = toggleConsoleSheet"), "the console handle is the raise control, reachable by pointer and by keyboard");
+assert.ok(script.includes("handleEl.onclick = handleTap"), "the console handle is the raise control, reachable by pointer and by keyboard");
+// #405 the phone handle is a real drag target: a drag resizes the sheet and the click that ends it
+// does not also raise it, while a pointer that holds still is a plain tap
+const dragSrc = page.slice(page.indexOf("let dragging = false"), page.indexOf("\napplyConsoleH(consoleH);"));
+const handleStub = { setPointerCapture() {} };
+const dragHeights: number[] = [];
+let taps = 0;
+const drag = new Function("document", "innerHeight", "applyConsoleH", "toggleConsoleSheet", dragSrc +
+	"; return { down: (e) => handleEl.onpointerdown(e), move: (e) => handleEl.onpointermove(e), up: () => handleEl.onpointerup(), tap: () => handleEl.onclick(), key: (e) => handleEl.onkeydown(e) };")({
+	getElementById: () => handleStub,
+}, 900, (h: number) => dragHeights.push(h), () => taps++);
+const pointerAt = (clientY: number) => ({ pointerId: 1, clientY, preventDefault() {} });
+drag.down(pointerAt(880)); drag.move(pointerAt(700)); drag.up(); drag.tap();
+assert.deepEqual([dragHeights, taps], [[200], 0], "the drag writes the live height and the click that follows it does not also raise the sheet");
+drag.down(pointerAt(880)); drag.up(); drag.tap();
+assert.equal(taps, 1, "a pointer that holds still is a tap and still toggles the raised sheet");
 
 // 26. #377 the spacing scale: six steps in the light :root block, and the chrome, the station heads and
 // the cards read their spacing from it, so no rule carries a hand-picked pixel rhythm
@@ -1006,7 +1029,8 @@ assert.ok(!/\.station \.cards \{[^}]*overflow-y: auto/.test(phoneBoard), "the ph
 // #387 the phone keeps the desktop heights and moves the 44px target into an invisible band, so a
 // compact control looks as it does on desktop and still answers a finger. The live rects and the
 // elementFromPoint pass are a browser check, left to the reviewer
-const bandHosts = [".m-action", ".seg", ".toggle", ".c-wait", "#c-text summary"];
+const ctlHosts = ["#theme", "#f-toggle", ".f-chip", "#p-close", "#c-close"];
+const bandHosts = [".m-action", ".seg", ".toggle", ".c-wait", "#c-text summary", ...ctlHosts];
 const phoneRules = [...phoneBoard.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2] }));
 const selParts = (sel: string) => sel.split(",").map((p) => p.trim().replace(/::after$/, ""));
 const bandRule = phoneRules.find((r) => r.sel.includes("::after") && bandHosts.every((h) => selParts(r.sel).includes(h)));
@@ -1016,7 +1040,14 @@ for (const decl of ['content: ""', "position: absolute", "left: 0", "right: 0", 
 assert.ok(!/background|pointer-events/.test(bandRule!.body), "the band paints nothing and it takes the tap");
 const positionRule = phoneRules.find((r) => /position: relative/.test(r.body) && bandHosts.every((h) => selParts(r.sel).includes(h)));
 assert.ok(positionRule, "every band host is positioned, so its band anchors to the control");
-assert.deepEqual(phoneRules.filter((r) => /min-height: 44px/.test(r.body) && bandHosts.some((h) => selParts(r.sel).includes(h))).map((r) => r.sel), [], "no compact control keeps the phone min-height floor, so each keeps its desktop height");
+// #405 the compact controls take one shorter box and lean on that same band for the 44px floor
+const sheetRules = [...phoneSheet.replace(new RegExp(`@media \\(max-width: ${MOBILE_MAX}px\\) \\{`, "g"), "").replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2] }));
+const sheetRule = (host: string) => sheetRules.find((r) => r.sel === host)?.body ?? "";
+assert.match(phoneSheet, /:root \{ --ctl-h: 32px; \}/, "the phone block names the compact control height once, and every compact control reads it");
+assert.deepEqual(ctlHosts.filter((h) => !/min-height: var\(--ctl-h\)/.test(sheetRule(h))), [], "every compact control takes the one --ctl-h height, so the theme toggle, the filter button, the chips and the close buttons share one box");
+assert.deepEqual(["#p-close", "#c-close"].filter((h) => !/min-width: var\(--ctl-h\)/.test(sheetRule(h))), [], "the two close buttons stay square at the compact height");
+assert.deepEqual(sheetRules.filter((r) => /min-height: 44px/.test(r.body) && bandHosts.some((h) => selParts(r.sel).includes(h))).map((r) => r.sel), [], "no compact control keeps a real 44px height, so the 44px floor comes from the band alone");
+assert.equal(Number(bandRule!.body.match(/height: (\d+)px/)![1]) - Number(phoneSheet.match(/--ctl-h: (\d+)px/)![1]), Number(sheetRules.find((r) => r.sel === ".f-group")!.body.match(/gap: (\d+)px/)![1]), "the chip rows sit two band overhangs apart, so two chips' bands touch and never overlap");
 for (const dead of [".run-row", ".arch-row", ".card"]) {
 	assert.ok(!selParts(bandRule!.sel).includes(dead), `${dead} takes no band, so a stacked row's band never covers the row below`);
 	assert.ok(!selParts(positionRule!.sel).includes(dead), `${dead} carries no band anchor`);
