@@ -578,7 +578,7 @@ const makeSpan = (handle: string) => {
 		get: () => (span.firstChild ? span.firstChild.data : ""),
 		set: (v: string) => {
 			if (!v) span.firstChild = null;
-			else if (!span.firstChild || span.firstChild.data !== v) span.firstChild = { data: v };
+			else span.firstChild = { data: v };
 		},
 	});
 	return span;
@@ -649,6 +649,11 @@ runs.open = { file: "000263_task.md", agents: [{ role: "developer", handle: "t.d
 runs.writeRuns();
 assert.ok(!(runsEl.innerHTML as string).includes("data-live-handle"), "a dead run renders no live slot");
 assert.ok((runsEl.innerHTML as string).includes(fmtTokens(1234)) && (runsEl.innerHTML as string).includes(fmtDur(65000)), "a dead run keeps its values inline");
+// #420 an alive doctor row is a live run row too, so its numbers fill its slot in place
+runs.open = { file: "000263_task.md", agents: [], doctors: [{ role: "doctor", run: 0, alive: true, status: "live", handle: "t.dev.1.doctor", start: 1700000000000, duration: 9000, tokens: 77 }] };
+runs.writeRuns();
+assert.equal(liveSpans.length, 1, "an alive doctor row renders one live slot");
+assert.equal(liveSpans[0].textContent, [new Date(1700000000000).toLocaleTimeString(), fmtTokens(77), fmtDur(9000)].join(" · "), "an alive doctor's numbers fill its slot in place");
 runs.open = { file: "000263_task.md", agents: [{ role: "developer", handle: "t.dev.1", run: 0, alive: true, start: 1700000000000, duration: 65000, tokens: 1234 }] };
 runs.writeRuns();
 const rowOf = new Function("esc", "fmtDur", "fmtTokens", "logState", "ROLE_CLS", "startText", "runMeta", page.slice(page.indexOf("function runRowHtml("), page.indexOf("// the subagent rows of one run")) + "; return runRowHtml;")(esc, fmtDur, fmtTokens, runLog, { developer: "agent-developer", reviewer: "agent-reviewer" }, (ms: number) => "T" + ms,

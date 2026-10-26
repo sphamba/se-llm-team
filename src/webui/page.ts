@@ -961,7 +961,7 @@ function writeRuns() {
 		? '<div class="run-note">no matching run</div>' + unmatched.map(d => runRowHtml(d, "agent-doctor", agentLabel(d, docCount), null)).join("")
 		: "");
 	if (writeGated(el, html)) bindRows(el);
-	syncLiveMeta(el, t.agents || []);
+	syncLiveMeta(el, (t.agents || []).concat(doctors));
 }
 // the panel heading: the number and the name, and the focus target on open. The text is only
 // assigned when it changes, so a poll leaves the focused heading and its text node in place
