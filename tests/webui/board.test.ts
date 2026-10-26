@@ -299,8 +299,8 @@ assert.deepEqual(relationPaths([
 	{ file: "000004_d.md", state: "to-do", blockedBy: "" },
 ], rectOf, true), [], "#370 the vertical spine stacks every card in one column, so a cross-station curve has no span: the phone layout draws no relation line");
 
-// hovering highlights both ways (000144): the served client script's hotRelations for the blocked
-// file and for the blocker file both raise the same path, an unrelated file raises nothing
+// the served client script's hotRelations lights only the paths that leave the hovered file: a hover
+// on a blocker raises nothing, and an unrelated file raises nothing
 const hotPath: any = { dataset: { file: "000002_b.md", blocker: "000004_d.md" }, hot: new Set<string>() };
 hotPath.classList = { toggle: (cls: string, on: boolean) => (on ? hotPath.hot.add(cls) : hotPath.hot.delete(cls)) };
 // #373 the reveal: the board gains a class, the blockers are rimmed, every other card dims, and
@@ -329,7 +329,7 @@ assert.ok(!hotBoard.cls.has("reveal") && !hotCards[1].cls.has("rim"), "leaving t
 hotFn("000009_x.md", true);
 assert.ok(!hotPath.hot.has("relations-hot"), "mouseleave reverts the highlight and an unrelated file raises nothing");
 hotFn("000004_d.md", true);
-assert.ok(hotPath.hot.has("relations-hot"), "hovering the blocker card highlights the same incoming line");
+assert.ok(!hotPath.hot.has("relations-hot"), "hovering the blocker card lights no line, because the line belongs to the blocked card");
 assert.ok(!hotCards[0].cls.has("rim"), "hovering a blocker rims its own blockers, not the cards it blocks");
 
 // #373 the stylesheet reads by selector and property: the marker is a button with a hit floor that
@@ -340,6 +340,9 @@ assert.match(cssRule(".c-wait"), /white-space: nowrap/, "the marker never wraps,
 assert.ok(Number(cssRule(".c-wait").match(/min-height: (\d+)px/)![1]) >= 28, "the marker keeps its 28px hit height");
 assert.match(cssRule(".c-wait"), /margin-left: auto/, "the marker is right aligned in the meta row");
 assert.match(cssRule("#relations"), /opacity: 0/, "no curve at rest");
+assert.match(cssRule("#relations path"), /stroke-opacity: 0/, "a plain line paints nothing, so a reveal lights only the hovered card's paths");
+assert.match(cssRule("#relations path.relations-hot"), /stroke: var\(--link\)/, "the lit line takes the link colour of the blocker's rim");
+assert.match(cssRule("#relations path.relations-hot"), /stroke-opacity: 1/, "the lit line is full strength");
 assert.match(themeCss, /#board\.reveal #relations \{[^}]*opacity: 1/, "a reveal paints the relation layer");
 assert.match(themeCss, /#board\.reveal \.card:not\(\.hot\) \{[^}]*opacity: \.55/, "an unrelated card dims to 55 percent, not 40, so the marker text stays readable");
 assert.match(cssRule("#waits-pop"), /position: fixed/, "the popover floats over the board instead of inside a scrolling card");
@@ -464,7 +467,7 @@ for (const fn of ["openTask", "showPanel", "hidePanel"]) {
 	const src = page.match(new RegExp(`function ${fn}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`))?.[0] ?? "";
 	assert.ok(src.includes("clearReveal()"), `${fn} clears the reveal, so no stuck state survives the open or the close`);
 }
-assert.ok(page.includes("const mine = p.dataset.file === file || p.dataset.blocker === file;") && page.includes('p.classList.toggle("relations-hot", on && mine)'), "the hover matches paths by either endpoint's file in the dataset, no quote-unsafe selector interpolation");
+assert.ok(page.includes("const mine = p.dataset.file === file;") && page.includes('p.classList.toggle("relations-hot", on && mine)'), "the hover matches only the paths that leave the hovered file, no quote-unsafe selector interpolation");
 assert.ok(page.includes('" data-blocker="'), "each relation path carries the blocker's file alongside the blocked task's file");
 assert.ok(page.includes('facts.querySelectorAll(".num-link")') && page.includes("openTask(a.dataset.task)"), "the panel binds its id links to openTask through the facts block");
 assert.ok(page.includes(">blockedBy</span>"), "the panel builds a blockedBy row");
@@ -640,21 +643,21 @@ assert.ok(facts.includes(`<span class='k'>blockedBy</span><span class="held">hel
 // #376 the waits-on popover row: a `user` token resolves to no task, so the held badge must come
 // before the missing-target guard, and a mixed `user, #N` card keeps the held badge and the
 // normal blocker row
-const waitRowsOf = new Function("esc", "numLinkHtml", "taskByNum", "cardEls", "stationFor", page.match(/function waitRows\(t\) \{[\s\S]*?\n\}/)![0] + "; return waitRows;") as
-	(esc: any, numLinkHtml: any, taskByNum: any, cardEls: any, stationFor: any) => (t: any) => string;
+const waitRowsOf = new Function("esc", "numLinkHtml", "taskByNum", "cardEls", page.match(/function waitRows\(t\) \{[\s\S]*?\n\}/)![0] + "; return waitRows;") as
+	(esc: any, numLinkHtml: any, taskByNum: any, cardEls: any) => (t: any) => string;
 const waitRows = waitRowsOf(
 	esc,
 	numLinkHtml,
 	(ref: string) => (ref === "#42" ? { file: "000042_x.md", name: "x", state: "to-review" } : undefined),
 	new Set(["000042_x.md"]),
-	(st: string) => st,
 );
 const userRow = waitRows({ blockedBy: "user" });
-assert.ok(userRow.includes('<span class="wait-badge">held by user</span>'), "the `user` token row carries the held by user badge");
-assert.ok(userRow.includes('<span class="wait-name">the user hold</span>'), "and the name reads the user hold");
-assert.ok(!userRow.includes("wait-state") && !userRow.includes("wait-st"), "and no state or station cell shows for the token");
+assert.ok(userRow.includes('<span class="wait-name">user</span>'), "the `user` token row names the stored ref text once");
+assert.ok(!userRow.includes("wait-badge") && !userRow.includes("wait-state") && !userRow.includes('<span class="wait-st">'), "and carries no badge, no state cell and no station cell");
+const taskRow = waitRows({ blockedBy: "#42" });
+assert.ok(taskRow.includes('<span class="wait-state">to-review</span>') && !taskRow.includes('<span class="wait-st">'), "a task row carries the state cell and no station cell");
 const mixedRow = waitRows({ blockedBy: "user, #42" });
-assert.ok(mixedRow.includes('<span class="wait-badge">held by user</span>') && mixedRow.includes('data-wait-open="000042_x.md"'), "a mixed card keeps the held badge and the normal blocker row");
+assert.ok(mixedRow.includes('<span class="wait-name">user</span>') && mixedRow.includes('data-wait-open="000042_x.md"'), "a mixed card prints the user row and the openable blocker row");
 
 // tabs: one per registered project; a single project keeps the old ui, no tab bar
 assert.ok(tabNames([]).length === 0 && tabNames([{ name: "solo", root: "/r1", branch: "main" }]).length === 0, "an empty or single-project registry renders no tab bar");

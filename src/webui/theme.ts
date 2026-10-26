@@ -133,9 +133,9 @@ that a relation exists, so the overlay has no opacity of its own */
 /* #373 the reveal dims every unrelated card to 55%, not 40%, so the marker text on a dimmed card
 stays readable; the active card and its rimmed blockers keep full strength */
 #board.reveal .card:not(.hot) { opacity: .55; }
-/* 000127: the low opacity keeps the lines a subtle hint behind the semi-transparent cards; a reveal raises it (.relations-hot) */
-#relations path { fill: none; stroke: var(--dim); stroke-width: 1.5; stroke-opacity: .3; stroke-dasharray: 6 4; transition: stroke-opacity var(--t-fast) var(--ease-enter); }
-#relations path.relations-hot { stroke-opacity: .8; }
+/* the base path carries no stroke of its own: the line exists only for the revealed card, so a reveal paints nothing but that card's outgoing lines (.relations-hot) */
+#relations path { fill: none; stroke: var(--dim); stroke-width: 1.5; stroke-opacity: 0; stroke-dasharray: 6 4; transition: stroke-opacity var(--t-fast) var(--ease-enter); }
+#relations path.relations-hot { stroke: var(--link); stroke-opacity: 1; }
 @keyframes dashflow { to { stroke-dashoffset: -10; } }
 /* #366 one station per phase: the head keeps the tick, the label and the count while the body scrolls; --ac comes from the station class at the end of this sheet */
 .station { --i: 0; grid-row: 2; display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; min-height: 0; }
@@ -201,7 +201,7 @@ touch and keyboard reach the popover; it sits right aligned, never wraps and kee
 .c-wait:hover { border-color: var(--link); color: var(--link); }
 .c-wait:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
 /* #373 the marker popover: one row per stored ref, the rendered refs open their card, the off-board
-ones stay text with their station; fixed, so a card never clips it */
+ones stay text with their badge; fixed, so a card never clips it */
 #waits-pop { position: fixed; z-index: 4; display: flex; flex-direction: column; min-width: 16rem; max-width: 24rem; padding: 4px; background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px; box-shadow: 0 12px 32px var(--overlay); }
 .wait-row { display: flex; align-items: baseline; gap: 8px; width: 100%; margin: 0; border: 0; border-radius: 4px; background: none; color: var(--text); padding: 5px 6px; font-family: inherit; font-size: 0.75rem; text-align: left; }
 button.wait-row { min-height: 28px; }
@@ -209,7 +209,6 @@ button.wait-row { min-height: 28px; }
 .wait-row:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
 .wait-name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .wait-state { color: var(--dim); font-family: ${MONO}; font-size: 0.6875rem; }
-.wait-st { color: var(--faint); font-size: 0.6875rem; }
 .wait-badge { flex: 0 0 auto; color: var(--dim); font-family: ${MONO}; font-size: 0.6875rem; }
 .wait-badge.wait-done { color: var(--accent-done-text); }
 /* #373 an off-board blocker keeps a stub at its card's right edge instead of vanishing; the tag

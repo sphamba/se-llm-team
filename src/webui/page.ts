@@ -524,15 +524,15 @@ function cardBox(el, flip) {
 	if (flip) for (let p = el.parentElement; p && p !== board; p = p.parentElement) { dx += p.scrollLeft; dy += p.scrollTop; }
 	return { x: r.left - boardRect.left + dx, y: r.top - boardRect.top + dy, w: r.width, h: r.height };
 }
-// #373 hovering or focusing a card reveals its relations: the board gains a class, the paths raise,
-// the rendered blockers are rimmed and every other card dims. The paths carry both endpoint files as
-// data, so the match needs no selector interpolation
+// #373 hovering or focusing a card reveals its relations: the board gains a class, the paths that
+// leave the hovered card raise, the rendered blockers are rimmed and every other card dims. The paths
+// carry both endpoint files as data, so the match needs no selector interpolation
 function hotRelations(file, on) {
 	const board = document.getElementById("board");
 	if (board) board.classList.toggle("reveal", on);
 	const lit = new Set([file]);
 	for (const p of document.querySelectorAll("#relations path")) {
-		const mine = p.dataset.file === file || p.dataset.blocker === file;
+		const mine = p.dataset.file === file;
 		p.classList.toggle("relations-hot", on && mine);
 		if (on && p.dataset.file === file) lit.add(p.dataset.blocker);
 	}
@@ -701,22 +701,20 @@ function blockedRow(t) {
 	return "<div><span class='k'>blockedBy</span>" + items.join(", ") + "</div>";
 }
 // #373 the waits-on popover: one row per stored ref in stored order, the number as the board's own id
-// link, the name on one line, the state and station, and a badge. A rendered row opens that card, an
-// off-board row stays text and names where the blocker sits
+// link, the name on one line, the state, and a badge. A rendered row opens that card, a ref that
+// resolves to no task prints its own text alone
 let waitFile = null;
 function waitRows(t) {
 	return String(t.blockedBy || "").split(",").map(s => s.trim()).filter(Boolean).map(ref => {
 		const target = taskByNum(ref);
-		const held = ref.toLowerCase() === "user";
-		const onBoard = !!(target && cardEls.has(target.file));
+		if (!target) return '<div class="wait-row"><span class="wait-name">' + esc(ref) + "</span></div>";
+		const onBoard = cardEls.has(target.file);
 		// a done blocker reads as satisfied first, because a done card is usually folded away as well
-		const badge = held ? '<span class="wait-badge">held by user</span>' : !target ? "" : target.state === "done" ? '<span class="wait-badge wait-done">✓</span>' : onBoard ? "" : '<span class="wait-badge">off board</span>';
-		const cells = '<span class="wait-name">' + esc(target ? target.name : held ? "the user hold" : ref) + "</span>" +
-			(target ? '<span class="wait-state">' + esc(target.state) + '</span><span class="wait-st">' + esc(stationFor(target.state)) + "</span>" : "") + badge;
-		const num = target ? numLinkHtml(target.file) : esc(ref);
+		const badge = target.state === "done" ? '<span class="wait-badge wait-done">✓</span>' : onBoard ? "" : '<span class="wait-badge">off board</span>';
+		const cells = '<span class="wait-name">' + esc(target.name) + '</span><span class="wait-state">' + esc(target.state) + "</span>" + badge;
 		return onBoard
-			? '<button type="button" class="wait-row" data-wait-open="' + esc(target.file) + '">' + num + cells + "</button>"
-			: '<div class="wait-row">' + num + cells + "</div>";
+			? '<button type="button" class="wait-row" data-wait-open="' + esc(target.file) + '">' + numLinkHtml(target.file) + cells + "</button>"
+			: '<div class="wait-row">' + numLinkHtml(target.file) + cells + "</div>";
 	}).join("");
 }
 // #393 both axes come from the marker rect: a card is taller than the one-row popover, so a
