@@ -999,7 +999,16 @@ assert.ok(spineZ > headZ, "the bar paints above the head ticks, so the 1px cross
 assert.ok(!/@keyframes sweep\b/.test(motionCss) && !declared.has("--t-sweep"), "the old sweep keyframe and its token are gone");
 const barBand = motionCss.match(/\[data-motion="live"\] \.spine::after \{([^}]*)\}/)?.[1] ?? "";
 assert.match(barBand, /animation: beamRun var\(--t-wave\) linear infinite/, "the band crosses the bar once over the wave token, so one pass covers the full board");
-assert.match(motionCss, /@keyframes beamRun \{ from \{ transform: translateX\(-100%\); \} to \{ transform: translateX\(666\.6667%\); \} \}/, "the band starts and ends fully off the bar, so the loop wraps with no dark beat");
+const beamToken = tokenBlocks[0].match(/--beam:\s*([\d.]+)%/)?.[1];
+assert.equal(beamToken, "85", "--beam is the spine band white mix at 85%");
+const shineToken = tokenBlocks[0].match(/--shine:\s*([\d.]+)%/)?.[1];
+assert.equal(shineToken, "45", "--shine stays 45%, so the card and console highlights cannot drift with the bar");
+const spineBandRule = ruleBodies.find((r) => r.sel === ".spine::after")!;
+assert.ok(/var\(--beam\)/.test(spineBandRule.body) && !/var\(--shine\)/.test(spineBandRule.body), "the spine band reads --beam, never the 45% --shine of the card and console");
+const bandWidth = spineBandRule.body.match(/width:\s*([\d.]+)%/)?.[1];
+const beamTravel = motionCss.match(/@keyframes beamRun \{ from \{ transform: translateX\(-100%\); \} to \{ transform: translateX\(([\d.]+)%\); \} \}/)?.[1];
+assert.ok(bandWidth && beamTravel, "the band width and the beamRun travel are both declared");
+assert.ok(Math.abs(Number(beamTravel) - 100 / (Number(bandWidth) / 100)) < 1e-3, "the band travel equals 100 / its own width, so the pair can never drift apart on its own");
 assert.match(motionCss, /\.spine::after \{[^}]*opacity: 0;/, "the band rests hidden, so motion none and reduced motion paint the ladder with no band");
 assert.match(barBand, /opacity: 1/, "the live gate alone reveals the band, so its shine never paints on a motion-off sheet");
 assert.ok(!/\.st-head::after/.test(desktopSheet) && /\.st-head::after \{[^}]*top: -1px/.test(phoneSlice), "the desktop board carries one continuous bar and no per-head glow, while the phone keeps its glow on the head rule");

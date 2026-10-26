@@ -32,8 +32,10 @@ export const CSS = `* { box-sizing: border-box; }
 --cx-trivial-bg: rgba(100, 130, 165, .18); --shine-hi: #ffffff; --overlay: rgba(15, 23, 42, .45); --code-bg: #ebeef0;
 /* 000353: one accent per pipeline stage and agent role, plus the failed-run red; the -text step is the darker Ayu Light ladder step that keeps a label readable on the light panel */
 --accent-backlog: #979faa; --accent-backlog-text: #666c75; --accent-todo: #c79603; --accent-todo-text: #886600; --accent-review: #eb7c33; --accent-review-text: #a84f0a; --accent-merge: #b188df; --accent-merge-text: #7b5a9f; --accent-live: #3fa9e5; --accent-live-text: #1674a4; --accent-integration: #4ab1ae; --accent-integration-text: #227a78; --accent-done: #56b669; --accent-done-text: #2e7f40; --error: #ff645f; --error-text: #b0423d;
-/* 000191: motion knobs, one place to retune the entrances, the chunk fade and the pulse loop; 000194: --exit runs the closes, --shine is the whiter band mix; #369: one motion token set, every duration and easing in the sheet reads one of these */
+/* 000191: motion knobs, one place to retune the entrances, the chunk fade and the pulse loop; 000194: --exit runs the closes, --shine is the card and console highlight mix; #369: one motion token set, every duration and easing in the sheet reads one of these */
 --t-fast: 120ms; --t-base: 180ms; --t-slow: 240ms; --t-breathe: 2s; --t-wave: 12s; --t-slot: calc(var(--t-wave) / 7); --ease-enter: cubic-bezier(.2, .8, .2, 1); --ease-exit: cubic-bezier(.4, 0, .8, 1); --ease-breathe: ease-in-out; --shine: 45%;
+/* #421 the spine band's white mix: 85% lifts the already bright tint ladder to near white, while --shine stays 45% for the card and console highlights */
+--beam: 85%;
 /* #377 one spacing scale: the chrome, the station heads and the cards read one of these six steps */
 --sp-1: 4px; --sp-2: 6px; --sp-3: 8px; --sp-4: 12px; --sp-5: 16px; --sp-6: 24px; }
 ${DARK_VARS}
@@ -119,8 +121,8 @@ body.panel-open #archive { padding-right: calc(18px + var(--panel-w)); }
 #board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(9.375rem, 1fr)) minmax(9.375rem, 1.15fr); grid-template-rows: 1px minmax(0, 1fr); gap: 0; padding: var(--sp-3) 0 var(--sp-5); overflow-x: auto; overflow-y: hidden; position: relative; }
 /* #417 the bar: the spine is one 1px ladder bar, one fixed slot per station with the ends holding the first and last tint, so the line never restarts at a junction. z-index 3 lifts it over the head ticks, so only their 1px crossing hides */
 .spine { grid-column: 1 / -1; grid-row: 1; z-index: 3; position: relative; overflow: hidden; background-image: linear-gradient(90deg, var(--accent-backlog) 0%, var(--accent-backlog) 7.1429%, var(--accent-todo) 21.4286%, var(--accent-review) 35.7143%, var(--accent-merge) 50%, var(--accent-live) 64.2857%, var(--accent-integration) 78.5714%, var(--accent-done) 92.8571%, var(--accent-done) 100%); }
-/* the band is 15% of the track and clips at both edges; it starts fully off the left and ends fully off the right, so the loop wraps with no dark beat. It rests at opacity 0, so a sheet with motion off paints the ladder alone */
-.spine::after { content: ""; position: absolute; left: 0; top: 0; width: 15%; height: 100%; opacity: 0; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--shine-hi) var(--shine), transparent), transparent); }
+/* the band is 22% of the track and clips at both edges; it starts fully off the left and ends fully off the right, so the loop wraps with no dark beat. It rests at opacity 0, so a sheet with motion off paints the ladder alone */
+.spine::after { content: ""; position: absolute; left: 0; top: 0; width: 22%; height: 100%; opacity: 0; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--shine-hi) var(--beam), transparent), transparent); }
 /* a disabled integration stage narrows its own track to a strip; the other six keep the floor */
 #board.off-integration { grid-template-columns: repeat(5, minmax(9.375rem, 1fr)) 48px minmax(9.375rem, 1.15fr); }
 /* relation lines: absolute in the relative board, so the overlay scrolls with the content; z-index 1
@@ -482,7 +484,7 @@ so its geometry paints in both modes and only its shine rides the live gate */
    of the cycle, so a station added later updates these percentages with the station count */
 @keyframes headWave { 0% { transform: translateX(-100%); opacity: 0; } 1% { opacity: 1; } 13% { opacity: 1; } 14.2857% { transform: translateX(500%); opacity: 0; } 100% { transform: translateX(500%); opacity: 0; } }
 /* #417 the band travels by transform alone, from fully off one edge to fully off the other */
-@keyframes beamRun { from { transform: translateX(-100%); } to { transform: translateX(666.6667%); } }
+@keyframes beamRun { from { transform: translateX(-100%); } to { transform: translateX(454.5455%); } }
 [data-motion="live"] .spin { animation: breathe var(--t-breathe) var(--ease-breathe) infinite; }
 [data-motion="live"] #relations path { animation: dashflow var(--t-breathe) linear infinite; animation-direction: reverse; }
 [data-motion="live"] .spine::after { animation: beamRun var(--t-wave) linear infinite; opacity: 1; }
