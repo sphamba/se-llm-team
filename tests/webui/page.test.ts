@@ -931,7 +931,9 @@ assert.equal((page.match(/buildShell\(board, document\)/g) ?? []).length, 1, "th
 assert.ok(readFileSync(new URL("../../src/webui/board.ts", import.meta.url), "utf8").includes('el.classList.toggle("running"'), "the card pass marks the running card every poll on the node it keeps");
 assert.match(page, /el\.style\.setProperty\("--p", String\(progressOf\(/, "the tick writes the progress line from progressOf, never a pixel share of the card width");
 assert.ok(!/--p", String\([^)]*offsetWidth/.test(page) && page.includes("syncTicker") && page.includes("polledAt"), "nothing reads offsetWidth for progress, and the tick reseeds from the authoritative poll value");
-assert.match(page, /function syncTicker\(\) \{[\s\S]{0,300}?tickCards\(\);/, "every poll seeds --p once from the authoritative duration before the interval starts");
+const tickerSrc = page.slice(page.indexOf("function syncTicker() {"), page.indexOf("function tickCards() {"));
+assert.ok(!tickerSrc.includes("tickCards()"), "the ticker only manages the interval: applyMotion calls it at init, before cardEls is declared, so a seed there throws a TDZ error");
+assert.match(page, /polledAt = Date\.now\(\);\s*syncTicker\(\);[\s\S]{0,400}?\n\ttickCards\(\);/, "the poll tail seeds --p once, after syncBoard fills cardEls");
 // #377 the selector is gone: no control, no mode list, no stored choice, no cycle handler
 assert.ok(!page.includes('id="motion"'), "the served page carries no motion control");
 assert.ok(!/MOTIONS|motionWant|cycleMotion|syncMotionBtn|MOTION_KEY/.test(page), "no motion list, stored choice or cycle handler survives");

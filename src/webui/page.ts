@@ -483,9 +483,6 @@ let stations = null;
 function syncTicker() {
 	if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
 	if (document.hidden) return;
-	// the seed: without it a running card paints 0 until the first interval, and the exponential
-	// curve makes that first jump the largest one
-	tickCards();
 	tickTimer = setInterval(tickCards, 1000);
 }
 function tickCards() {
@@ -660,6 +657,10 @@ function render(skipFlip) {
 	// #369 the authoritative values land here on every poll; the 1 px/s tick advances from them
 	polledAt = Date.now();
 	syncTicker();
+	// the seed: without it a running card paints 0 until the first interval, and the exponential
+	// curve makes that first jump the largest one. It lives here, after syncBoard fills cardEls,
+	// because syncTicker also runs from applyMotion at init, before that map is declared
+	tickCards();
 	const now = {};
 	for (const el of cardEls.values()) now[el.dataset.file] = cardBox(el, true);
 	const diff = flipDiff(old, now);
