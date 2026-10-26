@@ -2,7 +2,7 @@ import { PRIORITY_RANK } from "../kanban.ts";
 import { readConfigFiles, type StageFlags } from "../orchestrator/config.ts";
 export type { StageFlags };
 import { esc, inline, logFixups, md } from "./logpane.ts";
-import { agentLabel, agentStatsText, agentLive, applyCardStats, applyStages, archRowHtml, archStatsText, blockerTasks, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, groupRuns, heldToken, isHeld, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, stationFor, statsKey, STATIONS, syncBoard, syncCardStats, taskStats, taskTokenTotal, waitsOnText } from "./board.ts";
+import { agentLabel, agentStatsText, agentLive, applyCardStats, applyStages, archRowHtml, archStatsText, blockerTasks, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, groupRuns, heldToken, isHeld, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, PROGRESS_HALF_S, progressOf, relationPaths, sortStation, spinnerHtml, stationFor, statsKey, STATIONS, syncBoard, syncCardStats, taskStats, taskTokenTotal, waitsOnText } from "./board.ts";
 import { ARCHIVE_PAGE, archivePage, archiveTasks, decodeFilters, emptyFilters, encodeFilters, FILTER_COMPLEXITIES, FILTER_DEBOUNCE, FILTER_PRIORITIES, FILTERS_KEY, filterReason, filterTasks, filtersActive, filtersCount, matchesFilters, PALETTE_MAX, paletteResults } from "./filters.ts";
 import { CSS, MOBILE_MAX } from "./theme.ts";
 
@@ -207,6 +207,8 @@ ${applyCardStats}
 ${mergeCardStats}
 ${makeStatsQueue}
 ${refreshMs}
+const PROGRESS_HALF_S = ${PROGRESS_HALF_S};
+${progressOf}
 // #368 the filter bar: the URL's ?f=<base64> value is the filter and localStorage holds the last
 // used set for a URL that carries none; a corrupt value falls back to no filter
 let filters = null, archiveView = false, archPageNo = 0;
@@ -473,12 +475,16 @@ function queueExpanded() { const b = activeBoard(); for (const st of b.expanded)
 // spinner animation and in-flight FLIP transform are never restarted
 const cardEls = new Map();
 let stations = null;
-// the one 1 px/s tick: a running card's elapsed time and its progress line advance between polls,
-// both reseeded from the authoritative payload on every render; it runs whenever the tab is visible,
-// because the stylesheet floor lands every change with no animation under reduced motion
+// the one 1 s tick: a running card's elapsed time and its exponential progress line advance
+// between polls, both reseeded from the authoritative payload on every render; it runs whenever the
+// tab is visible, because the stylesheet floor lands every change with no animation under reduced
+// motion
 function syncTicker() {
 	if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
 	if (document.hidden) return;
+	// the seed: without it a running card paints 0 until the first interval, and the exponential
+	// curve makes that first jump the largest one
+	tickCards();
 	tickTimer = setInterval(tickCards, 1000);
 }
 function tickCards() {
@@ -489,7 +495,7 @@ function tickCards() {
 		const live = t && (t.agents || []).find(a => a.alive);
 		if (!live) continue;
 		syncCardStats(el, { agents: t.agents.map(a => (a === live ? { ...a, duration: (a.duration || 0) + delta } : a)) });
-		el.style.setProperty("--p", String(Math.min(1, ((live.duration || 0) + delta) / 1000 / (el.offsetWidth || 1))));
+		el.style.setProperty("--p", String(progressOf(((live.duration || 0) + delta) / 1000)));
 	}
 }
 // 000264: the lazily-known card stats, keyed per project and task (statsKey)
@@ -820,13 +826,13 @@ function factsHtml(t) {
 		blockedRow(t) +
 		"<div><span class='k'>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>";
 }
-// the actions: block or unblock the user hold. The hold toggle stays outside the rebuilt facts
-// block, so a detail refresh never rebuilds it
+// the actions: hold or unhold the task. The hold toggle stays outside the rebuilt facts block, so
+// a detail refresh never rebuilds it
 function actionsHtml(t) {
 	if (t.state === "done") return "";
-	if (isHeld(t)) return '<button class="m-action m-unblock" onclick="toggleHold(this)" title="Remove the user hold"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 1.5v9l8-4.5z" fill="currentColor"/></svg>Unblock</button>';
+	if (isHeld(t)) return '<button class="m-action m-unblock" onclick="toggleHold(this)" title="Remove the user hold"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 1.5v9l8-4.5z" fill="currentColor"/></svg>Unhold</button>';
 	if (t.state === "merging") return "";
-	return '<button class="m-action m-block" onclick="toggleHold(this)" title="Hold this task and stop its agent"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>Block</button>';
+	return '<button class="m-action m-block" onclick="toggleHold(this)" title="Hold this task and stop its agent"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>Hold</button>';
 }
 // the detail poll redraws the row from the file once the hold lands; a failure keeps the button
 // usable and names the error in the header's status line
@@ -840,7 +846,7 @@ function toggleHold(btn) {
 	}).then(r => r.json().then(b => r.ok ? b : Promise.reject(b)))
 		.then(() => pollDetail())
 		.catch(e => {
-			document.getElementById("updated").textContent = "block failed: " + ((e && e.error) || "request failed");
+			document.getElementById("updated").textContent = "hold failed: " + ((e && e.error) || "request failed");
 			btn.disabled = false;
 		});
 }

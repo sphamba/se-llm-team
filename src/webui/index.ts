@@ -17,6 +17,8 @@ export {
 	isHeld,
 	numLinkHtml,
 	priorityRuler,
+	PROGRESS_HALF_S,
+	progressOf,
 	relationPaths,
 	sortStation,
 	spinnerHtml,

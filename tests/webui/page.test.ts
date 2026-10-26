@@ -632,12 +632,12 @@ assert.match(page, /\.run-row\.agent-sub, \.run-row\.agent-doctor \{[^}]*padding
 assert.ok(page.includes(".run-group-live { --guide: var(--link); }"), "a live run's guide takes the run-level accent");
 
 // 16. the actions row: a done or unheld merging task offers no hold button, a held task offers
-// Unblock, every other state Block, no copy button remains, and a failed toggle re-enables the
+// Unhold, every other state Hold, no copy button remains, and a failed toggle re-enables the
 // button
 const actionsOf = new Function("esc", "numOf", "isHeld", page.match(/function actionsHtml\(t\) \{[\s\S]*?\n\}/)![0] + "; return actionsHtml;")(esc, (f: string) => parseInt(f.slice(0, 6), 10), isHeld) as (t: any) => string;
 const file = "000263_task.md";
-assert.ok(actionsOf({ state: "doing", file }).includes('"m-action m-block"') && actionsOf({ state: "doing", file }).includes("<rect"), "an unheld task offers Block with the stop icon");
-assert.ok(actionsOf({ state: "doing", file, blockedBy: "user" }).includes('"m-action m-unblock"') && actionsOf({ state: "doing", file, blockedBy: "user" }).includes("<path"), "a held task offers Unblock with the play icon");
+assert.ok(actionsOf({ state: "doing", file }).includes('"m-action m-block"') && actionsOf({ state: "doing", file }).includes("<rect"), "an unheld task offers Hold with the stop icon");
+assert.ok(actionsOf({ state: "doing", file, blockedBy: "user" }).includes('"m-action m-unblock"') && actionsOf({ state: "doing", file, blockedBy: "user" }).includes("<path"), "a held task offers Unhold with the play icon");
 assert.ok(!actionsOf({ state: "done", file, blockedBy: "user" }).includes("toggleHold") && !actionsOf({ state: "merging", file, blockedBy: "" }).includes("toggleHold"), "a done task offers no hold button, and neither does the merging task before a user hold");
 assert.equal(actionsOf({ state: "done", file }), "", "a done task returns the empty string, so the :empty row collapses");
 assert.equal(actionsOf({ state: "merging", file }), "", "a merging task before a user hold returns the empty string");
@@ -917,13 +917,18 @@ const desktopSheet = motionCss.slice(0, motionCss.indexOf(`@media (max-width: ${
 assert.ok(!/\.spine::after/.test(motionCss) && !/@keyframes sweep\b/.test(motionCss) && !declared.has("--t-sweep"), "the spine keeps its hairline and no sweep: the band, its keyframe and its 6 s token are gone");
 assert.match(desktopSheet, /\.st-head::after \{[^}]*top: -1px/, "the head glow rides the desktop sheet, out of the phone query, so both breakpoints carry one");
 assert.match(motionCss, /\[data-motion="live"\] \.spin \{[^}]*animation: breathe var\(--t-breathe\) var\(--ease-breathe\)/, "the running dot breathes over the 2 s token");
-assert.match(motionCss, /\[data-motion="live"\] \.card\.running::after \{[^}]*transform: scaleX\(var\(--p\)\)/, "the progress line advances by a scale transform, never a width");
+assert.match(motionCss, /^\.card\.running \{ --p: 0; \}/m, "the running card starts at zero in both motion modes");
+assert.match(motionCss, /^\.card\.running::after \{[^}]*transform: scaleX\(var\(--p\)\)/m, "the progress line advances by a scale transform, never a width");
+assert.ok(!/^\.card\.running::after \{[^}]*animation/m.test(motionCss), "the geometry rule paints in both motion modes, so no animation sits in it");
+assert.match(motionCss, /^\[data-motion="live"\] \.card\.running::after \{[^}]*background-size: 300% 100%[^}]*animation: shimmer var\(--t-breathe\) linear infinite/m, "the live line takes the streaming log's band, and the shine is the only live part of it");
 assert.ok(!/\.running::after \{[^}]*width: calc/.test(motionCss), "the progress line never animates its width");
 assert.ok(motionCss.includes("animation-play-state: paused") && page.includes('classList.toggle("motion-paused", document.hidden)'), "the head glow pauses while the tab is hidden and resumes on visibilitychange");
 assert.match(motionCss, /\[data-motion="live"\] #c-text > \.pulse/, "the newest streaming line shines only in live mode, so historical lines never do");
 assert.equal((page.match(/buildShell\(board, document\)/g) ?? []).length, 1, "the shell, and with it the heads the glow rides, is built once, so a poll never recreates it");
 assert.ok(readFileSync(new URL("../../src/webui/board.ts", import.meta.url), "utf8").includes('el.classList.toggle("running"'), "the card pass marks the running card every poll on the node it keeps");
-assert.ok(page.includes('el.style.setProperty("--p"') && page.includes("syncTicker") && page.includes("polledAt"), "the page runs the 1 px/s tick and reseeds the progress from the authoritative poll value");
+assert.match(page, /el\.style\.setProperty\("--p", String\(progressOf\(/, "the tick writes the progress line from progressOf, never a pixel share of the card width");
+assert.ok(!/--p", String\([^)]*offsetWidth/.test(page) && page.includes("syncTicker") && page.includes("polledAt"), "nothing reads offsetWidth for progress, and the tick reseeds from the authoritative poll value");
+assert.match(page, /function syncTicker\(\) \{[\s\S]{0,300}?tickCards\(\);/, "every poll seeds --p once from the authoritative duration before the interval starts");
 // #377 the selector is gone: no control, no mode list, no stored choice, no cycle handler
 assert.ok(!page.includes('id="motion"'), "the served page carries no motion control");
 assert.ok(!/MOTIONS|motionWant|cycleMotion|syncMotionBtn|MOTION_KEY/.test(page), "no motion list, stored choice or cycle handler survives");

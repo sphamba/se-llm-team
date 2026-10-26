@@ -478,8 +478,9 @@ body.filters-open #filters { display: flex; position: fixed; left: 0; right: 0; 
 /* #369 one motion layer: the data-motion attribute on the root decides which loops run, the token
 block above decides how fast, and every ambient rule is opt-in, so a document with no attribute
 paints no ambience and a poll that rewrites a card's content never restarts a loop the head or the
-dot owns. live adds the breathing dot, the head glow, the 1 px/s progress line and the newest-line
-shine; #377 leaves one mode live and one floor, so the system ask is the only none */
+dot owns. live adds the breathing dot, the head glow and the newest-line shine; #377 leaves one mode
+live and one floor, so the system ask is the only none. #413 the card's progress line is information,
+so its geometry paints in both modes and only its shine rides the live gate */
 @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
 /* #403 the head glow: one cycle covers every station, one slot per station, and the boundaries are 1/7
    of the cycle, so a station added later updates these percentages with the station count */
@@ -488,8 +489,9 @@ shine; #377 leaves one mode live and one floor, so the system ask is the only no
 [data-motion="live"] #relations path { animation: dashflow var(--t-breathe) linear infinite; animation-direction: reverse; }
 [data-motion="live"] .st-head::after { animation: headWave var(--t-wave) linear infinite; animation-delay: calc(var(--i, 0) * var(--t-slot)); }
 html.motion-paused .st-head::after { animation-play-state: paused; }
-[data-motion="live"] .card.running { --p: 0; }
-[data-motion="live"] .card.running::after { content: ""; position: absolute; left: 0; bottom: 0; width: 100%; height: 1px; background: var(--ac, var(--link)); transform: scaleX(var(--p)); transform-origin: left center; }
+.card.running { --p: 0; }
+.card.running::after { content: ""; position: absolute; left: 0; bottom: 0; width: 100%; height: 1px; background-color: var(--ac, var(--link)); transform: scaleX(var(--p)); transform-origin: left center; }
+[data-motion="live"] .card.running::after { --shine-base: var(--ac, var(--link)); background-image: linear-gradient(90deg, var(--shine-base) 0%, var(--shine-base) 33%, color-mix(in srgb, var(--shine-hi) var(--shine), var(--shine-base)) 50%, var(--shine-base) 67%, var(--shine-base) 100%); background-size: 300% 100%; background-repeat: no-repeat; animation: shimmer var(--t-breathe) linear infinite; }
 /* #369 the floor: none disables every animation and transition, the inlined FLIP travel included,
 and the system ask turns everything off whatever the stored choice says; one block, not five */
 [data-motion="none"] *, [data-motion="none"]::before, [data-motion="none"] *::before, [data-motion="none"] *::after { animation: none !important; transition: none !important; }

@@ -98,6 +98,13 @@ export function archRowHtml(t, date) {
 	);
 }
 
+// #413 the card's bottom line is an exponential progress curve on a 5-minute half-life: p never
+// reaches 1, so a long run still shows room ahead. t is the live agent's elapsed seconds
+export const PROGRESS_HALF_S = 300;
+export function progressOf(seconds) {
+	return Math.max(0, 1 - Math.pow(2, -(seconds || 0) / PROGRESS_HALF_S));
+}
+
 // the open detail card's poll cadence (000142): a live agent's tokens and duration advance with
 // the run log, so while the open task has one the poll ticks at 1 s; otherwise the 5 s board poll
 export function refreshMs(t) {

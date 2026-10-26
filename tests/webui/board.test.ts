@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startHub } from "../../src/hub.ts";
 import { PRIORITY_RANK, STATES } from "../../src/kanban.ts";
-import { applyStages, buildShell, cardBaseHtml, curve, DEFAULT_STAGES, flipDiff, isHeld, MOBILE_MAX, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, STATIONS, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats, taskTokenTotal } from "../../src/webui.ts";
+import { applyStages, buildShell, cardBaseHtml, curve, DEFAULT_STAGES, flipDiff, isHeld, MOBILE_MAX, numLinkHtml, priorityRuler, PROGRESS_HALF_S, progressOf, relationPaths, sortStation, spinnerHtml, STATIONS, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats, taskTokenTotal } from "../../src/webui.ts";
 import { groupRuns } from "../../src/webui/board.ts";
 import { esc } from "../../src/webui/logpane.ts";
 
@@ -765,5 +765,17 @@ assert.deepEqual([docOnly379.groups, docOnly379.unmatched.map((d) => d.handle)],
 const mid379 = groupRuns([{ role: "developer", handle: "t.dev.0" }], [{ role: "doctor", handle: "t.doctor.dev.0.doctor" }]);
 assert.deepEqual(mid379.unmatched.map((d) => d.handle), ["t.doctor.dev.0.doctor"], "only the trailing .doctor suffix is stripped, so a handle with doctor mid-string never joins a run");
 assert.equal(mid379.groups[0].doctor, null, "a mid-string doctor leaves its run group empty");
+
+// #413 the card's bottom line is a progress curve on a 5-minute half-life, so a long run still
+// shows room ahead and the line never fills
+assert.equal(PROGRESS_HALF_S, 300, "the half-life is five minutes of run time");
+assert.equal(progressOf(0), 0, "the line starts empty");
+assert.equal(progressOf(300), 0.5, "five minutes paints half the line");
+assert.equal(progressOf(600), 0.75, "ten minutes paints three quarters");
+assert.equal(progressOf(900), 0.875, "fifteen minutes paints seven eighths");
+assert.equal(progressOf(1200), 0.9375, "every extra half-life halves the empty line, as the formula says: twenty minutes paints fifteen sixteenths");
+const elapsed413 = [0, 60, 300, 600, 1200, 2400, 3600];
+assert.ok(elapsed413.every((s) => progressOf(s) < 1), "the line never fills, however long the run");
+assert.deepEqual(elapsed413.map(progressOf), [...elapsed413.map(progressOf)].sort((a, b) => a - b), "a shorter elapsed time never paints more than a longer one");
 
 ui.close();
