@@ -906,7 +906,7 @@ for (const fn of [encodeFilters, decodeFilters, emptyFilters, filtersActive, mat
 // effects animate a property other than transform or opacity. #377 drops the live/purposeful/none
 // selector: live is the default and the system preference the only override
 const motionCss = themeCss;
-for (const tok of ["--t-fast: 120ms", "--t-base: 180ms", "--t-slow: 240ms", "--t-breathe: 2s", "--ease-enter:", "--ease-exit:"])
+for (const tok of ["--t-fast: 120ms", "--t-base: 180ms", "--t-slow: 240ms", "--t-breathe: 2s", "--t-wave: 12s", "--t-slot: calc(var(--t-wave) / 7)", "--ease-enter:", "--ease-exit:"])
 	assert.ok(tokenBlocks[0].includes(tok), `the light :root block declares ${tok.split(":")[0]}, the one motion token set`);
 const stripVars = (s: string) => s.replace(/var\(--[\w-]+(?:,[^)]*)?\)/g, "");
 const ruleBodies = [...motionCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2] }));
@@ -922,15 +922,26 @@ assert.equal((page.match(/@media \(prefers-reduced-motion: reduce\)/g) ?? []).le
 assert.equal((page.match(/prefers-reduced-motion/g) ?? []).length, 2, "the page names the reduced-motion ask once in the stylesheet and once in the policy store");
 assert.match(motionCss, /\[data-motion="none"\][^{]*\{[^}]*animation: none !important[^}]*transition: none !important/, "the none policy disables every animation and transition, the inlined FLIP travel included");
 const desktopSheet = motionCss.slice(0, motionCss.indexOf(`@media (max-width: ${MOBILE_MAX}px)`));
-assert.ok(!/\.spine::after/.test(motionCss) && !/@keyframes sweep\b/.test(motionCss) && !declared.has("--t-sweep"), "the spine keeps its hairline and no sweep: the band, its keyframe and its 6 s token are gone");
-assert.match(desktopSheet, /\.st-head::after \{[^}]*top: -1px/, "the head glow rides the desktop sheet, out of the phone query, so both breakpoints carry one");
+const phoneSlice = motionCss.slice(motionCss.indexOf(`@media (max-width: ${MOBILE_MAX}px)`));
+const spineRule = ruleBodies.find((r) => r.sel === ".spine")!;
+const barLadder = spineRule.body.match(/background-image: linear-gradient\(90deg,[^;]*/)?.[0] ?? "";
+assert.deepEqual([...barLadder.matchAll(/var\((--accent-[\w-]+)\)/g)].map((m) => m[1]).filter((v, i, a) => v !== a[i - 1]), ["--accent-backlog", "--accent-todo", "--accent-review", "--accent-merge", "--accent-live", "--accent-integration", "--accent-done"], "the one bar carries the seven station tints in pipeline order, one fixed equal slot each");
+assert.ok(!/animation/.test(spineRule.body) && spineRule.sel === ".spine", "the ladder paints in every motion mode: the bar rule takes no motion gate and no animation");
+const headZ = Number(motionCss.match(/^\.st-head \{[^}]*z-index: (\d+)/m)?.[1] ?? NaN), spineZ = Number(spineRule.body.match(/z-index: (\d+)/)?.[1] ?? NaN);
+assert.ok(spineZ > headZ, "the bar paints above the head ticks, so the 1px crossing at each junction does not cut the line");
+assert.ok(!/@keyframes sweep\b/.test(motionCss) && !declared.has("--t-sweep"), "the old sweep keyframe and its token are gone");
+const barBand = motionCss.match(/\[data-motion="live"\] \.spine::after \{([^}]*)\}/)?.[1] ?? "";
+assert.match(barBand, /animation: beamRun var\(--t-wave\) linear infinite/, "the band crosses the bar once over the wave token, so one pass covers the full board");
+assert.match(motionCss, /@keyframes beamRun \{ from \{ transform: translateX\(-100%\); \} to \{ transform: translateX\(666\.6667%\); \} \}/, "the band starts and ends fully off the bar, so the loop wraps with no dark beat");
+assert.ok(!/\.st-head::after/.test(desktopSheet) && /\.st-head::after \{[^}]*top: -1px/.test(phoneSlice), "the desktop board carries one continuous bar and no per-head glow, while the phone keeps its glow on the head rule");
 assert.match(motionCss, /\[data-motion="live"\] \.spin \{[^}]*animation: breathe var\(--t-breathe\) var\(--ease-breathe\)/, "the running dot breathes over the 2 s token");
 assert.match(motionCss, /^\.card\.running \{ --p: 0; \}/m, "the running card starts at zero in both motion modes");
 assert.match(motionCss, /^\.card\.running::after \{[^}]*transform: scaleX\(var\(--p\)\)/m, "the progress line advances by a scale transform, never a width");
 assert.ok(!/^\.card\.running::after \{[^}]*animation/m.test(motionCss), "the geometry rule paints in both motion modes, so no animation sits in it");
 assert.match(motionCss, /^\[data-motion="live"\] \.card\.running::after \{[^}]*background-size: 300% 100%[^}]*animation: shimmer var\(--t-breathe\) linear infinite/m, "the live line takes the streaming log's band, and the shine is the only live part of it");
 assert.ok(!/\.running::after \{[^}]*width: calc/.test(motionCss), "the progress line never animates its width");
-assert.ok(motionCss.includes("animation-play-state: paused") && page.includes('classList.toggle("motion-paused", document.hidden)'), "the head glow pauses while the tab is hidden and resumes on visibilitychange");
+const pausedRule = motionCss.match(/html\.motion-paused [^{]+\{[^}]*animation-play-state: paused[^}]*\}/)?.[0] ?? "";
+assert.ok(/\.spine::after/.test(pausedRule) && /\.st-head::after/.test(pausedRule) && page.includes('classList.toggle("motion-paused", document.hidden)'), "one paused rule freezes the bar and the head glow while the tab is hidden, and visibilitychange resumes them");
 assert.match(motionCss, /\[data-motion="live"\] #c-text > \.pulse/, "the newest streaming line shines only in live mode, so historical lines never do");
 assert.equal((page.match(/buildShell\(board, document\)/g) ?? []).length, 1, "the shell, and with it the heads the glow rides, is built once, so a poll never recreates it");
 assert.ok(readFileSync(new URL("../../src/webui/board.ts", import.meta.url), "utf8").includes('el.classList.toggle("running"'), "the card pass marks the running card every poll on the node it keeps");
@@ -1165,7 +1176,7 @@ assert.match(headGlow, /top: -1px/, "the glow sits on the head's own top rule, n
 const waveRule = motionCss.match(/\[data-motion="live"\] \.st-head::after \{([^}]*)\}/)?.[1] ?? "";
 assert.match(waveRule, /animation: headWave var\(--t-wave\) linear infinite/, "the head glow loops the wave keyframe over the token that covers one slot per station");
 assert.match(waveRule, /animation-delay: calc\(var\(--i, 0\) \* var\(--t-slot\)\)/, "each station waits its own slot before the glow: a negative delay would light column one, then the last column, then walk back up");
-assert.ok(!phoneBoard.includes('[data-motion="live"] .st-head::after') && /\.st-head::after/.test(desktopSheet), "the wave rule carries no phone wrapper, so one animation rides the glow on both breakpoints");
+assert.ok(!phoneBoard.includes('[data-motion="live"] .st-head::after') && /\.st-head::after/.test(phoneSheet), "the wave rule carries no phone wrapper, so one animation rides the phone glow");
 assert.match(motionCss, /html\.motion-paused \.st-head::after \{[^}]*animation-play-state: paused/, "a hidden tab freezes the head glow with the spine");
 assert.match(motionCss, /\[data-motion="none"\] \*::after[^{]*\{[^}]*animation: none/, "the none policy already covers the head glow pseudo element");
 
