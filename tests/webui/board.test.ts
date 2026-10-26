@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startHub } from "../../src/hub.ts";
 import { PRIORITY_RANK, STATES } from "../../src/kanban.ts";
-import { applyStages, buildShell, cardBaseHtml, curve, DEFAULT_STAGES, flipDiff, isHeld, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, STATIONS, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats } from "../../src/webui.ts";
+import { applyStages, buildShell, cardBaseHtml, curve, DEFAULT_STAGES, flipDiff, isHeld, MOBILE_MAX, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, STATIONS, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats } from "../../src/webui.ts";
 import { esc } from "../../src/webui/logpane.ts";
 
 const root = mkdtempSync(join(tmpdir(), "webui-board-"));
@@ -135,7 +135,7 @@ assert.match(themeCss, /\.c-meta \{[^}]*flex-wrap: wrap/, "the meta row wraps in
 assert.match(themeCss, /#board \{[^}]*overflow-y: hidden/, "the board never scrolls the page vertically");
 assert.match(themeCss, /#board \{[^}]*overflow-x: auto/, "below 1100px the board scrolls horizontally on its own");
 assert.match(themeCss, /\.station\.live \.st-head::before \{[^}]*background: var\(--ac\)/, "a station with a running agent accents its tick");
-assert.ok(page.includes("el.tabIndex = 0") && page.includes('if (e.key === "Enter")'), "a card link is keyboard focusable and Enter opens the current card");
+assert.ok(page.includes("el.tabIndex = 0") && page.includes('if (e.key === "Enter" && !onMarker(e))'), "a card link is keyboard focusable and Enter opens the current card unless the marker holds the focus");
 assert.match(themeCss, /\.card:focus-visible[^{]*\{[^}]*outline: 2px solid var\(--link\)/, "a focused card shows the visible ring");
 
 // accents: the stylesheet points each station class at a stage accent token the theme declares
@@ -177,7 +177,7 @@ assert.ok(rich.includes('<span class="c-p p-high">high</span>') && rich.includes
 assert.ok(!rich.includes('<span class="sub-state">'), "a primary state shows no sub-state marker");
 assert.ok(cardBaseHtml({ file: "000048_m.md", name: "m", priority: "low" }, "reviewing").includes('<span class="sub-state">reviewing</span>'), "a non-primary state shows its raw slug in the meta row");
 assert.ok(cardBaseHtml({ file: "000049_n.md", name: "n", priority: "low" }, "backlog").includes('<span class="sub-state">backlog</span>'), "backlog sits in the queue station and keeps its sub-state marker");
-assert.ok(cardBaseHtml({ file: "000050_o.md", name: "o", priority: "low", blockedBy: "user" }, "to-do").includes('<span class="held">held</span>'), "a held task gets an inline held marker");
+assert.ok(cardBaseHtml({ file: "000050_o.md", name: "o", priority: "low", blockedBy: "user" }, "to-do").includes('<button type="button" class="c-wait held"'), "a held task gets the held marker in the meta row");
 assert.ok(!cardBaseHtml({ file: "000051_p.md", name: "p", priority: "low" }, "to-do").includes("c-live"), "an idle card gets no live cell");
 assert.ok(!cardBaseHtml({ file: "000052_q.md", name: "q", priority: "low" }, "to-do").includes("ctx"), "a card without a summary drops the context line");
 const deadCard = cardBaseHtml({ file: "000053_r.md", name: "r", priority: "low", agents: [{ ...liveRun, alive: false, status: "dead" }] }, "to-review");
@@ -192,9 +192,33 @@ const baseOf = (tokens: number, duration: number) => cardBaseHtml({ file: "00005
 assert.equal(baseOf(420, 1500), baseOf(9999, 90000), "the base markup carries no token or elapsed value, so the spinner never restarts on a poll");
 assert.ok(taskStats({ agents: [{ tokens: 420, duration: 1500 }, { tokens: 1580, duration: 2000 }] }) === "2k · 4s", "the run row totals the agent entries");
 
+// #373 the waits-on marker: the resting fact that a relation exists, in the card meta row. A ref
+// resolves through the board's own task list, a done blocker counts as satisfied, and the `user`
+// token is the hold, not a blocker
+const boardTasks = [
+	{ file: "000004_d.md", name: "d", priority: "low", state: "to-do" },
+	{ file: "000005_e.md", name: "e", priority: "low", state: "to-review" },
+	{ file: "000006_f.md", name: "f", priority: "low", state: "done" },
+	{ file: "000007_g.md", name: "g", priority: "low", state: "merging" },
+];
+const markerOf = (blockedBy: string, all: any[] = boardTasks) =>
+	cardBaseHtml({ file: "000002_b.md", name: "b", priority: "low", blockedBy }, "to-do", all).match(/<button type="button" class="c-wait[^"]*"[^>]*>([^<]*)<\/button>/);
+assert.equal(markerOf(""), null, "a card with no blockedBy shows no marker");
+assert.equal(markerOf("#4")?.[1], "waits on 1", "one unsatisfied blocker names the wait");
+assert.equal(markerOf("#4, #5, #7")?.[1], "waits on 3", "three blockers count as one wait");
+assert.equal(markerOf("#6")?.[1], "waits on 1 ✓", "a satisfied blocker is a check, not a wait");
+assert.equal(markerOf("#4, #6")?.[1], "waits on 1", "a mixed set waits on the unsatisfied blockers only");
+assert.equal(markerOf("user")?.[1], "held", "the user token alone is the held marker");
+assert.equal(markerOf("user, #4")?.[1], "held waits on 1", "a held task that also waits shows held first, then the wait");
+assert.equal(markerOf("#9, junk"), null, "a ref no task resolves leaves no marker");
+assert.ok((markerOf("#4, #5")?.[0] ?? "").includes('aria-label="waits on 2: #4, #5"'), "the marker's accessible name lists the refs");
+assert.ok((markerOf("#4")?.[0] ?? "").includes('data-wait="#4"'), "the marker carries its refs as data for the popover");
+const markerCard = cardBaseHtml({ file: "000002_b.md", name: "b", priority: "low", blockedBy: "#4" }, "to-do", boardTasks);
+assert.ok(markerCard.indexOf('<div class="c-meta">') < markerCard.indexOf('class="c-wait"'), "the marker sits in the meta row, so the name and the context line stay put");
+
 // relation lines: one dashed curve per stored relation between rendered cards, running from the
-// blocked task's card to the blocker's card. A done blocker, a ghost ref and an unrendered card
-// draw nothing.
+// blocked task's card to the blocker's card. A done blocker, a ghost ref and a blocker with no
+// rendered card never draw a curve: the last one is an explicit off-board entry instead.
 const rects = {
 	"000001_a.md": { x: 0, y: 0, w: 280, h: 60 },
 	"000002_b.md": { x: 310, y: 0, w: 280, h: 60 },
@@ -235,7 +259,22 @@ assert.equal(relationPaths([
 	{ file: "000003_c.md", state: "done", blockedBy: "" },
 ], rectOf).length, 0, "a done blocker draws nothing");
 assert.equal(relationPaths([{ file: "000002_b.md", state: "to-do", blockedBy: "#9, junk, , " }], rectOf).length, 0, "ghost and unparseable refs draw nothing");
-assert.equal(relationPaths([{ file: "000002_b.md", state: "to-do", blockedBy: "#1" }], (f) => (f === "000001_a.md" ? rects["000001_a.md"] : null)).length, 0, "a ref whose card is not rendered draws nothing");
+assert.deepEqual(relationPaths([{ file: "000002_b.md", state: "to-do", blockedBy: "#1" }], rectOf), [], "a ref that resolves to no task at all draws nothing");
+// #373 a blocker that resolves to a real task but has no rendered card is an explicit off-board
+// entry naming its station, not a silent drop; the entry carries no geometry
+const offPaths = relationPaths([
+	{ file: "000002_b.md", state: "to-do", blockedBy: "#4, #7, #6, user" },
+	{ file: "000004_d.md", state: "to-do" },
+	{ file: "000006_f.md", state: "done" },
+	{ file: "000007_g.md", state: "to-review" },
+], rectOf);
+assert.deepEqual(offPaths.map((p) => [p.file, p.blocker, !!p.offBoard]), [["000002_b.md", "000004_d.md", false], ["000002_b.md", "000007_g.md", true]], "a rendered blocker draws a curve, an off-board blocker is an entry, and a done blocker and the hold drop");
+assert.equal(offPaths[1].station, "Review", "the off-board entry names the station its blocker sits in");
+assert.ok(!offPaths[1].d, "an off-board entry carries no geometry");
+assert.deepEqual(relationPaths([
+	{ file: "000002_b.md", state: "to-do", blockedBy: "#1" },
+	{ file: "000001_a.md", state: "to-do" },
+], () => null), [], "a blocked card with no rendered card has no stub to carry");
 assert.deepEqual(relationPaths([{ file: "000002_b.md", state: "to-do" }], rectOf), [], "an older payload without blockedBy draws nothing");
 assert.deepEqual(relationPaths([
 	{ file: "000002_b.md", state: "to-do", blockedBy: "#4" },
@@ -246,14 +285,52 @@ assert.deepEqual(relationPaths([
 // file and for the blocker file both raise the same path, an unrelated file raises nothing
 const hotPath: any = { dataset: { file: "000002_b.md", blocker: "000004_d.md" }, hot: new Set<string>() };
 hotPath.classList = { toggle: (cls: string, on: boolean) => (on ? hotPath.hot.add(cls) : hotPath.hot.delete(cls)) };
-const hotFn = (new Function("document", page.match(/<script>([\s\S]*?)<\/script>/)![1].match(/function hotRelations\(file, on\) \{[\s\S]*?\n\}/)![0] + "; return hotRelations;") as (d: unknown) => (file: string, on: boolean) => void)({ querySelectorAll: (sel: string) => (sel === "#relations path" ? [hotPath] : []) });
+// #373 the reveal: the board gains a class, the blockers are rimmed, every other card dims, and
+// keyboard focus runs the same pass as hover
+const hotCard = (file: string) => {
+	const el: any = { dataset: { file }, cls: new Set<string>() };
+	el.classList = { toggle: (c: string, on: boolean) => (on ? el.cls.add(c) : el.cls.delete(c)) };
+	return el;
+};
+const hotBoard: any = { cls: new Set<string>() };
+hotBoard.classList = { toggle: (c: string, on: boolean) => (on ? hotBoard.cls.add(c) : hotBoard.cls.delete(c)) };
+const hotCards = ["000002_b.md", "000004_d.md", "000009_x.md"].map(hotCard);
+const hotDoc = {
+	querySelectorAll: (sel: string) => (sel === "#relations path" ? [hotPath] : sel === "#board .card" ? hotCards : []),
+	getElementById: (id: string) => (id === "board" ? hotBoard : null),
+};
+const hotFn = (new Function("document", page.match(/<script>([\s\S]*?)<\/script>/)![1].match(/function hotRelations\(file, on\) \{[\s\S]*?\n\}/)![0] + "; return hotRelations;") as (d: unknown) => (file: string, on: boolean) => void)(hotDoc);
 hotFn("000002_b.md", true);
 assert.ok(hotPath.hot.has("relations-hot"), "hovering the blocked card highlights its outgoing line");
+assert.ok(hotBoard.cls.has("reveal"), "hovering a card reveals the relation layer");
+assert.ok(hotCards[0].cls.has("hot") && !hotCards[0].cls.has("rim"), "the active card stays lit and takes no rim");
+assert.ok(hotCards[1].cls.has("hot") && hotCards[1].cls.has("rim"), "a rendered blocker is rimmed and stays lit");
+assert.ok(!hotCards[2].cls.has("hot") && !hotCards[2].cls.has("rim"), "an unrelated card only dims");
 hotFn("000002_b.md", false);
+assert.ok(!hotBoard.cls.has("reveal") && !hotCards[1].cls.has("rim"), "leaving the card drops the reveal and the rims");
 hotFn("000009_x.md", true);
 assert.ok(!hotPath.hot.has("relations-hot"), "mouseleave reverts the highlight and an unrelated file raises nothing");
 hotFn("000004_d.md", true);
 assert.ok(hotPath.hot.has("relations-hot"), "hovering the blocker card highlights the same incoming line");
+assert.ok(!hotCards[0].cls.has("rim"), "hovering a blocker rims its own blockers, not the cards it blocks");
+
+// #373 the stylesheet reads by selector and property: the marker is a button with a hit floor that
+// never wraps and sits right aligned, the lines exist only during a reveal, the dim keeps the marker
+// text readable, and the popover is a floating panel the card cannot clip
+const cssRule = (sel: string) => themeCss.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " \\{([^}]*)\\}"))?.[1] ?? "";
+assert.match(cssRule(".c-wait"), /white-space: nowrap/, "the marker never wraps, so it stays on one line");
+assert.ok(Number(cssRule(".c-wait").match(/min-height: (\d+)px/)![1]) >= 28, "the marker keeps its 28px hit height");
+assert.match(cssRule(".c-wait"), /margin-left: auto/, "the marker is right aligned in the meta row");
+assert.match(cssRule("#relations"), /opacity: 0/, "no curve at rest");
+assert.match(themeCss, /#board\.reveal #relations \{[^}]*opacity: 1/, "a reveal paints the relation layer");
+assert.match(themeCss, /#board\.reveal \.card:not\(\.hot\) \{[^}]*opacity: \.55/, "an unrelated card dims to 55 percent, not 40, so the marker text stays readable");
+assert.match(cssRule("#waits-pop"), /position: fixed/, "the popover floats over the board instead of inside a scrolling card");
+assert.match(themeCss, new RegExp(`@media \\(max-width: ${MOBILE_MAX}px\\) \\{[\\s\\S]*?\\.c-wait`), "the phone layout gives the marker the 44px touch floor");
+
+// #373 the popover wiring: one popover keyed by file so a poll leaves it open, Escape restores the
+// marker, and a rendered row scrolls its blocker's card into view
+assert.ok(page.includes('pop.id = "waits-pop"') && page.includes("if (waitFile === file) closeWaits(true)"), "the client ships one popover at a time, keyed by file");
+assert.ok(page.includes("function closeWaits(restore)") && page.includes(".scrollIntoView({ block: \"nearest\""), "the close restores focus and a rendered row reaches the blocker card");
 
 // 000127/000236: far-apart cards bend the line into an S (the control offsets scale with the
 // span, capped); same-row pairs clamp the offset inside the span, because a same-row cubic is
@@ -284,7 +361,7 @@ const zOf = (sel: string) => Number(page.match(new RegExp(sel + " \\{[^}]*z-inde
 assert.ok(zOf(".card") > zOf("#relations"), "the task cards paint above the relation overlay");
 assert.ok(page.includes('setAttribute("pointer-events", "none")') && page.includes('window.addEventListener("resize", drawRelations)'), "the overlay is created non-interactive and a resize recomputes the line endpoints");
 assert.ok(page.includes("el.onmouseenter = () => hotRelations(file, true)") && page.includes("el.onmouseleave = () => hotRelations(file, false)"), "the card hover wires the highlight on mouseenter and reverts on mouseleave");
-assert.ok(page.includes('if (p.dataset.file === file || p.dataset.blocker === file) p.classList.toggle("relations-hot", on)'), "the hover matches paths by either endpoint's file in the dataset, no quote-unsafe selector interpolation");
+assert.ok(page.includes("const mine = p.dataset.file === file || p.dataset.blocker === file;") && page.includes('p.classList.toggle("relations-hot", on && mine)'), "the hover matches paths by either endpoint's file in the dataset, no quote-unsafe selector interpolation");
 assert.ok(page.includes('" data-blocker="'), "each relation path carries the blocker's file alongside the blocked task's file");
 assert.ok(page.includes('facts.querySelectorAll(".num-link")') && page.includes("openTask(a.dataset.task)"), "the panel binds its id links to openTask through the facts block");
 assert.ok(page.includes(">blockedBy</span>"), "the panel builds a blockedBy row");
@@ -407,10 +484,10 @@ const heldTask = (file: string, blockedBy: string) => ({ file, name: "feat: h", 
 sync([heldTask("000031_h.md", "user"), heldTask("000032_i.md", "USER, #42"), heldTask("000033_j.md", "#42")]);
 const heldOf = (file: string) => els.get(file)!.className.split(" ");
 assert.ok(heldOf("000031_h.md").includes("user-hold") && heldOf("000032_i.md").includes("user-hold"), "a `user` blockedBy marks the card held, any case, mixed with task refs");
-assert.ok(els.get("000031_h.md")!.innerHTML.includes('<span class="held">held</span>'), "and the held card carries the inline marker");
+assert.ok(els.get("000031_h.md")!.innerHTML.includes('class="c-wait held"'), "and the held card carries the held marker");
 sync([heldTask("000031_h.md", ""), heldTask("000032_i.md", "USER, #42"), heldTask("000033_j.md", "#42")]);
 assert.ok(!heldOf("000031_h.md").includes("user-hold") && heldOf("000032_i.md").includes("user-hold") && !heldOf("000033_j.md").includes("user-hold"), "the next pass drops the class once the token is gone, a still-held card stays held, a task ref alone never holds");
-assert.ok(!els.get("000031_h.md")!.innerHTML.includes('class="held"'), "and drops the inline marker with it");
+assert.ok(!els.get("000031_h.md")!.innerHTML.includes("c-wait"), "and drops the held marker with it");
 assert.equal(els.get("000031_h.md")!.className, "card enter", "the toggle neither replays nor loses the one-shot entrance class");
 
 // a held ref draws no relation line and prints as plain escaped text in the detail card

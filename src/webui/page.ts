@@ -2,7 +2,7 @@ import { PRIORITY_RANK } from "../kanban.ts";
 import { readConfigFiles, type StageFlags } from "../orchestrator/config.ts";
 export type { StageFlags };
 import { esc, inline, logFixups, md } from "./logpane.ts";
-import { agentLabel, agentStatsText, applyCardStats, applyStages, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, isHeld, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, statsKey, STATIONS, syncBoard, syncCardStats, taskStats } from "./board.ts";
+import { agentLabel, agentStatsText, applyCardStats, applyStages, blockerTasks, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, isHeld, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, stationFor, statsKey, STATIONS, syncBoard, syncCardStats, taskStats, waitsOnText } from "./board.ts";
 import { ARCHIVE_PAGE, archivePage, archiveTasks, decodeFilters, emptyFilters, encodeFilters, FILTER_COMPLEXITIES, FILTER_DEBOUNCE, FILTER_PRIORITIES, FILTERS_KEY, filterReason, filterTasks, filtersActive, filtersCount, matchesFilters, PALETTE_MAX, paletteResults, PHASES } from "./filters.ts";
 import { CSS, MOBILE_MAX } from "./theme.ts";
 
@@ -187,6 +187,9 @@ ${md}
 ${flipDiff}
 ${curve}
 ${relationPaths}
+${blockerTasks}
+${waitsOnText}
+${stationFor}
 // board layout and the card pass, interpolated as source so the client runs the tested code;
 // constants go in as values, the functions as source
 const STATIONS = ${JSON.stringify(STATIONS)};
@@ -489,12 +492,17 @@ function makeCard(file) {
 	const el = document.createElement("div");
 	el.className = "card";
 	el.dataset.file = file;
-	el.onclick = () => openTask(file);
+	// #373 a click or an Enter on the marker belongs to the popover, not to the card under it
+	const onMarker = (e) => e.target.closest && e.target.closest(".c-wait");
+	el.onclick = (e) => { if (!onMarker(e)) openTask(file); };
 	// #366: the card is a link in the tab order, so Enter opens the card under the focus ring
 	el.tabIndex = 0;
-	el.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); openTask(file); } };
+	el.onkeydown = (e) => { if (e.key === "Enter" && !onMarker(e)) { e.preventDefault(); openTask(file); } };
 	el.onmouseenter = () => hotRelations(file, true);
 	el.onmouseleave = () => hotRelations(file, false);
+	// #373 keyboard focus runs the same reveal as hover, so the connectors are reachable without a mouse
+	el.onfocus = () => hotRelations(file, true);
+	el.onblur = () => hotRelations(file, false);
 	// 000191: the entrance class is one-shot, dropped on animationend so a later poll or reorder
 	// never replays it
 	el.onanimationend = () => { el.classList.remove("enter"); el.onanimationend = null; };
@@ -512,12 +520,21 @@ function cardBox(el) {
 	for (let p = el.parentElement; p && p !== board; p = p.parentElement) { dx += p.scrollLeft; dy += p.scrollTop; }
 	return { x: r.left - boardRect.left + dx, y: r.top - boardRect.top + dy, w: r.width, h: r.height };
 }
-// hovering a card raises the opacity of the lines it connects to, in and out, mouseleave reverts
-// (000127, 000144); the paths carry both endpoint files as data, so the match needs no selector
-// interpolation
+// #373 hovering or focusing a card reveals its relations: the board gains a class, the paths raise,
+// the rendered blockers are rimmed and every other card dims. The paths carry both endpoint files as
+// data, so the match needs no selector interpolation
 function hotRelations(file, on) {
+	const board = document.getElementById("board");
+	if (board) board.classList.toggle("reveal", on);
+	const lit = new Set([file]);
 	for (const p of document.querySelectorAll("#relations path")) {
-		if (p.dataset.file === file || p.dataset.blocker === file) p.classList.toggle("relations-hot", on);
+		const mine = p.dataset.file === file || p.dataset.blocker === file;
+		p.classList.toggle("relations-hot", on && mine);
+		if (on && p.dataset.file === file) lit.add(p.dataset.blocker);
+	}
+	for (const el of document.querySelectorAll("#board .card")) {
+		el.classList.toggle("hot", on && lit.has(el.dataset.file));
+		el.classList.toggle("rim", on && el.dataset.file !== file && lit.has(el.dataset.file));
 	}
 }
 // #370 the phone layout stacks every card in one column, so no relation curve has a span to cross
@@ -545,6 +562,23 @@ function drawRelations() {
 	svg.setAttribute("height", h);
 	const html = paths.map(p => '<path d="' + p.d + '" data-file="' + esc(p.file) + '" data-blocker="' + esc(p.blocker) + '"/>').join("");
 	if (svg.__html !== html) { svg.innerHTML = html; svg.__html = html; }
+	drawStubs(paths);
+}
+// #373 an off-board blocker keeps a stub at its blocked card's right edge: two at most, then a count.
+// The element is reused across refreshes, so a poll neither flickers nor widens the board
+function drawStubs(paths) {
+	const byFile = {};
+	for (const p of paths) if (p.offBoard) (byFile[p.file] = byFile[p.file] || []).push(p.blocker);
+	for (const el of cardEls.values()) {
+		const list = byFile[el.dataset.file] || [];
+		const stub = el.querySelector(".c-stub");
+		if (!list.length) { if (stub) stub.remove(); continue; }
+		const items = list.slice(0, 2).map(f => '<span class="c-stub-item">← #' + parseInt(f, 10) + '<span class="stub-tag">off board</span></span>');
+		if (list.length > 2) items.push('<span class="c-stub-item">+' + (list.length - 2) + "</span>");
+		const html = items.join("");
+		if (stub) { if (stub.__html === html) continue; stub.innerHTML = html; stub.__html = html; }
+		else { const made = document.createElement("div"); made.className = "c-stub"; made.innerHTML = html; made.__html = html; el.appendChild(made); }
+	}
 }
 function render(skipFlip) {
 	renderTabs();
@@ -558,6 +592,13 @@ function render(skipFlip) {
 		svg.setAttribute("pointer-events", "none");
 		board.insertBefore(svg, board.firstChild);
 		for (const id in stations) stations[id].toggle.onclick = id === "done" ? openArchive : () => toggleStation(id);
+		// #373 the marker delegation: one listener for every card, so a re-render never rebinds it
+		board.addEventListener("click", (e) => {
+			const marker = e.target.closest && e.target.closest(".c-wait");
+			if (!marker) return;
+			e.stopPropagation();
+			toggleWaits(marker.closest(".card").dataset.file);
+		});
 		window.addEventListener("resize", drawRelations);
 	}
 	const project = projects.find(t => t.id === active);
@@ -572,7 +613,7 @@ function render(skipFlip) {
 	// 000264: the lazily-known stats land on the rows before the board pass, so the 5 s poll's
 	// agent-less cards 6+ never wipe revealed stats; the payload's eager first-5 agents win
 	applyCardStats(tab.tasks, statsKnown, localStorage, active);
-	syncBoard(stations, filterTasks(tab.tasks, filters), tab.expanded, cardEls, makeCard, VISIBLE, document, filterReason(filters));
+	syncBoard(stations, filterTasks(tab.tasks, filters), tab.expanded, cardEls, makeCard, VISIBLE, document, filterReason(filters), tab.tasks);
 	// #369 the authoritative values land here on every poll; the 1 px/s tick advances from them
 	polledAt = Date.now();
 	syncTicker();
@@ -640,6 +681,89 @@ function blockedRow(t) {
 	});
 	return "<div><span class='k'>blockedBy</span>" + items.join(", ") + "</div>";
 }
+// #373 the waits-on popover: one row per stored ref in stored order, the number as the board's own id
+// link, the name on one line, the state and station, and a badge. A rendered row opens that card, an
+// off-board row stays text and names where the blocker sits
+let waitFile = null;
+function waitRows(t) {
+	return String(t.blockedBy || "").split(",").map(s => s.trim()).filter(Boolean).map(ref => {
+		const target = taskByNum(ref);
+		const held = ref.toLowerCase() === "user";
+		const onBoard = !!(target && cardEls.has(target.file));
+		// a done blocker reads as satisfied first, because a done card is usually folded away as well
+		const badge = !target ? "" : held ? '<span class="wait-badge">held by user</span>' : target.state === "done" ? '<span class="wait-badge wait-done">✓</span>' : onBoard ? "" : '<span class="wait-badge">off board</span>';
+		const cells = '<span class="wait-name">' + esc(target ? target.name : held ? "the user hold" : ref) + "</span>" +
+			(target ? '<span class="wait-state">' + esc(target.state) + '</span><span class="wait-st">' + esc(stationFor(target.state)) + "</span>" : "") + badge;
+		const num = target ? numLinkHtml(target.file) : esc(ref);
+		return onBoard
+			? '<button type="button" class="wait-row" data-wait-open="' + esc(target.file) + '">' + num + cells + "</button>"
+			: '<div class="wait-row">' + num + cells + "</div>";
+	}).join("");
+}
+// the panel sits above its card when there is room and below it otherwise, so it never covers the card
+// it belongs to; the phone layout puts it under the card at full width instead of floating it
+function placeWaits(pop, card) {
+	const m = card.querySelector(".c-wait").getBoundingClientRect();
+	const c = card.getBoundingClientRect();
+	if (verticalSpine()) {
+		pop.style.left = "8px";
+		pop.style.right = "8px";
+		pop.style.top = Math.round(c.bottom + 4) + "px";
+		return;
+	}
+	pop.style.left = Math.round(Math.max(8, Math.min(m.left, innerWidth - pop.offsetWidth - 8))) + "px";
+	pop.style.top = Math.round(c.top > pop.offsetHeight + 8 ? c.top - pop.offsetHeight - 4 : c.bottom + 4) + "px";
+}
+function closeWaits(restore) {
+	const pop = document.getElementById("waits-pop");
+	const file = waitFile;
+	waitFile = null;
+	if (pop) pop.remove();
+	if (!restore || !file) return;
+	const card = cardEls.get(file);
+	const marker = card && card.querySelector(".c-wait");
+	if (marker) marker.focus();
+}
+// #373 one popover at a time, keyed by the blocked file: a poll leaves it open, and only another
+// marker replaces it. A rendered row scrolls its card into view and replays the card entrance
+function openWaits(file) {
+	const t = activeBoard().tasks.find(x => x.file === file);
+	const card = cardEls.get(file);
+	if (!t || !card || !card.querySelector(".c-wait")) return;
+	closeWaits(false);
+	waitFile = file;
+	const pop = document.createElement("div");
+	pop.id = "waits-pop";
+	pop.setAttribute("role", "dialog");
+	pop.setAttribute("aria-label", "blocked by");
+	pop.innerHTML = waitRows(t);
+	pop.onclick = (e) => {
+		const row = e.target.closest && e.target.closest(".wait-row[data-wait-open]");
+		if (!row) return;
+		const target = cardEls.get(row.dataset.waitOpen);
+		closeWaits(true);
+		if (target) {
+			target.scrollIntoView({ block: "nearest", inline: "nearest" });
+			target.classList.add("enter");
+			target.onanimationend = () => { target.classList.remove("enter"); target.onanimationend = null; };
+		}
+	};
+	document.body.appendChild(pop);
+	placeWaits(pop, card);
+	const first = pop.querySelector("button.wait-row");
+	if (first) first.focus();
+}
+function toggleWaits(file) {
+	if (waitFile === file) closeWaits(true);
+	else openWaits(file);
+}
+// escape and an outside click close the popover; a click on a marker is the toggle's own business
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && waitFile) closeWaits(true); });
+document.addEventListener("click", (e) => {
+	if (!waitFile) return;
+	const pop = document.getElementById("waits-pop");
+	if (pop && !pop.contains(e.target) && !(e.target.closest && e.target.closest(".c-wait"))) closeWaits(false);
+});
 // the issuer row: a task-issued issuer ("#<num>") links to its card when that task is on the
 // active board; "user", the orchestrator's "auto", an absent issuer, or an off-board number stays
 // plain text (auto never carries an issuer link)

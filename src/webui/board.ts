@@ -159,6 +159,35 @@ export function isHeld(t: Task) {
 	return String(t.blockedBy || "").split(",").some((r) => r.trim().toLowerCase() === "user");
 }
 
+// the station a state belongs to, named for a reader: the popover row and the off-board stub both
+// say where a blocker sits
+export function stationFor(state: string) {
+	return STATIONS.find((s) => s.states.includes(state))?.label ?? state;
+}
+
+// #373 the stored blockedBy refs resolved against the board's task list, in stored order: the
+// `user` token is a hold and not a task, and a ref that resolves to no task is junk, so both drop
+export function blockerTasks(t: Task, all: Task[] = []) {
+	const out: Task[] = [];
+	for (const raw of String(t.blockedBy || "").split(",")) {
+		const ref = raw.trim();
+		if (!ref || ref.toLowerCase() === "user") continue;
+		const num = parseInt(ref.replace(/^#/, ""), 10);
+		const hit = all.find((x) => parseInt(x.file, 10) === num);
+		if (hit && !out.includes(hit)) out.push(hit);
+	}
+	return out;
+}
+
+// #373 the marker text: a wait counts only the unsatisfied blockers, so a satisfied set reads as a
+// check instead of a wait; the hold comes first and a task with nothing to say gets no marker
+export function waitsOnText(t: Task, all: Task[] = []) {
+	const blockers = blockerTasks(t, all);
+	const open = blockers.filter((b) => b.state !== "done").length;
+	const wait = blockers.length ? "waits on " + (open || blockers.length - open) + (open ? "" : " ✓") : "";
+	return [isHeld(t) ? "held" : "", wait].filter(Boolean).join(" ");
+}
+
 // the station's rows in board order: a held task pins first, then priority-desc, then update-desc;
 // the sort is stable and the payload arrives in task-number order, so equal keys keep that order.
 // syncBoard and the payload's eager card set share it
@@ -187,16 +216,17 @@ export function priorityRuler(priority: string) {
 // card and its spinner keeps its animation (000191); syncCardStats fills the live cell and the run
 // row in place. Every optional row drops when empty: the number, ruler and live cell on top, the
 // name, the summary as the context line, the run row, then the meta row with the sub-state marker
-// (a non-primary state only) and the priority, complexity and issuer labels
-export function cardBaseHtml(t: Task, st: string) {
+// (a non-primary state only), the priority, complexity and issuer labels and the waits-on marker
+export function cardBaseHtml(t: Task, st: string, all: Task[] = []) {
 	const issued = !!t.issuer && /^#\d+$/.test(t.issuer);
 	const live = (t.agents || []).some((a) => a.alive);
 	const primary = STATIONS.some((s) => s.primary === st);
+	const refs = String(t.blockedBy || "").split(",").map((r) => r.trim()).filter(Boolean);
+	const wait = waitsOnText(t, all);
 	return (
 		'<div class="c-top">' +
 		spinnerHtml(st) +
 		numLinkHtml(t.file, "num") +
-		(isHeld(t) ? '<span class="held">held</span>' : "") +
 		priorityRuler(t.priority) +
 		(live ? '<span class="c-live"><span class="c-live-text"></span></span>' : "") +
 		"</div>" +
@@ -208,6 +238,11 @@ export function cardBaseHtml(t: Task, st: string) {
 		'<span class="c-p p-' + esc(t.priority) + '">' + esc(t.priority) + "</span>" +
 		'<span class="c-cx cx-' + esc(t.complexity || "moderate") + '">' + esc(t.complexity || "moderate") + "</span>" +
 		'<span class="c-issuer">' + esc(t.issuer || "user") + "</span>" +
+		// #373 the marker is the resting fact the hover connectors only detail: a real button, so
+		// touch and keyboard reach the popover, and the accessible name lists the refs it covers
+		(wait
+			? '<button type="button" class="c-wait' + (isHeld(t) ? " held" : "") + '" data-wait="' + esc(refs.join(",")) + '" aria-label="' + esc(wait + (refs.length ? ": " + refs.join(", ") : "")) + '">' + esc(wait) + "</button>"
+			: "") +
 		"</div>"
 	);
 }
@@ -241,25 +276,26 @@ export function curve(from, to) {
 	return "M " + x1 + " " + y1 + " C " + (x1 + d) + " " + y1 + ", " + (x2 - d) + " " + y2 + ", " + x2 + " " + y2;
 }
 
-// one curve per stored relation the board can draw: the blocked task's card to each blocking
-// task's card, both currently rendered, carrying both endpoint files for the hover highlight
-// (000127, 000144). A "#<num>" ref maps to its task via parseInt(file); a ref
-// without a rendered card is skipped, and a done blocker draws nothing. #370: the phone layout stacks
-// every card in one column, so a blocked -> blocker curve has no horizontal span to cross and the
-// vertical flag draws nothing at all
+// one entry per stored relation the board can name: the blocked task's card to each blocking task,
+// both currently rendered, carrying both endpoint files for the hover highlight (000127, 000144).
+// #373 a blocker that resolves to a real task with no rendered card (folded behind the station
+// overflow, filtered out, archived) becomes an explicit off-board entry naming its station instead
+// of a silent drop. A done blocker draws nothing, and so does a ref that resolves to no task. #370:
+// the phone layout stacks every card in one column, so a blocked -> blocker curve has no horizontal
+// span to cross and the vertical flag draws nothing at all
 export function relationPaths(tasks, rectOf, vertical = false) {
 	const out = [];
 	if (vertical) return out;
 	for (const t of tasks) {
 		const from = rectOf(t.file);
 		if (!from) continue;
-		for (const raw of String(t.blockedBy || "").split(",")) {
-			const ref = raw.trim();
-			if (!ref) continue;
-			const blocker = tasks.find((x) => parseInt(x.file, 10) === parseInt(ref.replace(/^#/, ""), 10));
-			if (!blocker || blocker.state === "done") continue;
+		for (const blocker of blockerTasks(t, tasks)) {
+			if (blocker.state === "done") continue;
 			const to = rectOf(blocker.file);
-			if (!to) continue;
+			if (!to) {
+				out.push({ file: t.file, blocker: blocker.file, offBoard: true, station: stationFor(blocker.state) });
+				continue;
+			}
 			out.push({ file: t.file, blocker: blocker.file, d: curve(from, to) });
 		}
 	}
@@ -453,7 +489,7 @@ export function makeStatsQueue(key, fetchStats, applyStats, setTimer = setTimeou
 // station never rebuilds the cards already in it. A genuinely new card gains the "enter" class for
 // the page's one-shot entrance animation. The caller measures card positions before and after this
 // pass to animate the moves
-export function syncBoard(stations, tasks, expanded, els, make, visible, doc, reason = "") {
+export function syncBoard(stations, tasks, expanded, els, make, visible, doc, reason = "", all = tasks) {
 	const live = new Set();
 	for (const s of STATIONS) {
 		const part = stations[s.id];
@@ -490,7 +526,7 @@ export function syncBoard(stations, tasks, expanded, els, make, visible, doc, re
 			// #369 the running hook every pass: the live policy draws the progress line on it, and a
 			// toggle never rewrites the card, so the tick keeps its node
 			el.classList.toggle("running", spinnerHtml(t.state) !== "");
-			const html = cardBaseHtml(t, t.state);
+			const html = cardBaseHtml(t, t.state, all);
 			if (el.__html !== html) {
 				el.innerHTML = html;
 				el.__html = html;

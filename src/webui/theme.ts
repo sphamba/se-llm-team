@@ -121,9 +121,14 @@ body.panel-open #archive { padding-right: calc(18px + var(--panel-w)); }
 @media (max-width: 1099px) { #board.off-integration { grid-template-columns: repeat(5, minmax(150px, 1fr)) 48px minmax(150px, 1.15fr); } }
 /* relation lines: absolute in the relative board, so the overlay scrolls with the content; z-index 1
 paints them above the station bodies and below the z-index-2 task cards, pointer-events none so the
-card clicks pass through */
-#relations { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; overflow: visible; }
-/* 000127: the low opacity keeps the lines a subtle hint behind the semi-transparent cards; hovering either connected card raises it (.relations-hot) */
+card clicks pass through. #373 the lines exist only during a reveal: at rest the card marker carries
+that a relation exists, so the overlay has no opacity of its own */
+#relations { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; overflow: visible; opacity: 0; transition: opacity var(--t-fast) var(--ease-enter); }
+#board.reveal #relations { opacity: 1; }
+/* #373 the reveal dims every unrelated card to 55%, not 40%, so the marker text on a dimmed card
+stays readable; the active card and its rimmed blockers keep full strength */
+#board.reveal .card:not(.hot) { opacity: .55; }
+/* 000127: the low opacity keeps the lines a subtle hint behind the semi-transparent cards; a reveal raises it (.relations-hot) */
 #relations path { fill: none; stroke: var(--dim); stroke-width: 1.5; stroke-opacity: .3; stroke-dasharray: 6 4; transition: stroke-opacity var(--t-fast) var(--ease-enter); }
 #relations path.relations-hot { stroke-opacity: .8; }
 @keyframes dashflow { to { stroke-dashoffset: -10; } }
@@ -182,7 +187,32 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .c-meta .p-low { color: var(--low-fg); }
 .c-cx { color: var(--dim); }
 .c-issuer { margin-left: auto; color: var(--faint); }
+/* #373 the waits-on marker: the resting fact that a relation exists, a real button in the meta row so
+touch and keyboard reach the popover; it sits right aligned, never wraps and keeps a 28px hit height */
+.c-wait { flex: 0 0 auto; margin-left: auto; min-height: 28px; display: inline-flex; align-items: center; white-space: nowrap; border: 1px solid var(--hairline); background: var(--raised); color: var(--text); border-radius: 6px; padding: 0 8px; font-family: inherit; font-size: 0.75rem; }
+.c-wait.held { border-style: dashed; border-color: var(--dim); color: var(--dim); }
+.c-wait:hover { border-color: var(--link); color: var(--link); }
+.c-wait:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
+/* #373 the marker popover: one row per stored ref, the rendered refs open their card, the off-board
+ones stay text with their station; fixed, so a card never clips it */
+#waits-pop { position: fixed; z-index: 4; display: flex; flex-direction: column; min-width: 16rem; max-width: 24rem; padding: 4px; background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px; box-shadow: 0 12px 32px var(--overlay); }
+.wait-row { display: flex; align-items: baseline; gap: 8px; width: 100%; margin: 0; border: 0; border-radius: 4px; background: none; color: var(--text); padding: 5px 6px; font-family: inherit; font-size: 0.75rem; text-align: left; }
+button.wait-row { min-height: 28px; }
+.wait-row:hover { background: var(--raised); }
+.wait-row:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
+.wait-name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.wait-state { color: var(--dim); font-family: ${MONO}; font-size: 0.6875rem; }
+.wait-st { color: var(--faint); font-size: 0.6875rem; }
+.wait-badge { flex: 0 0 auto; color: var(--dim); font-family: ${MONO}; font-size: 0.6875rem; }
+.wait-badge.wait-done { color: var(--accent-done-text); }
+/* #373 an off-board blocker keeps a stub at its card's right edge instead of vanishing; the tag
+names the reason where the station is wide enough */
+.c-stub { position: absolute; top: 6px; right: 2px; display: flex; align-items: baseline; gap: 6px; max-width: 45%; overflow: hidden; pointer-events: none; color: var(--dim); font-family: ${MONO}; font-size: 0.6875rem; }
+.c-stub-item { flex: 0 0 auto; white-space: nowrap; }
+.stub-tag { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--faint); margin-left: 4px; }
 .sub-state { color: var(--dim); }
+/* #373 the blocker rim: an inset ring on the cards the active card waits on */
+.card.rim { box-shadow: inset 0 0 0 1px var(--link); }
 .num { font-size: 0.75rem; font-family: ${MONO}; font-variant-numeric: tabular-nums; color: var(--dim); margin-right: 4px; }
 .num-link { color: var(--link); cursor: pointer; }
 .num-link:hover { text-decoration: underline; }
@@ -361,8 +391,10 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
 .st-head::before { left: -13px; top: 16px; width: 12px; height: 1px; }
 .count { font-size: 0.8125rem; }
 /* the touch floor: every control clears 44px and its neighbours sit at least 8px apart */
-.m-action, .seg, .run-row, .arch-row, .toggle, .card, #c-text summary { min-height: 44px; }
+.m-action, .seg, .run-row, .arch-row, .toggle, .card, .c-wait, #c-text summary { min-height: 44px; }
 #p-actions, #f-phases, #tabs, .c-top, .c-meta { gap: 8px; }
+/* #373 the popover becomes a full width block under its card, never a floating panel */
+#waits-pop { min-width: 0; max-width: none; }
 }
 /* #370 the panel: a full-screen sheet with a drag handle, the sticky header keeps the task identity
    and a visible close button, and the back gesture follows the existing hash route */
