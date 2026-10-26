@@ -896,16 +896,16 @@ assert.equal(makeMotion(false).api.noMotion(), false, "the default state animate
 assert.equal(makeMotion(true).rootEl.dataset.motion, "none", "the system reduced-motion ask forces the none state");
 assert.equal(makeMotion(true).api.noMotion(), true, "the one helper the JS gates read answers for the system ask");
 
-// #389 the liveness mark is a square on the station accent's -text step, not a spinner ring: the pulse
-// stays, the dead rotate keyframes and its token go
+// #397 the liveness mark is a circle on the station accent's -text step, not a spinner ring: the pulse
+// fades on opacity alone, the dead rotate keyframes and its token go
 const spinRule = ruleBodies.find((r) => r.sel === ".spin")!;
-assert.match(spinRule.body, /width: 7px; height: 7px/, "the liveness mark is a 7px square, not a 9px ring");
+assert.match(spinRule.body, /width: 7px; height: 7px/, "the liveness mark is a 7px circle, not a 9px ring");
 assert.match(spinRule.body, /border: 0;/, "the mark paints no ring frame");
-assert.match(spinRule.body, /border-radius: 0;/, "the mark has square corners");
+assert.match(spinRule.body, /border-radius: 50%;/, "the mark has round corners");
 assert.match(spinRule.body, /background: var\(--ac-t, var\(--ac, var\(--link\)\)\)/, "the mark fills from the station accent's -text step, falling back to the link colour in the panel");
 assert.match(motionCss, /\.s-work \{ --ac: var\(--accent-todo\); --ac-t: var\(--accent-todo-text\); \}/, "each station points --ac-t at its accent's contrast-safe step");
 assert.match(motionCss, /\.st-head h2 \.spin \{ margin-right: 0; \}/, "the head's flex gap owns the space, so the dot drops its own right margin");
-assert.match(motionCss, /@keyframes breathe \{ 0%, 100% \{ opacity: 1; transform: scale\(1\); \} 50% \{ opacity: \.55; transform: scale\(\.85\); \} \}/, "the pulse keeps a square legible at both ends");
+assert.match(motionCss, /@keyframes breathe \{ 0%, 100% \{ opacity: 1; \} 50% \{ opacity: \.4; \} \}/, "the pulse fades on opacity alone, so the circle never changes size");
 assert.ok(!/@keyframes spin /.test(motionCss) && !declared.has("--t-spin"), "the dead rotate keyframes and its token are gone");
 const lumOf = (hex: string) => {
 	const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));

@@ -223,8 +223,8 @@ names the reason where the station is wide enough */
 .num { font-size: 0.75rem; font-family: ${MONO}; font-variant-numeric: tabular-nums; color: var(--dim); margin-right: 4px; }
 .num-link { color: var(--link); cursor: pointer; }
 .num-link:hover { text-decoration: underline; }
-/* #389 the liveness glyph is a square, not a spinner ring: it keeps the breathe pulse and fills from the station accent's -text step, with --ac and then the link colour as the fallback the panel's loading line reads */
-.spin { display: inline-block; width: 7px; height: 7px; border: 0; border-radius: 0; background: var(--ac-t, var(--ac, var(--link))); margin-right: 6px; vertical-align: 1px; }
+/* #397 the liveness glyph is a circle, not a spinner ring: it keeps the breathe pulse and fills from the station accent's -text step, with --ac and then the link colour as the fallback the panel's loading line reads */
+.spin { display: inline-block; width: 7px; height: 7px; border: 0; border-radius: 50%; background: var(--ac-t, var(--ac, var(--link))); margin-right: 6px; vertical-align: 1px; }
 .st-head h2 .spin { margin-right: 0; }
 .chip { font-size: 0.75rem; padding: 1px 7px; border-radius: 999px; background: var(--hairline); color: var(--text); }
 .chip.issuer { background: var(--code-bg); color: var(--dim); }
@@ -462,7 +462,7 @@ block above decides how fast, and every ambient rule is opt-in, so a document wi
 paints no ambience and a poll that rewrites a card's content never restarts a loop the spine or the
 dot owns. live adds the breathing dot, the sweep, the 1 px/s progress line and the newest-line shine;
 #377 leaves one mode live and one floor, so the system ask is the only none */
-@keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .55; transform: scale(.85); } }
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(500%); } }
 [data-motion="live"] .spin { animation: breathe var(--t-breathe) var(--ease-breathe) infinite; }
 [data-motion="live"] #relations path { animation: dashflow var(--t-breathe) linear infinite; animation-direction: reverse; }
