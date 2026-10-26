@@ -8,7 +8,7 @@ export const FILTERS_KEY = "boardFilters";
 export const FILTER_DEBOUNCE = 120;
 export const PALETTE_MAX = 12;
 export const ARCHIVE_PAGE = 50;
-export const FILTER_PRIORITIES: string[] = Object.keys(PRIORITY_RANK).sort((a, b) => PRIORITY_RANK[a] - PRIORITY_RANK[b]);
+export const FILTER_PRIORITIES: string[] = Object.keys(PRIORITY_RANK).sort((a, b) => PRIORITY_RANK[b] - PRIORITY_RANK[a]);
 export const FILTER_COMPLEXITIES: string[] = [...COMPLEXITIES];
 
 export interface FilterState {

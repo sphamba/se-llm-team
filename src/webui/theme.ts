@@ -53,9 +53,6 @@ h1 { font-size: 1.0625rem; font-weight: 500; margin: 0; }
 #theme { margin-left: auto; border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.875rem; }
 #theme:hover { background: var(--raised); }
 #updated { font-size: 0.75rem; color: var(--dim); font-family: ${MONO}; font-variant-numeric: tabular-nums; }
-/* 000165: the serving hub's identity, hidden until the first /api/hub answer fills it */
-#hub { padding: 2px 18px 8px; font-size: 0.75rem; color: var(--dim); }
-#hub:empty { display: none; }
 /* 000091: a relative #tabs at z-index 1 keeps the bar above the board's relation lines; 000124: the task cards stack at z-index 2 */
 #tabs { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; }
 #tabs:empty { display: none; }
@@ -64,10 +61,11 @@ h1 { font-size: 1.0625rem; font-weight: 500; margin: 0; }
 .tab.active { border-color: var(--link); color: var(--link); }
 /* #368 the filter bar: one wrapping row under the tabs and above the spine, every control a chip or a
    text field on the chrome; clear sits at the row's end and hides while nothing filters */
-#filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: var(--sp-3) 18px; }
+#filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: var(--sp-3) 18px; }
 #f-q { flex: 0 1 15rem; min-width: 8rem; border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 3px 8px; font-family: inherit; font-size: 0.8125rem; }
 #f-q::placeholder { color: var(--dim); }
-.f-group { display: flex; flex-wrap: wrap; gap: 4px; }
+.f-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.f-label { color: var(--dim); font-size: 0.75rem; }
 .f-chip { border: 1px solid var(--hairline); background: var(--panel); color: var(--dim); border-radius: 999px; padding: 3px 9px; min-height: 28px; font-family: inherit; font-size: 0.75rem; }
 .f-chip:hover { background: var(--raised); }
 .f-chip[aria-pressed="true"] { border-color: var(--link); color: var(--link); }
@@ -388,7 +386,6 @@ ${STATIONS.map((s, i) => `.s-${s.id} { --ac: var(--accent-${s.accent}); --ac-t: 
 :root { --ctl-h: 32px; }
 header { flex-wrap: wrap; padding: 10px 12px 6px; }
 #theme { min-height: var(--ctl-h); }
-#hub { padding: 2px 12px 8px; }
 #tabs { flex-wrap: nowrap; gap: 8px; overflow-x: auto; padding: 6px 12px 0; }
 .tab { min-height: 44px; padding: 0 16px; }
 #board { display: flex; flex-direction: column; gap: 0; padding: 14px 0 12px; overflow-x: hidden; overflow-y: auto; }

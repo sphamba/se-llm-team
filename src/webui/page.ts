@@ -84,16 +84,15 @@ export const PAGE = `<!doctype html>
 ${CSS}</style>
 </head>
 <body>
-<header><h1>Software Engineering LLM Team</h1><span id="updated"></span><button id="theme" onclick="toggleTheme()">Dark</button></header>
+<header><h1 id="title">Software Engineering LLM Team</h1><span id="updated"></span><button id="theme" onclick="toggleTheme()">Dark</button></header>
 <nav id="tabs"></nav>
 <button id="f-toggle" aria-expanded="false" aria-controls="filters" onclick="toggleFilters()">Filters<span id="f-count" hidden></span></button>
 <div id="filters" aria-label="Filter tasks">
 <input id="f-q" type="text" placeholder="filter: text or #num  (/)" aria-label="Filter by text or number" autocomplete="off">
 <div id="f-prio" class="f-group" role="group" aria-label="Priority"></div>
 <div id="f-cx" class="f-group" role="group" aria-label="Complexity"></div>
-<button id="f-user" class="f-chip" aria-pressed="false">user</button>
-<button id="f-held" class="f-chip" aria-pressed="false">held</button>
-<button id="f-live" class="f-chip" aria-pressed="false">live</button>
+<div class="f-group" role="group" aria-label="Issuer"><span class="f-label" aria-hidden="true">issuer</span><button id="f-user" class="f-chip" aria-pressed="false">user</button></div>
+<div class="f-group" role="group" aria-label="State"><span class="f-label" aria-hidden="true">state</span><button id="f-held" class="f-chip" aria-pressed="false">held</button><button id="f-live" class="f-chip" aria-pressed="false">live</button></div>
 <button id="f-clear" class="f-chip" hidden>clear</button>
 <button id="f-apply" class="f-chip" onclick="closeFilters()">apply</button>
 </div>
@@ -104,7 +103,6 @@ ${CSS}</style>
 <div id="arch-empty" class="empty"></div>
 <div id="arch-foot"><button id="arch-newer" class="m-action" hidden onclick="archNewer()">newer</button><span id="arch-page"></span><button id="arch-more" class="m-action" hidden onclick="loadOlder()">+50 older</button></div>
 </section>
-<footer id="hub"></footer>
 <aside id="panel" class="hidden" aria-label="Task detail">
 <div id="p-head"><div id="p-handle" aria-hidden="true"></div><h2 id="p-title" tabindex="-1"></h2><button id="p-close" onclick="closePanel()">Close</button></div>
 <div id="p-outside" class="hidden"></div>
@@ -136,6 +134,10 @@ const MOBILE_MAX = ${MOBILE_MAX};
 const DEFAULT_STAGES = ${JSON.stringify(DEFAULT_STAGES)};
 let projects = [{ id: "", label: "", stages: DEFAULT_STAGES }]; // one tab per registered project; id "" is the single-project ui, one board, no tabs
 let active = ""; // the active tab's id: a registry root, or "" for the single-project board
+// #412 the page title is the root's directory name: a tab id is one of those roots, and the
+// single-project server, whose /api/projects 404s, keeps its own from /api/hub
+const TITLE = "Software Engineering LLM Team";
+let hubRoot = "";
 const boards = Object.create(null);
 const esc = ${esc};
 const rootEl = document.documentElement;
@@ -241,7 +243,7 @@ function applyFilters() {
 }
 function saveFilters() {
 	const enc = encodeFilters(filters);
-	try { history.replaceState(null, "", (filtersActive(filters) ? "?f=" + enc : "") + location.hash); } catch {}
+	try { history.replaceState(null, "", location.pathname + (filtersActive(filters) ? "?f=" + enc : "") + location.hash); } catch {}
 	try { localStorage.setItem(FILTERS_KEY, enc); } catch {}
 }
 function clearFilters() { filters = emptyFilters(); applyFilters(); }
@@ -270,16 +272,19 @@ function renderFilterBar() {
 // #378 the two chip groups: a chip is a real button over a set, its own value hue marks the pressed
 // state, and one click applies
 const CHIP_HUE = { priorities: "pr-", complexities: "cx-" };
+const CHIP_LABEL = { priorities: "priority", complexities: "complexity" };
 function renderChips(id, field) {
 	const el = document.getElementById(id);
 	if (!el) return;
 	const values = field === "priorities" ? FILTER_PRIORITIES : FILTER_COMPLEXITIES;
 	const chosen = filters[field];
-	if (el.children.length !== values.length) {
-		el.innerHTML = values.map(v => '<button class="f-chip ' + CHIP_HUE[field] + v + '" data-value="' + v + '" aria-pressed="false">' + v + "</button>").join("");
-		for (const b of el.children) b.onclick = () => toggleChip(field, b.dataset.value);
+	let buttons = el.querySelectorAll(".f-chip");
+	if (buttons.length !== values.length) {
+		el.innerHTML = '<span class="f-label" aria-hidden="true">' + CHIP_LABEL[field] + "</span>" + values.map(v => '<button class="f-chip ' + CHIP_HUE[field] + v + '" data-value="' + v + '" aria-pressed="false">' + v + "</button>").join("");
+		buttons = el.querySelectorAll(".f-chip");
+		for (const b of buttons) b.onclick = () => toggleChip(field, b.dataset.value);
 	}
-	for (const b of el.children) b.setAttribute("aria-pressed", String(chosen.includes(b.dataset.value)));
+	for (const b of buttons) b.setAttribute("aria-pressed", String(chosen.includes(b.dataset.value)));
 }
 function toggleChip(field, value) {
 	const list = filters[field];
@@ -599,6 +604,14 @@ function drawStubs(paths) {
 		else { const made = document.createElement("div"); made.className = "c-stub"; made.innerHTML = html; made.__html = html; el.appendChild(made); }
 	}
 }
+// #412 the heading and the tab title are the root's basename; a bare or missing root keeps the
+// served string, and the compare keeps an unchanged poll off the DOM
+function syncTitle() {
+	const name = (active || hubRoot).replace(/\\/+$/, "").split("/").pop() || TITLE;
+	const h1 = document.getElementById("title");
+	if (h1 && h1.textContent !== name) h1.textContent = name;
+	if (document.title !== name) document.title = name;
+}
 function render(skipFlip) {
 	renderTabs();
 	renderFilterBar();
@@ -655,6 +668,7 @@ function render(skipFlip) {
 		el.ontransitionend = () => { el.style.transition = ""; el.ontransitionend = null; queueRelations(); };
 	}
 	if (archiveView) renderArchive();
+	syncTitle();
 }
 // the shared animated close: .closing runs the entrance in reverse, the element hides on
 // animationend with a fixed-timeout fallback (a background tab never fires the event); a reopen
@@ -1326,20 +1340,13 @@ pane.onscroll = () => {
 	if (!logState || logState.busy || logState.atStart || pane.scrollTop > 0) return;
 	pullLog(logUrl("&offset=" + logState.head + "&before=1"), "history");
 };
-// the serving hub's identity (000165): pid, code checkout and commit; null keeps the last text
-function renderHub(info) {
-	const el = document.getElementById("hub");
-	if (!el || !info) return;
-	const text = info.old ? "hub: old hub code (restart needed)" : "hub pid " + info.pid + " \u00b7 " + info.root + (info.commit ? " \u00b7 " + info.commit.slice(0, 7) : "");
-	if (el.textContent !== text) el.textContent = text;
-}
 // 000235: poll bookkeeping for the wake check: the stamp of the last served board, the delay of
 // the pending tick, and its handle (cleared before a forced wake cycle)
 let pollTimer = null, lastReload = Date.now(), lastDelay = 5000;
 function refresh() {
-	// the serving hub's identity in the footer (000165): a stale-code hub or a failover shows
-	// at a glance; a 404 means old hub code that predates the endpoint (a webui hot reload mix)
-	fetch("/api/hub").then(r => r.status === 404 ? { old: true } : r.ok ? r.json() : null).catch(() => null).then(renderHub);
+	// #412 the hub's own root: the single-project server 404s at /api/projects, so its title takes
+	// the directory name from here; a 404 or a missing field keeps the served string
+	fetch("/api/hub").then(r => r.ok ? r.json() : null).catch(() => null).then(info => { hubRoot = info && info.root ? info.root : ""; syncTitle(); });
 	fetch("/api/projects").then(r => r.ok ? r.json() : null).catch(() => null).then(list => {
 		// the single-project server 404s here, and a transient hub failure keeps the last known
 		// tabs: only a real projects list replaces them

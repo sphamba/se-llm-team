@@ -48,8 +48,26 @@ const filterFns = Object.entries(filtersMod).filter(([, v]) => typeof v === "fun
 const scriptFns = new Set([...script.matchAll(/function ([A-Za-z0-9_$]+)\(/g)].map((m) => m[1]));
 assert.deepEqual(filterFns.filter((n) => new RegExp(`(^|[^\\w$.])${n}\\(`).test(script) && !scriptFns.has(n)), [], "the served script defines every filter helper it calls, so syncFilterToggle cannot throw on boot");
 // the hub shell keeps the element ids the client addresses
-const sheetIds = ["theme", "hub", "board", "tabs", "updated", "panel", "p-title", "p-facts", "p-prio", "p-actions", "p-runs", "p-body", "console", "c-handle", "c-head", "c-title", "c-meta", "c-log", "c-text"];
+const sheetIds = ["theme", "board", "tabs", "updated", "panel", "p-title", "p-facts", "p-prio", "p-actions", "p-runs", "p-body", "console", "c-handle", "c-head", "c-title", "c-meta", "c-log", "c-text"];
 for (const id of sheetIds) assert.ok(page.includes(`id="${id}"`), `the page keeps #${id}, an element the client addresses`);
+// #412 the hub footer and its stale-code line go, so nothing writes #hub and no writer survives it
+assert.ok(!page.includes('id="hub"') && !page.includes("renderHub"), "#412 the footer and its renderHub writer are gone from the page");
+// #412 the title is the served root's directory name: the heading takes an id, the static string stays
+// for the first paint and the no-hub fallback, and one helper writes both the heading and the tab title
+assert.ok(page.includes('<h1 id="title">Software Engineering LLM Team</h1>') && page.includes("<title>Software Engineering LLM Team</title>"), "#412 the heading takes an id and the static title stays served");
+const titleSource = page.match(/function syncTitle\(\) \{[\s\S]*?\n\}/);
+assert.ok(titleSource, "#412 the client ships the title helper");
+const titleOfRoot = (act: string, hub: string) => {
+	const head = { textContent: "Software Engineering LLM Team" };
+	const doc: any = { title: "", getElementById: (id: string) => (id === "title" ? head : null) };
+	new Function("document", "active", "hubRoot", "TITLE", titleSource![0] + "; return syncTitle;")(doc, act, hub, "Software Engineering LLM Team")();
+	return [doc.title, head.textContent];
+};
+assert.deepEqual(titleOfRoot("/home/me/repos/se-llm-team", ""), ["se-llm-team", "se-llm-team"], "#412 the title is the active root's directory name, in the heading and the tab");
+assert.deepEqual(titleOfRoot("", "/srv/hub/"), ["hub", "hub"], "#412 a trailing slash is stripped and the single-project root comes from /api/hub");
+assert.deepEqual(titleOfRoot("", ""), ["Software Engineering LLM Team", "Software Engineering LLM Team"], "#412 a missing root keeps the static title");
+assert.deepEqual(titleOfRoot("/", "x"), ["Software Engineering LLM Team", "Software Engineering LLM Team"], "#412 a root of / keeps the static title");
+assert.match(page.match(/function render\(skipFlip\) \{[\s\S]*?\n\}/)![0], /\n\tsyncTitle\(\);\n\}/, "#412 render writes the title last, so a tab switch follows");
 // every state slug reaches the page source, and the layout covers each one exactly once
 for (const st of STATES) assert.ok(page.includes(st), `the page source names the ${st} state`);
 // the client still calls every hub endpoint the board, the detail card and the tabs need
@@ -825,6 +843,30 @@ assert.ok(!page.includes('id="f-phases"') && !page.includes("togglePhase"), "#37
 assert.ok(page.includes('id="f-prio" class="f-group" role="group" aria-label="Priority"') && page.includes('id="f-cx" class="f-group" role="group" aria-label="Complexity"'), "#378 priority and complexity are labelled chip groups");
 assert.ok(page.includes('id="f-user" class="f-chip" aria-pressed="false">user<'), "#378 one user chip replaces the issuer select");
 assert.ok(page.indexOf('id="f-q"') < page.indexOf('id="f-prio"') && page.indexOf('id="f-prio"') < page.indexOf('id="f-cx"') && page.indexOf('id="f-cx"') < page.indexOf('id="f-user"') && page.indexOf('id="f-user"') < page.indexOf('id="f-held"'), "#378 the bar reads search, priority, complexity, user, held left to right");
+// #412 every chip sits in a group with a visible label, and the priority order runs lowest to highest
+assert.equal(filtersMod.FILTER_PRIORITIES.join(), "low,medium,high,critical", "#412 the priority chips read low to critical");
+const barGroups = [...page.matchAll(/<div class="f-group" role="group" aria-label="(\w+)">([\s\S]*?)<\/div>/g)].map((m) => ({ name: m[1], inner: m[2] }));
+assert.deepEqual(barGroups.map((g) => g.name), ["Issuer", "State"], "#412 the loose chips sit in two labelled groups");
+assert.deepEqual(barGroups.filter((g) => !g.inner.includes(`<span class="f-label" aria-hidden="true">${g.name.toLowerCase()}</span>`)).map((g) => g.name), [], "#412 each static group leads with its own label, aria-hidden so the group name reads once");
+assert.deepEqual([...barGroups[1].inner.matchAll(/id="(f-[a-z]+)"/g)].map((m) => m[1]), ["f-held", "f-live"], "#412 the state group holds held and live");
+const chipsSource = page.match(/function renderChips\(id, field\) \{[\s\S]*?\n\}/);
+assert.ok(chipsSource, "#412 the client ships the chip renderer");
+assert.match(chipsSource![0], /<span class="f-label" aria-hidden="true">' \+ CHIP_LABEL\[field\]/, "#412 the two rendered groups lead with their label too, so all four groups carry one");
+assert.match(themeCss, /\.f-label \{[^}]*color: var\(--dim\)/, "#412 a group label takes the dim hue");
+assert.match(themeCss, /\.f-group \{[^}]*align-items: center/, "#412 a group centres its label on the chips");
+assert.match(themeCss, /#filters \{[^}]*gap: 6px 12px/, "#412 the bar widens the column gap, so one group breaks from the next");
+// #412 the URL write is absolute: a fragment-only reference keeps the query, so an emptied filter must
+// not write the hash alone, or a reload restores the filter that was just cleared
+const saveSource = page.match(/function saveFilters\(\) \{[\s\S]*?\n\}/);
+assert.ok(saveSource, "#412 the client ships the filter URL writer");
+const saveOf = (state: any, loc: any) => {
+	let written: string | null = null;
+	new Function("filters", "filtersActive", "encodeFilters", "history", "localStorage", "location", saveSource![0] + "; return saveFilters;")(
+		state, filtersActive, encodeFilters, { replaceState: (_a: unknown, _b: unknown, url: string) => { written = url; } }, { setItem: () => {} }, loc)();
+	return written;
+};
+assert.equal(saveOf(emptyFilters(), { pathname: "/board", hash: "#hash" }), "/board#hash", "#412 an emptied filter drops the ?f= query instead of keeping it");
+assert.ok(saveOf({ ...emptyFilters(), priorities: ["high"] }, { pathname: "/board", hash: "" })!.startsWith("/board?f="), "#412 a set filter writes its query under the pathname");
 assert.match(themeCss, /\.f-chip \{[^}]*min-height: 28px/, "#378 a desktop chip clears the 28px pointer floor");
 for (const hue of ["pr-critical", "pr-high", "pr-medium", "pr-low", "cx-trivial", "cx-simple", "cx-moderate", "cx-complex"])
 	assert.ok(themeCss.includes(`.f-chip.${hue}[aria-pressed="true"]`), `#378 a pressed ${hue} chip takes its own value hue`);
