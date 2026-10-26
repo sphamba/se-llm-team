@@ -56,9 +56,9 @@ h1 { font-size: 1.0625rem; font-weight: 500; margin: 0; }
 #theme:hover { background: var(--raised); }
 #updated { font-size: 0.75rem; color: var(--dim); font-family: ${MONO}; font-variant-numeric: tabular-nums; }
 /* 000091: a relative #tabs at z-index 1 keeps the bar above the board's relation lines; 000124: the task cards stack at z-index 2 */
-#tabs { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; }
+#tabs { position: relative; z-index: 1; display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; }
 #tabs:empty { display: none; }
-.tab { border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px 6px 0 0; padding: 4px 12px; font-size: 0.875rem; cursor: pointer; }
+.tab { border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 4px 12px; font-size: 0.875rem; cursor: pointer; }
 .tab:hover { background: var(--raised); }
 .tab.active { border-color: var(--link); color: var(--link); }
 /* #368 the filter bar: one wrapping row under the tabs and above the spine, every control a chip or a
@@ -389,8 +389,8 @@ ${STATIONS.map((s, i) => `.s-${s.id} { --ac: var(--accent-${s.accent}); --ac-t: 
 :root { --ctl-h: 32px; }
 header { flex-wrap: wrap; padding: 10px 12px 6px; }
 #theme { min-height: var(--ctl-h); }
-#tabs { flex-wrap: nowrap; gap: 8px; overflow-x: auto; padding: 6px 12px 0; }
-.tab { min-height: 44px; padding: 0 16px; }
+#tabs { flex-wrap: nowrap; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 6px 12px 4px; }
+.tab { min-height: var(--ctl-h); padding: 0 14px; }
 #board { display: flex; flex-direction: column; gap: 0; padding: 14px 0 12px; overflow-x: hidden; overflow-y: auto; }
 .spine, #relations { display: none; }
 /* #386 nothing inside the phone board shrinks: the station, its cards and each card size to their content, so a card never paints over the next one and #board stays the one vertical scroller */
@@ -417,10 +417,10 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
    bottom of a run row would open the row below. The card takes no band either, because its content
    already clears 44px and its ::after is the running progress line. A nested run row draws its
    connector in ::after and a more specific rule, so it keeps the connector and goes without a band.
-   #405 the theme toggle, the filter button, the chips and the close buttons take the one 32px --ctl-h
-   box and lean on the same band for the 44px floor */
-.m-action, .seg, .toggle, .c-wait, #c-text summary, #theme, #f-toggle, .f-chip, #p-close, #c-close { position: relative; }
-.m-action::after, .seg::after, .toggle::after, .c-wait::after, #c-text summary::after, #theme::after, #f-toggle::after, .f-chip::after, #p-close::after, #c-close::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; margin-top: -22px; }
+   #405 the theme toggle, the filter button, the chips, the tabs and the close buttons take the one
+   32px --ctl-h box and lean on the same band for the 44px floor */
+.m-action, .seg, .toggle, .c-wait, #c-text summary, #theme, #f-toggle, .f-chip, .tab, #p-close, #c-close { position: relative; }
+.m-action::after, .seg::after, .toggle::after, .c-wait::after, #c-text summary::after, #theme::after, #f-toggle::after, .f-chip::after, .tab::after, #p-close::after, #c-close::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; margin-top: -22px; }
 /* the neighbours still sit at least 8px apart */
 #p-actions, .f-group, #tabs, .c-top, .c-meta { gap: 8px; }
 /* #405 a wrapped chip row sits two band overhangs apart, so two chips' bands touch and never overlap;

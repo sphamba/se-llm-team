@@ -1210,7 +1210,7 @@ assert.ok(!/\.station \.cards \{[^}]*overflow-y: auto/.test(phoneBoard), "the ph
 // #387 the phone keeps the desktop heights and moves the 44px target into an invisible band, so a
 // compact control looks as it does on desktop and still answers a finger. The live rects and the
 // elementFromPoint pass are a browser check, left to the reviewer
-const ctlHosts = ["#theme", "#f-toggle", ".f-chip", "#p-close", "#c-close"];
+const ctlHosts = ["#theme", "#f-toggle", ".f-chip", "#p-close", "#c-close", ".tab"];
 const bandHosts = [".m-action", ".seg", ".toggle", ".c-wait", "#c-text summary", ...ctlHosts];
 const phoneRules = [...phoneBoard.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2] }));
 const selParts = (sel: string) => sel.split(",").map((p) => p.trim().replace(/::after$/, ""));
@@ -1236,6 +1236,15 @@ for (const dead of [".run-row", ".arch-row", ".card"]) {
 	assert.ok(!selParts(positionRule!.sel).includes(dead), `${dead} carries no band anchor`);
 }
 assert.ok(!/\bagent-(sub|doctor)\b/.test(phoneBoard), "the phone block touches no nested run row, so the more specific connector ::after still wins over the band");
+
+// #422 the project tabs: the strip keeps its height on a short phone viewport and the tabs take the
+// compact control box. The live rects and the tap pass are a browser check, left to the reviewer
+assert.match(spacingRule("#tabs"), /flex: 0 0 auto/, "the tab strip never shrinks, so a short viewport squeezes the board instead of clipping the labels");
+assert.match(spacingRule(".tab"), /border-radius: 6px/, "the tabs round all four corners, since the filter bar sits below them and nothing attaches to their flat bottom");
+assert.doesNotMatch(spacingRule(".tab"), /border-radius: 6px 6px 0 0/, "no two-corner folder form is left on the tabs");
+assert.match(sheetRule("#tabs"), /overflow-x: auto; overflow-y: hidden/, "the phone strip clips the band's overhang and never scrolls vertically");
+assert.match(sheetRule("#tabs"), /padding: 6px 12px 4px/, "the phone strip keeps 4px under a tab, exactly the reach of the 2px focus ring");
+assert.match(sheetRule(".tab"), /min-height: var\(--ctl-h\); padding: 0 14px;/, "a phone tab is 32px tall and as wide-padded as the filter button, and its 44px floor comes from the band alone");
 
 // #388 the board is flush with the screen edges: the board keeps no side padding, so a card box starts
 // at 0 on the desktop and at the 1px phone rail, and the card text keeps its 12px inset. The live rects
