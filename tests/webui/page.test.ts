@@ -933,6 +933,8 @@ assert.ok(!/@keyframes sweep\b/.test(motionCss) && !declared.has("--t-sweep"), "
 const barBand = motionCss.match(/\[data-motion="live"\] \.spine::after \{([^}]*)\}/)?.[1] ?? "";
 assert.match(barBand, /animation: beamRun var\(--t-wave\) linear infinite/, "the band crosses the bar once over the wave token, so one pass covers the full board");
 assert.match(motionCss, /@keyframes beamRun \{ from \{ transform: translateX\(-100%\); \} to \{ transform: translateX\(666\.6667%\); \} \}/, "the band starts and ends fully off the bar, so the loop wraps with no dark beat");
+assert.match(motionCss, /\.spine::after \{[^}]*opacity: 0;/, "the band rests hidden, so motion none and reduced motion paint the ladder with no band");
+assert.match(barBand, /opacity: 1/, "the live gate alone reveals the band, so its shine never paints on a motion-off sheet");
 assert.ok(!/\.st-head::after/.test(desktopSheet) && /\.st-head::after \{[^}]*top: -1px/.test(phoneSlice), "the desktop board carries one continuous bar and no per-head glow, while the phone keeps its glow on the head rule");
 assert.match(motionCss, /\[data-motion="live"\] \.spin \{[^}]*animation: breathe var\(--t-breathe\) var\(--ease-breathe\)/, "the running dot breathes over the 2 s token");
 assert.match(motionCss, /^\.card\.running \{ --p: 0; \}/m, "the running card starts at zero in both motion modes");
