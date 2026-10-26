@@ -1040,10 +1040,11 @@ assert.match(flushRule(".empty"), /padding: 0 12px/, "the phone empty line carri
 assert.match(flushRule(".st-head"), /border-top: 1px solid var\(--hairline\)/, "the phone head rules its column off, so the next column starts at a visible line");
 const headGlow = flushRule(".st-head::after");
 assert.ok(headGlow.includes("background: linear-gradient(90deg, transparent, var(--link), transparent)"), "the phone head glow paints the desktop spine gradient on that rule");
+assert.match(headGlow, /opacity: 0/, "the glow paints nothing before its slot, so no head shows a resting bar on load or with motion off");
 assert.match(headGlow, /top: -1px/, "the glow sits on the head's own top rule, not inside the head");
 const waveRule = motionCss.match(/\[data-motion="live"\] \.st-head::after \{([^}]*)\}/)?.[1] ?? "";
 assert.match(waveRule, /animation: headWave var\(--t-wave\) linear infinite/, "the head glow loops the wave keyframe over the token that covers one slot per station");
-assert.match(waveRule, /animation-delay: calc\(var\(--i, 0\) \* var\(--t-slot\) \* -1\)/, "each station starts its glow one slot earlier, so the wave walks down the stack");
+assert.match(waveRule, /animation-delay: calc\(var\(--i, 0\) \* var\(--t-slot\)\)/, "each station waits its own slot before the glow: a negative delay would light column one, then the last column, then walk back up");
 assert.match(motionCss, /html\.motion-paused \.st-head::after \{[^}]*animation-play-state: paused/, "a hidden tab freezes the head glow with the spine");
 assert.match(motionCss, /\[data-motion="none"\] \*::after[^{]*\{[^}]*animation: none/, "the none policy already covers the head glow pseudo element");
 

@@ -409,7 +409,7 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
 .st-head::before { left: 1px; top: 16px; width: 7px; height: 1px; }
 /* #403 the phone head rules its column off and carries the desktop sweep as a glow on that rule; the
    motion layer starts it at the station's own slot, so the wave walks down the stack */
-.st-head::after { content: ""; position: absolute; left: 0; top: -1px; width: 20%; height: 1px; background: linear-gradient(90deg, transparent, var(--link), transparent); }
+.st-head::after { content: ""; position: absolute; left: 0; top: -1px; width: 20%; height: 1px; opacity: 0; background: linear-gradient(90deg, transparent, var(--link), transparent); }
 .empty { padding: 0 12px; }
 .count { font-size: 0.8125rem; }
 /* #387 the touch floor: a compact control keeps its desktop height and carries an invisible 44px band
@@ -477,7 +477,7 @@ dot owns. live adds the breathing dot, the sweep, the 1 px/s progress line and t
 [data-motion="live"] #relations path { animation: dashflow var(--t-breathe) linear infinite; animation-direction: reverse; }
 [data-motion="live"] .spine::after { animation: sweep var(--t-sweep) linear infinite; }
 html.motion-paused .spine::after { animation-play-state: paused; }
-[data-motion="live"] .st-head::after { animation: headWave var(--t-wave) linear infinite; animation-delay: calc(var(--i, 0) * var(--t-slot) * -1); }
+[data-motion="live"] .st-head::after { animation: headWave var(--t-wave) linear infinite; animation-delay: calc(var(--i, 0) * var(--t-slot)); }
 html.motion-paused .st-head::after { animation-play-state: paused; }
 [data-motion="live"] .card.running { --p: 0; }
 [data-motion="live"] .card.running::after { content: ""; position: absolute; left: 0; bottom: 0; width: 100%; height: 1px; background: var(--ac, var(--link)); transform: scaleX(var(--p)); transform-origin: left center; }
