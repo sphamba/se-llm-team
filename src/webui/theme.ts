@@ -407,11 +407,13 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
 .empty { padding: 0 12px; }
 .count { font-size: 0.8125rem; }
 /* #387 the touch floor: a compact control keeps its desktop height and carries an invisible 44px band
-   centred on its middle, so the look holds and the finger still lands; the band takes the tap, so two
-   stacked rows overlap by up to 16px (accepted 2026-10-15). A nested run row draws its connector in
-   ::after and a more specific rule, so it keeps the connector and goes without a band */
-.m-action, .seg, .arch-row, .toggle, .c-wait, #c-text summary, .run-row { position: relative; }
-.m-action::after, .seg::after, .arch-row::after, .toggle::after, .c-wait::after, #c-text summary::after, .run-row::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; margin-top: -22px; }
+   centred on its middle, so the look holds and the finger still lands; the band takes the tap. A stacked
+   row takes no band: on a 29px pitch the next row's band starts 21px into the current row's box, so the
+   bottom of a run row would open the row below. The card takes no band either, because its content
+   already clears 44px and its ::after is the running progress line. A nested run row draws its
+   connector in ::after and a more specific rule, so it keeps the connector and goes without a band */
+.m-action, .seg, .toggle, .c-wait, #c-text summary { position: relative; }
+.m-action::after, .seg::after, .toggle::after, .c-wait::after, #c-text summary::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; margin-top: -22px; }
 /* the neighbours still sit at least 8px apart */
 #p-actions, .f-group, #tabs, .c-top, .c-meta { gap: 8px; }
 /* #373 the popover becomes a full width block under its card, never a floating panel */

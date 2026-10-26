@@ -1006,7 +1006,7 @@ assert.ok(!/\.station \.cards \{[^}]*overflow-y: auto/.test(phoneBoard), "the ph
 // #387 the phone keeps the desktop heights and moves the 44px target into an invisible band, so a
 // compact control looks as it does on desktop and still answers a finger. The live rects and the
 // elementFromPoint pass are a browser check, left to the reviewer
-const bandHosts = [".m-action", ".seg", ".arch-row", ".toggle", ".c-wait", "#c-text summary", ".run-row"];
+const bandHosts = [".m-action", ".seg", ".toggle", ".c-wait", "#c-text summary"];
 const phoneRules = [...phoneBoard.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2] }));
 const selParts = (sel: string) => sel.split(",").map((p) => p.trim().replace(/::after$/, ""));
 const bandRule = phoneRules.find((r) => r.sel.includes("::after") && bandHosts.every((h) => selParts(r.sel).includes(h)));
@@ -1014,9 +1014,13 @@ assert.ok(bandRule, "the phone layer carries one shared ::after band on every co
 for (const decl of ['content: ""', "position: absolute", "left: 0", "right: 0", "top: 50%", "height: 44px", "margin-top: -22px"])
 	assert.ok(bandRule!.body.includes(decl), `the band leaves the flow and centres 44px on the control's middle: ${decl}`);
 assert.ok(!/background|pointer-events/.test(bandRule!.body), "the band paints nothing and it takes the tap");
-assert.ok(phoneRules.some((r) => /position: relative/.test(r.body) && bandHosts.every((h) => selParts(r.sel).includes(h))), "every band host is positioned, so its band anchors to the control");
+const positionRule = phoneRules.find((r) => /position: relative/.test(r.body) && bandHosts.every((h) => selParts(r.sel).includes(h)));
+assert.ok(positionRule, "every band host is positioned, so its band anchors to the control");
 assert.deepEqual(phoneRules.filter((r) => /min-height: 44px/.test(r.body) && bandHosts.some((h) => selParts(r.sel).includes(h))).map((r) => r.sel), [], "no compact control keeps the phone min-height floor, so each keeps its desktop height");
-assert.ok(!bandHosts.includes(".card"), "the card takes no band: its content already clears 44px and its ::after is the running progress line");
+for (const dead of [".run-row", ".arch-row", ".card"]) {
+	assert.ok(!selParts(bandRule!.sel).includes(dead), `${dead} takes no band, so a stacked row's band never covers the row below`);
+	assert.ok(!selParts(positionRule!.sel).includes(dead), `${dead} carries no band anchor`);
+}
 assert.ok(!/\bagent-(sub|doctor)\b/.test(phoneBoard), "the phone block touches no nested run row, so the more specific connector ::after still wins over the band");
 
 // #388 the board is flush with the screen edges: the board keeps no side padding, so a card box starts
