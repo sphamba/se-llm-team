@@ -261,10 +261,11 @@ names the reason where the station is wide enough */
 .agent-merger { color: var(--accent-merge-text); }
 .agent-livetest { color: var(--accent-live-text); }
 .agent-integration { color: var(--accent-integration-text); }
-.check { color: var(--low-fg); margin-right: 5px; }
+.check { margin-right: 5px; }
 .cross { color: var(--error-text); margin-right: 5px; }
 .run-row > .run-mark { flex: 0 0 11px; display: inline-flex; justify-content: center; }
 .run-mark > .spin, .run-mark > .check, .run-mark > .cross { margin-right: 0; }
+.run-mark > .spin { background: currentColor; }
 /* the docked task panel: full height below the page chrome, the board gives up the panel's width so
    the panel never covers a station head, and the console lifts the panel's bottom edge */
 #panel { position: fixed; top: var(--chrome); right: 0; bottom: var(--console-h); width: var(--panel-w); z-index: 3; overflow-y: auto; overflow-x: hidden; background: var(--panel); border-left: 1px solid var(--hairline); padding: 0 18px 18px; }

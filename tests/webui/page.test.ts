@@ -593,7 +593,7 @@ assert.ok(liveRow.includes("agent-developer") && liveRow.includes("agent-live") 
 assert.ok(liveRow.includes('data-handle="t.dev.1"') && liveRow.includes('data-role="developer"'), "the row carries the run handle and role the console click needs");
 assert.ok(liveRow.includes(fmtTokens(1234)) && liveRow.includes(fmtDur(65000)) && liveRow.includes(new Date(1700000000000).toLocaleTimeString()), "the row shows the start, the duration and the tokens");
 assert.equal(subFetches.length, 1, "a run with no cached sub list starts exactly one fetch");
-const rowOf = new Function("esc", "fmtDur", "fmtTokens", "logState", "ROLE_CLS", "startText", page.slice(page.indexOf("function runRowHtml("), page.indexOf("// the subagent rows of one run")) + "; return runRowHtml;")(esc, fmtDur, fmtTokens, runLog, { developer: "agent-developer" }, (ms: number) => "T" + ms);
+const rowOf = new Function("esc", "fmtDur", "fmtTokens", "logState", "ROLE_CLS", "startText", page.slice(page.indexOf("function runRowHtml("), page.indexOf("// the subagent rows of one run")) + "; return runRowHtml;")(esc, fmtDur, fmtTokens, runLog, { developer: "agent-developer", reviewer: "agent-reviewer" }, (ms: number) => "T" + ms);
 assert.ok(rowOf({ role: "developer", handle: "d", status: "dead", tokens: 0, duration: 0 }, "", "Developer", null).includes("agent-dead"), "a dead run keeps its red marker");
 assert.ok(rowOf({ role: "developer", handle: "d", status: "dead", tokens: 0, duration: 0 }, "", "Developer", null).includes("cross"), "the dead marker is the cross");
 assert.ok(rowOf({ role: "developer", handle: "d", status: "done", tokens: 0, duration: 0 }, "", "Developer", null).includes("agent-past"), "a finished run keeps the past marker");
@@ -602,6 +602,9 @@ const runMarkOf = (a: any) => ((rowOf({ role: "developer", handle: "d", tokens: 
 assert.equal(runMarkOf({ alive: true }), '<span class="run-mark"><span class="spin"></span></span>', "a live run wraps its dot in the shared slot");
 assert.ok(runMarkOf({ status: "dead" }).startsWith('<span class="run-mark"><span class="cross">'), "a dead run wraps its cross in the same slot");
 assert.ok(runMarkOf({ status: "done" }).startsWith('<span class="run-mark"><span class="check">'), "a past run wraps its check in the same slot");
+// #419 the marks take the row's agent tint, which the .agent-* rules set on the row
+assert.ok(rowOf({ role: "developer", handle: "d", status: "done", tokens: 0, duration: 0 }, "", "Developer", null).includes("agent-developer"), "a developer run wears its agent tint");
+assert.ok(rowOf({ role: "reviewer", handle: "r", status: "done", tokens: 0, duration: 0 }, "", "Reviewer", null).includes("agent-reviewer"), "a reviewer run wears its agent tint");
 runs.subCache["t.dev.1"] = [{ index: 0, tokens: 10, duration: 2000 }, { index: 1, tokens: 0, duration: 0 }];
 runs.writeRuns();
 assert.ok(runsEl.innerHTML.includes('data-sub="0"') && runsEl.innerHTML.includes('data-sub="1"'), "the subagent rows stack under their run, each with its sub index");
@@ -992,6 +995,14 @@ assert.match(markSlot.body, /flex: 0 0 11px;/, "the run mark takes one fixed 11p
 assert.match(markSlot.body, /display: inline-flex; justify-content: center;/, "the slot centres the glyph and keeps its baseline");
 const innerMark = ruleBodies.find((r) => r.sel === ".run-mark > .spin, .run-mark > .check, .run-mark > .cross")!;
 assert.match(innerMark.body, /margin-right: 0;/, "the slot owns the gap, so the inner mark drops its own right margin");
+// #419 the check and the dot inherit the row's agent colour instead of a priority green and the link blue
+const checkRule = ruleBodies.find((r) => r.sel === ".check")!;
+assert.doesNotMatch(checkRule.body, /color:/, "the check paints no colour of its own, so it never falls back to a priority colour");
+const runSpin = ruleBodies.find((r) => r.sel === ".run-mark > .spin")!;
+assert.match(runSpin.body, /background: currentColor;/, "the run's dot reads the row's tint, not the link blue");
+assert.match(ruleBodies.find((r) => r.sel === ".agent-developer")!.body, /color: var\(--accent-todo-text\)/, "the developer tint is the readable -text step");
+assert.match(ruleBodies.find((r) => r.sel === ".agent-reviewer")!.body, /color: var\(--accent-review-text\)/, "the reviewer tint is the readable -text step");
+assert.match(ruleBodies.find((r) => r.sel === ".cross")!.body, /color: var\(--error-text\)/, "the cross stays red");
 assert.equal(ruleBodies.find((r) => r.sel === "#p-close")!.body.match(/flex: ([^;]+);/)![1], "0 0 auto", "the panel's close button never shrinks under its label");
 assert.equal(ruleBodies.find((r) => r.sel === "#c-close")!.body.match(/flex: ([^;]+);/)![1], "0 0 auto", "the console's close button never shrinks under its label");
 assert.match(motionCss, /@keyframes breathe \{ 0%, 100% \{ opacity: 1; \} 50% \{ opacity: \.4; \} \}/, "the pulse fades on opacity alone, so the circle never changes size");
