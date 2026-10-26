@@ -112,6 +112,7 @@ class El {
 // and one hairline element across the heads instead of a border per station
 assert.deepEqual(STATIONS.flatMap((s) => [...s.states]), [...STATES], "the station table covers every state slug exactly once, in pipeline order");
 assert.deepEqual(STATIONS.map((s) => s.id), ["queue", "work", "review", "merge", "test", "integration", "done"], "the station order is the fixed process spine");
+assert.ok(STATIONS.find((s) => s.id === "queue")?.label === "Backlog" && !STATIONS.some((s) => s.label === "Queue"), "the first station reads Backlog, so no station still says Queue");
 assert.deepEqual(STATIONS.map((s) => s.primary), ["to-do", "doing", "to-review", "to-merge", "to-live-test", "to-integration-test", "done"], "each station names the state a card shows without a sub-state marker");
 const boardEl = new El("main");
 const stations: Record<string, any> = buildShell(boardEl, { createElement: (tag: string) => new El(tag) });
@@ -179,7 +180,7 @@ assert.ok(rich.includes('<div class="c-run"><span class="card-stats"></span></di
 assert.ok(rich.includes('<span class="c-p p-high">high</span>') && rich.includes('<span class="c-cx cx-complex">complex</span>') && !rich.includes('class="chip'), "the meta row shows priority and complexity as small mono labels, not pill chips");
 assert.ok(!rich.includes('<span class="sub-state">'), "a primary state shows no sub-state marker");
 assert.ok(cardBaseHtml({ file: "000048_m.md", name: "m", priority: "low" }, "reviewing").includes('<span class="sub-state">reviewing</span>'), "a non-primary state shows its raw slug in the meta row");
-assert.ok(cardBaseHtml({ file: "000049_n.md", name: "n", priority: "low" }, "backlog").includes('<span class="sub-state">backlog</span>'), "backlog sits in the queue station and keeps its sub-state marker");
+assert.ok(!cardBaseHtml({ file: "000049_n.md", name: "n", priority: "low" }, "backlog").includes('<span class="sub-state">'), "a backlog card carries no sub-state marker, because its column already says the word");
 assert.ok(cardBaseHtml({ file: "000050_o.md", name: "o", priority: "low", blockedBy: "user" }, "to-do").includes('<button type="button" class="c-wait held"'), "a held task gets the held marker in the meta row");
 assert.ok(!cardBaseHtml({ file: "000051_p.md", name: "p", priority: "low" }, "to-do").includes("c-live"), "an idle card gets no live cell");
 assert.ok(!cardBaseHtml({ file: "000052_q.md", name: "q", priority: "low" }, "to-do").includes("ctx"), "a card without a summary drops the context line");
@@ -354,7 +355,7 @@ assert.equal(below.top, "56px", "without room above the marker, the popover drop
 
 // #393 the popover is fixed while the cards move, so a scroll of the board or of a station body
 // closes it the same way an outside click does, instead of leaving it at a stale position
-const scrollHandler = page.match(/addEventListener\("scroll", (.+?), true\)/)![1];
+const scrollHandler = page.match(/document\.addEventListener\("scroll", (.+?), true\)/)![1];
 const scrollClose = (file: string | null, calls: string[]) =>
 	(new Function("waitFile", "closeWaits", `return ${scrollHandler}`) as any)(file, (restore: unknown) => calls.push(String(restore)));
 const scrollCalls: string[] = [];
