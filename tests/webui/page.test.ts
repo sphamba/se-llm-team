@@ -1261,6 +1261,20 @@ assert.match(flushRule(".station + .station"), /margin-top: 16px/, "the phone co
 assert.match(flushRule(".station .cards > .card:last-child"), /border-bottom: 0/, "a column's last card drops its line, so the seam paints one hairline and not two touching ones");
 assert.match(flushRule(".card"), /padding: 10px 12px 12px/, "the card's top row gets the same frame as its bottom");
 
+// #425 seven equal station tracks, and the open panel is flush with the done column: no wider last
+// track and no dead 18px between the board and the panel. The live widths are a browser pass, left to
+// the reviewer
+const boardGrid = spacingRule("#board").match(/grid-template-columns: ([^;]+);/)?.[1] ?? "";
+assert.equal(boardGrid, "repeat(7, minmax(9.375rem, 1fr))", `#425 the base board grid is seven equal tracks, got ${boardGrid}`);
+assert.doesNotMatch(spacingRule("#board"), /1\.15fr|repeat\(6,/, "#425 no wider last track and no six-track base is left on the board");
+const offGrid = spacingRule("#board.off-integration").match(/grid-template-columns: ([^;]+);/)?.[1] ?? "";
+assert.equal(offGrid, "repeat(5, minmax(9.375rem, 1fr)) 48px minmax(9.375rem, 1fr)", `#425 the off-integration grid is five equal tracks, the 48px strip and one more equal track, got ${offGrid}`);
+const panelBoardPad = spacingRule("body.panel-open #board");
+assert.ok(panelBoardPad.includes("padding-right: var(--panel-w)"), `#425 the open panel sets the board's padding to its own width, so the done column meets the panel edge, got ${panelBoardPad}`);
+assert.doesNotMatch(panelBoardPad, /calc\(|18px/, `#425 the panel-open board padding adds no constant to the panel width, got ${panelBoardPad}`);
+const panelArchivePad = spacingRule("body.panel-open #archive");
+assert.ok(panelArchivePad.includes("padding-right: calc(18px + var(--panel-w))"), `#425 the archive keeps its own 18px side padding beside the panel, got ${panelArchivePad}`);
+
 // #410 the phone columns: each head rules the column off in its own tint and carries a glow that walks
 // the ladder, one station per slot, on the same motion gates as the desktop head
 assert.match(flushRule(".st-head"), /border-top: 1px solid color-mix\(in srgb, var\(--ac\) 55%, transparent\)/, "the phone head rules its column off in the station tint, so the next column starts at a tinted line");

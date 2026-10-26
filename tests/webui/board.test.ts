@@ -135,7 +135,7 @@ assert.ok(page.includes(`const PRIORITY_RANK = ${JSON.stringify(PRIORITY_RANK)}`
 
 // layout: a seven-track grid, done slightly wider, the station body as the vertical scroller
 assert.match(themeCss, /#board \{[^}]*display: grid/, "the board is a grid, not a column flex row");
-assert.match(themeCss, /#board \{[^}]*grid-template-columns: repeat\(6, minmax\(9\.375rem, 1fr\)\) minmax\(9\.375rem, 1\.15fr\)/, "six equal station tracks and a slightly wider done track, each with the same rem floor at every width");
+assert.match(themeCss, /#board \{[^}]*grid-template-columns: repeat\(7, minmax\(9\.375rem, 1fr\)\)/, "seven equal station tracks, each with the same rem floor at every width");
 assert.ok(!/@media \(max-width: 1099px\)/.test(themeCss), "no hand-picked breakpoint carries the floor: the base template holds it at every width");
 // #374 the body base scales the type with the viewport and stops at 1rem
 assert.match(themeCss, /body \{[^}]*font-size: clamp\(0\.875rem, 0\.35vw \+ 0\.55rem, 1rem\)/, "the body base clamps 14px to 16px, so a wide screen reads one step larger");

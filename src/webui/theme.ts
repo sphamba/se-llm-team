@@ -117,14 +117,14 @@ body.panel-open #archive { padding-right: calc(18px + var(--panel-w)); }
 #p-outside { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; border: 1px solid var(--hairline); border-radius: 6px; padding: 4px 8px; color: var(--dim); font-size: 0.8125rem; }
 #p-outside.hidden { display: none; }
 #p-outside .m-action { margin-left: auto; }
-/* #366 the station spine: seven tracks, six even and done slightly wider. #374 the floor is derived, not a breakpoint: 9.375rem per station, so at any width too narrow for seven 150px tracks plus the separators the board alone scrolls horizontally (000247) and the page never does. #388 the board keeps no side padding, so the seven tracks fill the viewport and a card box starts at 0. The heads share one hairline grid item and each station body scrolls on its own */
-#board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(9.375rem, 1fr)) minmax(9.375rem, 1.15fr); grid-template-rows: 1px minmax(0, 1fr); gap: 0; padding: var(--sp-3) 0 var(--sp-5); overflow-x: auto; overflow-y: hidden; position: relative; }
+/* #366 the station spine: seven equal tracks. #374 the floor is derived, not a breakpoint: 9.375rem per station, so at any width too narrow for seven 150px tracks plus the separators the board alone scrolls horizontally (000247) and the page never does. #388 the board keeps no side padding, so the seven tracks fill the viewport and a card box starts at 0. The heads share one hairline grid item and each station body scrolls on its own */
+#board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(7, minmax(9.375rem, 1fr)); grid-template-rows: 1px minmax(0, 1fr); gap: 0; padding: var(--sp-3) 0 var(--sp-5); overflow-x: auto; overflow-y: hidden; position: relative; }
 /* #417 the bar: the spine is one 1px ladder bar, one fixed slot per station with the ends holding the first and last tint, so the line never restarts at a junction. z-index 3 lifts it over the head ticks, so only their 1px crossing hides */
 .spine { grid-column: 1 / -1; grid-row: 1; z-index: 3; position: relative; overflow: hidden; background-image: linear-gradient(90deg, var(--accent-backlog) 0%, var(--accent-backlog) 7.1429%, var(--accent-todo) 21.4286%, var(--accent-review) 35.7143%, var(--accent-merge) 50%, var(--accent-live) 64.2857%, var(--accent-integration) 78.5714%, var(--accent-done) 92.8571%, var(--accent-done) 100%); }
 /* the band is 22% of the track and clips at both edges; it starts fully off the left and ends fully off the right, so the loop wraps with no dark beat. It rests at opacity 0, so a sheet with motion off paints the ladder alone */
 .spine::after { content: ""; position: absolute; left: 0; top: 0; width: 22%; height: 100%; opacity: 0; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--shine-hi) var(--beam), transparent), transparent); }
 /* a disabled integration stage narrows its own track to a strip; the other six keep the floor */
-#board.off-integration { grid-template-columns: repeat(5, minmax(9.375rem, 1fr)) 48px minmax(9.375rem, 1.15fr); }
+#board.off-integration { grid-template-columns: repeat(5, minmax(9.375rem, 1fr)) 48px minmax(9.375rem, 1fr); }
 /* relation lines: absolute in the relative board, so the overlay scrolls with the content; z-index 1
 paints them above the station bodies and below the z-index-2 task cards, pointer-events none so the
 card clicks pass through. #373 the lines exist only during a reveal: at rest the card marker carries
@@ -277,7 +277,7 @@ names the reason where the station is wide enough */
 @keyframes panelIn { from { transform: translateX(100%); } }
 #panel.closing { animation: panelOut var(--t-base) var(--ease-exit) forwards; }
 @keyframes panelOut { to { transform: translateX(100%); } }
-body.panel-open #board { padding-right: calc(18px + var(--panel-w)); }
+body.panel-open #board { padding-right: var(--panel-w); }
 /* the header is sticky at every width, so the title and the close control never scroll away */
 #p-head { position: sticky; top: 0; display: flex; align-items: flex-start; gap: 10px; padding: 14px 0 8px; background: var(--panel); z-index: 1; }
 #p-head h2 { flex: 1 1 auto; min-width: 0; font-size: 1.0625rem; font-weight: 500; margin: 0; line-height: 1.3; }
