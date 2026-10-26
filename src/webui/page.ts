@@ -680,15 +680,16 @@ const historyUrl = file => "/api/task-history?num=" + numOf(file) + projectParam
 function taskByNum(ref) {
 	return activeBoard().tasks.find(x => numOf(x.file) === parseInt(ref.replace(/^#/, ""), 10));
 }
-// the blockedBy row: each stored ref links to its task's card when that task is on the board, and
-// the row is dropped when the attribute is absent or empty
+// the blockedBy row: the user hold leads as a held item, each stored task ref links to its card
+// when that task is on the board, and the row is dropped when the list is empty and unheld
 function blockedRow(t) {
 	const refs = String(t.blockedBy || "").split(",").map(s => s.trim()).filter(Boolean);
-	if (!refs.length) return "";
-	const items = refs.map(ref => {
+	const items = refs.filter(ref => ref.toLowerCase() !== "user").map(ref => {
 		const target = taskByNum(ref);
 		return target ? numLinkHtml(target.file) : esc(ref);
 	});
+	if (isHeld(t)) items.unshift('<span class="held">held</span>');
+	if (!items.length) return "";
 	return "<div><span class='k'>blockedBy</span>" + items.join(", ") + "</div>";
 }
 // #373 the waits-on popover: one row per stored ref in stored order, the number as the board's own id
@@ -785,14 +786,12 @@ function issuerCell(t) {
 	const target = t.issuer && t.issuer !== "user" && t.issuer !== "auto" ? taskByNum(t.issuer) : null;
 	return target ? numLinkHtml(target.file) : esc(t.issuer || "user");
 }
-// the panel header's facts: number, state slug and phase, complexity, issuer, hold and worktree
+// the panel header's facts: number, state slug, complexity, issuer, blockedBy and worktree
 function factsHtml(t) {
-	const station = STATIONS.find(s => s.states.includes(t.state));
 	return "<div><span class='k'>number</span>#" + esc(String(numOf(t.file))) + "</div>" +
-		"<div><span class='k'>state</span>" + esc(t.state) + (station ? " <span class='sub-state'>" + esc(station.label) + "</span>" : "") + "</div>" +
+		"<div><span class='k'>state</span>" + esc(t.state) + "</div>" +
 		"<div><span class='k'>complexity</span><span class='chip cx cx-" + esc(t.complexity || "moderate") + "'>" + esc(t.complexity || "moderate") + "</span></div>" +
 		"<div><span class='k'>issuer</span>" + issuerCell(t) + "</div>" +
-		(isHeld(t) ? "<div><span class='k'>hold</span><span class='held'>held</span></div>" : "") +
 		blockedRow(t) +
 		"<div><span class='k'>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>";
 }

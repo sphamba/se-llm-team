@@ -549,13 +549,29 @@ assert.equal(els.get("000031_h.md")!.className, "card enter", "the toggle neithe
 
 // a held ref draws no relation line and prints as plain escaped text in the detail card
 assert.equal(relationPaths([{ file: "000002_b.md", state: "to-do", blockedBy: "user" }], rectOf).length, 0, "a `user` ref draws no relation line");
-const blockedRowOf = new Function("esc", "numLinkHtml", "taskByNum", page.match(/function blockedRow\(t\) \{[\s\S]*?\n\}/)![0] + "; return blockedRow;")(
+const blockedRowOf = new Function("esc", "numLinkHtml", "taskByNum", "isHeld", page.match(/function blockedRow\(t\) \{[\s\S]*?\n\}/)![0] + "; return blockedRow;")(
 	esc,
 	numLinkHtml,
 	(ref: string) => (ref === "#42" ? { file: "000042_x.md" } : undefined),
+	isHeld,
 ) as (t: any) => string;
-assert.equal(blockedRowOf({ blockedBy: "user" }), "<div><span class='k'>blockedBy</span>user</div>", "the `user` ref prints as plain escaped text");
-assert.equal(blockedRowOf({ blockedBy: "user, #42" }), `<div><span class='k'>blockedBy</span>user, <span class="num-link" data-task="000042_x.md">#42</span></div>`, "a held ref mixes with a linked task ref");
+assert.equal(blockedRowOf({ blockedBy: "user" }), `<div><span class='k'>blockedBy</span><span class="held">held</span></div>`, "the hold leads the blockedBy row and the bare token never prints");
+assert.equal(blockedRowOf({ blockedBy: "user, #42" }), `<div><span class='k'>blockedBy</span><span class="held">held</span>, <span class="num-link" data-task="000042_x.md">#42</span></div>`, "a held ref mixes with a linked task ref, held first");
+
+// #396 the facts block carries the state slug alone and no separate hold row: the hold shows in the
+// blockedBy row that blockedRow builds
+const factsHtmlOf = new Function("esc", "numOf", "STATIONS", "isHeld", "issuerCell", "blockedRow", page.match(/function factsHtml\(t\) \{[\s\S]*?\n\}/)![0] + "; return factsHtml;")(
+	esc,
+	(f: string) => parseInt(f.slice(0, 6), 10),
+	STATIONS,
+	isHeld,
+	() => "user",
+	blockedRowOf,
+) as (t: any) => string;
+const facts = factsHtmlOf({ file: "000263_task.md", state: "doing", complexity: "low", issuer: "user", blockedBy: "user", worktree: "feat/x" });
+assert.ok(!facts.includes("<span class='k'>hold</span>") && !facts.includes("sub-state"), "the facts block prints no hold row and no station span beside the state");
+assert.ok(facts.includes("<span class='k'>state</span>doing</div>"), "the state row prints the state slug and nothing else");
+assert.ok(facts.includes(`<span class='k'>blockedBy</span><span class="held">held</span>`), "a pure hold still renders the blockedBy row, held first");
 
 // #376 the waits-on popover row: a `user` token resolves to no task, so the held badge must come
 // before the missing-target guard, and a mixed `user, #N` card keeps the held badge and the

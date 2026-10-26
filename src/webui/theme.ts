@@ -250,7 +250,7 @@ names the reason where the station is wide enough */
    role, and the failed-run red wins over it (two classes beat one) */
 #p-runs { display: flex; flex-direction: column; margin-bottom: 14px; }
 #p-runs:empty { display: none; }
-.run-row { display: flex; align-items: baseline; gap: 8px; width: 100%; margin: 0; border: 0; border-bottom: 1px solid var(--hairline); background: none; color: inherit; padding: 5px 2px; cursor: pointer; font-family: inherit; font-size: 0.8125rem; text-align: left; }
+.run-row { display: flex; align-items: baseline; gap: 8px; width: 100%; margin: 0; border: 0; background: none; color: inherit; padding: 5px 2px; cursor: pointer; font-family: inherit; font-size: 0.8125rem; text-align: left; }
 .run-row:hover { background: var(--raised); }
 .run-row .row-meta { margin-left: auto; font-family: ${MONO}; font-size: 0.75rem; color: var(--dim); font-variant-numeric: tabular-nums; }
 .run-row.agent-sub, .run-row.agent-doctor { position: relative; padding-left: var(--sp-5); font-size: 0.75rem; }
@@ -292,8 +292,11 @@ body.panel-open #board { padding-right: calc(18px + var(--panel-w)); }
 #p-facts { font-size: 0.8125rem; margin-bottom: 10px; }
 #p-facts div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 2px 0; }
 #p-facts .k { min-width: 84px; color: var(--dim); }
-/* the priority control is a four-option segmented group: the active option takes its own hue */
-#p-prio { display: flex; margin-bottom: 6px; }
+/* the priority control sits on its label's line, aligned with the facts rows above, and is a
+   four-option segmented group: the active option takes its own hue */
+#p-prio-wrap { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-bottom: 6px; }
+#p-prio-wrap .k { min-width: 84px; color: var(--dim); }
+#p-prio { display: flex; }
 .seg { border: 1px solid var(--hairline); background: var(--panel); color: var(--dim); padding: 2px 8px; font-size: 0.75rem; font-family: ${MONO}; cursor: pointer; }
 .seg + .seg { border-left: 0; }
 .seg:first-child { border-radius: 6px 0 0 6px; }
@@ -304,7 +307,7 @@ body.panel-open #board { padding-right: calc(18px + var(--panel-w)); }
 .seg.p-medium[aria-pressed="true"] { color: var(--medium-fg); }
 .seg.p-high[aria-pressed="true"] { color: var(--high-fg); }
 .seg.p-critical[aria-pressed="true"] { color: var(--critical-fg); }
-#p-prio-err { font-size: 0.75rem; color: var(--error-text); margin-bottom: 6px; }
+#p-prio-err { width: 100%; font-size: 0.75rem; color: var(--error-text); margin-bottom: 6px; }
 #p-prio-err:empty { display: none; }
 #p-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 #p-actions:empty { display: none; }
