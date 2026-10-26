@@ -492,9 +492,17 @@ function writeHistory() {
 	for (const d of docs) count[d.role] = (count[d.role] || 0) + 1;
 	if (writeGated(el, docs.map(d => runRowHtml(d, "agent-doctor", agentLabel(d, count), null)).join(""))) bindRows(el);
 }
+// the panel heading: the number and the name, and the focus target on open. The text is only
+// assigned when it changes, so a poll leaves the focused heading and its text node in place
+function writeTitle(t) {
+	const el = document.getElementById("p-title");
+	const text = "#" + numOf(t.file) + " " + (t.name || "");
+	if (el && el.textContent !== text) el.textContent = text;
+}
 // the whole panel from one task payload: every block is html-gated, so an unchanged poll keeps the
 // DOM nodes, the panel's scroll position and the focused control
 function writePanel(t, withBody) {
+	writeTitle(t);
 	const facts = document.getElementById("p-facts");
 	if (writeGated(facts, factsHtml(t))) for (const a of facts.querySelectorAll(".num-link")) a.onclick = () => openTask(a.dataset.task);
 	writePriority(t);

@@ -65,6 +65,18 @@ assert.match(page, /#panel \{[^}]*top: var\(--chrome\)[^}]*bottom: var\(--consol
 assert.match(page, /#console \{[^}]*height: var\(--console-h\)/, "the console takes its height from the one page variable");
 assert.ok(page.includes("syncPanelTop()") && page.includes('setProperty("--chrome"'), "the panel measures the page chrome on open and on resize");
 assert.ok(!/backdrop-filter|::backdrop|\.backdrop \{/.test(page) && /#panel \{[^}]*position: fixed/.test(page), "the panel is a fixed dock with no backdrop rule, so the board keeps its width");
+// the assigned height is honoured: the console is a flex item in the body column, so without a fixed
+// flex basis the row shrinks it below the 60vh the variable names
+assert.match(page, /#console \{[^}]*flex: 0 0 auto/, "the console holds the height the variable assigns instead of shrinking in the body column");
+// the panel heading carries the number and the task name, and only rewrites when the text changes
+const titleEl = { textContent: "" };
+const titleOf = new Function("document", "numOf", page.match(/function writeTitle\(t\) \{[\s\S]*?\n\}/)![0] + "; return writeTitle;")(
+	{ getElementById: (id: string) => (id === "p-title" ? titleEl : null) },
+	(f: string) => parseInt(f.slice(0, 6), 10),
+) as (t: any) => void;
+titleOf({ file: "000263_demo.md", name: "feat: docked panel probe" });
+assert.equal(titleEl.textContent, "#263 feat: docked panel probe", "the panel heading names the number and the task name");
+assert.ok(page.match(/function writePanel\(t, withBody\) \{[\s\S]*?\n\}/)![0].includes("writeTitle(t)"), "every panel write refreshes the heading");
 
 // 3. token integrity: no rule reads a name nothing declares, both themes declare the same names,
 // and every raw hex value sits in a token block. --ac and --shine-base stay rule-local: the column

@@ -239,7 +239,7 @@ line, and the leftmost column pins left with a static right border as the cue */
 #c-text .md-table-wrap .md-pin { background: var(--code-bg); }
 /* the docked console is the column's last child, so its top edge is the drag handle and its height
    is its own var; the panel's bottom edge follows the same var */
-#console { display: flex; flex-direction: column; height: var(--console-h); min-height: 0; border-top: 1px solid var(--hairline); background: var(--code-bg); }
+#console { flex: 0 0 auto; display: flex; flex-direction: column; height: var(--console-h); min-height: 0; border-top: 1px solid var(--hairline); background: var(--code-bg); }
 #console.hidden { display: none; }
 #console:not(.hidden) { animation: logIn var(--enter) ease-out; }
 @keyframes logIn { from { opacity: 0; transform: translateY(4px); } }
