@@ -592,6 +592,18 @@ const liveRow = runsEl.innerHTML as string;
 assert.ok(liveRow.includes("agent-developer") && liveRow.includes("agent-live") && liveRow.includes('<span class="spin"></span>'), "a live run keeps its role class and its spinner");
 assert.ok(liveRow.includes('data-handle="t.dev.1"') && liveRow.includes('data-role="developer"'), "the row carries the run handle and role the console click needs");
 assert.ok(liveRow.includes(fmtTokens(1234)) && liveRow.includes(fmtDur(65000)) && liveRow.includes(new Date(1700000000000).toLocaleTimeString()), "the row shows the start, the duration and the tokens");
+assert.ok(liveRow.indexOf(fmtTokens(1234)) < liveRow.indexOf(fmtDur(65000)), "the run row reads the start, then the tokens before the time");
+const headEls: Record<string, any> = { "c-title": {}, "c-state": {}, "c-tokens": {} };
+const makeHead = new Function("fmtDur", "fmtTokens", "logState", "document",
+	"let openDetail = null, panelFile = null;\n" + page.match(/function writeConsoleHead\(\) \{[\s\S]*?\n\}/)![0] +
+	"\n; return { write: writeConsoleHead, set open(v) { openDetail = v; }, set file(v) { panelFile = v; } };") (
+	fmtDur, fmtTokens, { handle: "t.dev.1", num: 263, role: "developer", sub: null },
+	{ getElementById: (id: string) => headEls[id] },
+);
+makeHead.file = "000263_task.md";
+makeHead.open = { file: "000263_task.md", agents: [{ role: "developer", handle: "t.dev.1", run: 0, alive: true, start: 1700000000000, duration: 65000, tokens: 1234 }] };
+makeHead.write();
+assert.equal(headEls["c-tokens"].textContent, `${fmtTokens(1234)} · ${fmtDur(65000)}`, "the console head reads the tokens before the time");
 assert.equal(subFetches.length, 1, "a run with no cached sub list starts exactly one fetch");
 const rowOf = new Function("esc", "fmtDur", "fmtTokens", "logState", "ROLE_CLS", "startText", page.slice(page.indexOf("function runRowHtml("), page.indexOf("// the subagent rows of one run")) + "; return runRowHtml;")(esc, fmtDur, fmtTokens, runLog, { developer: "agent-developer", reviewer: "agent-reviewer" }, (ms: number) => "T" + ms);
 assert.ok(rowOf({ role: "developer", handle: "d", status: "dead", tokens: 0, duration: 0 }, "", "Developer", null).includes("agent-dead"), "a dead run keeps its red marker");

@@ -903,11 +903,11 @@ function setPriority(p) {
 // payload role to row marker class; a run, its sub rows and a doctor row share the run's role class
 const ROLE_CLS = { splitter: "agent-splitter", developer: "agent-developer", reviewer: "agent-reviewer", merger: "agent-merger", "live-tester": "agent-livetest", "integration-tester": "agent-integration" };
 const startText = ms => typeof ms === "number" && Number.isFinite(ms) ? new Date(ms).toLocaleTimeString() : "";
-// one run row: the role label, then the start time, the duration and the tokens at the right; a
+// one run row: the role label, then the start time, the tokens and the duration at the right; a
 // live run spins, a dead one turns red, and a click opens the console on that run's log
 function runRowHtml(a, extra, label, sub) {
 	const mark = '<span class="run-mark">' + (a.alive ? '<span class="spin"></span>' : a.status === "dead" ? '<span class="cross">✗</span>' : '<span class="check">✓</span>') + "</span>";
-	const meta = [startText(a.start), fmtDur(a.duration), fmtTokens(a.tokens)].filter(Boolean).join(" · ");
+	const meta = [startText(a.start), fmtTokens(a.tokens), fmtDur(a.duration)].filter(Boolean).join(" · ");
 	const activeRow = logState && logState.handle === a.handle && (logState.sub ?? null) === (sub ?? null) ? " agent-row-active" : "";
 	return '<button class="run-row ' + (ROLE_CLS[a.role] || "") + " " + extra + (a.alive ? " agent-live" : a.status === "dead" ? " agent-dead" : " agent-past") + activeRow +
 		'" data-handle="' + esc(a.handle) + '" data-role="' + esc(a.role) + '"' + (sub == null ? "" : ' data-sub="' + sub + '"') + ">" + mark +
@@ -1157,7 +1157,7 @@ function ingest(html, where) {
 	else el.insertAdjacentHTML(where === "history" ? "afterbegin" : "beforeend", html);
 	logFixups(el, document);
 }
-// the console header: task number, role, running or finished state, elapsed and tokens; a finished
+// the console header: task number, role, running or finished state, tokens and elapsed; a finished
 // run keeps its last numbers readable
 function writeConsoleHead() {
 	if (!logState) return;
@@ -1166,7 +1166,7 @@ function writeConsoleHead() {
 	const label = logState.sub != null ? "Sub-" + logState.role : logState.role ? logState.role[0].toUpperCase() + logState.role.slice(1) : "";
 	document.getElementById("c-title").textContent = "#" + logState.num + " " + label;
 	document.getElementById("c-state").textContent = run && run.alive ? "running" : "finished";
-	document.getElementById("c-tokens").textContent = run ? [fmtDur(run.duration), fmtTokens(run.tokens)].filter(Boolean).join(" · ") : "";
+	document.getElementById("c-tokens").textContent = run ? [fmtTokens(run.tokens), fmtDur(run.duration)].filter(Boolean).join(" · ") : "";
 }
 function openConsole(handle, sub, role) {
 	const c = document.getElementById("console");

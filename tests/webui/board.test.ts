@@ -535,11 +535,12 @@ const liveTask = { file: "000004_d.md", name: "feat: d", priority: "high", state
 sync([liveTask]);
 const cardD = els.get("000004_d.md")!;
 assert.equal(cardD.writes, 1, "a live card writes its base markup once");
-assert.equal(cardD.querySelector(".c-live-text")!.textContent, "Developer · 2s · 420", "the live cell fills in place with the role, the elapsed time and the tokens, in the run row's order");
+assert.equal(cardD.querySelector(".c-live-text")!.textContent, "Developer · 420 · 2s", "the live cell fills in place with the role, the tokens and the elapsed time, in the run row's order");
+assert.ok(cardD.querySelector(".c-live-text")!.textContent!.indexOf("420") < cardD.querySelector(".c-live-text")!.textContent!.indexOf("2s"), "the live cell reads the tokens before the time");
 assert.equal(cardD.querySelector(".card-stats")!.textContent, "420 · 2s", "the run row fills in place with the run totals");
 sync([{ ...liveTask, agents: [{ ...liveTask.agents[0], tokens: 900, duration: 2500 }] }]);
 assert.equal(cardD.writes, 1, "a stats-only change does not rewrite the card markup, the spinner animation survives");
-assert.equal(cardD.querySelector(".c-live-text")!.textContent, "Developer · 3s · 900", "the live cell follows the poll, tokens included");
+assert.equal(cardD.querySelector(".c-live-text")!.textContent, "Developer · 900 · 3s", "the live cell follows the poll, tokens included");
 assert.equal(cardD.querySelector(".card-stats")!.textContent, "900 · 3s", "the run row follows the poll");
 sync([{ ...liveTask, agents: [{ ...liveTask.agents[0], tokens: 82000, duration: 2500 }] }]);
 assert.equal(cardD.querySelector(".card-stats")!.textContent, "82k · 3s", "the run row sums the entries itself again, so the card keeps no separate token cell");
