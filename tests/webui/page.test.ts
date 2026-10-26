@@ -966,4 +966,17 @@ assert.match(themeCss, /\.station \.cards::-webkit-scrollbar \{ width: 0; \}/, "
 const phoneSheet = themeCss.slice(themeCss.indexOf(`@media (max-width: ${MOBILE_MAX}px)`));
 assert.match(phoneSheet, /\.empty \{ padding: 0; \}/, "the phone block pins the empty line back to the station's own 12px inset");
 
+// #386 the phone board: nothing inside it shrinks, so every box sizes to its content and #board stays the
+// one scroller. The live rect check (no two boxes intersect) is a browser pass, left to the reviewer
+const phoneStart = themeCss.indexOf("@media (max-width: " + MOBILE_MAX + "px)");
+const phoneBoard = themeCss.slice(phoneStart, themeCss.indexOf("@media (max-width: " + MOBILE_MAX + "px)", phoneStart + 1));
+assert.ok(phoneBoard.includes("#board { display: flex;"), "the phone board block is the first phone media query, the one that stacks the stations");
+const phoneRule = (sel: string) => phoneBoard.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " \\{([^}]*)\\}"))?.[1] ?? "";
+for (const sel of [".station", ".station .cards", ".card"])
+	assert.match(phoneRule(sel), /flex: 0 0 auto/, `${sel} sizes to its content on a phone instead of shrinking into the next box`);
+for (const sel of [".station", ".station .cards"])
+	assert.match(phoneRule(sel), /min-height: auto/, `${sel} drops the desktop min-height: 0 that let the box collapse to nothing`);
+assert.match(phoneRule("#board"), /overflow-y: auto/, "the phone board stays the one vertical scroller");
+assert.ok(!/\.station \.cards \{[^}]*overflow-y: auto/.test(phoneBoard), "the phone block adds no nested scroller on the station body");
+
 console.log("page.test.ts: all assertions passed");

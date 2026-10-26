@@ -392,12 +392,14 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
 .tab { min-height: 44px; padding: 0 16px; }
 #board { display: flex; flex-direction: column; gap: 0; padding: 8px 12px 12px; overflow-x: hidden; overflow-y: auto; }
 .spine, #relations { display: none; }
-.station { padding-left: 12px; border-left: 1px solid var(--hairline); }
+/* #386 nothing inside the phone board shrinks: the station, its cards and each card size to their content, so a card never paints over the next one and #board stays the one vertical scroller */
+.station { padding-left: 12px; border-left: 1px solid var(--hairline); flex: 0 0 auto; min-height: auto; }
 .station + .station { border-top: 0; border-left: 1px solid var(--hairline); }
 .station.strip { border-left: 1px dashed var(--hairline); }
 .station.strip .st-head { flex-direction: row; align-items: baseline; }
 .station.strip .st-head h2 { writing-mode: horizontal-tb; }
-.station .cards { overflow: visible; }
+.station .cards { flex: 0 0 auto; min-height: auto; overflow: visible; }
+.card { flex: 0 0 auto; }
 .st-head { align-items: baseline; padding: 10px 0 6px; }
 .st-head h2 { font-size: 0.875rem; }
 .st-head::before { left: -13px; top: 16px; width: 12px; height: 1px; }
