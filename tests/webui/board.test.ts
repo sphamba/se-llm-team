@@ -149,13 +149,13 @@ assert.match(themeCss, /\.c-live \{[^}]*max-width: 100%;[^}]*min-width: 0;[^}]*o
 assert.match(themeCss, /\.c-meta \{[^}]*flex-wrap: wrap/, "the meta row wraps instead of clipping the labels at 150px");
 assert.match(themeCss, /#board \{[^}]*overflow-y: hidden/, "the board never scrolls the page vertically");
 assert.match(themeCss, /#board \{[^}]*overflow-x: auto/, "below 1100px the board scrolls horizontally on its own");
-assert.match(themeCss, /\.station\.live \.st-head::before \{[^}]*background: var\(--ac\)/, "a station with a running agent accents its tick");
+assert.match(themeCss, /\.station\.live \.st-head::before \{[^}]*box-shadow: 0 0 6px var\(--ac\)/, "a station with a running agent glows its tick, which already carries the station tint at rest");
 assert.ok(page.includes("el.tabIndex = 0") && page.includes('if (e.key === "Enter" && !onMarker(e))'), "a card link is keyboard focusable and Enter opens the current card unless the marker holds the focus");
 assert.match(themeCss, /\.card:focus-visible[^{]*\{[^}]*outline: 2px solid var\(--link\)/, "a focused card shows the visible ring");
 
 // accents: the stylesheet points each station class at a stage accent token the theme declares
 const declared = new Set([...page.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
-assert.ok(STATIONS.every((s) => page.includes(`.s-${s.id} { --ac: var(--accent-${s.accent}); --ac-t: var(--accent-${s.accent}-text); }`)), "each station points --ac at its own accent token and --ac-t at that accent's -text step");
+assert.ok(STATIONS.every((s, i) => page.includes(`.s-${s.id} { --ac: var(--accent-${s.accent}); --ac-t: var(--accent-${s.accent}-text); --ac-prev: var(--accent-${STATIONS[Math.max(0, i - 1)].accent}); }`)), "each station points --ac at its own accent token, --ac-t at that accent's -text step and --ac-prev at the station before it, so the glow walks the ladder");
 assert.ok(STATIONS.every((s) => declared.has(`--accent-${s.accent}`) && declared.has(`--accent-${s.accent}-text`)), "each station accent names a token the theme declares, and so does its -text step");
 
 // stage flags: only the integration station switches off, and it leaves a strip

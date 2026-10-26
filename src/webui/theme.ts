@@ -15,7 +15,7 @@ const DARK_TOKENS = `--canvas: #05080a; --panel: #0b1118; --raised: #111a24; --h
 /* 000129: medium/critical hues widened (yellow / strong red) so the priority chips read apart; -bg tints match their fg */
 --low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252;
 --cx-trivial-bg: rgba(100, 130, 165, .18); --shine-hi: #ffffff; --overlay: rgba(0, 0, 0, .6); --code-bg: #010102;
---accent-backlog: #5a6378; --accent-backlog-text: #74818f; --accent-todo: #ffb454; --accent-todo-text: #ffb454; --accent-review: #ff8f40; --accent-review-text: #ff8f40; --accent-merge: #d2a6ff; --accent-merge-text: #d2a6ff; --accent-live: #59c2ff; --accent-live-text: #59c2ff; --accent-integration: #95e6cb; --accent-integration-text: #95e6cb; --accent-done: #aad94c; --accent-done-text: #aad94c; --error: #ff5252; --error-text: #ff5252;`;
+--accent-backlog: #b3bbc6; --accent-backlog-text: #b3bbc6; --accent-todo: #e6b22d; --accent-todo-text: #e6b22d; --accent-review: #ffa068; --accent-review-text: #ffa068; --accent-merge: #cea5fd; --accent-merge-text: #cea5fd; --accent-live: #68c5ff; --accent-live-text: #68c5ff; --accent-integration: #69ceca; --accent-integration-text: #69ceca; --accent-done: #73d484; --accent-done-text: #73d484; --error: #ff6b63; --error-text: #ff6b63;`;
 const darkBlock = (selector: string) => `${selector} { ${DARK_TOKENS} }`;
 const themeButton = (selector: string) => `${selector} #theme { color: var(--link); border-color: var(--link); }`;
 const DARK_VARS = `
@@ -31,9 +31,9 @@ export const CSS = `* { box-sizing: border-box; }
 --low-bg: rgba(134, 179, 0, .15); --low-fg: #86b300; --medium-bg: rgba(201, 151, 0, .15); --medium-fg: #c99700; --high-bg: rgba(250, 133, 50, .15); --high-fg: #fa8532; --critical-bg: rgba(230, 80, 80, .15); --critical-fg: #e65050;
 --cx-trivial-bg: rgba(100, 130, 165, .18); --shine-hi: #ffffff; --overlay: rgba(15, 23, 42, .45); --code-bg: #ebeef0;
 /* 000353: one accent per pipeline stage and agent role, plus the failed-run red; the -text step is the darker Ayu Light ladder step that keeps a label readable on the light panel */
---accent-backlog: #828e9f; --accent-backlog-text: #74757a; --accent-todo: #eba400; --accent-todo-text: #a16a00; --accent-review: #fa8532; --accent-review-text: #ad6410; --accent-merge: #a37acc; --accent-merge-text: #8b64b6; --accent-live: #22a4e6; --accent-live-text: #1a7bb7; --accent-integration: #4cbf99; --accent-integration-text: #3b8264; --accent-done: #86b300; --accent-done-text: #647f00; --error: #e65050; --error-text: #cd474f;
+--accent-backlog: #979faa; --accent-backlog-text: #666c75; --accent-todo: #c79603; --accent-todo-text: #886600; --accent-review: #eb7c33; --accent-review-text: #a84f0a; --accent-merge: #b188df; --accent-merge-text: #7b5a9f; --accent-live: #3fa9e5; --accent-live-text: #1674a4; --accent-integration: #4ab1ae; --accent-integration-text: #227a78; --accent-done: #56b669; --accent-done-text: #2e7f40; --error: #ff645f; --error-text: #b0423d;
 /* 000191: motion knobs, one place to retune the entrances, the chunk fade and the pulse loop; 000194: --exit runs the closes, --shine is the whiter band mix; #369: one motion token set, every duration and easing in the sheet reads one of these */
---t-fast: 120ms; --t-base: 180ms; --t-slow: 240ms; --t-breathe: 2s; --t-sweep: 6s; --t-slot: 800ms; --t-wave: 5.6s; --ease-enter: cubic-bezier(.2, .8, .2, 1); --ease-exit: cubic-bezier(.4, 0, .8, 1); --ease-breathe: ease-in-out; --shine: 45%;
+--t-fast: 120ms; --t-base: 180ms; --t-slow: 240ms; --t-breathe: 2s; --t-slot: 800ms; --t-wave: 5.6s; --ease-enter: cubic-bezier(.2, .8, .2, 1); --ease-exit: cubic-bezier(.4, 0, .8, 1); --ease-breathe: ease-in-out; --shine: 45%;
 /* #377 one spacing scale: the chrome, the station heads and the cards read one of these six steps */
 --sp-1: 4px; --sp-2: 6px; --sp-3: 8px; --sp-4: 12px; --sp-5: 16px; --sp-6: 24px; }
 ${DARK_VARS}
@@ -121,7 +121,6 @@ body.panel-open #archive { padding-right: calc(18px + var(--panel-w)); }
 #board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(9.375rem, 1fr)) minmax(9.375rem, 1.15fr); grid-template-rows: 1px minmax(0, 1fr); gap: 0; padding: var(--sp-3) 0 var(--sp-5); overflow-x: auto; overflow-y: hidden; position: relative; }
 .spine { grid-column: 1 / -1; grid-row: 1; background: var(--hairline); position: relative; overflow: hidden; }
 /* #369 the sweep is one gradient element on the spine's own hairline, so the loop has one animation node the poll never touches */
-.spine::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 20%; background: linear-gradient(90deg, transparent, var(--link), transparent); }
 /* a disabled integration stage narrows its own track to a strip; the other six keep the floor */
 #board.off-integration { grid-template-columns: repeat(5, minmax(9.375rem, 1fr)) 48px minmax(9.375rem, 1.15fr); }
 /* relation lines: absolute in the relative board, so the overlay scrolls with the content; z-index 1
@@ -141,11 +140,12 @@ stays readable; the active card and its rimmed blockers keep full strength */
 .station { --i: 0; grid-row: 2; display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; min-height: 0; }
 .station + .station { border-left: 1px solid var(--hairline); }
 .st-head { display: flex; align-items: baseline; gap: 8px; padding: var(--sp-2) var(--sp-4) var(--sp-3); position: relative; flex: 0 0 auto; background: var(--canvas); z-index: 2; }
-.st-head h2 { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: 0.8125rem; font-weight: 500; text-transform: uppercase; letter-spacing: .05em; margin: 0; color: var(--dim); display: flex; align-items: center; gap: 6px; }
-/* the tick crosses the shared hairline; only a station with a running agent accents it and its label */
-.st-head::before { content: ""; position: absolute; left: 0; top: -9px; width: 1px; height: 18px; background: var(--hairline); }
-.station.live .st-head::before { background: var(--ac); box-shadow: 0 0 6px var(--ac); }
-.station.live .st-head h2 { color: var(--ac); }
+.st-head h2 { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: 0.8125rem; font-weight: 500; text-transform: uppercase; letter-spacing: .05em; margin: 0; color: var(--ac-t, var(--dim)); display: flex; align-items: center; gap: 6px; }
+/* the tick crosses the shared hairline in the station's own tint; a running agent adds the glow */
+.st-head::before { content: ""; position: absolute; left: 0; top: -9px; width: 1px; height: 18px; background: var(--ac); }
+.station.live .st-head::before { box-shadow: 0 0 6px var(--ac); }
+/* #410 the head glow: one bar per head, on the shared hairline, blending the previous column's tint into its own so the walk reads as one transition */
+.st-head::after { content: ""; position: absolute; left: 0; top: -1px; width: 20%; height: 1px; opacity: 0; background: linear-gradient(90deg, transparent, var(--ac-prev), var(--ac), transparent); }
 /* #385 the scrollbar inset would push a scrolled card off the separator, so the wheel, the trackpad and the keyboard do the scrolling */
 .station .cards { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; scrollbar-width: none; }
 .station .cards::-webkit-scrollbar { width: 0; }
@@ -170,7 +170,7 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
    it wraps so a narrow station never clips the live cell */
 .c-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.75rem; }
 .held { border: 1px dashed var(--dim); color: var(--dim); padding: 0 4px; font-size: 0.6875rem; font-family: ${MONO}; }
-.c-live { margin-left: auto; color: var(--ac); font-family: ${MONO}; font-size: 0.75rem; white-space: nowrap; font-variant-numeric: tabular-nums; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.c-live { margin-left: auto; color: var(--ac-t, var(--ac)); font-family: ${MONO}; font-size: 0.75rem; white-space: nowrap; font-variant-numeric: tabular-nums; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ruler { display: inline-flex; gap: 2px; align-items: center; }
 .ruler i { display: block; width: 8px; height: 3px; background: var(--hairline); }
 .ruler i.on { background: currentColor; }
@@ -380,7 +380,7 @@ so no historical line ever shines; because the color: transparent sits inside th
 an un-animated block can never strand invisible text, and the old reduced-motion restores are gone */
 /* one accent per stage, in pipeline order; the waiting and working states of a stage share it */
 /* #366 each station points --ac at its stage token, generated from the station table so the mapping lives in one place */
-${STATIONS.map((s) => `.s-${s.id} { --ac: var(--accent-${s.accent}); --ac-t: var(--accent-${s.accent}-text); }`).join("\n")}
+${STATIONS.map((s, i) => `.s-${s.id} { --ac: var(--accent-${s.accent}); --ac-t: var(--accent-${s.accent}-text); --ac-prev: var(--accent-${STATIONS[Math.max(0, i - 1)].accent}); }`).join("\n")}
 /* #370 the phone layout, one breakpoint for every surface and media queries only: the spine stacks
    vertically in pipeline order and the hairline becomes the connector on the left edge. The root
    keeps the 16px base, so the type scale needs no mobile override except the station count */
@@ -410,12 +410,13 @@ and the five desktop rows drop, while the live mark and the number stay */
 .card .c-meta { display: none; }
 .card .card-tokens { display: inline-block; margin-left: auto; font-variant-numeric: tabular-nums; }
 .station .cards > .card:last-child { border-bottom: 0; }
-.st-head { align-items: baseline; padding: 14px 12px 0; border-top: 1px solid var(--hairline); }
+.st-head { align-items: baseline; padding: 14px 12px 0; border-top: 1px solid color-mix(in srgb, var(--ac) 55%, transparent); }
+.station.live .st-head { border-top-color: var(--ac); }
 .st-head h2 { font-size: 0.875rem; }
 .st-head::before { left: 1px; top: 23px; width: 7px; height: 1px; }
 /* #403 the phone head rules its column off and carries the desktop sweep as a glow on that rule; the
    motion layer starts it at the station's own slot, so the wave walks down the stack */
-.st-head::after { content: ""; position: absolute; left: 0; top: -1px; width: 20%; height: 1px; opacity: 0; background: linear-gradient(90deg, transparent, var(--link), transparent); }
+.st-head::after { content: ""; position: absolute; left: 0; top: -1px; width: 20%; height: 1px; opacity: 0; background: linear-gradient(90deg, transparent, var(--ac-prev), var(--ac), transparent); }
 .empty { padding: 0 12px; }
 .count { font-size: 0.8125rem; }
 /* #387 the touch floor: a compact control keeps its desktop height and carries an invisible 44px band
@@ -479,18 +480,15 @@ body.filters-open #filters { display: flex; position: fixed; left: 0; right: 0; 
 }
 /* #369 one motion layer: the data-motion attribute on the root decides which loops run, the token
 block above decides how fast, and every ambient rule is opt-in, so a document with no attribute
-paints no ambience and a poll that rewrites a card's content never restarts a loop the spine or the
-dot owns. live adds the breathing dot, the sweep, the 1 px/s progress line and the newest-line shine;
-#377 leaves one mode live and one floor, so the system ask is the only none */
+paints no ambience and a poll that rewrites a card's content never restarts a loop the head or the
+dot owns. live adds the breathing dot, the head glow, the 1 px/s progress line and the newest-line
+shine; #377 leaves one mode live and one floor, so the system ask is the only none */
 @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
-@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(500%); } }
 /* #403 the head glow: one cycle covers every station, one slot per station, and the boundaries are 1/7
    of the cycle, so a station added later updates these percentages with the station count */
 @keyframes headWave { 0% { transform: translateX(-100%); opacity: 0; } 1% { opacity: 1; } 13% { opacity: 1; } 14.2857% { transform: translateX(500%); opacity: 0; } 100% { transform: translateX(500%); opacity: 0; } }
 [data-motion="live"] .spin { animation: breathe var(--t-breathe) var(--ease-breathe) infinite; }
 [data-motion="live"] #relations path { animation: dashflow var(--t-breathe) linear infinite; animation-direction: reverse; }
-[data-motion="live"] .spine::after { animation: sweep var(--t-sweep) linear infinite; }
-html.motion-paused .spine::after { animation-play-state: paused; }
 [data-motion="live"] .st-head::after { animation: headWave var(--t-wave) linear infinite; animation-delay: calc(var(--i, 0) * var(--t-slot)); }
 html.motion-paused .st-head::after { animation-play-state: paused; }
 [data-motion="live"] .card.running { --p: 0; }

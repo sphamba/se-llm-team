@@ -195,7 +195,7 @@ export interface Station {
 	empty: string;
 }
 export const STATIONS: readonly Station[] = [
-	{ id: "queue", label: "Backlog", states: ["backlog"], accent: "todo", empty: "nothing waiting to start" },
+	{ id: "queue", label: "Backlog", states: ["backlog"], accent: "backlog", empty: "nothing waiting to start" },
 	{ id: "work", label: "Develop", states: ["to-do", "doing"], accent: "todo", empty: "no agent is working" },
 	{ id: "review", label: "Review", states: ["to-review", "reviewing"], accent: "review", empty: "nothing waiting for a reviewer" },
 	{ id: "merge", label: "Merge", states: ["to-merge", "merging"], accent: "merge", empty: "nothing waiting to merge" },

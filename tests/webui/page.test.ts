@@ -856,7 +856,7 @@ for (const fn of [encodeFilters, decodeFilters, emptyFilters, filtersActive, mat
 // effects animate a property other than transform or opacity. #377 drops the live/purposeful/none
 // selector: live is the default and the system preference the only override
 const motionCss = themeCss;
-for (const tok of ["--t-fast: 120ms", "--t-base: 180ms", "--t-slow: 240ms", "--t-breathe: 2s", "--t-sweep: 6s", "--ease-enter:", "--ease-exit:"])
+for (const tok of ["--t-fast: 120ms", "--t-base: 180ms", "--t-slow: 240ms", "--t-breathe: 2s", "--ease-enter:", "--ease-exit:"])
 	assert.ok(tokenBlocks[0].includes(tok), `the light :root block declares ${tok.split(":")[0]}, the one motion token set`);
 const stripVars = (s: string) => s.replace(/var\(--[\w-]+(?:,[^)]*)?\)/g, "");
 const ruleBodies = [...motionCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2] }));
@@ -871,13 +871,15 @@ assert.deepEqual([...new Set(kfLines.flatMap(kfProps).filter((p) => p !== "opaci
 assert.equal((page.match(/@media \(prefers-reduced-motion: reduce\)/g) ?? []).length, 1, "the stylesheet keeps exactly one reduced-motion block");
 assert.equal((page.match(/prefers-reduced-motion/g) ?? []).length, 2, "the page names the reduced-motion ask once in the stylesheet and once in the policy store");
 assert.match(motionCss, /\[data-motion="none"\][^{]*\{[^}]*animation: none !important[^}]*transition: none !important/, "the none policy disables every animation and transition, the inlined FLIP travel included");
-assert.match(motionCss, /\[data-motion="live"\] \.spine::after \{[^}]*animation: sweep var\(--t-sweep\) linear infinite/, "one gradient element carries the spine sweep at 6 s linear");
+const desktopSheet = motionCss.slice(0, motionCss.indexOf(`@media (max-width: ${MOBILE_MAX}px)`));
+assert.ok(!/\.spine::after/.test(motionCss) && !/@keyframes sweep\b/.test(motionCss) && !declared.has("--t-sweep"), "the spine keeps its hairline and no sweep: the band, its keyframe and its 6 s token are gone");
+assert.match(desktopSheet, /\.st-head::after \{[^}]*top: -1px/, "the head glow rides the desktop sheet, out of the phone query, so both breakpoints carry one");
 assert.match(motionCss, /\[data-motion="live"\] \.spin \{[^}]*animation: breathe var\(--t-breathe\) var\(--ease-breathe\)/, "the running dot breathes over the 2 s token");
 assert.match(motionCss, /\[data-motion="live"\] \.card\.running::after \{[^}]*transform: scaleX\(var\(--p\)\)/, "the progress line advances by a scale transform, never a width");
 assert.ok(!/\.running::after \{[^}]*width: calc/.test(motionCss), "the progress line never animates its width");
-assert.ok(motionCss.includes("animation-play-state: paused") && page.includes('classList.toggle("motion-paused", document.hidden)'), "the sweep pauses while the tab is hidden and resumes on visibilitychange");
+assert.ok(motionCss.includes("animation-play-state: paused") && page.includes('classList.toggle("motion-paused", document.hidden)'), "the head glow pauses while the tab is hidden and resumes on visibilitychange");
 assert.match(motionCss, /\[data-motion="live"\] #c-text > \.pulse/, "the newest streaming line shines only in live mode, so historical lines never do");
-assert.equal((page.match(/buildShell\(board, document\)/g) ?? []).length, 1, "the shell, and with it the spine the sweep rides, is built once, so a poll never recreates it");
+assert.equal((page.match(/buildShell\(board, document\)/g) ?? []).length, 1, "the shell, and with it the heads the glow rides, is built once, so a poll never recreates it");
 assert.ok(readFileSync(new URL("../../src/webui/board.ts", import.meta.url), "utf8").includes('el.classList.toggle("running"'), "the card pass marks the running card every poll on the node it keeps");
 assert.ok(page.includes('el.style.setProperty("--p"') && page.includes("syncTicker") && page.includes("polledAt"), "the page runs the 1 px/s tick and reseeds the progress from the authoritative poll value");
 // #377 the selector is gone: no control, no mode list, no stored choice, no cycle handler
@@ -912,7 +914,7 @@ assert.match(spinRule.body, /width: 7px; height: 7px/, "the liveness mark is a 7
 assert.match(spinRule.body, /border: 0;/, "the mark paints no ring frame");
 assert.match(spinRule.body, /border-radius: 50%;/, "the mark has round corners");
 assert.match(spinRule.body, /background: var\(--ac-t, var\(--ac, var\(--link\)\)\)/, "the mark fills from the station accent's -text step, falling back to the link colour in the panel");
-assert.match(motionCss, /\.s-work \{ --ac: var\(--accent-todo\); --ac-t: var\(--accent-todo-text\); \}/, "each station points --ac-t at its accent's contrast-safe step");
+assert.match(motionCss, /\.s-work \{ --ac: var\(--accent-todo\); --ac-t: var\(--accent-todo-text\); --ac-prev: var\(--accent-backlog\); \}/, "each station points --ac-t at its accent's contrast-safe step and --ac-prev at the station before it");
 assert.match(motionCss, /\.st-head h2 \.spin \{ margin-right: 0; \}/, "the head's flex gap owns the space, so the dot drops its own right margin");
 assert.match(motionCss, /@keyframes breathe \{ 0%, 100% \{ opacity: 1; \} 50% \{ opacity: \.4; \} \}/, "the pulse fades on opacity alone, so the circle never changes size");
 assert.ok(!/@keyframes spin /.test(motionCss) && !declared.has("--t-spin"), "the dead rotate keyframes and its token are gone");
@@ -926,6 +928,23 @@ const contrastOnCanvas = (block: string) => {
 	return (hi + 0.05) / (lo + 0.05);
 };
 assert.ok(contrastOnCanvas(tokenBlocks[0]) >= 3 && contrastOnCanvas(tokenBlocks[1]) >= 3, "the doing square clears the 3:1 floor that a mark carrying state needs, in both themes");
+// #410 the ladder: the seven dark accents share one OKLCH lightness, so a later hue change that misses it fails
+const oklchL = (hex: string) => {
+	const lin = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+	const [r, g, b] = [1, 3, 5].map((i) => lin(parseInt(hex.slice(i, i + 2), 16) / 255));
+	const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+	const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+	const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+	return 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
+};
+const ladder = ["backlog", "todo", "review", "merge", "live", "integration", "done"].map((n) => oklchL(themeTok(tokenBlocks[1], `--accent-${n}`)));
+assert.ok(Math.max(...ladder) - Math.min(...ladder) <= 0.01, `the seven dark accents step one OKLCH lightness within 0.01, so the ladder reads by hue alone: ${ladder.map((v) => v.toFixed(3)).join(" ")}`);
+const contrastOnRaised = (name: string) => {
+	const [hi, lo] = [lumOf(themeTok(tokenBlocks[0], name)), lumOf(themeTok(tokenBlocks[0], "--raised"))].sort((x, y) => y - x);
+	return (hi + 0.05) / (lo + 0.05);
+};
+const lightTexts = [...["backlog", "todo", "review", "merge", "live", "integration", "done"].map((n) => `--accent-${n}-text`), "--error-text"];
+assert.deepEqual(lightTexts.filter((n) => contrastOnRaised(n) < 4.5), [], "every light -text step clears 4.5:1 on the raised panel, so a tinted label reads");
 
 // 25. #370 the phone layout: one breakpoint constant, media queries only, the same nodes reused as
 // sheets, and the two viewport hacks gone. The live geometry (the 44px rects, the three viewports,
@@ -1071,16 +1090,17 @@ assert.match(flushRule(".station + .station"), /margin-top: 16px/, "the phone co
 assert.match(flushRule(".station .cards > .card:last-child"), /border-bottom: 0/, "a column's last card drops its line, so the seam paints one hairline and not two touching ones");
 assert.match(flushRule(".card"), /padding: 10px 12px 12px/, "the card's top row gets the same frame as its bottom");
 
-// #403 the phone columns: each head rules the column off and carries the desktop sweep as a glow that
-// walks the stack, one station per slot, on the same motion gates as the spine
-assert.match(flushRule(".st-head"), /border-top: 1px solid var\(--hairline\)/, "the phone head rules its column off, so the next column starts at a visible line");
+// #410 the phone columns: each head rules the column off in its own tint and carries a glow that walks
+// the ladder, one station per slot, on the same motion gates as the desktop head
+assert.match(flushRule(".st-head"), /border-top: 1px solid color-mix\(in srgb, var\(--ac\) 55%, transparent\)/, "the phone head rules its column off in the station tint, so the next column starts at a tinted line");
 const headGlow = flushRule(".st-head::after");
-assert.ok(headGlow.includes("background: linear-gradient(90deg, transparent, var(--link), transparent)"), "the phone head glow paints the desktop spine gradient on that rule");
+assert.ok(headGlow.includes("background: linear-gradient(90deg, transparent, var(--ac-prev), var(--ac), transparent)"), "the glow enters in the previous column's tint and leaves in its own, so the walk reads as one transition");
 assert.match(headGlow, /opacity: 0/, "the glow paints nothing before its slot, so no head shows a resting bar on load or with motion off");
 assert.match(headGlow, /top: -1px/, "the glow sits on the head's own top rule, not inside the head");
 const waveRule = motionCss.match(/\[data-motion="live"\] \.st-head::after \{([^}]*)\}/)?.[1] ?? "";
 assert.match(waveRule, /animation: headWave var\(--t-wave\) linear infinite/, "the head glow loops the wave keyframe over the token that covers one slot per station");
 assert.match(waveRule, /animation-delay: calc\(var\(--i, 0\) \* var\(--t-slot\)\)/, "each station waits its own slot before the glow: a negative delay would light column one, then the last column, then walk back up");
+assert.ok(!phoneBoard.includes('[data-motion="live"] .st-head::after') && /\.st-head::after/.test(desktopSheet), "the wave rule carries no phone wrapper, so one animation rides the glow on both breakpoints");
 assert.match(motionCss, /html\.motion-paused \.st-head::after \{[^}]*animation-play-state: paused/, "a hidden tab freezes the head glow with the spine");
 assert.match(motionCss, /\[data-motion="none"\] \*::after[^{]*\{[^}]*animation: none/, "the none policy already covers the head glow pseudo element");
 
