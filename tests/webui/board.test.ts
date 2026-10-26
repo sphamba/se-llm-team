@@ -758,15 +758,23 @@ const mid379 = groupRuns([{ role: "developer", handle: "t.dev.0" }], [{ role: "d
 assert.deepEqual(mid379.unmatched.map((d) => d.handle), ["t.doctor.dev.0.doctor"], "only the trailing .doctor suffix is stripped, so a handle with doctor mid-string never joins a run");
 assert.equal(mid379.groups[0].doctor, null, "a mid-string doctor leaves its run group empty");
 
-// #413 the card's bottom line is a progress curve on a 10-minute half-life, so a long run still
-// shows room ahead and the line never fills
-assert.equal(PROGRESS_HALF_S, 600, "the half-life is ten minutes of run time");
+// #424 the card's bottom line is a straight ramp to the half point, then the hyperbola 1 - h/(2t)
+// that is tangent to it there, so a long run still shows room ahead and the line never fills
+assert.equal(PROGRESS_HALF_S, 600, "the half point is ten minutes of run time");
 assert.equal(progressOf(0), 0, "the line starts empty");
-assert.equal(progressOf(300), 1 - Math.pow(2, -0.5), "five minutes paints about 29 percent of the line, slower than the old curve");
-assert.equal(progressOf(600), 0.5, "ten minutes paints half the line");
+assert.equal(progressOf(300), 0.25, "the ramp is linear: five minutes paints a quarter of the line");
+assert.equal(progressOf(600), 0.5, "ten minutes paints half the line, where the ramp and the hyperbola join");
 assert.equal(progressOf(1200), 0.75, "twenty minutes paints three quarters");
-assert.equal(progressOf(1800), 0.875, "every extra half-life halves the empty line, as the formula says: thirty minutes paints seven eighths");
-const elapsed413 = [0, 60, 300, 600, 1200, 2400, 3600];
+assert.equal(progressOf(2400), 0.875, "forty minutes paints seven eighths");
+assert.equal(progressOf(4800), 0.9375, "eighty minutes paints fifteen sixteenths");
+const joinRamp = PROGRESS_HALF_S / (2 * PROGRESS_HALF_S);
+const joinCurve = 1 - PROGRESS_HALF_S / (2 * PROGRESS_HALF_S);
+assert.equal(progressOf(PROGRESS_HALF_S), joinRamp, "the ramp branch paints half at the join");
+assert.equal(progressOf(PROGRESS_HALF_S), joinCurve, "the hyperbola branch paints the same half at the join, so the line is continuous");
+const stepBefore = progressOf(PROGRESS_HALF_S) - progressOf(PROGRESS_HALF_S - 1);
+const stepAfter = progressOf(PROGRESS_HALF_S + 1) - progressOf(PROGRESS_HALF_S);
+assert.ok(Math.abs(stepAfter - stepBefore) < 1e-5, `the join has no corner: the step after ${stepAfter} matches the step before ${stepBefore}`);
+const elapsed413 = [0, 60, 300, 600, 1200, 2400, 3600, 4800, 9600];
 assert.ok(elapsed413.every((s) => progressOf(s) < 1), "the line never fills, however long the run");
 assert.deepEqual(elapsed413.map(progressOf), [...elapsed413.map(progressOf)].sort((a, b) => a - b), "a shorter elapsed time never paints more than a longer one");
 

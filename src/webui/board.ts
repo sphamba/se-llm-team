@@ -90,11 +90,15 @@ export function archRowHtml(t, date) {
 	);
 }
 
-// #413 the card's bottom line is an exponential progress curve on a 10-minute half-life: p never
-// reaches 1, so a long run still shows room ahead. t is the live agent's elapsed seconds
+// #424 the card's bottom line: a straight ramp to the half point, then the hyperbola 1 - h/(2t),
+// tangent to it there, so the line paints half at ten minutes, three quarters at twenty, seven
+// eighths at forty and fifteen sixteenths at eighty, and never fills. t is the live agent's
+// elapsed seconds
 export const PROGRESS_HALF_S = 600;
 export function progressOf(seconds) {
-	return Math.max(0, 1 - Math.pow(2, -(seconds || 0) / PROGRESS_HALF_S));
+	const t = Math.max(0, seconds || 0);
+	if (t <= PROGRESS_HALF_S) return t / (2 * PROGRESS_HALF_S);
+	return 1 - PROGRESS_HALF_S / (2 * t);
 }
 
 // the open detail card's poll cadence (000142): a live agent's tokens and duration advance with
