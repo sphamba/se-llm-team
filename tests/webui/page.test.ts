@@ -11,6 +11,7 @@ import { startHub } from "../../src/hub.ts";
 import { agentLabel, agentRowSig, agentStatsText, ARCHIVE_PAGE, archivePage, archiveTasks, boardOf, curve, decodeFilters, doctorCol, emptyFilters, encodeFilters, FILTER_DEBOUNCE, filterReason, filtersActive, filtersCount, filterTasks, fmtDur, fmtTokens, isHeld, logFixups, matchesFilters, mergeBoards, MOBILE_MAX, PALETTE_MAX, paletteResults, refreshMs, syncAgentStats, syncDoctorCards, syncStatsLine } from "../../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the logpane module
 import { esc } from "../../src/webui/logpane.ts";
+import * as filtersMod from "../../src/webui/filters.ts";
 
 const root = mkdtempSync(join(tmpdir(), "webui-page-test-"));
 const home = mkdtempSync(join(tmpdir(), "webui-page-home-"));
@@ -41,6 +42,11 @@ assert.equal((page.match(/<style>/g) ?? []).length, 1, "the page serves exactly 
 assert.equal((page.match(/<script>/g) ?? []).length, 1, "the page serves exactly one <script> block");
 const script = page.match(/<script>([\s\S]*?)<\/script>/)![1];
 assert.doesNotThrow(() => new Function(script), "the extracted client script parses");
+// #375 the filter helpers reach the client as interpolated source, so a helper the script calls
+// must be a declaration the page emits: a dropped interpolation throws on boot, before any card
+const filterFns = Object.entries(filtersMod).filter(([, v]) => typeof v === "function").map(([k]) => k);
+const scriptFns = new Set([...script.matchAll(/function ([A-Za-z0-9_$]+)\(/g)].map((m) => m[1]));
+assert.deepEqual(filterFns.filter((n) => new RegExp(`(^|[^\\w$.])${n}\\(`).test(script) && !scriptFns.has(n)), [], "the served script defines every filter helper it calls, so syncFilterToggle cannot throw on boot");
 // the hub shell keeps the element ids the client addresses
 const sheetIds = ["theme", "hub", "board", "tabs", "updated", "panel", "p-title", "p-facts", "p-prio", "p-actions", "p-runs", "p-body", "p-history", "console", "c-handle", "c-head", "c-title", "c-meta", "c-log", "c-text"];
 for (const id of sheetIds) assert.ok(page.includes(`id="${id}"`), `the page keeps #${id}, an element the client addresses`);

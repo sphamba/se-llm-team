@@ -234,6 +234,7 @@ ${emptyFilters}
 ${encodeFilters}
 ${decodeFilters}
 ${filtersActive}
+${filtersCount}
 ${matchesFilters}
 ${filterTasks}
 ${filterReason}
