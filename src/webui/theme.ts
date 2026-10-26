@@ -424,7 +424,8 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
 .m-action::after, .seg::after, .toggle::after, .c-wait::after, #c-text summary::after, #theme::after, #f-toggle::after, .f-chip::after, #p-close::after, #c-close::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; margin-top: -22px; }
 /* the neighbours still sit at least 8px apart */
 #p-actions, .f-group, #tabs, .c-top, .c-meta { gap: 8px; }
-/* #405 a wrapped chip row sits two band overhangs apart, so two chips' bands touch and never overlap */
+/* #405 a wrapped chip row sits two band overhangs apart, so two chips' bands touch and never overlap;
+   the filter sheet that stacks the chip groups and the loose chips uses the same distance */
 .f-group { gap: 12px; }
 /* #373 the popover becomes a full width block under its card, never a floating panel */
 #waits-pop { min-width: 0; max-width: none; }
@@ -459,7 +460,7 @@ body { --console-h-touch: calc(92px + env(safe-area-inset-bottom)); }
 #f-toggle[aria-expanded="true"] { border-color: var(--link); color: var(--link); }
 #f-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--link); color: var(--canvas); font-family: ${MONO}; font-size: 0.75rem; line-height: 20px; text-align: center; }
 #filters { display: none; }
-body.filters-open #filters { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 7; flex-direction: column; align-items: stretch; gap: 10px; max-height: 80vh; overflow-y: auto; padding: 14px 12px calc(14px + env(safe-area-inset-bottom)); background: var(--panel); border-top: 1px solid var(--hairline); border-radius: 12px 12px 0 0; }
+body.filters-open #filters { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 7; flex-direction: column; align-items: stretch; gap: 12px; max-height: 80vh; overflow-y: auto; padding: 14px 12px calc(14px + env(safe-area-inset-bottom)); background: var(--panel); border-top: 1px solid var(--hairline); border-radius: 12px 12px 0 0; }
 #f-q { flex: 0 0 auto; min-width: 0; min-height: 44px; font-size: 1rem; }
 .f-chip { min-height: var(--ctl-h); }
 #f-clear { margin-left: 0; }

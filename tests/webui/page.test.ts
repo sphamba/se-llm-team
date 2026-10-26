@@ -1047,7 +1047,9 @@ assert.match(phoneSheet, /:root \{ --ctl-h: 32px; \}/, "the phone block names th
 assert.deepEqual(ctlHosts.filter((h) => !/min-height: var\(--ctl-h\)/.test(sheetRule(h))), [], "every compact control takes the one --ctl-h height, so the theme toggle, the filter button, the chips and the close buttons share one box");
 assert.deepEqual(["#p-close", "#c-close"].filter((h) => !/min-width: var\(--ctl-h\)/.test(sheetRule(h))), [], "the two close buttons stay square at the compact height");
 assert.deepEqual(sheetRules.filter((r) => /min-height: 44px/.test(r.body) && bandHosts.some((h) => selParts(r.sel).includes(h))).map((r) => r.sel), [], "no compact control keeps a real 44px height, so the 44px floor comes from the band alone");
-assert.equal(Number(bandRule!.body.match(/height: (\d+)px/)![1]) - Number(phoneSheet.match(/--ctl-h: (\d+)px/)![1]), Number(sheetRules.find((r) => r.sel === ".f-group")!.body.match(/gap: (\d+)px/)![1]), "the chip rows sit two band overhangs apart, so two chips' bands touch and never overlap");
+const minChipGap = Number(bandRule!.body.match(/height: (\d+)px/)![1]) - Number(phoneSheet.match(/--ctl-h: (\d+)px/)![1]);
+assert.equal(Number(sheetRules.find((r) => r.sel === ".f-group")!.body.match(/gap: (\d+)px/)![1]), minChipGap, "the chip rows sit two band overhangs apart, so two chips' bands touch and never overlap");
+assert.ok(Number(sheetRule("body.filters-open #filters").match(/gap: (\d+)px/)![1]) >= minChipGap, "the filter sheet spaces the chip groups and the loose chips by the same two band overhangs, so a chip's band never reaches into the band of the next group either");
 for (const dead of [".run-row", ".arch-row", ".card"]) {
 	assert.ok(!selParts(bandRule!.sel).includes(dead), `${dead} takes no band, so a stacked row's band never covers the row below`);
 	assert.ok(!selParts(positionRule!.sel).includes(dead), `${dead} carries no band anchor`);
