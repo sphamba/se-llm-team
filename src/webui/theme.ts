@@ -253,7 +253,6 @@ names the reason where the station is wide enough */
 .run-row.agent-sub::before, .run-row.agent-doctor::before { content: ""; position: absolute; left: 7px; top: 0; bottom: 0; width: 1px; background: var(--guide, var(--hairline)); }
 .run-row.agent-sub::after, .run-row.agent-doctor::after { content: ""; position: absolute; left: 7px; top: 50%; width: 6px; height: 1px; background: var(--guide, var(--hairline)); }
 .run-note { padding: 4px 2px 4px var(--sp-5); color: var(--dim); font-size: 0.75rem; }
-.run-row.agent-sub .row-role { color: var(--dim); }
 .run-row.agent-row-active { background: color-mix(in srgb, var(--link) 12%, var(--panel)); }
 .run-row.agent-dead { color: var(--error-text); }
 .agent-doctor { color: var(--accent-done-text); }
@@ -286,13 +285,13 @@ body.panel-open #board { padding-right: var(--panel-w); }
 #p-handle { display: none; }
 #p-close { flex: 0 0 auto; border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.8125rem; }
 #p-close:hover { background: var(--raised); }
-#p-facts { font-size: 0.8125rem; margin-bottom: 10px; }
+#p-facts, #p-prio-wrap { font-size: 0.8125rem; }
+#p-facts { margin-bottom: 10px; }
 #p-facts div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 2px 0; }
-#p-facts .k { min-width: 84px; color: var(--dim); }
+#p-facts .k, #p-prio-wrap .k { min-width: 84px; color: var(--dim); }
 /* the priority control sits on its label's line, aligned with the facts rows above, and is a
    four-option segmented group: the active option takes its own hue */
 #p-prio-wrap { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-bottom: 6px; }
-#p-prio-wrap .k { min-width: 84px; color: var(--dim); }
 #p-prio { display: flex; }
 .seg { border: 1px solid var(--hairline); background: var(--panel); color: var(--dim); padding: 2px 8px; font-size: 0.75rem; font-family: ${MONO}; cursor: pointer; }
 .seg + .seg { border-left: 0; }

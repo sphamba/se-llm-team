@@ -1289,4 +1289,11 @@ assert.ok(!phoneBoard.includes('[data-motion="live"] .st-head::after') && /\.st-
 assert.match(motionCss, /html\.motion-paused \.st-head::after \{[^}]*animation-play-state: paused/, "a hidden tab freezes the head glow with the spine");
 assert.match(motionCss, /\[data-motion="none"\] \*::after[^{]*\{[^}]*animation: none/, "the none policy already covers the head glow pseudo element");
 
+// #426 the priority label sits on the facts row's size, so the two rows cannot drift apart
+const factsSizeRule = themeCss.match(/#p-facts, #p-prio-wrap \{([^}]*)\}/)?.[1] ?? "";
+assert.match(factsSizeRule, /font-size: 0\.8125rem/, `the facts row and the priority row share one 0.8125rem size rule, so the priority label is not one step larger than complexity: ${factsSizeRule}`);
+assert.ok(!/(?:^|\})\s*#p-prio-wrap \{[^}]*font-size/.test(themeCss), "the priority row carries no size of its own, so the shared facts size is the only one");
+// #426 a subagent name takes its run's role accent, exactly like its parent
+assert.ok(!/\.run-row\.agent-sub \.row-role/.test(themeCss), "no rule dims a sub row's role name, so the Sub-developer name keeps the developer accent");
+
 console.log("page.test.ts: all assertions passed");
