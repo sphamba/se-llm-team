@@ -865,7 +865,7 @@ assert.equal((themeSrc.match(/export const MOBILE_MAX = \d+;/g) ?? []).length, 1
 const phoneQueries = (themeCss.match(/@media \(max-width: 700px\)/g) ?? []).length;
 assert.ok(phoneQueries >= 4, "the phone layer is more than one rule");
 assert.equal(phoneQueries, (themeSrc.match(/@media \(max-width: \$\{MOBILE_MAX\}px\)/g) ?? []).length, "every phone media query interpolates that one constant, never a hand-written width");
-assert.deepEqual([...new Set([...themeCss.matchAll(/@media \(max-width: (\d+)px\)/g)].map((m) => m[1]))].sort(), ["1099", String(MOBILE_MAX)].sort(), "the sheet carries the tablet floor and one phone breakpoint, nothing else");
+assert.deepEqual([...new Set([...themeCss.matchAll(/@media \(max-width: (\d+)px\)/g)].map((m) => m[1]))].sort(), [String(MOBILE_MAX)], "the sheet carries one phone breakpoint and no hand-picked tablet floor");
 assert.ok(page.includes(`const MOBILE_MAX = ${MOBILE_MAX}`), "the client reads the same constant, so the CSS switch and the JS check cannot drift");
 // the vertical spine: the stations stack in pipeline order, the hairline becomes the left connector
 assert.match(themeCss, /#board \{[^}]*flex-direction: column/, "the phone board stacks its stations instead of scrolling them sideways");

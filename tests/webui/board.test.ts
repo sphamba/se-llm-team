@@ -125,8 +125,10 @@ assert.ok(page.includes(`const PRIORITY_RANK = ${JSON.stringify(PRIORITY_RANK)}`
 
 // layout: a seven-track grid, done slightly wider, the station body as the vertical scroller
 assert.match(themeCss, /#board \{[^}]*display: grid/, "the board is a grid, not a column flex row");
-assert.match(themeCss, /#board \{[^}]*grid-template-columns: repeat\(6, minmax\(0, 1fr\)\) minmax\(0, 1\.15fr\)/, "six equal station tracks and a slightly wider done track");
-assert.match(themeCss, /@media \(max-width: 1099px\) \{[^}]*#board \{[^}]*minmax\(150px, 1fr\)/, "below 1100px the board alone scrolls, with a 150px station floor");
+assert.match(themeCss, /#board \{[^}]*grid-template-columns: repeat\(6, minmax\(9\.375rem, 1fr\)\) minmax\(9\.375rem, 1\.15fr\)/, "six equal station tracks and a slightly wider done track, each with the same rem floor at every width");
+assert.ok(!/@media \(max-width: 1099px\)/.test(themeCss), "no hand-picked breakpoint carries the floor: the base template holds it at every width");
+// #374 the body base scales the type with the viewport and stops at 1rem
+assert.match(themeCss, /body \{[^}]*font-size: clamp\(0\.875rem, 0\.35vw \+ 0\.55rem, 1rem\)/, "the body base clamps 14px to 16px, so a wide screen reads one step larger");
 assert.match(themeCss, /\.spine \{[^}]*grid-column: 1 \/ -1/, "the hairline spans every station as one grid item");
 assert.ok(!/\.st-head[^{]*\{[^}]*border-top/.test(themeCss), "the hairline is not a per-station top border");
 assert.match(themeCss, /\.station \.cards \{[^}]*overflow-y: auto/, "vertical spill scrolls inside each station");
@@ -451,7 +453,8 @@ assert.ok(stations.integration.empty.style.display === "" && shown("integration"
 assert.equal(stations.integration.count.textContent, "0", "an empty station still shows its count");
 
 // 000077/000366 ordering: priority first inside every station, then newest update first, the
-// stable sort keeping the payload's task-number order on equal keys; a held task pins above all
+// stable sort keeping the payload's task-number order on equal keys; a held task pins above all.
+// #374 the done station alone sorts by newest update, so it answers "what just landed"
 const ordered = [
 	{ file: "000001_a.md", name: "a", priority: "low", state: "backlog", updated: 100 },
 	{ file: "000002_b.md", name: "b", priority: "critical", state: "to-do", updated: 1 },
@@ -467,8 +470,15 @@ sync(ordered, new Set(["queue", "work", "review", "done"]));
 assert.deepEqual(shown("queue"), ["000002_b.md", "000001_a.md"], "the queue station orders its two states as one list, priority first");
 assert.deepEqual(shown("work"), ["000004_d.md", "000003_c.md"], "equal priority falls back to the newest update");
 assert.deepEqual(shown("review"), ["000005_e.md", "000007_g.md", "000006_f.md"], "the review station interleaves its two states by priority, then recency");
-assert.deepEqual(shown("done"), ["000008_h.md", "000009_i.md"], "done keeps the station order too, so the fold hides the lowest priority first");
+assert.deepEqual(shown("done"), ["000009_i.md", "000008_h.md"], "done shows the most recent finish first, whatever its priority");
 assert.deepEqual(sortStation(ordered.filter((t) => t.state === "done")).map((t) => t.file), ["000008_h.md", "000009_i.md"], "the station order helper is exported for the page's beyond-fold fetch");
+// #374 Done answers "what just landed": the recency flag puts a fresh low task above an old critical one
+const recency = [
+	{ file: "000020_m.md", name: "m", priority: "critical", state: "done", updated: 100 },
+	{ file: "000021_n.md", name: "n", priority: "low", state: "done", updated: 900 },
+];
+assert.deepEqual(sortStation([...recency], { byRecency: true }).map((t) => t.file), ["000021_n.md", "000020_m.md"], "the done station puts the most recently updated task first, whatever its priority");
+assert.deepEqual(sortStation([...recency]).map((t) => t.file), ["000020_m.md", "000021_n.md"], "every other station keeps priority first, so an old critical task still leads");
 const heldOrders = [
 	{ file: "000010_j.md", name: "j", priority: "low", state: "to-do", updated: 1, blockedBy: "user" },
 	{ file: "000011_k.md", name: "k", priority: "critical", state: "backlog", updated: 9 },

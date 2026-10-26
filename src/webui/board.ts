@@ -190,8 +190,10 @@ export function waitsOnText(t: Task, all: Task[] = []) {
 
 // the station's rows in board order: a held task pins first, then priority-desc, then update-desc;
 // the sort is stable and the payload arrives in task-number order, so equal keys keep that order.
-// syncBoard and the payload's eager card set share it
-export function sortStation(tasks: Task[]): Task[] {
+// syncBoard and the payload's eager card set share it. #374 the done station passes byRecency, so it
+// answers "what just landed": newest update first, with no priority and no hold (done is never held)
+export function sortStation(tasks: Task[], { byRecency = false }: { byRecency?: boolean } = {}): Task[] {
+	if (byRecency) return tasks.sort((a, b) => b.updated - a.updated);
 	return tasks.sort((a, b) => (isHeld(b) ? 1 : 0) - (isHeld(a) ? 1 : 0) || (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) || b.updated - a.updated);
 }
 
@@ -472,9 +474,10 @@ export function makeStatsQueue(key, fetchStats, applyStats, setTimer = setTimeou
 		pending.push({ project, file, key: k });
 		if (!timer && !busy) timer = setTimer(drain, 0);
 	};
-	// the station's beyond-fold cards, in board order, skipping done cards with known stats
+	// the station's beyond-fold cards, in the same order syncBoard shows them (done by newest
+	// update), skipping done cards with known stats
 	const enqueueStation = (project, tasks, station, visible) => {
-		for (const t of sortStation(tasks.filter((t) => station.states.includes(t.state))).slice(visible)) {
+		for (const t of sortStation(tasks.filter((t) => station.states.includes(t.state)), { byRecency: station.id === "done" }).slice(visible)) {
 			if (t.state === "done" && t.agents) continue;
 			enqueue(project, t.file);
 		}
@@ -493,7 +496,7 @@ export function syncBoard(stations, tasks, expanded, els, make, visible, doc, re
 	const live = new Set();
 	for (const s of STATIONS) {
 		const part = stations[s.id];
-		const inStation = sortStation(tasks.filter((t) => s.states.includes(t.state)));
+		const inStation = sortStation(tasks.filter((t) => s.states.includes(t.state)), { byRecency: s.id === "done" });
 		const shown = expanded.has(s.id) ? inStation : inStation.slice(0, visible);
 		const running = inStation.some((t) => spinnerHtml(t.state) !== "");
 		part.count.textContent = String(inStation.length);

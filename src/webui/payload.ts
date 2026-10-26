@@ -653,11 +653,11 @@ function lightRow(root: string, t: Task) {
 const VISIBLE_CARDS = 5; // the cards each station renders before "+N more" (the client's VISIBLE)
 
 // the files the board renders before "+N more": the first five per station, in the same order
-// syncBoard sorts (a held task first, then priority, then newest update)
+// syncBoard sorts (a held task first, then priority, then newest update; #374 done by newest update)
 function visibleCards(rows: ReturnType<typeof lightRow>[]): Set<string> {
 	const visible = new Set<string>();
 	for (const s of STATIONS) {
-		const inStation = sortStation(rows.filter((r) => s.states.includes(r.state)) as unknown as Task[]);
+		const inStation = sortStation(rows.filter((r) => s.states.includes(r.state)) as unknown as Task[], { byRecency: s.id === "done" });
 		for (const r of inStation.slice(0, VISIBLE_CARDS)) visible.add(r.file);
 	}
 	return visible;

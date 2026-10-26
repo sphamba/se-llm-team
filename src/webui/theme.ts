@@ -41,9 +41,9 @@ ${DARK_VARS}
 @font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 700; font-display: swap; src: url("/fonts/space-grotesk-700.woff2") format("woff2"); }
 @font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("/fonts/ibm-plex-mono-400.woff2") format("woff2"); }
 @font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 500; font-display: swap; src: url("/fonts/ibm-plex-mono-500.woff2") format("woff2"); }
-/* the type scale, 16px base: 2rem count, 1.0625rem title, 0.9375rem task name, 0.875rem body, 0.8125rem station label and log, 0.75rem meta; nothing falls below 0.75rem */
+/* the type scale, 16px base: 2rem count, 1.0625rem title, 0.9375rem task name, 0.875rem body, 0.8125rem station label and log, 0.75rem meta; nothing falls below 0.75rem. #374 the body base clamps 14px to 16px, so a 1920 screen reads one step larger and 1440 stays as it was */
 html, body { height: 100%; }
-body { --panel-w: clamp(28rem, 32vw, 35rem); --console-h: 0px; --chrome: 0px; display: flex; flex-direction: column; margin: 0; background: var(--canvas); color: var(--text); font-family: ${SANS}; font-size: 0.875rem; }
+body { --panel-w: clamp(28rem, 32vw, 35rem); --console-h: 0px; --chrome: 0px; display: flex; flex-direction: column; margin: 0; background: var(--canvas); color: var(--text); font-family: ${SANS}; font-size: clamp(0.875rem, 0.35vw + 0.55rem, 1rem); }
 /* 000147: buttons inherit the page font instead of the UA Arial default */
 button { font-family: inherit; }
 header { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 6px; }
@@ -110,15 +110,13 @@ body.panel-open #archive { padding-right: calc(18px + var(--panel-w)); }
 #p-outside { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; border: 1px solid var(--hairline); border-radius: 6px; padding: 4px 8px; color: var(--dim); font-size: 0.8125rem; }
 #p-outside.hidden { display: none; }
 #p-outside .m-action { margin-left: auto; }
-/* #366 the station spine: seven tracks, six even and done slightly wider; below 1100px the board alone scrolls horizontally with a 150px station floor, so the page never scrolls sideways (000247). The heads share one hairline grid item and each station body scrolls on its own */
-#board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)) minmax(0, 1.15fr); grid-template-rows: 1px minmax(0, 1fr); gap: 0 18px; padding: 10px 18px 18px; overflow-x: auto; overflow-y: hidden; position: relative; }
-@media (max-width: 1099px) { #board { grid-template-columns: repeat(6, minmax(150px, 1fr)) minmax(150px, 1.15fr); } }
+/* #366 the station spine: seven tracks, six even and done slightly wider. #374 the floor is derived, not a breakpoint: 9.375rem per station, so at any width too narrow for seven 150px tracks plus the 18px gaps and side padding the board alone scrolls horizontally (000247) and the page never does. The heads share one hairline grid item and each station body scrolls on its own */
+#board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(9.375rem, 1fr)) minmax(9.375rem, 1.15fr); grid-template-rows: 1px minmax(0, 1fr); gap: 0 18px; padding: 10px 18px 18px; overflow-x: auto; overflow-y: hidden; position: relative; }
 .spine { grid-column: 1 / -1; grid-row: 1; background: var(--hairline); position: relative; overflow: hidden; }
 /* #369 the sweep is one gradient element on the spine's own hairline, so the loop has one animation node the poll never touches */
 .spine::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 20%; background: linear-gradient(90deg, transparent, var(--link), transparent); }
-/* a disabled integration stage narrows its own track to a strip; below 1100px the floor still wins */
-#board.off-integration { grid-template-columns: repeat(5, minmax(0, 1fr)) 48px minmax(0, 1.15fr); }
-@media (max-width: 1099px) { #board.off-integration { grid-template-columns: repeat(5, minmax(150px, 1fr)) 48px minmax(150px, 1.15fr); } }
+/* a disabled integration stage narrows its own track to a strip; the other six keep the floor */
+#board.off-integration { grid-template-columns: repeat(5, minmax(9.375rem, 1fr)) 48px minmax(9.375rem, 1.15fr); }
 /* relation lines: absolute in the relative board, so the overlay scrolls with the content; z-index 1
 paints them above the station bodies and below the z-index-2 task cards, pointer-events none so the
 card clicks pass through. #373 the lines exist only during a reveal: at rest the card marker carries
