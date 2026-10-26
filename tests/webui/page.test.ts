@@ -597,6 +597,11 @@ const rowOf = new Function("esc", "fmtDur", "fmtTokens", "logState", "ROLE_CLS",
 assert.ok(rowOf({ role: "developer", handle: "d", status: "dead", tokens: 0, duration: 0 }, "", "Developer", null).includes("agent-dead"), "a dead run keeps its red marker");
 assert.ok(rowOf({ role: "developer", handle: "d", status: "dead", tokens: 0, duration: 0 }, "", "Developer", null).includes("cross"), "the dead marker is the cross");
 assert.ok(rowOf({ role: "developer", handle: "d", status: "done", tokens: 0, duration: 0 }, "", "Developer", null).includes("agent-past"), "a finished run keeps the past marker");
+// #415 the three marks share one slot, so the role label starts at the same x in every state
+const runMarkOf = (a: any) => ((rowOf({ role: "developer", handle: "d", tokens: 0, duration: 0, ...a }, "", "Developer", null) as string).match(/<span class="run-mark">.*?<\/span><\/span>/) as string[])[0];
+assert.equal(runMarkOf({ alive: true }), '<span class="run-mark"><span class="spin"></span></span>', "a live run wraps its dot in the shared slot");
+assert.ok(runMarkOf({ status: "dead" }).startsWith('<span class="run-mark"><span class="cross">'), "a dead run wraps its cross in the same slot");
+assert.ok(runMarkOf({ status: "done" }).startsWith('<span class="run-mark"><span class="check">'), "a past run wraps its check in the same slot");
 runs.subCache["t.dev.1"] = [{ index: 0, tokens: 10, duration: 2000 }, { index: 1, tokens: 0, duration: 0 }];
 runs.writeRuns();
 assert.ok(runsEl.innerHTML.includes('data-sub="0"') && runsEl.innerHTML.includes('data-sub="1"'), "the subagent rows stack under their run, each with its sub index");
@@ -968,6 +973,14 @@ assert.match(spinRule.body, /border-radius: 50%;/, "the mark has round corners")
 assert.match(spinRule.body, /background: var\(--ac-t, var\(--ac, var\(--link\)\)\)/, "the mark fills from the station accent's -text step, falling back to the link colour in the panel");
 assert.match(motionCss, /\.s-work \{ --ac: var\(--accent-todo\); --ac-t: var\(--accent-todo-text\); --ac-prev: var\(--accent-backlog\); \}/, "each station points --ac-t at its accent's contrast-safe step and --ac-prev at the station before it");
 assert.match(motionCss, /\.st-head h2 \.spin \{ margin-right: 0; \}/, "the head's flex gap owns the space, so the dot drops its own right margin");
+// #415 one fixed slot for the run marks, and two close buttons that never shrink under their label
+const markSlot = ruleBodies.find((r) => r.sel === ".run-row > .run-mark")!;
+assert.match(markSlot.body, /flex: 0 0 11px;/, "the run mark takes one fixed 11px slot, so the role label never moves with its width");
+assert.match(markSlot.body, /display: inline-flex; justify-content: center;/, "the slot centres the glyph and keeps its baseline");
+const innerMark = ruleBodies.find((r) => r.sel === ".run-mark > .spin, .run-mark > .check, .run-mark > .cross")!;
+assert.match(innerMark.body, /margin-right: 0;/, "the slot owns the gap, so the inner mark drops its own right margin");
+assert.equal(ruleBodies.find((r) => r.sel === "#p-close")!.body.match(/flex: ([^;]+);/)![1], "0 0 auto", "the panel's close button never shrinks under its label");
+assert.equal(ruleBodies.find((r) => r.sel === "#c-close")!.body.match(/flex: ([^;]+);/)![1], "0 0 auto", "the console's close button never shrinks under its label");
 assert.match(motionCss, /@keyframes breathe \{ 0%, 100% \{ opacity: 1; \} 50% \{ opacity: \.4; \} \}/, "the pulse fades on opacity alone, so the circle never changes size");
 assert.ok(!/@keyframes spin /.test(motionCss) && !declared.has("--t-spin"), "the dead rotate keyframes and its token are gone");
 const lumOf = (hex: string) => {

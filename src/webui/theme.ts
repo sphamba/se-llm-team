@@ -265,6 +265,8 @@ names the reason where the station is wide enough */
 .agent-integration { color: var(--accent-integration-text); }
 .check { color: var(--low-fg); margin-right: 5px; }
 .cross { color: var(--error-text); margin-right: 5px; }
+.run-row > .run-mark { flex: 0 0 11px; display: inline-flex; justify-content: center; }
+.run-mark > .spin, .run-mark > .check, .run-mark > .cross { margin-right: 0; }
 /* the docked task panel: full height below the page chrome, the board gives up the panel's width so
    the panel never covers a station head, and the console lifts the panel's bottom edge */
 #panel { position: fixed; top: var(--chrome); right: 0; bottom: var(--console-h); width: var(--panel-w); z-index: 3; overflow-y: auto; overflow-x: hidden; background: var(--panel); border-left: 1px solid var(--hairline); padding: 0 18px 18px; }
@@ -281,7 +283,7 @@ body.panel-open #board { padding-right: calc(18px + var(--panel-w)); }
 #p-head h2:focus { outline: none; }
 /* #370 the phone sheet's drag handle, hidden on the desktop dock */
 #p-handle { display: none; }
-#p-close { border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.8125rem; }
+#p-close { flex: 0 0 auto; border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.8125rem; }
 #p-close:hover { background: var(--raised); }
 #p-facts { font-size: 0.8125rem; margin-bottom: 10px; }
 #p-facts div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 2px 0; }
@@ -348,7 +350,7 @@ line, and the leftmost column pins left with a static right border as the cue */
 #c-handle:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
 #c-head { flex: 0 0 auto; display: flex; align-items: baseline; gap: 10px; padding: 2px 18px 4px; font-size: 0.75rem; font-family: ${MONO}; color: var(--dim); font-variant-numeric: tabular-nums; }
 #c-title { color: var(--text); }
-#c-close { margin-left: auto; border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 1px 9px; cursor: pointer; font-size: 0.75rem; }
+#c-close { flex: 0 0 auto; margin-left: auto; border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 1px 9px; cursor: pointer; font-size: 0.75rem; }
 #c-close:hover { background: var(--raised); }
 #c-log { flex: 1 1 auto; min-height: 0; overflow: auto; }
 #c-meta { padding: 4px 18px 0; font-size: 0.75rem; line-height: 1.45; color: var(--dim); font-family: ${MONO}; font-variant-numeric: tabular-nums; }

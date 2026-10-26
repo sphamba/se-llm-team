@@ -907,7 +907,7 @@ const startText = ms => typeof ms === "number" && Number.isFinite(ms) ? new Date
 // one run row: the role label, then the start time, the duration and the tokens at the right; a
 // live run spins, a dead one turns red, and a click opens the console on that run's log
 function runRowHtml(a, extra, label, sub) {
-	const mark = a.alive ? '<span class="spin"></span>' : a.status === "dead" ? '<span class="cross">✗</span>' : '<span class="check">✓</span>';
+	const mark = '<span class="run-mark">' + (a.alive ? '<span class="spin"></span>' : a.status === "dead" ? '<span class="cross">✗</span>' : '<span class="check">✓</span>') + "</span>";
 	const meta = [startText(a.start), fmtDur(a.duration), fmtTokens(a.tokens)].filter(Boolean).join(" · ");
 	const activeRow = logState && logState.handle === a.handle && (logState.sub ?? null) === (sub ?? null) ? " agent-row-active" : "";
 	return '<button class="run-row ' + (ROLE_CLS[a.role] || "") + " " + extra + (a.alive ? " agent-live" : a.status === "dead" ? " agent-dead" : " agent-past") + activeRow +
