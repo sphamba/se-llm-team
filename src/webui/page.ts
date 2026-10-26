@@ -134,9 +134,10 @@ const MOBILE_MAX = ${MOBILE_MAX};
 const DEFAULT_STAGES = ${JSON.stringify(DEFAULT_STAGES)};
 let projects = [{ id: "", label: "", stages: DEFAULT_STAGES }]; // one tab per registered project; id "" is the single-project ui, one board, no tabs
 let active = ""; // the active tab's id: a registry root, or "" for the single-project board
-// #412 the page title is the root's directory name: a tab id is one of those roots, and the
-// single-project server, whose /api/projects 404s, keeps its own from /api/hub
+// #412 the page title is the root's directory name: a tab id is one of those roots, a one-project
+// hub serves one from /api/projects, and a hub that answers neither keeps its own from /api/hub
 const TITLE = "Software Engineering LLM Team";
+let servedRoot = "";
 let hubRoot = "";
 const boards = Object.create(null);
 const esc = ${esc};
@@ -610,10 +611,10 @@ function drawStubs(paths) {
 		else { const made = document.createElement("div"); made.className = "c-stub"; made.innerHTML = html; made.__html = html; el.appendChild(made); }
 	}
 }
-// #412 the heading and the tab title are the root's basename; a bare or missing root keeps the
-// served string, and the compare keeps an unchanged poll off the DOM
+// #412 the heading and the tab title are the root's basename: the tab id, else the served project,
+// else the hub's own checkout, else the served string; the compare keeps an unchanged poll off the DOM
 function syncTitle() {
-	const name = (active || hubRoot).replace(/\\/+$/, "").split("/").pop() || TITLE;
+	const name = (active || servedRoot || hubRoot).replace(/\\/+$/, "").split("/").pop() || TITLE;
 	const h1 = document.getElementById("title");
 	if (h1 && h1.textContent !== name) h1.textContent = name;
 	if (document.title !== name) document.title = name;
@@ -1350,13 +1351,14 @@ pane.onscroll = () => {
 // the pending tick, and its handle (cleared before a forced wake cycle)
 let pollTimer = null, lastReload = Date.now(), lastDelay = 5000;
 function refresh() {
-	// #412 the hub's own root: the single-project server 404s at /api/projects, so its title takes
-	// the directory name from here; a 404 or a missing field keeps the served string
+	// #412 the hub's own root, the last resort: a hub that serves another project takes its title
+	// from /api/projects below, and a 404 or a missing field keeps the served string
 	fetch("/api/hub").then(r => r.ok ? r.json() : null).catch(() => null).then(info => { hubRoot = info && info.root ? info.root : ""; syncTitle(); });
 	fetch("/api/projects").then(r => r.ok ? r.json() : null).catch(() => null).then(list => {
 		// the single-project server 404s here, and a transient hub failure keeps the last known
 		// tabs: only a real projects list replaces them
 		if (Array.isArray(list)) {
+			servedRoot = list.length === 1 && list[0]?.root ? list[0].root : "";
 			const tabs = tabNames(list);
 			projects = tabs.length ? tabs : [{ id: "", label: "", stages: list[0]?.stages ?? DEFAULT_STAGES }]; // single project: the old ui, one board, no tabs
 		}

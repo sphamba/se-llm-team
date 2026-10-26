@@ -57,14 +57,17 @@ assert.ok(!page.includes('id="hub"') && !page.includes("renderHub"), "#412 the f
 assert.ok(page.includes('<h1 id="title">Software Engineering LLM Team</h1>') && page.includes("<title>Software Engineering LLM Team</title>"), "#412 the heading takes an id and the static title stays served");
 const titleSource = page.match(/function syncTitle\(\) \{[\s\S]*?\n\}/);
 assert.ok(titleSource, "#412 the client ships the title helper");
-const titleOfRoot = (act: string, hub: string) => {
+const titleOfRoot = (act: string, hub: string, served = "") => {
 	const head = { textContent: "Software Engineering LLM Team" };
 	const doc: any = { title: "", getElementById: (id: string) => (id === "title" ? head : null) };
-	new Function("document", "active", "hubRoot", "TITLE", titleSource![0] + "; return syncTitle;")(doc, act, hub, "Software Engineering LLM Team")();
+	new Function("document", "active", "hubRoot", "servedRoot", "TITLE", titleSource![0] + "; return syncTitle;")(doc, act, hub, served, "Software Engineering LLM Team")();
 	return [doc.title, head.textContent];
 };
 assert.deepEqual(titleOfRoot("/home/me/repos/se-llm-team", ""), ["se-llm-team", "se-llm-team"], "#412 the title is the active root's directory name, in the heading and the tab");
 assert.deepEqual(titleOfRoot("", "/srv/hub/"), ["hub", "hub"], "#412 a trailing slash is stripped and the single-project root comes from /api/hub");
+assert.deepEqual(titleOfRoot("", "/hub/checkout", "/x/y-alpha"), ["y-alpha", "y-alpha"], "#414 the served project's root beats the hub's own checkout");
+assert.deepEqual(titleOfRoot("", "/hub/checkout"), ["checkout", "checkout"], "#414 a hub without a projects list keeps its own checkout root");
+assert.match(page, /servedRoot = list\.length === 1[^;]*;/, "#414 the projects handler records the one served root");
 assert.deepEqual(titleOfRoot("", ""), ["Software Engineering LLM Team", "Software Engineering LLM Team"], "#412 a missing root keeps the static title");
 assert.deepEqual(titleOfRoot("/", "x"), ["Software Engineering LLM Team", "Software Engineering LLM Team"], "#412 a root of / keeps the static title");
 assert.match(page.match(/function render\(skipFlip\) \{[\s\S]*?\n\}/)![0], /\n\tsyncTitle\(\);\n\}/, "#412 render writes the title last, so a tab switch follows");
