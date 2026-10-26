@@ -486,6 +486,9 @@ function tickCards() {
 }
 // 000264: the lazily-known card stats, keyed per project and task (statsKey)
 const statsKnown = Object.create(null);
+// #398 a coarse pointer cannot hover: a tap synthesises mouseenter with no mouseleave, and the sheet
+// restores focus to the card, so the reveal is press-scoped there instead of hover- or focus-scoped
+const coarsePointer = () => matchMedia("(hover: none)").matches;
 function makeCard(file) {
 	const el = document.createElement("div");
 	el.className = "card";
@@ -496,11 +499,14 @@ function makeCard(file) {
 	// #366: the card is a link in the tab order, so Enter opens the card under the focus ring
 	el.tabIndex = 0;
 	el.onkeydown = (e) => { if (e.key === "Enter" && !onMarker(e)) { e.preventDefault(); openTask(file); } };
-	el.onmouseenter = () => hotRelations(file, true);
-	el.onmouseleave = () => hotRelations(file, false);
+	el.onmouseenter = () => { if (!coarsePointer()) hotRelations(file, true); };
+	el.onmouseleave = () => { if (!coarsePointer()) hotRelations(file, false); };
 	// #373 keyboard focus runs the same reveal as hover, so the connectors are reachable without a mouse
-	el.onfocus = () => hotRelations(file, true);
-	el.onblur = () => hotRelations(file, false);
+	el.onfocus = () => { if (!coarsePointer()) hotRelations(file, true); };
+	el.onblur = () => { if (!coarsePointer()) hotRelations(file, false); };
+	// #398 on a coarse pointer the reveal lives for the press alone, so the finger lift always clears it
+	el.onpointerdown = () => { if (coarsePointer()) hotRelations(file, true); };
+	el.onpointerup = el.onpointercancel = el.ontouchend = () => { if (coarsePointer()) hotRelations(file, false); };
 	// 000191: the entrance class is one-shot, dropped on animationend so a later poll or reorder
 	// never replays it
 	el.onanimationend = () => { el.classList.remove("enter"); el.onanimationend = null; };
@@ -536,6 +542,9 @@ function hotRelations(file, on) {
 		el.classList.toggle("rim", on && el.dataset.file !== file && lit.has(el.dataset.file));
 	}
 }
+// #398 the panel path clears the reveal through the same switch, so an open or a close cannot leave a
+// card selected on a device that never fires the hover exit
+const clearReveal = () => hotRelations(null, false);
 // #370 the phone layout stacks every card in one column, so no relation curve has a span to cross
 const verticalSpine = () => matchMedia("(max-width: " + MOBILE_MAX + "px)").matches;
 // one dashed curve per drawn relation, sized to the rendered card extent; the bow paints outside
@@ -949,6 +958,7 @@ function syncPanelTop() {
 // and no dim
 function showPanel() {
 	syncPanelTop();
+	clearReveal();
 	const p = document.getElementById("panel");
 	const wasHidden = p.classList.contains("hidden");
 	document.body.classList.add("panel-open");
@@ -966,6 +976,7 @@ function hidePanel() {
 	notFoundNum = null;
 	openerFile = null;
 	for (const k in subCache) delete subCache[k];
+	clearReveal();
 	document.body.classList.remove("panel-open");
 	if (p.classList.contains("hidden")) return;
 	closeAnimated(p);
@@ -1019,6 +1030,7 @@ const visible = () => { const p = document.getElementById("panel"); return !p.cl
 function openTask(file) {
 	const t = activeBoard().tasks.find(x => x.file === file);
 	if (!t) return;
+	clearReveal();
 	openerFile = file;
 	if (routeNum === t.num) return openPanel(t);
 	location.hash = "task/" + t.num;

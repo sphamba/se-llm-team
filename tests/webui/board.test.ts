@@ -401,7 +401,49 @@ assert.ok(relationCalls.length === 1 && queueSrc.includes(relationCalls[0]), "on
 assert.ok(queueSrc.includes("if (relationsFrame) return") && queueSrc.includes("requestAnimationFrame("), "a burst of triggers yields one draw per frame");
 assert.ok(page.includes('board.addEventListener("scroll", queueRelations, true)'), "one capture scroll listener on the board redraws after any station body scrolls");
 assert.ok(page.includes("new ResizeObserver(queueRelations).observe(board)"), "the observer on the board redraws when the docked panel narrows it");
-assert.ok(page.includes("el.onmouseenter = () => hotRelations(file, true)") && page.includes("el.onmouseleave = () => hotRelations(file, false)"), "the card hover wires the highlight on mouseenter and reverts on mouseleave");
+// #398 the reveal splits by pointer capability: a fine pointer arms it on hover and focus, a coarse
+// one only while the finger is down, because a tap synthesises mouseenter with no mouseleave and the
+// sheet's focus restore re-arms the card after the close
+const cardWire = (hover: boolean) => {
+	const el: any = { dataset: {}, classList: { remove: () => {} } };
+	const calls: Array<[string, boolean]> = [];
+	const cap = page.match(/const coarsePointer = [^\n]*/)?.[0] ?? "";
+	const src = page.match(/function makeCard\(file\) \{[\s\S]*?\n\}/)![0];
+	const makeCard = new Function("document", "hotRelations", "openTask", "matchMedia", `${cap}\n${src}; return makeCard;`)(
+		{ createElement: () => el },
+		(f: string, on: boolean) => calls.push([f, on]),
+		() => {},
+		() => ({ matches: !hover }),
+	) as (file: string) => void;
+	makeCard("000002_b.md");
+	return { el, calls };
+};
+const fine = cardWire(true);
+fine.el.onmouseenter();
+assert.deepEqual(fine.calls.at(-1), ["000002_b.md", true], "a fine pointer still arms the reveal on hover");
+fine.el.onmouseleave();
+assert.deepEqual(fine.calls.at(-1), ["000002_b.md", false], "a fine pointer still clears the reveal on mouseleave");
+fine.el.onfocus();
+assert.deepEqual(fine.calls.at(-1), ["000002_b.md", true], "keyboard focus still arms the reveal on a fine pointer");
+fine.el.onblur();
+assert.deepEqual(fine.calls.at(-1), ["000002_b.md", false], "blur still clears the reveal on a fine pointer");
+const coarse = cardWire(false);
+coarse.el.onmouseenter();
+coarse.el.onfocus();
+assert.equal(coarse.calls.length, 0, "a tap-synthesised mouseenter and the sheet's focus restore arm nothing on a coarse pointer");
+coarse.el.onpointerdown();
+assert.deepEqual(coarse.calls.at(-1), ["000002_b.md", true], "the press arms the reveal for the touched card on a coarse pointer");
+for (const ev of ["pointerup", "pointercancel", "touchend"]) {
+	coarse.el.onpointerdown();
+	coarse.el["on" + ev]();
+	assert.deepEqual(coarse.calls.at(-1), ["000002_b.md", false], `the finger lift clears the reveal on ${ev}`);
+}
+// #398 the panel path clears the reveal, so no stuck selection survives the open or the close
+assert.ok(page.includes("const clearReveal = () => hotRelations(null, false)"), "one clear drops the reveal through the same switch");
+for (const fn of ["openTask", "showPanel", "hidePanel"]) {
+	const src = page.match(new RegExp(`function ${fn}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`))?.[0] ?? "";
+	assert.ok(src.includes("clearReveal()"), `${fn} clears the reveal, so no stuck state survives the open or the close`);
+}
 assert.ok(page.includes("const mine = p.dataset.file === file || p.dataset.blocker === file;") && page.includes('p.classList.toggle("relations-hot", on && mine)'), "the hover matches paths by either endpoint's file in the dataset, no quote-unsafe selector interpolation");
 assert.ok(page.includes('" data-blocker="'), "each relation path carries the blocker's file alongside the blocked task's file");
 assert.ok(page.includes('facts.querySelectorAll(".num-link")') && page.includes("openTask(a.dataset.task)"), "the panel binds its id links to openTask through the facts block");
