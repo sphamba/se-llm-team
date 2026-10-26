@@ -979,4 +979,20 @@ for (const sel of [".station", ".station .cards"])
 assert.match(phoneRule("#board"), /overflow-y: auto/, "the phone board stays the one vertical scroller");
 assert.ok(!/\.station \.cards \{[^}]*overflow-y: auto/.test(phoneBoard), "the phone block adds no nested scroller on the station body");
 
+// #387 the phone keeps the desktop heights and moves the 44px target into an invisible band, so a
+// compact control looks as it does on desktop and still answers a finger. The live rects and the
+// elementFromPoint pass are a browser check, left to the reviewer
+const bandHosts = [".m-action", ".seg", ".arch-row", ".toggle", ".c-wait", "#c-text summary", ".run-row"];
+const phoneRules = [...phoneBoard.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2] }));
+const selParts = (sel: string) => sel.split(",").map((p) => p.trim().replace(/::after$/, ""));
+const bandRule = phoneRules.find((r) => r.sel.includes("::after") && bandHosts.every((h) => selParts(r.sel).includes(h)));
+assert.ok(bandRule, "the phone layer carries one shared ::after band on every compact control");
+for (const decl of ['content: ""', "position: absolute", "left: 0", "right: 0", "top: 50%", "height: 44px", "margin-top: -22px"])
+	assert.ok(bandRule!.body.includes(decl), `the band leaves the flow and centres 44px on the control's middle: ${decl}`);
+assert.ok(!/background|pointer-events/.test(bandRule!.body), "the band paints nothing and it takes the tap");
+assert.ok(phoneRules.some((r) => /position: relative/.test(r.body) && bandHosts.every((h) => selParts(r.sel).includes(h))), "every band host is positioned, so its band anchors to the control");
+assert.deepEqual(phoneRules.filter((r) => /min-height: 44px/.test(r.body) && bandHosts.some((h) => selParts(r.sel).includes(h))).map((r) => r.sel), [], "no compact control keeps the phone min-height floor, so each keeps its desktop height");
+assert.ok(!bandHosts.includes(".card"), "the card takes no band: its content already clears 44px and its ::after is the running progress line");
+assert.ok(!/\bagent-(sub|doctor)\b/.test(phoneBoard), "the phone block touches no nested run row, so the more specific connector ::after still wins over the band");
+
 console.log("page.test.ts: all assertions passed");

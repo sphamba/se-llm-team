@@ -405,8 +405,13 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
 .st-head::before { left: -13px; top: 16px; width: 12px; height: 1px; }
 .empty { padding: 0; }
 .count { font-size: 0.8125rem; }
-/* the touch floor: every control clears 44px and its neighbours sit at least 8px apart */
-.m-action, .seg, .run-row, .arch-row, .toggle, .card, .c-wait, #c-text summary { min-height: 44px; }
+/* #387 the touch floor: a compact control keeps its desktop height and carries an invisible 44px band
+   centred on its middle, so the look holds and the finger still lands; the band takes the tap, so two
+   stacked rows overlap by up to 16px (accepted 2026-10-15). A nested run row draws its connector in
+   ::after and a more specific rule, so it keeps the connector and goes without a band */
+.m-action, .seg, .arch-row, .toggle, .c-wait, #c-text summary, .run-row { position: relative; }
+.m-action::after, .seg::after, .arch-row::after, .toggle::after, .c-wait::after, #c-text summary::after, .run-row::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; margin-top: -22px; }
+/* the neighbours still sit at least 8px apart */
 #p-actions, .f-group, #tabs, .c-top, .c-meta { gap: 8px; }
 /* #373 the popover becomes a full width block under its card, never a floating panel */
 #waits-pop { min-width: 0; max-width: none; }
