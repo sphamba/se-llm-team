@@ -51,7 +51,7 @@ export function decodeFilters(raw: unknown): FilterState {
 	if (!obj || typeof obj !== "object" || Array.isArray(obj)) return f;
 	const pick = (v: unknown, keep: (s: string) => boolean) => (Array.isArray(v) ? v.filter((s: any) => typeof s === "string" && keep(s)) : []);
 	if (typeof obj.q === "string") f.q = obj.q;
-	if (typeof obj.i === "string") f.issuer = obj.i;
+	if (obj.i === "user") f.issuer = obj.i;
 	f.priorities = pick(obj.pr, (s) => FILTER_PRIORITIES.includes(s));
 	f.complexities = pick(obj.cx, (s) => FILTER_COMPLEXITIES.includes(s));
 	f.held = obj.h === true;

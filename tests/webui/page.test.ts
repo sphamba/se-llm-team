@@ -750,6 +750,11 @@ assert.deepEqual(decodeFilters(encodeFilters(allFilters)), allFilters, "the filt
 // #378 a link that still carries the retired phase key keeps its other keys
 assert.deepEqual(decodeFilters(btoa(JSON.stringify({ q: "x", p: ["work", "done"], pr: ["high"], i: "user" }))), { q: "x", priorities: ["high"], complexities: [], issuer: "user", held: false, live: false }, "a legacy phase key in an old link is ignored, never the whole filter");
 assert.deepEqual([decodeFilters(encodeFilters(emptyFilters())), decodeFilters(""), decodeFilters(null), decodeFilters("!!!!"), decodeFilters("e30=")].map(filtersActive), [false, false, false, false, false], "an empty, absent, unreadable or non-object filter value decodes to no filter");
+// #382 the bar shows one user chip, so a retired issuer value in an old link must not filter the board
+const issuerOfLink = (i: string) => decodeFilters(btoa(JSON.stringify({ i }))).issuer;
+assert.equal(issuerOfLink("auto"), "", "a legacy auto issuer decodes to no issuer filter");
+assert.equal(issuerOfLink("#366"), "", "a legacy task-issued issuer decodes to no issuer filter");
+assert.equal(issuerOfLink("user"), "user", "the user issuer survives a decode");
 const hostile = btoa(JSON.stringify({ q: 5, p: ["work", "nope"], pr: "high", cx: ["complex", 7], i: {}, h: "yes", l: true }));
 assert.deepEqual(decodeFilters(hostile), { q: "", priorities: [], complexities: ["complex"], issuer: "", held: false, live: true }, "a value of the wrong shape keeps only the well-typed fields and never throws");
 const filterRows = [
