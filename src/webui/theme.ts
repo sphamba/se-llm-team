@@ -242,12 +242,17 @@ names the reason where the station is wide enough */
 .toggle:hover { color: var(--text); }
 /* the panel's run rows: one row per agent run, sub run and doctor run. #353 kept one accent per
    role, and the failed-run red wins over it (two classes beat one) */
-#p-runs, #p-history { display: flex; flex-direction: column; margin-bottom: 14px; }
-#p-runs:empty, #p-history:empty { display: none; }
+#p-runs { display: flex; flex-direction: column; margin-bottom: 14px; }
+#p-runs:empty { display: none; }
 .run-row { display: flex; align-items: baseline; gap: 8px; width: 100%; margin: 0; border: 0; border-bottom: 1px solid var(--hairline); background: none; color: inherit; padding: 5px 2px; cursor: pointer; font-family: inherit; font-size: 0.8125rem; text-align: left; }
 .run-row:hover { background: var(--raised); }
 .run-row .row-meta { margin-left: auto; font-family: ${MONO}; font-size: 0.75rem; color: var(--dim); font-variant-numeric: tabular-nums; }
-.run-row.agent-sub, .run-row.agent-doctor { padding-left: 16px; font-size: 0.75rem; }
+.run-row.agent-sub, .run-row.agent-doctor { position: relative; padding-left: var(--sp-5); font-size: 0.75rem; }
+/* #379 the run tree: one guide per run group and a tick into each child, both read the group's --guide, which a live run turns to the run-level accent */
+.run-group-live { --guide: var(--link); }
+.run-row.agent-sub::before, .run-row.agent-doctor::before { content: ""; position: absolute; left: 7px; top: 0; bottom: 0; width: 1px; background: var(--guide, var(--hairline)); }
+.run-row.agent-sub::after, .run-row.agent-doctor::after { content: ""; position: absolute; left: 7px; top: 50%; width: 6px; height: 1px; background: var(--guide, var(--hairline)); }
+.run-note { padding: 4px 2px 4px var(--sp-5); color: var(--dim); font-size: 0.75rem; }
 .run-row.agent-sub .row-role { color: var(--dim); }
 .run-row.agent-row-active { background: color-mix(in srgb, var(--link) 12%, var(--panel)); }
 .run-row.agent-dead { color: var(--error-text); }

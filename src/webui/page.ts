@@ -2,7 +2,7 @@ import { PRIORITY_RANK } from "../kanban.ts";
 import { readConfigFiles, type StageFlags } from "../orchestrator/config.ts";
 export type { StageFlags };
 import { esc, inline, logFixups, md } from "./logpane.ts";
-import { agentLabel, agentStatsText, applyCardStats, applyStages, blockerTasks, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, isHeld, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, stationFor, statsKey, STATIONS, syncBoard, syncCardStats, taskStats, waitsOnText } from "./board.ts";
+import { agentLabel, agentStatsText, applyCardStats, applyStages, blockerTasks, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, groupRuns, isHeld, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, stationFor, statsKey, STATIONS, syncBoard, syncCardStats, taskStats, waitsOnText } from "./board.ts";
 import { ARCHIVE_PAGE, archivePage, archiveTasks, decodeFilters, emptyFilters, encodeFilters, FILTER_COMPLEXITIES, FILTER_DEBOUNCE, FILTER_PRIORITIES, FILTERS_KEY, filterReason, filterTasks, filtersActive, filtersCount, matchesFilters, PALETTE_MAX, paletteResults } from "./filters.ts";
 import { CSS, MOBILE_MAX } from "./theme.ts";
 
@@ -113,7 +113,6 @@ ${CSS}</style>
 <div id="p-actions"></div>
 <div id="p-runs"></div>
 <div id="p-body"></div>
-<div id="p-history"></div>
 </aside>
 <section id="console" class="hidden" aria-label="Agent log">
 <div id="c-handle" role="separator" tabindex="0" aria-label="Resize the log console" aria-orientation="horizontal" aria-valuemin="120" aria-valuenow="240"></div>
@@ -190,6 +189,7 @@ ${tabsHtml}
 ${boardOf}
 ${mergeBoards}
 ${agentLabel}
+${groupRuns}
 ${agentStatsText}
 ${fmtTokens}
 ${fmtDur}
@@ -865,31 +865,29 @@ function loadSubs(handle) {
 function bindRows(el) {
 	for (const b of el.querySelectorAll(".run-row")) b.onclick = () => openConsole(b.dataset.handle, b.dataset.sub == null ? null : Number(b.dataset.sub), b.dataset.role);
 }
-// the runs block: one row per agent run with its subagent rows stacked under it, oldest first,
-// the live run last (the payload order)
+// the runs block: one group per run, oldest first and the live run last (the payload order); a
+// group holds the run row, its subagent rows, then its doctor row, and the doctors whose run is
+// gone render after the last run under a label row, so nothing is lost silently
 function writeRuns() {
 	const el = document.getElementById("p-runs");
 	const t = openDetail && openDetail.file === panelFile ? openDetail : null;
 	if (!t) { writeGated(el, ""); return; }
-	const runs = (t.agents || []).slice();
+	const doctors = t.doctors || [];
 	const count = {};
-	for (const a of runs) count[a.role] = (count[a.role] || 0) + 1;
-	const html = runs.map(a => {
-		loadSubs(a.handle); // cached: only the first pass per handle hits the endpoint
-		const subs = subCache[a.handle] || [];
-		return runRowHtml(a, "", agentLabel(a, count), null) + subs.map(s =>
-			runRowHtml({ role: a.role, alive: a.alive, status: a.status, handle: a.handle, tokens: s.tokens, duration: s.duration }, "agent-sub", "Sub-" + a.role, s.index)).join("");
-	}).join("");
+	for (const a of t.agents || []) count[a.role] = (count[a.role] || 0) + 1;
+	const docCount = {};
+	for (const d of doctors) docCount[d.role] = (docCount[d.role] || 0) + 1;
+	const { groups, unmatched } = groupRuns(t.agents || [], doctors);
+	const html = groups.map(({ run, doctor }) => {
+		loadSubs(run.handle); // cached: only the first pass per handle hits the endpoint
+		const kids = (subCache[run.handle] || []).map(s =>
+			runRowHtml({ role: run.role, alive: run.alive, status: run.status, handle: run.handle, tokens: s.tokens, duration: s.duration }, "agent-sub", "Sub-" + run.role, s.index)).join("") +
+			(doctor ? runRowHtml(doctor, "agent-doctor", agentLabel(doctor, docCount), null) : "");
+		return '<div class="run-group' + (run.alive ? " run-group-live" : "") + '">' + runRowHtml(run, "", agentLabel(run, count), null) + kids + "</div>";
+	}).join("") + (unmatched.length
+		? '<div class="run-note">no matching run</div>' + unmatched.map(d => runRowHtml(d, "agent-doctor", agentLabel(d, docCount), null)).join("")
+		: "");
 	if (writeGated(el, html)) bindRows(el);
-}
-// the history block: the doctor rows of this task's analysed runs, same row and same click
-function writeHistory() {
-	const el = document.getElementById("p-history");
-	const t = openDetail && openDetail.file === panelFile ? openDetail : null;
-	const docs = (t && t.doctors) || [];
-	const count = {};
-	for (const d of docs) count[d.role] = (count[d.role] || 0) + 1;
-	if (writeGated(el, docs.map(d => runRowHtml(d, "agent-doctor", agentLabel(d, count), null)).join(""))) bindRows(el);
 }
 // the panel heading: the number and the name, and the focus target on open. The text is only
 // assigned when it changes, so a poll leaves the focused heading and its text node in place
@@ -910,7 +908,6 @@ function writePanel(t, withBody) {
 	if (writeGated(actions, actionsHtml(t))) for (const b of actions.querySelectorAll("[data-copy]")) b.onclick = () => copyText(b);
 	writeRuns();
 	if (withBody !== false) writeGated(document.getElementById("p-body"), md(t.body || ""));
-	writeHistory();
 	writeConsoleHead();
 }
 // the page chrome's height, so the docked panel starts under it and never covers a station head
@@ -962,7 +959,6 @@ function writeNotFound(num) {
 	writeGated(document.getElementById("p-actions"), "");
 	writeGated(document.getElementById("p-runs"), "");
 	writeGated(document.getElementById("p-body"), '<div class="empty">No task #' + esc(String(num)) + " on this board</div>");
-	writeGated(document.getElementById("p-history"), "");
 	showPanel();
 }
 // the hash is the route: #task/<num> opens that task, an empty hash closes the panel, and browser

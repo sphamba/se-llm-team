@@ -104,6 +104,21 @@ export function syncAgentStats(el, runs, doc) {
 	return true;
 }
 
+// #379 the panel's run tree: one group per run in the payload order (oldest first) with the
+// doctor that extends it, and the doctors whose run is gone in one unmatched list, so a run pruned
+// from the agents list never hides its pass
+export function groupRuns(agents, doctors) {
+	const groups = (agents || []).map((run) => ({ run, doctor: null }));
+	const byHandle = new Map(groups.map((g) => [g.run.handle, g]));
+	const unmatched = [];
+	for (const d of doctors || []) {
+		const g = byHandle.get(d.handle.replace(/\.doctor$/, ""));
+		if (g && !g.doctor) g.doctor = d;
+		else unmatched.push(d);
+	}
+	return { groups, unmatched };
+}
+
 // 000230 the analysed run's column for a doctor card: a doctor entry's handle is the parent run's
 // handle plus the .doctor suffix, so strip it and match the run card's data-handle (the run card
 // is the column's first child); null when no column carries it (the run log rotated away) and the

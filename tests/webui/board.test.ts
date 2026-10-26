@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { startHub } from "../../src/hub.ts";
 import { PRIORITY_RANK, STATES } from "../../src/kanban.ts";
 import { applyStages, buildShell, cardBaseHtml, curve, DEFAULT_STAGES, flipDiff, isHeld, MOBILE_MAX, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, STATIONS, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats } from "../../src/webui.ts";
+import { groupRuns } from "../../src/webui/board.ts";
 import { esc } from "../../src/webui/logpane.ts";
 
 const root = mkdtempSync(join(tmpdir(), "webui-board-"));
@@ -574,5 +575,28 @@ syncBoard(stations, [], new Set(), els, make, 5, { createElement: (tag: string) 
 assert.ok(STATIONS.every((s) => stations[s.id].empty.textContent === "no task matches: work"), "an empty station names the active filters while a filter is on");
 sync([]);
 assert.ok(STATIONS.every((s) => stations[s.id].empty.textContent === s.empty), "the station's own job line returns when nothing filters");
+
+// #379 the panel's run tree: one group per run in the payload order, the run's doctor under it
+// when the handles match after the .doctor suffix, and every doctor whose run is gone in one
+// unmatched list, so a pruned run never hides its pass
+const runs379 = [
+	{ role: "developer", handle: "t.developer.0", run: 0 },
+	{ role: "reviewer", handle: "t.reviewer.1", run: 1 },
+];
+const tree379 = groupRuns(runs379, [{ role: "doctor", handle: "t.developer.0.doctor" }, { role: "doctor", handle: "t.reviewer.1.doctor" }]);
+assert.deepEqual(
+	tree379.groups.map((g) => [g.run.handle, g.doctor && g.doctor.handle]),
+	[["t.developer.0", "t.developer.0.doctor"], ["t.reviewer.1", "t.reviewer.1.doctor"]],
+	"one group per run in the payload order, each holding the doctor that extends it",
+);
+assert.deepEqual(tree379.unmatched, [], "every doctor with a matching run stays in its group");
+const orphan379 = groupRuns(runs379, [{ role: "doctor", handle: "t.developer.9.doctor" }]);
+assert.deepEqual(orphan379.unmatched.map((d) => d.handle), ["t.developer.9.doctor"], "a doctor whose run is pruned from the agents list lands in the unmatched list");
+assert.equal(orphan379.groups[0].doctor, null, "an unmatched doctor never joins a run group");
+const docOnly379 = groupRuns([], [{ role: "doctor", handle: "t.developer.0.doctor" }]);
+assert.deepEqual([docOnly379.groups, docOnly379.unmatched.map((d) => d.handle)], [[], ["t.developer.0.doctor"]], "a task with no agents and one doctor produces one unmatched entry");
+const mid379 = groupRuns([{ role: "developer", handle: "t.dev.0" }], [{ role: "doctor", handle: "t.doctor.dev.0.doctor" }]);
+assert.deepEqual(mid379.unmatched.map((d) => d.handle), ["t.doctor.dev.0.doctor"], "only the trailing .doctor suffix is stripped, so a handle with doctor mid-string never joins a run");
+assert.equal(mid379.groups[0].doctor, null, "a mid-string doctor leaves its run group empty");
 
 ui.close();

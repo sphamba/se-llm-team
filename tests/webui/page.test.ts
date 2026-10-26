@@ -48,7 +48,7 @@ const filterFns = Object.entries(filtersMod).filter(([, v]) => typeof v === "fun
 const scriptFns = new Set([...script.matchAll(/function ([A-Za-z0-9_$]+)\(/g)].map((m) => m[1]));
 assert.deepEqual(filterFns.filter((n) => new RegExp(`(^|[^\\w$.])${n}\\(`).test(script) && !scriptFns.has(n)), [], "the served script defines every filter helper it calls, so syncFilterToggle cannot throw on boot");
 // the hub shell keeps the element ids the client addresses
-const sheetIds = ["theme", "hub", "board", "tabs", "updated", "panel", "p-title", "p-facts", "p-prio", "p-actions", "p-runs", "p-body", "p-history", "console", "c-handle", "c-head", "c-title", "c-meta", "c-log", "c-text"];
+const sheetIds = ["theme", "hub", "board", "tabs", "updated", "panel", "p-title", "p-facts", "p-prio", "p-actions", "p-runs", "p-body", "console", "c-handle", "c-head", "c-title", "c-meta", "c-log", "c-text"];
 for (const id of sheetIds) assert.ok(page.includes(`id="${id}"`), `the page keeps #${id}, an element the client addresses`);
 // every state slug reaches the page source, and the layout covers each one exactly once
 for (const st of STATES) assert.ok(page.includes(st), `the page source names the ${st} state`);
@@ -63,8 +63,9 @@ for (const dead of ["modal", "m-box", "m-head", "m-attrs", "m-actions", "m-body"
 for (const dead of ["closeModal", "openLog(", "closeLog(", "renderAgent", "renderDoctor", "fetchSubs", "drawAgentRelations"])
 	assert.ok(!page.includes(dead), `the retired ${dead} entry point is gone from the client`);
 assert.ok(page.includes('<aside id="panel" class="hidden" aria-label="Task detail">'), "the panel is a labelled complementary landmark");
-const panelOrder = ["p-head", "p-facts", "p-prio-wrap", "p-actions", "p-runs", "p-body", "p-history"].map((id) => page.indexOf(`id="${id}"`));
-assert.ok(panelOrder.every((at, i) => at > 0 && (i === 0 || at > panelOrder[i - 1])), "the panel holds the header, the priority control, the actions, the runs, the body and the history in spec order");
+const panelOrder = ["p-head", "p-facts", "p-prio-wrap", "p-actions", "p-runs", "p-body"].map((id) => page.indexOf(`id="${id}"`));
+assert.ok(panelOrder.every((at, i) => at > 0 && (i === 0 || at > panelOrder[i - 1])), "the panel holds the header, the priority control, the actions, the runs and the body in spec order");
+assert.ok(!page.includes('id="p-history"') && !page.includes("writeHistory"), "the footer history block and its writer are gone, so no block sits between the runs and their children");
 assert.ok(page.indexOf('id="console"') > page.indexOf('id="panel"') && page.indexOf('id="console"') < page.indexOf("<script>"), "the console follows the panel in the body, the last painted surface");
 assert.ok(page.includes('<div id="c-handle" role="separator" tabindex="0"') && page.includes('aria-orientation="horizontal"'), "the resize handle is a focusable separator that names its orientation");
 assert.match(page, /#panel \{[^}]*top: var\(--chrome\)[^}]*bottom: var\(--console-h\)/, "the panel starts under the page chrome and stops above the console, so neither surface covers the other's close control");
@@ -547,7 +548,8 @@ assert.deepEqual(pressed(), ["medium"], "after the confirmation the control foll
 // run, a red cross on a dead one, the subagent rows stacked under their run, and the row that
 // matches the open console carrying the active marker
 const writeGatedSrc = page.match(/function writeGated\(el, html\) \{[\s\S]*?\n\}/)![0];
-const runsSrc = page.slice(page.indexOf("const ROLE_CLS = "), page.indexOf("// the history block"));
+const groupRunsSrc = page.match(/function groupRuns\(agents, doctors\) \{[\s\S]*?\n\}/)![0];
+const runsSrc = groupRunsSrc + page.slice(page.indexOf("const ROLE_CLS = "), page.indexOf("// the panel heading"));
 const runsEl: Record<string, any> = { __html: undefined, innerHTML: "", querySelectorAll: () => [] };
 const runLog = { handle: "t.dev.1", sub: null as number | null };
 let subFetches: string[] = [];
@@ -555,7 +557,7 @@ const makeRuns = () => new Function("esc", "fmtDur", "fmtTokens", "logState", "a
 	writeGatedSrc + "\nlet openDetail = null, panelFile = null;\n" + runsSrc +
 	"\n; return { writeRuns: writeRuns, subCache: subCache, set open(v) { openDetail = v; }, set file(v) { panelFile = v; } };")(
 	esc, fmtDur, fmtTokens, runLog, agentLabel,
-	{ getElementById: (id: string) => (id === "p-runs" || id === "p-history" ? runsEl : null) },
+	{ getElementById: (id: string) => (id === "p-runs" ? runsEl : null) },
 	(u: string) => { subFetches.push(u); return new Promise(() => {}); },
 	encodeURIComponent,
 	() => "",
@@ -584,6 +586,32 @@ runLog.sub = 1;
 runsEl.__html = undefined;
 runs.writeRuns();
 assert.ok((runsEl.innerHTML as string).includes("agent-row-active"), "the row that matches the open console carries the active marker");
+
+// #379 the panel's run tree: the doctor hangs under its run after the subagent rows, both at
+// depth 1, and a doctor whose run is pruned renders after the last run under a label row
+runLog.sub = null;
+runsEl.__html = undefined;
+runs.open = {
+	file: "000263_task.md",
+	agents: [{ role: "developer", handle: "t.dev.1", run: 0, alive: true, start: 1700000000000, duration: 65000, tokens: 1234 }],
+	doctors: [
+		{ role: "doctor", handle: "t.dev.1.doctor", run: 0, alive: false, status: "ok", duration: 1000, tokens: 5 },
+		{ role: "doctor", handle: "t.dev.9.doctor", run: 9, alive: false, status: "ok", duration: 1000, tokens: 5 },
+	],
+};
+runs.writeRuns();
+const tree = runsEl.innerHTML as string;
+assert.ok(
+	tree.indexOf('data-handle="t.dev.1"') < tree.indexOf('data-sub="0"') && tree.indexOf('data-sub="1"') < tree.indexOf('data-handle="t.dev.1.doctor"'),
+	"the run row comes first, its subagent rows next and its doctor last",
+);
+assert.ok(tree.includes('class="run-group run-group-live"'), "the group carries the live run's accent, so the guide follows the run");
+assert.ok(
+	tree.indexOf("no matching run") < tree.indexOf('data-handle="t.dev.9.doctor"') && tree.indexOf('data-handle="t.dev.9.doctor"') > tree.indexOf('data-handle="t.dev.1.doctor"'),
+	"a doctor whose run is pruned renders after the last run under the label row, so nothing is lost",
+);
+assert.match(page, /\.run-row\.agent-sub, \.run-row\.agent-doctor \{[^}]*padding-left: var\(--sp-5\)/, "a child row indents one scale step under its run");
+assert.ok(page.includes(".run-group-live { --guide: var(--link); }"), "a live run's guide takes the run-level accent");
 
 // 16. the actions row: a done or unheld merging task offers no hold button, a held task offers
 // Unblock, every other state Block, both copy buttons carry their text, and a failed toggle
