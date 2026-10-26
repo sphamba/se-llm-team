@@ -394,19 +394,20 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
 #hub { padding: 2px 12px 8px; }
 #tabs { flex-wrap: nowrap; gap: 8px; overflow-x: auto; padding: 6px 12px 0; }
 .tab { min-height: 44px; padding: 0 16px; }
-#board { display: flex; flex-direction: column; gap: 0; padding: 8px 0 12px; overflow-x: hidden; overflow-y: auto; }
+#board { display: flex; flex-direction: column; gap: 0; padding: 14px 0 12px; overflow-x: hidden; overflow-y: auto; }
 .spine, #relations { display: none; }
 /* #386 nothing inside the phone board shrinks: the station, its cards and each card size to their content, so a card never paints over the next one and #board stays the one vertical scroller */
 .station { padding-left: 0; border-left: 1px solid var(--hairline); flex: 0 0 auto; min-height: auto; }
-.station + .station { border-top: 0; border-left: 1px solid var(--hairline); }
+.station + .station { border-top: 0; border-left: 1px solid var(--hairline); margin-top: 16px; }
 .station.strip { border-left: 1px dashed var(--hairline); }
 .station.strip .st-head { flex-direction: row; align-items: baseline; }
 .station.strip .st-head h2 { writing-mode: horizontal-tb; }
 .station .cards { flex: 0 0 auto; min-height: auto; overflow: visible; }
-.card { flex: 0 0 auto; }
-.st-head { align-items: baseline; padding: 10px 12px 6px; border-top: 1px solid var(--hairline); }
+.card { flex: 0 0 auto; padding: 10px 12px 12px; }
+.station .cards > .card:last-child { border-bottom: 0; }
+.st-head { align-items: baseline; padding: 14px 12px 0; border-top: 1px solid var(--hairline); }
 .st-head h2 { font-size: 0.875rem; }
-.st-head::before { left: 1px; top: 16px; width: 7px; height: 1px; }
+.st-head::before { left: 1px; top: 23px; width: 7px; height: 1px; }
 /* #403 the phone head rules its column off and carries the desktop sweep as a glow on that rule; the
    motion layer starts it at the station's own slot, so the wave walks down the stack */
 .st-head::after { content: ""; position: absolute; left: 0; top: -1px; width: 20%; height: 1px; opacity: 0; background: linear-gradient(90deg, transparent, var(--link), transparent); }

@@ -1061,12 +1061,15 @@ assert.ok(!/\bagent-(sub|doctor)\b/.test(phoneBoard), "the phone block touches n
 // and the overflow check are a browser pass, left to the reviewer
 assert.equal(spacingRule("#board").includes("padding: var(--sp-3) 0 var(--sp-5)"), true, "the desktop board drops its 18px side padding, so the first card box starts at 0");
 assert.equal(spacingRule(".toggle").includes("padding: 6px 12px"), true, "the more-toggle keeps a 12px text inset once the board padding is gone");
-assert.match(phoneRule("#board"), /padding: 8px 0 12px/, "the phone board drops its 12px side padding and keeps the 8px top and 12px bottom");
+assert.match(phoneRule("#board"), /padding: 14px 0 12px/, "the phone board drops its 12px side padding and keeps the 14px top air above the first head rule");
 const flushRule = (sel: string) => phoneBoard.replace(/\/\*[\s\S]*?\*\//g, "").match(new RegExp(`(?:^|\\n)${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`))?.[1] ?? "";
 assert.match(flushRule(".station"), /padding-left: 0/, "the phone station drops the 12px inset, so the card box starts at 1 and the 1px rail keeps x 0 to 1");
-assert.match(flushRule(".st-head"), /padding: 10px 12px 6px/, "the phone head carries the 12px inset itself, so the title and the count start at the card text line");
-assert.match(flushRule(".st-head::before"), /left: 1px; top: 16px; width: 7px;/, "the phone tick starts on the rail and stops 4px short of the title inset");
+assert.match(flushRule(".st-head"), /padding: 14px 12px 0/, "the phone head carries the 12px inset itself and drops its bottom pad, so the station gap owns the space above its cards");
+assert.match(flushRule(".st-head::before"), /left: 1px; top: 23px; width: 7px;/, "the phone tick sits on the label's optical middle, the 14px head pad plus half the 18px line box");
 assert.match(flushRule(".empty"), /padding: 0 12px/, "the phone empty line carries the 12px inset itself");
+assert.match(flushRule(".station + .station"), /margin-top: 16px/, "the phone column seam gets its air above the rule, not under it");
+assert.match(flushRule(".station .cards > .card:last-child"), /border-bottom: 0/, "a column's last card drops its line, so the seam paints one hairline and not two touching ones");
+assert.match(flushRule(".card"), /padding: 10px 12px 12px/, "the card's top row gets the same frame as its bottom");
 
 // #403 the phone columns: each head rules the column off and carries the desktop sweep as a glow that
 // walks the stack, one station per slot, on the same motion gates as the spine
