@@ -29,7 +29,6 @@ export {
 	syncDoctorCards,
 	syncStatsLine,
 	taskStats,
-	taskTokenTotal,
 } from "./board.ts";
 export { agentLogPayload, cardStatsPayload, taskDetail, taskHistory, taskPayload } from "./payload.ts";
 export { CSS, MOBILE_MAX } from "./theme.ts";

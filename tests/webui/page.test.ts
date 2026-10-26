@@ -1114,7 +1114,7 @@ assert.ok(!/\.station \.cards \{[^}]*overflow-y: auto/.test(phoneBoard), "the ph
 // compact control looks as it does on desktop and still answers a finger. The live rects and the
 // elementFromPoint pass are a browser check, left to the reviewer
 const ctlHosts = ["#theme", "#f-toggle", ".f-chip", "#p-close", "#c-close"];
-const bandHosts = [".m-action", ".seg", ".toggle", "#c-text summary", ...ctlHosts];
+const bandHosts = [".m-action", ".seg", ".toggle", ".c-wait", "#c-text summary", ...ctlHosts];
 const phoneRules = [...phoneBoard.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2] }));
 const selParts = (sel: string) => sel.split(",").map((p) => p.trim().replace(/::after$/, ""));
 const bandRule = phoneRules.find((r) => r.sel.includes("::after") && bandHosts.every((h) => selParts(r.sel).includes(h)));
@@ -1134,7 +1134,7 @@ assert.deepEqual(sheetRules.filter((r) => /min-height: 44px/.test(r.body) && ban
 const minChipGap = Number(bandRule!.body.match(/height: (\d+)px/)![1]) - Number(phoneSheet.match(/--ctl-h: (\d+)px/)![1]);
 assert.equal(Number(sheetRules.find((r) => r.sel === ".f-group")!.body.match(/gap: (\d+)px/)![1]), minChipGap, "the chip rows sit two band overhangs apart, so two chips' bands touch and never overlap");
 assert.ok(Number(sheetRule("body.filters-open #filters").match(/gap: (\d+)px/)![1]) >= minChipGap, "the filter sheet spaces the chip groups and the loose chips by the same two band overhangs, so a chip's band never reaches into the band of the next group either");
-for (const dead of [".run-row", ".arch-row", ".card", ".c-wait"]) {
+for (const dead of [".run-row", ".arch-row", ".card"]) {
 	assert.ok(!selParts(bandRule!.sel).includes(dead), `${dead} takes no band, so a stacked row's band never covers the row below`);
 	assert.ok(!selParts(positionRule!.sel).includes(dead), `${dead} carries no band anchor`);
 }

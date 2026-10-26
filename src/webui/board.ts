@@ -53,20 +53,12 @@ export function agentStatsText(tokens, duration) {
 // stats lines use; empty when no entry carries a usage record (#183, usage-less logs and live
 // runs before their first usage record), or the task has no entries, or both totals are 0/null
 export function taskStats(t) {
-	const toks = taskTokenTotal(t);
-	if (toks === null) return "";
 	const agents = t.agents || [];
+	if (!agents.some((a) => typeof a.tokens === "number" && Number.isFinite(a.tokens))) return "";
+	const toks = agents.reduce((s, a) => s + (typeof a.tokens === "number" ? a.tokens : 0), 0);
 	const dur = agents.reduce((s, a) => s + (typeof a.duration === "number" ? a.duration : 0), 0);
 	if (!toks && !dur) return "";
 	return agentStatsText(toks, dur);
-}
-
-// #408 the summed tokens across the task's agent entries, null when no entry carries a usage record:
-// the run row and the phone card read one sum, and a genuine zero total still stays a number
-export function taskTokenTotal(t) {
-	const agents = t.agents || [];
-	if (!agents.some((a) => typeof a.tokens === "number" && Number.isFinite(a.tokens))) return null;
-	return agents.reduce((s, a) => s + (typeof a.tokens === "number" ? a.tokens : 0), 0);
 }
 
 // #380 the done archive's two stat cells, tokens then duration: the sum across the task's agents
@@ -284,11 +276,10 @@ export function priorityRuler(priority: string) {
 }
 
 // one card's markup; the live values (elapsed, tokens) stay out of it, so a poll never rewrites the
-// card and its mark keeps its pulse (000191); syncCardStats fills the live cell, the token cell and the
-// run row in place. Every optional row drops when empty: the number, ruler, live cell and token cell
-// on top, the name, the summary as the context line, the run row, then the meta row with the
-// complexity and issuer labels and the waits-on marker. #408 the ruler alone carries the priority,
-// and a phone keeps the top row, the name and the token, so the stylesheet hides the rest
+// card and its mark keeps its pulse (000191); syncCardStats fills the live cell and the run
+// row in place. Every optional row drops when empty: the number, ruler and live cell on top, the
+// name, the summary as the context line, the run row, then the meta row with the
+// complexity and issuer labels and the waits-on marker. #408 the ruler alone carries the priority
 export function cardBaseHtml(t: Task, st: string, all: Task[] = []) {
 	const issued = !!t.issuer && /^#\d+$/.test(t.issuer);
 	const live = agentLive(t);
@@ -304,7 +295,6 @@ export function cardBaseHtml(t: Task, st: string, all: Task[] = []) {
 		numLinkHtml(t.file, "num") +
 		priorityRuler(t.priority) +
 		(live ? '<span class="c-live"><span class="c-live-text"></span></span>' : "") +
-		'<span class="card-tokens"></span>' +
 		"</div>" +
 		'<div class="name' + (issued ? " issued" : "") + '">' + esc(t.name) + "</div>" +
 		(t.summary ? '<div class="ctx">' + esc(t.summary) + "</div>" : "") +
@@ -438,9 +428,9 @@ export function applyStages(stations, stages) {
 }
 
 // 000191/000366: the in-place live pass. The top-right live cell carries the role, the elapsed
-// time and the tokens, in the panel run row's order (#406); #408 the token cell carries the bare
-// total a phone reads, and the run row the task's token totals; all update without touching the card
-// markup, so the live .spin node keeps its animation across a poll (supersedes the accepted #178 restart)
+// time and the tokens, in the panel run row's order (#406); the run row the task's token totals;
+// both update without touching the card markup, so the live .spin node keeps its animation across
+// a poll (supersedes the accepted #178 restart)
 export function syncCardStats(el, t) {
 	const runs = t.agents || [];
 	const live = runs.find((a) => a.alive);
@@ -448,9 +438,6 @@ export function syncCardStats(el, t) {
 	const cell = el.querySelector(".c-live-text");
 	const meta = live ? [agentLabel(live, count), fmtDur(live.duration), fmtTokens(live.tokens)].filter(Boolean).join(" · ") : "";
 	if (cell && cell.textContent !== meta) cell.textContent = meta;
-	const tokens = el.querySelector(".card-tokens");
-	const total = fmtTokens(taskTokenTotal(t));
-	if (tokens && tokens.textContent !== total) tokens.textContent = total;
 	const stats = el.querySelector(".card-stats");
 	const text = taskStats(t);
 	if (stats && stats.textContent !== text) stats.textContent = text;

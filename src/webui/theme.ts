@@ -225,8 +225,6 @@ names the reason where the station is wide enough */
 /* #366 the run row's totals (taskStats): the value already sits in the span, so no entrance animation runs on a poll */
 .card-stats { font-variant-numeric: tabular-nums; }
 .card-stats:empty { display: none; }
-/* #408 the phone card's token total: the desktop card reads the run row instead, so the cell hides */
-.card-tokens { display: none; }
 .p-low { background: var(--low-bg); color: var(--low-fg); }
 .p-medium { background: var(--medium-bg); color: var(--medium-fg); }
 .p-high { background: var(--high-bg); color: var(--high-fg); }
@@ -400,14 +398,6 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
 .station.strip .st-head h2 { writing-mode: horizontal-tb; }
 .station .cards { flex: 0 0 auto; min-height: auto; overflow: visible; }
 .card { flex: 0 0 auto; padding: 10px 12px 12px; }
-/* #408 a phone card is the id, the title and the tokens: the token cell takes the id row's right edge
-and the five desktop rows drop, while the live mark and the number stay */
-.card .ruler { display: none; }
-.card .c-live { display: none; }
-.card .ctx { display: none; }
-.card .c-run { display: none; }
-.card .c-meta { display: none; }
-.card .card-tokens { display: inline-block; margin-left: auto; font-variant-numeric: tabular-nums; }
 .station .cards > .card:last-child { border-bottom: 0; }
 .st-head { align-items: baseline; padding: 14px 12px 0; border-top: 1px solid color-mix(in srgb, var(--ac) 55%, transparent); }
 .station.live .st-head { border-top-color: var(--ac); }
@@ -426,9 +416,8 @@ and the five desktop rows drop, while the live mark and the number stay */
    connector in ::after and a more specific rule, so it keeps the connector and goes without a band.
    #405 the theme toggle, the filter button, the chips and the close buttons take the one 32px --ctl-h
    box and lean on the same band for the 44px floor */
-/* #408 no phone card shows its meta row, so the waits-on marker takes no band */
-.m-action, .seg, .toggle, #c-text summary, #theme, #f-toggle, .f-chip, #p-close, #c-close { position: relative; }
-.m-action::after, .seg::after, .toggle::after, #c-text summary::after, #theme::after, #f-toggle::after, .f-chip::after, #p-close::after, #c-close::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; margin-top: -22px; }
+.m-action, .seg, .toggle, .c-wait, #c-text summary, #theme, #f-toggle, .f-chip, #p-close, #c-close { position: relative; }
+.m-action::after, .seg::after, .toggle::after, .c-wait::after, #c-text summary::after, #theme::after, #f-toggle::after, .f-chip::after, #p-close::after, #c-close::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; margin-top: -22px; }
 /* the neighbours still sit at least 8px apart */
 #p-actions, .f-group, #tabs, .c-top, .c-meta { gap: 8px; }
 /* #405 a wrapped chip row sits two band overhangs apart, so two chips' bands touch and never overlap;
@@ -476,6 +465,10 @@ body.filters-open #filters { display: flex; position: fixed; left: 0; right: 0; 
 #pal-box { width: 100%; height: 100%; max-height: none; border: 0; border-radius: 0; padding: calc(10px + env(safe-area-inset-top)) 12px calc(10px + env(safe-area-inset-bottom)); }
 #pal-input { min-height: 44px; font-size: 1rem; }
 .pal-row { min-height: 44px; align-items: center; }
+}
+/* #416 a phone archive row is the number, the name and the token total: the chip, the duration and the date drop */
+@media (max-width: ${MOBILE_MAX}px) {
+.arch-row .arch-cx, .arch-row .arch-dur, .arch-row .arch-date { display: none; }
 }
 /* #369 one motion layer: the data-motion attribute on the root decides which loops run, the token
 block above decides how fast, and every ambient rule is opt-in, so a document with no attribute

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startHub } from "../../src/hub.ts";
 import { PRIORITY_RANK, STATES } from "../../src/kanban.ts";
-import { applyStages, buildShell, cardBaseHtml, curve, DEFAULT_STAGES, flipDiff, isHeld, MOBILE_MAX, numLinkHtml, priorityRuler, PROGRESS_HALF_S, progressOf, relationPaths, sortStation, spinnerHtml, STATIONS, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats, taskTokenTotal } from "../../src/webui.ts";
+import { applyStages, buildShell, cardBaseHtml, curve, DEFAULT_STAGES, flipDiff, isHeld, MOBILE_MAX, numLinkHtml, priorityRuler, PROGRESS_HALF_S, progressOf, relationPaths, sortStation, spinnerHtml, STATIONS, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats } from "../../src/webui.ts";
 import { groupRuns } from "../../src/webui/board.ts";
 import { esc } from "../../src/webui/logpane.ts";
 
@@ -185,7 +185,7 @@ const rich = cardBaseHtml({ file: "000047_fix_x.md", name: "a & b", priority: "h
 assert.ok(rich.startsWith('<div class="c-top">') && rich.includes('<span class="num-link num" data-task="000047_fix_x.md">#47</span>'), "the top row leads with the task number as a link");
 assert.ok((rich.match(/<i class="on">/g) ?? []).length === 3 && rich.includes('class="ruler pr-high"'), "the four-step ruler fills three steps for a high priority");
 assert.ok(rich.includes('<span class="c-live"><span class="c-live-text"></span></span>'), "a live run gets the top-right live cell, filled only by the in-place pass");
-assert.ok(rich.includes('<span class="card-tokens"></span>') && rich.indexOf('class="c-live"') < rich.indexOf('class="card-tokens"'), "the token cell follows the live cell on the id row, empty in the markup so a poll never rewrites it");
+assert.ok(!rich.includes("card-tokens"), "the id row ends at the live cell, so a phone card keeps its own rows");
 assert.ok(rich.includes('<div class="name">a &amp; b</div>'), "the name is escaped and carries no priority tint");
 assert.ok(rich.includes('<div class="ctx">the board is rebuilt</div>'), "an idle card shows its summary as the context line");
 assert.ok(rich.includes('<div class="c-run"><span class="card-stats"></span></div>'), "a live run gets a run row, its values filled in place");
@@ -210,11 +210,7 @@ assert.equal(numLinkHtml('000048_quo"te.md'), '<span class="num-link" data-task=
 const baseOf = (tokens: number, duration: number) => cardBaseHtml({ file: "000056_l.md", name: "l", priority: "high", agents: [{ ...liveRun, tokens, duration }] }, "doing");
 assert.equal(baseOf(420, 1500), baseOf(9999, 90000), "the base markup carries no token or elapsed value, so the spinner never restarts on a poll");
 assert.ok(taskStats({ agents: [{ tokens: 420, duration: 1500 }, { tokens: 1580, duration: 2000 }] }) === "2k · 4s", "the run row totals the agent entries");
-// #408 the phone card prints the same sum as bare tokens, and a run with no usage record prints none
-assert.equal(taskTokenTotal({ agents: [{ tokens: 82000 }, { tokens: null }] }), 82000, "the token total sums the agent entries and skips one with no number");
-assert.equal(taskTokenTotal({ agents: [{ tokens: 0 }] }), 0, "a genuine zero total stays a number, so a run that spent nothing reads 0");
-assert.equal(taskTokenTotal({ agents: [{ duration: 900 }] }), null, "no usage record leaves the total null, so the card prints no number");
-assert.equal(taskTokenTotal({}), null, "a task with no agent entries has no token total");
+assert.equal(taskStats({ agents: [{ duration: 2000 }] }), "", "an entry with no usage record leaves the run row empty, so the card prints no bare number");
 
 // #373 the waits-on marker: the resting fact that a relation exists, in the card meta row. A ref
 // resolves through the board's own task list, a done blocker counts as satisfied, and the `user`
@@ -357,16 +353,12 @@ assert.match(cssRule("#relations path.relations-hot"), /stroke-opacity: 1/, "the
 assert.match(themeCss, /#board\.reveal #relations \{[^}]*opacity: 1/, "a reveal paints the relation layer");
 assert.match(themeCss, /#board\.reveal \.card:not\(\.hot\) \{[^}]*opacity: \.55/, "an unrelated card dims to 55 percent, not 40, so the marker text stays readable");
 assert.match(cssRule("#waits-pop"), /position: fixed/, "the popover floats over the board instead of inside a scrolling card");
-// #408 the phone card is the id, the title and the tokens: the first phone block hides the five
-// desktop rows and shows the token cell, which its own auto margin pushes to the right edge
-const phoneStart = themeCss.indexOf("@media (max-width: " + MOBILE_MAX + "px)");
-const phoneCard = themeCss.slice(phoneStart, themeCss.indexOf("@media (max-width: " + MOBILE_MAX + "px)", phoneStart + 1));
-const phoneCardRule = (sel: string) => phoneCard.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " \\{([^}]*)\\}"))?.[1] ?? "";
-for (const sel of [".card .ruler", ".card .c-live", ".card .ctx", ".card .c-run", ".card .c-meta"])
-	assert.match(phoneCardRule(sel), /display: none/, `the phone block hides ${sel.replace(".card ", "")}, so a phone card keeps no desktop row`);
-assert.match(phoneCardRule(".card .card-tokens"), /margin-left: auto/, "the token cell sits at the right edge of the id row");
-assert.match(phoneCardRule(".card .card-tokens"), /font-variant-numeric: tabular-nums/, "the token number keeps its tabular figures");
-assert.ok(/display: none/.test(cssRule(".card-tokens")) && !/display: none/.test(phoneCardRule(".card .card-tokens")), "the token cell stays out of the desktop card and shows on a phone alone");
+assert.match(themeCss, new RegExp(`@media \\(max-width: ${MOBILE_MAX}px\\) \\{[\\s\\S]*?\\.c-wait`), "the phone layout gives the marker the 44px touch floor");
+// #416 a phone archive row is the number, the name and the token total: the chip, the duration and
+// the date drop, and no phone rule touches the token cell, so it keeps the base rule's right alignment
+const phoneArchive = themeCss.slice(themeCss.lastIndexOf("@media (max-width: " + MOBILE_MAX + "px)"));
+assert.ok(phoneArchive.includes(".arch-row .arch-cx, .arch-row .arch-dur, .arch-row .arch-date { display: none; }"), "the phone archive block hides the complexity chip, the duration and the date");
+assert.ok(!phoneArchive.includes(".arch-tok") && /text-align: right/.test(cssRule(".arch-tok, .arch-dur")), "the token cell keeps its place at the row's right edge on a phone");
 
 // #373 the popover wiring: one popover keyed by file so a poll leaves it open, Escape restores the
 // marker, and a rendered row scrolls its blocker's card into view
@@ -549,13 +541,12 @@ sync([{ ...liveTask, agents: [{ ...liveTask.agents[0], tokens: 900, duration: 25
 assert.equal(cardD.writes, 1, "a stats-only change does not rewrite the card markup, the spinner animation survives");
 assert.equal(cardD.querySelector(".c-live-text")!.textContent, "Developer · 3s · 900", "the live cell follows the poll, tokens included");
 assert.equal(cardD.querySelector(".card-stats")!.textContent, "900 · 3s", "the run row follows the poll");
-assert.equal(cardD.querySelector(".card-tokens")!.textContent, "900", "the phone card's token cell takes the same run total, with no duration");
 sync([{ ...liveTask, agents: [{ ...liveTask.agents[0], tokens: 82000, duration: 2500 }] }]);
-assert.equal(cardD.querySelector(".card-tokens")!.textContent, "82k", "the chosen phone card reads 82k, the run's token total alone");
+assert.equal(cardD.querySelector(".card-stats")!.textContent, "82k · 3s", "the run row sums the entries itself again, so the card keeps no separate token cell");
 sync([{ ...liveTask, agents: [{ ...liveTask.agents[0], tokens: null }] }]);
-assert.ok(cardD.querySelector(".c-live-text")!.textContent === "Developer · 2s" && cardD.querySelector(".card-tokens")!.textContent === "", "an agent with no usage record reads the label and the duration with no trailing separator, and leaves the token cell empty");
+assert.equal(cardD.querySelector(".c-live-text")!.textContent, "Developer · 2s", "an agent with no usage record reads the label and the duration with no trailing separator");
 sync([{ ...liveTask, agents: [] }]);
-assert.ok(cardD.writes === 2 && !cardD.querySelector(".card-stats") && !cardD.querySelector(".c-live-text") && cardD.querySelector(".card-tokens")!.textContent === "", "a run that ends drops both live slots and keeps the card node");
+assert.ok(cardD.writes === 2 && !cardD.querySelector(".card-stats") && !cardD.querySelector(".c-live-text"), "a run that ends drops both live slots and keeps the card node");
 sync([{ file: "000005_e.md", name: "feat: e", priority: "low", state: "to-do", updated: 7, agents: [{ role: "reviewer", run: 0, alive: false, status: "dead", handle: "g", tokens: 5, duration: 900 }] }]);
 const cardE = els.get("000005_e.md")!;
 assert.ok(cardE.innerHTML.includes('<div class="c-run dead">') && !cardE.innerHTML.includes("c-live"), "a dead run gets the red run row and no live cell");
