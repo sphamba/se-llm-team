@@ -90,9 +90,9 @@ export function archRowHtml(t, date) {
 	);
 }
 
-// #413 the card's bottom line is an exponential progress curve on a 5-minute half-life: p never
+// #413 the card's bottom line is an exponential progress curve on a 10-minute half-life: p never
 // reaches 1, so a long run still shows room ahead. t is the live agent's elapsed seconds
-export const PROGRESS_HALF_S = 300;
+export const PROGRESS_HALF_S = 600;
 export function progressOf(seconds) {
 	return Math.max(0, 1 - Math.pow(2, -(seconds || 0) / PROGRESS_HALF_S));
 }
