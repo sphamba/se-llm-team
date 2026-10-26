@@ -189,8 +189,8 @@ export interface Station {
 	empty: string;
 }
 export const STATIONS: readonly Station[] = [
-	{ id: "queue", label: "Backlog", states: ["backlog", "to-do"], primary: "to-do", accent: "todo", empty: "nothing waiting to start" },
-	{ id: "work", label: "Work", states: ["doing"], primary: "doing", accent: "todo", empty: "no agent is working" },
+	{ id: "queue", label: "Backlog", states: ["backlog"], primary: "backlog", accent: "todo", empty: "nothing waiting to start" },
+	{ id: "work", label: "Work", states: ["to-do", "doing"], primary: "to-do", accent: "todo", empty: "no agent is working" },
 	{ id: "review", label: "Review", states: ["to-review", "reviewing"], primary: "to-review", accent: "review", empty: "nothing waiting for a reviewer" },
 	{ id: "merge", label: "Merge", states: ["to-merge", "merging"], primary: "to-merge", accent: "merge", empty: "nothing waiting to merge" },
 	{ id: "test", label: "Test", states: ["to-live-test", "live-testing"], primary: "to-live-test", accent: "live", empty: "nothing waiting for a live test" },
@@ -262,13 +262,13 @@ export function priorityRuler(priority: string) {
 // card and its mark keeps its pulse (000191); syncCardStats fills the live cell and the run
 // row in place. Every optional row drops when empty: the number, ruler and live cell on top, the
 // name, the summary as the context line, the run row, then the meta row with the sub-state marker
-// (a non-primary state only, and never backlog, because its column head says that word), the
+// (a non-primary state only, because a column's primary is the word its head already says), the
 // priority, complexity and issuer labels and the waits-on marker
 export function cardBaseHtml(t: Task, st: string, all: Task[] = []) {
 	const issued = !!t.issuer && /^#\d+$/.test(t.issuer);
 	const live = (t.agents || []).some((a) => a.alive);
 	const primary = STATIONS.some((s) => s.primary === st);
-	const implied = primary || st === "backlog";
+	const implied = primary;
 	const refs = String(t.blockedBy || "").split(",").map((r) => r.trim()).filter(Boolean);
 	const wait = waitsOnText(t, all);
 	return (

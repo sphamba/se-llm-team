@@ -113,7 +113,7 @@ class El {
 assert.deepEqual(STATIONS.flatMap((s) => [...s.states]), [...STATES], "the station table covers every state slug exactly once, in pipeline order");
 assert.deepEqual(STATIONS.map((s) => s.id), ["queue", "work", "review", "merge", "test", "integration", "done"], "the station order is the fixed process spine");
 assert.ok(STATIONS.find((s) => s.id === "queue")?.label === "Backlog" && !STATIONS.some((s) => s.label === "Queue"), "the first station reads Backlog, so no station still says Queue");
-assert.deepEqual(STATIONS.map((s) => s.primary), ["to-do", "doing", "to-review", "to-merge", "to-live-test", "to-integration-test", "done"], "each station names the state a card shows without a sub-state marker");
+assert.deepEqual(STATIONS.map((s) => s.primary), ["backlog", "to-do", "to-review", "to-merge", "to-live-test", "to-integration-test", "done"], "each station names the state a card shows without a sub-state marker");
 const boardEl = new El("main");
 const stations: Record<string, any> = buildShell(boardEl, { createElement: (tag: string) => new El(tag) });
 const stationEls = boardEl.children.filter((c: El) => c.className.split(" ").includes("station"));
@@ -170,7 +170,7 @@ assert.equal(servedSpinner("to-do"), "", "the served spinner source returns empt
 // the card anatomy (000366): number, ruler and live cell on top, the name, the context line, the
 // run row, then the meta row; every optional row drops when empty
 const liveRun = { role: "developer", run: 0, alive: true, status: "live", handle: "h", tokens: 4242, duration: 1500 };
-const rich = cardBaseHtml({ file: "000047_fix_x.md", name: "a & b", priority: "high", summary: "the board is rebuilt", complexity: "complex", agents: [liveRun] }, "doing");
+const rich = cardBaseHtml({ file: "000047_fix_x.md", name: "a & b", priority: "high", summary: "the board is rebuilt", complexity: "complex", agents: [liveRun] }, "to-do");
 assert.ok(rich.startsWith('<div class="c-top">') && rich.includes('<span class="num-link num" data-task="000047_fix_x.md">#47</span>'), "the top row leads with the task number as a link");
 assert.ok((rich.match(/<i class="on">/g) ?? []).length === 3 && rich.includes('class="ruler pr-high"'), "the four-step ruler fills three steps for a high priority");
 assert.ok(rich.includes('<span class="c-live"><span class="c-live-text"></span></span>'), "a live run gets the top-right live cell, filled only by the in-place pass");
@@ -179,8 +179,9 @@ assert.ok(rich.includes('<div class="ctx">the board is rebuilt</div>'), "an idle
 assert.ok(rich.includes('<div class="c-run"><span class="card-stats"></span></div>'), "a live run gets a run row, its values filled in place");
 assert.ok(rich.includes('<span class="c-p p-high">high</span>') && rich.includes('<span class="c-cx cx-complex">complex</span>') && !rich.includes('class="chip'), "the meta row shows priority and complexity as small mono labels, not pill chips");
 assert.ok(!rich.includes('<span class="sub-state">'), "a primary state shows no sub-state marker");
+assert.ok(cardBaseHtml({ file: "000053_r.md", name: "r", priority: "low" }, "doing").includes('<span class="sub-state">doing</span>'), "a doing card names its own state, because Work's primary is to-do");
 assert.ok(cardBaseHtml({ file: "000048_m.md", name: "m", priority: "low" }, "reviewing").includes('<span class="sub-state">reviewing</span>'), "a non-primary state shows its raw slug in the meta row");
-assert.ok(!cardBaseHtml({ file: "000049_n.md", name: "n", priority: "low" }, "backlog").includes('<span class="sub-state">'), "a backlog card carries no sub-state marker, because its column already says the word");
+assert.ok(!cardBaseHtml({ file: "000049_n.md", name: "n", priority: "low" }, "backlog").includes('<span class="sub-state">'), "a backlog card carries no sub-state marker, because backlog is its column's primary");
 assert.ok(cardBaseHtml({ file: "000050_o.md", name: "o", priority: "low", blockedBy: "user" }, "to-do").includes('<button type="button" class="c-wait held"'), "a held task gets the held marker in the meta row");
 assert.ok(!cardBaseHtml({ file: "000051_p.md", name: "p", priority: "low" }, "to-do").includes("c-live"), "an idle card gets no live cell");
 assert.ok(!cardBaseHtml({ file: "000052_q.md", name: "q", priority: "low" }, "to-do").includes("ctx"), "a card without a summary drops the context line");
@@ -478,7 +479,7 @@ assert.equal(els.get("000001_a.md"), cardA, "an unchanged card keeps its DOM nod
 assert.equal(cardA.writes, 1, "and its markup is not rewritten, so its spinner animation keeps running");
 sync(tasksA.map((t) => (t.file === "000001_a.md" ? { ...t, state: "to-do", updated: 3 } : t)));
 assert.ok(els.get("000001_a.md") === cardA && cardA.dataset.state === "to-do", "a card that changes station keeps its node, so FLIP can move it, and its state hook follows");
-assert.deepEqual(shown("queue"), ["000001_a.md", "000002_b.md"], "the card sits in its new station, above the queue's other card by priority");
+assert.deepEqual([shown("queue"), shown("work")], [["000002_b.md"], ["000001_a.md"]], "a card that becomes to-do stays in Work, and Backlog keeps the card that is still backlog");
 assert.equal(cardA.writes, 2, "a state change rewrites the markup once");
 assert.ok(!cardA.innerHTML.includes("spin"), "leaving a working state stops the spinner");
 sync(tasksA);
@@ -556,8 +557,8 @@ const ordered = [
 	{ file: "000009_i.md", name: "i", priority: "low", state: "done", updated: 9 },
 ];
 sync(ordered, new Set(["queue", "work", "review", "done"]));
-assert.deepEqual(shown("queue"), ["000002_b.md", "000001_a.md"], "the queue station orders its two states as one list, priority first");
-assert.deepEqual(shown("work"), ["000004_d.md", "000003_c.md"], "equal priority falls back to the newest update");
+assert.deepEqual(shown("queue"), ["000001_a.md"], "the backlog station holds only the backlog state");
+assert.deepEqual(shown("work"), ["000002_b.md", "000004_d.md", "000003_c.md"], "the work station interleaves its to-do and doing cards as one list, priority first, then the newest update");
 assert.deepEqual(shown("review"), ["000005_e.md", "000007_g.md", "000006_f.md"], "the review station interleaves its two states by priority, then recency");
 assert.deepEqual(shown("done"), ["000009_i.md", "000008_h.md"], "done shows the most recent finish first, whatever its priority");
 assert.deepEqual(sortStation(ordered.filter((t) => t.state === "done")).map((t) => t.file), ["000008_h.md", "000009_i.md"], "the station order helper is exported for the page's beyond-fold fetch");
@@ -569,7 +570,7 @@ const recency = [
 assert.deepEqual(sortStation([...recency], { byRecency: true }).map((t) => t.file), ["000021_n.md", "000020_m.md"], "the done station puts the most recently updated task first, whatever its priority");
 assert.deepEqual(sortStation([...recency]).map((t) => t.file), ["000020_m.md", "000021_n.md"], "every other station keeps priority first, so an old critical task still leads");
 const heldOrders = [
-	{ file: "000010_j.md", name: "j", priority: "low", state: "to-do", updated: 1, blockedBy: "user" },
+	{ file: "000010_j.md", name: "j", priority: "low", state: "backlog", updated: 1, blockedBy: "user" },
 	{ file: "000011_k.md", name: "k", priority: "critical", state: "backlog", updated: 9 },
 	{ file: "000012_l.md", name: "l", priority: "medium", state: "backlog", updated: 8, blockedBy: "USER, #42" },
 ];
