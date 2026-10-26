@@ -146,7 +146,7 @@ assert.ok(page.includes("Software Engineering LLM Team"), "page shows the new ti
 assert.ok(page.includes('id="theme"'), "page has the theme toggle");
 assert.ok(!page.includes('id="notify"'), "the header has no browser-notification control (000249)");
 assert.ok(!page.includes("Notification"), "the served client never touches the Notification API (000249)");
-assert.ok(page.includes('id="hub"'), "page has the hub identity footer (000165)");
+assert.ok(!page.includes('id="hub"'), "the hub footer is gone (#412), so /api/hub only feeds the title");
 assert.ok(page.includes("/api/task-history"), "the client fetches the heavy history in a follow-up fetch (000248)");
 // 000165: /api/hub reports the serving hub's identity (pid, code checkout, commit), so a
 // stale-code hub or a failover is visible at a glance

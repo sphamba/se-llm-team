@@ -435,7 +435,7 @@ assert.ok(promptAL.includes("You run no test suite"), "the merger runs no test s
 assert.ok(!promptAL.includes("run the full test suite"), "the merger prompt names no full suite run");
 assert.ok(!promptAL.includes(rootAL) && !promptAL.includes(wtAL), "no absolute path survives rendering");
 assert.ok(!promptAL.includes("{{"), "no placeholder survives rendering");
-assert.ok(promptAL.includes("git branch --show-current"), "the merger resolves its branch in its cwd");
+assert.ok(promptAL.includes("take the base sha from `onto`"), "the merger takes the base sha from the rebase state, so no branch command survives");
 assert.ok(promptAL.includes("SPECS.md"), "the prompt names the cwd task file symlink");
 // the reviewer prompt: step 2 resolves the base branch from the project root checkout (the
 // one remaining {{ROOT}} use), no hardcoded main, and no absolute task-file or worktree path
