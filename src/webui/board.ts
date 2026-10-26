@@ -405,15 +405,16 @@ export function applyStages(stations, stages) {
 	stations.test.el.classList.toggle("dim", stages?.liveTesting === false);
 }
 
-// 000191/000366: the in-place live pass. The top-right live cell carries the role and the elapsed
-// time, the run row the task's token totals; both update without touching the card markup, so the
-// live .spin node keeps its animation across a poll (supersedes the accepted #178 restart)
+// 000191/000366: the in-place live pass. The top-right live cell carries the role, the elapsed
+// time and the tokens, in the panel run row's order (#406); the run row the task's token totals;
+// both update without touching the card markup, so the live .spin node keeps its animation across
+// a poll (supersedes the accepted #178 restart)
 export function syncCardStats(el, t) {
 	const runs = t.agents || [];
 	const live = runs.find((a) => a.alive);
 	const count = runs.reduce((m, a) => ((m[a.role] = (m[a.role] || 0) + 1), m), {});
 	const cell = el.querySelector(".c-live-text");
-	const meta = live ? [agentLabel(live, count), fmtDur(live.duration)].filter(Boolean).join(" · ") : "";
+	const meta = live ? [agentLabel(live, count), fmtDur(live.duration), fmtTokens(live.tokens)].filter(Boolean).join(" · ") : "";
 	if (cell && cell.textContent !== meta) cell.textContent = meta;
 	const stats = el.querySelector(".card-stats");
 	const text = taskStats(t);

@@ -145,6 +145,7 @@ const desktopCss = themeCss.slice(0, themeCss.indexOf(`@media (max-width: ${MOBI
 assert.ok(!/\.st-head[^{]*\{[^}]*border-top/.test(desktopCss), "the desktop hairline is not a per-station top border");
 assert.match(themeCss, /\.station \.cards \{[^}]*overflow-y: auto/, "vertical spill scrolls inside each station");
 assert.match(themeCss, /\.c-top \{[^}]*flex-wrap: wrap/, "the top row wraps the live cell instead of clipping it at 150px");
+assert.match(themeCss, /\.c-live \{[^}]*max-width: 100%;[^}]*min-width: 0;[^}]*overflow: hidden;[^}]*text-overflow: ellipsis/, "the live cell ellipsizes inside the card instead of clipping at the station edge");
 assert.match(themeCss, /\.c-meta \{[^}]*flex-wrap: wrap/, "the meta row wraps instead of clipping the labels at 150px");
 assert.match(themeCss, /#board \{[^}]*overflow-y: hidden/, "the board never scrolls the page vertically");
 assert.match(themeCss, /#board \{[^}]*overflow-x: auto/, "below 1100px the board scrolls horizontally on its own");
@@ -519,12 +520,14 @@ const liveTask = { file: "000004_d.md", name: "feat: d", priority: "high", state
 sync([liveTask]);
 const cardD = els.get("000004_d.md")!;
 assert.equal(cardD.writes, 1, "a live card writes its base markup once");
-assert.equal(cardD.querySelector(".c-live-text")!.textContent, "Developer · 2s", "the live cell fills in place with the role and the elapsed time");
+assert.equal(cardD.querySelector(".c-live-text")!.textContent, "Developer · 2s · 420", "the live cell fills in place with the role, the elapsed time and the tokens, in the run row's order");
 assert.equal(cardD.querySelector(".card-stats")!.textContent, "420 · 2s", "the run row fills in place with the run totals");
 sync([{ ...liveTask, agents: [{ ...liveTask.agents[0], tokens: 900, duration: 2500 }] }]);
 assert.equal(cardD.writes, 1, "a stats-only change does not rewrite the card markup, the spinner animation survives");
-assert.equal(cardD.querySelector(".c-live-text")!.textContent, "Developer · 3s", "the live cell follows the poll");
+assert.equal(cardD.querySelector(".c-live-text")!.textContent, "Developer · 3s · 900", "the live cell follows the poll, tokens included");
 assert.equal(cardD.querySelector(".card-stats")!.textContent, "900 · 3s", "the run row follows the poll");
+sync([{ ...liveTask, agents: [{ ...liveTask.agents[0], tokens: null }] }]);
+assert.equal(cardD.querySelector(".c-live-text")!.textContent, "Developer · 2s", "an agent with no usage record reads the label and the duration with no trailing separator");
 sync([{ ...liveTask, agents: [] }]);
 assert.ok(cardD.writes === 2 && !cardD.querySelector(".card-stats") && !cardD.querySelector(".c-live-text"), "a run that ends drops both live slots and keeps the card node");
 sync([{ file: "000005_e.md", name: "feat: e", priority: "low", state: "to-do", updated: 7, agents: [{ role: "reviewer", run: 0, alive: false, status: "dead", handle: "g", tokens: 5, duration: 900 }] }]);

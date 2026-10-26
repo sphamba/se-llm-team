@@ -170,7 +170,7 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
    it wraps so a narrow station never clips the live cell */
 .c-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.75rem; }
 .held { border: 1px dashed var(--dim); color: var(--dim); padding: 0 4px; font-size: 0.6875rem; font-family: ${MONO}; }
-.c-live { margin-left: auto; color: var(--ac); font-family: ${MONO}; font-size: 0.75rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.c-live { margin-left: auto; color: var(--ac); font-family: ${MONO}; font-size: 0.75rem; white-space: nowrap; font-variant-numeric: tabular-nums; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ruler { display: inline-flex; gap: 2px; align-items: center; }
 .ruler i { display: block; width: 8px; height: 3px; background: var(--hairline); }
 .ruler i.on { background: currentColor; }
