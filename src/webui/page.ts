@@ -2,7 +2,7 @@ import { PRIORITY_RANK } from "../kanban.ts";
 import { readConfigFiles, type StageFlags } from "../orchestrator/config.ts";
 export type { StageFlags };
 import { esc, inline, logFixups, md } from "./logpane.ts";
-import { agentLabel, agentStatsText, applyCardStats, applyStages, archRowHtml, archStatsText, blockerTasks, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, groupRuns, isHeld, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, stationFor, statsKey, STATIONS, syncBoard, syncCardStats, taskStats, waitsOnText } from "./board.ts";
+import { agentLabel, agentStatsText, agentLive, applyCardStats, applyStages, archRowHtml, archStatsText, blockerTasks, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, groupRuns, heldToken, isHeld, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, stationFor, statsKey, STATIONS, syncBoard, syncCardStats, taskStats, taskTokenTotal, waitsOnText } from "./board.ts";
 import { ARCHIVE_PAGE, archivePage, archiveTasks, decodeFilters, emptyFilters, encodeFilters, FILTER_COMPLEXITIES, FILTER_DEBOUNCE, FILTER_PRIORITIES, FILTERS_KEY, filterReason, filterTasks, filtersActive, filtersCount, matchesFilters, PALETTE_MAX, paletteResults } from "./filters.ts";
 import { CSS, MOBILE_MAX } from "./theme.ts";
 
@@ -168,6 +168,7 @@ ${flipDiff}
 ${curve}
 ${relationPaths}
 ${blockerTasks}
+${heldToken}
 ${waitsOnText}
 ${stationFor}
 // board layout and the card pass, interpolated as source so the client runs the tested code;
@@ -178,6 +179,7 @@ ${spinnerHtml}
 ${numLinkHtml}
 ${priorityRuler}
 ${isHeld}
+${agentLive}
 ${cardBaseHtml}
 ${buildShell}
 ${applyStages}
@@ -193,6 +195,7 @@ ${groupRuns}
 ${agentStatsText}
 ${fmtTokens}
 ${fmtDur}
+${taskTokenTotal}
 ${taskStats}
 ${archStatsText}
 ${archRowHtml}

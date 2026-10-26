@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startHub } from "../../src/hub.ts";
 import { PRIORITY_RANK, STATES } from "../../src/kanban.ts";
-import { applyStages, buildShell, cardBaseHtml, curve, DEFAULT_STAGES, flipDiff, isHeld, MOBILE_MAX, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, STATIONS, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats } from "../../src/webui.ts";
+import { applyStages, buildShell, cardBaseHtml, curve, DEFAULT_STAGES, flipDiff, isHeld, MOBILE_MAX, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, STATIONS, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats, taskTokenTotal } from "../../src/webui.ts";
 import { groupRuns } from "../../src/webui/board.ts";
 import { esc } from "../../src/webui/logpane.ts";
 
@@ -185,10 +185,11 @@ const rich = cardBaseHtml({ file: "000047_fix_x.md", name: "a & b", priority: "h
 assert.ok(rich.startsWith('<div class="c-top">') && rich.includes('<span class="num-link num" data-task="000047_fix_x.md">#47</span>'), "the top row leads with the task number as a link");
 assert.ok((rich.match(/<i class="on">/g) ?? []).length === 3 && rich.includes('class="ruler pr-high"'), "the four-step ruler fills three steps for a high priority");
 assert.ok(rich.includes('<span class="c-live"><span class="c-live-text"></span></span>'), "a live run gets the top-right live cell, filled only by the in-place pass");
+assert.ok(rich.includes('<span class="card-tokens"></span>') && rich.indexOf('class="c-live"') < rich.indexOf('class="card-tokens"'), "the token cell follows the live cell on the id row, empty in the markup so a poll never rewrites it");
 assert.ok(rich.includes('<div class="name">a &amp; b</div>'), "the name is escaped and carries no priority tint");
 assert.ok(rich.includes('<div class="ctx">the board is rebuilt</div>'), "an idle card shows its summary as the context line");
 assert.ok(rich.includes('<div class="c-run"><span class="card-stats"></span></div>'), "a live run gets a run row, its values filled in place");
-assert.ok(rich.includes('<span class="c-p p-high">high</span>') && rich.includes('<span class="c-cx cx-complex">complex</span>') && !rich.includes('class="chip'), "the meta row shows priority and complexity as small mono labels, not pill chips");
+assert.ok(!rich.includes('class="c-p') && rich.includes('class="ruler pr-high"') && rich.includes('<span class="c-cx cx-complex">complex</span>') && rich.includes('<span class="c-issuer">user</span>') && !rich.includes('class="chip'), "the ruler alone carries the priority, so the meta row keeps only the complexity and issuer labels");
 // #404 no card names its own state: the column head and the agent pill already say it, so every state
 // of every station renders the same meta row, looped over the station table so a new state is covered
 for (const st of STATIONS.flatMap((s) => [...s.states])) {
@@ -209,6 +210,11 @@ assert.equal(numLinkHtml('000048_quo"te.md'), '<span class="num-link" data-task=
 const baseOf = (tokens: number, duration: number) => cardBaseHtml({ file: "000056_l.md", name: "l", priority: "high", agents: [{ ...liveRun, tokens, duration }] }, "doing");
 assert.equal(baseOf(420, 1500), baseOf(9999, 90000), "the base markup carries no token or elapsed value, so the spinner never restarts on a poll");
 assert.ok(taskStats({ agents: [{ tokens: 420, duration: 1500 }, { tokens: 1580, duration: 2000 }] }) === "2k · 4s", "the run row totals the agent entries");
+// #408 the phone card prints the same sum as bare tokens, and a run with no usage record prints none
+assert.equal(taskTokenTotal({ agents: [{ tokens: 82000 }, { tokens: null }] }), 82000, "the token total sums the agent entries and skips one with no number");
+assert.equal(taskTokenTotal({ agents: [{ tokens: 0 }] }), 0, "a genuine zero total stays a number, so a run that spent nothing reads 0");
+assert.equal(taskTokenTotal({ agents: [{ duration: 900 }] }), null, "no usage record leaves the total null, so the card prints no number");
+assert.equal(taskTokenTotal({}), null, "a task with no agent entries has no token total");
 
 // #373 the waits-on marker: the resting fact that a relation exists, in the card meta row. A ref
 // resolves through the board's own task list, a done blocker counts as satisfied, and the `user`
@@ -226,8 +232,11 @@ assert.equal(markerOf("#4")?.[1], "waits on 1", "one unsatisfied blocker names t
 assert.equal(markerOf("#4, #5, #7")?.[1], "waits on 3", "three blockers count as one wait");
 assert.equal(markerOf("#6")?.[1], "waits on 1 ✓", "a satisfied blocker is a check, not a wait");
 assert.equal(markerOf("#4, #6")?.[1], "waits on 1", "a mixed set waits on the unsatisfied blockers only");
-assert.equal(markerOf("user")?.[1], "held", "the user token alone is the held marker");
-assert.equal(markerOf("user, #4")?.[1], "held waits on 1", "a held task that also waits shows held first, then the wait");
+assert.equal(markerOf("user")?.[1], "user", "the hold marker names the stored blockedBy token, not the word held");
+assert.equal(markerOf("USER")?.[1], "USER", "and keeps the token's stored case");
+assert.equal(markerOf("user, #4")?.[1], "user waits on 1", "a held task that also waits shows the hold first, then the wait");
+assert.ok((markerOf("user")?.[0] ?? "").includes('aria-label="blocked by user"'), "the hold's accessible name spells the relation out instead of reading the token twice");
+assert.ok((markerOf("user, #4")?.[0] ?? "").includes('aria-label="blocked by user, waits on 1: #4"'), "a hold that also waits names both relations and the refs");
 assert.equal(markerOf("#9, junk"), null, "a ref no task resolves leaves no marker");
 assert.ok((markerOf("#4, #5")?.[0] ?? "").includes('aria-label="waits on 2: #4, #5"'), "the marker's accessible name lists the refs");
 assert.ok((markerOf("#4")?.[0] ?? "").includes('data-wait="#4"'), "the marker carries its refs as data for the popover");
@@ -338,7 +347,7 @@ assert.ok(!hotCards[0].cls.has("rim"), "hovering a blocker rims its own blockers
 const cssRule = (sel: string) => themeCss.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " \\{([^}]*)\\}"))?.[1] ?? "";
 assert.match(cssRule(".c-wait"), /white-space: nowrap/, "the marker never wraps, so it stays on one line");
 assert.ok(Number(cssRule(".c-wait").match(/min-height: (\d+)px/)![1]) >= 28, "the marker keeps its 28px hit height");
-assert.match(cssRule(".c-wait"), /margin-left: auto/, "the marker is right aligned in the meta row");
+assert.ok(!/margin-left/.test(cssRule(".c-wait")) && /margin-left: auto/.test(cssRule(".c-issuer")), "the issuer alone takes the row's auto margin, so the marker sits beside it at the right edge with no hole between");
 assert.match(cssRule("#relations"), /opacity: 0/, "no curve at rest");
 assert.match(cssRule("#relations path"), /stroke-opacity: 0/, "a plain line paints nothing, so a reveal lights only the hovered card's paths");
 assert.match(cssRule("#relations path.relations-hot"), /stroke: var\(--link\)/, "the lit line takes the link colour of the blocker's rim");
@@ -346,7 +355,16 @@ assert.match(cssRule("#relations path.relations-hot"), /stroke-opacity: 1/, "the
 assert.match(themeCss, /#board\.reveal #relations \{[^}]*opacity: 1/, "a reveal paints the relation layer");
 assert.match(themeCss, /#board\.reveal \.card:not\(\.hot\) \{[^}]*opacity: \.55/, "an unrelated card dims to 55 percent, not 40, so the marker text stays readable");
 assert.match(cssRule("#waits-pop"), /position: fixed/, "the popover floats over the board instead of inside a scrolling card");
-assert.match(themeCss, new RegExp(`@media \\(max-width: ${MOBILE_MAX}px\\) \\{[\\s\\S]*?\\.c-wait`), "the phone layout gives the marker the 44px touch floor");
+// #408 the phone card is the id, the title and the tokens: the first phone block hides the five
+// desktop rows and shows the token cell, which its own auto margin pushes to the right edge
+const phoneStart = themeCss.indexOf("@media (max-width: " + MOBILE_MAX + "px)");
+const phoneCard = themeCss.slice(phoneStart, themeCss.indexOf("@media (max-width: " + MOBILE_MAX + "px)", phoneStart + 1));
+const phoneCardRule = (sel: string) => phoneCard.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " \\{([^}]*)\\}"))?.[1] ?? "";
+for (const sel of [".card .ruler", ".card .c-live", ".card .ctx", ".card .c-run", ".card .c-meta"])
+	assert.match(phoneCardRule(sel), /display: none/, `the phone block hides ${sel.replace(".card ", "")}, so a phone card keeps no desktop row`);
+assert.match(phoneCardRule(".card .card-tokens"), /margin-left: auto/, "the token cell sits at the right edge of the id row");
+assert.match(phoneCardRule(".card .card-tokens"), /font-variant-numeric: tabular-nums/, "the token number keeps its tabular figures");
+assert.ok(/display: none/.test(cssRule(".card-tokens")) && !/display: none/.test(phoneCardRule(".card .card-tokens")), "the token cell stays out of the desktop card and shows on a phone alone");
 
 // #373 the popover wiring: one popover keyed by file so a poll leaves it open, Escape restores the
 // marker, and a rendered row scrolls its blocker's card into view
@@ -529,10 +547,13 @@ sync([{ ...liveTask, agents: [{ ...liveTask.agents[0], tokens: 900, duration: 25
 assert.equal(cardD.writes, 1, "a stats-only change does not rewrite the card markup, the spinner animation survives");
 assert.equal(cardD.querySelector(".c-live-text")!.textContent, "Developer · 3s · 900", "the live cell follows the poll, tokens included");
 assert.equal(cardD.querySelector(".card-stats")!.textContent, "900 · 3s", "the run row follows the poll");
+assert.equal(cardD.querySelector(".card-tokens")!.textContent, "900", "the phone card's token cell takes the same run total, with no duration");
+sync([{ ...liveTask, agents: [{ ...liveTask.agents[0], tokens: 82000, duration: 2500 }] }]);
+assert.equal(cardD.querySelector(".card-tokens")!.textContent, "82k", "the chosen phone card reads 82k, the run's token total alone");
 sync([{ ...liveTask, agents: [{ ...liveTask.agents[0], tokens: null }] }]);
-assert.equal(cardD.querySelector(".c-live-text")!.textContent, "Developer · 2s", "an agent with no usage record reads the label and the duration with no trailing separator");
+assert.ok(cardD.querySelector(".c-live-text")!.textContent === "Developer · 2s" && cardD.querySelector(".card-tokens")!.textContent === "", "an agent with no usage record reads the label and the duration with no trailing separator, and leaves the token cell empty");
 sync([{ ...liveTask, agents: [] }]);
-assert.ok(cardD.writes === 2 && !cardD.querySelector(".card-stats") && !cardD.querySelector(".c-live-text"), "a run that ends drops both live slots and keeps the card node");
+assert.ok(cardD.writes === 2 && !cardD.querySelector(".card-stats") && !cardD.querySelector(".c-live-text") && cardD.querySelector(".card-tokens")!.textContent === "", "a run that ends drops both live slots and keeps the card node");
 sync([{ file: "000005_e.md", name: "feat: e", priority: "low", state: "to-do", updated: 7, agents: [{ role: "reviewer", run: 0, alive: false, status: "dead", handle: "g", tokens: 5, duration: 900 }] }]);
 const cardE = els.get("000005_e.md")!;
 assert.ok(cardE.innerHTML.includes('<div class="c-run dead">') && !cardE.innerHTML.includes("c-live"), "a dead run gets the red run row and no live cell");
@@ -601,6 +622,21 @@ const heldOrders = [
 sync(heldOrders, new Set(["queue"]));
 assert.deepEqual(shown("queue"), ["000012_l.md", "000010_j.md", "000011_k.md"], "held tasks pin above the rest of their station, in priority order among themselves");
 assert.ok(isHeld({ blockedBy: "USER, #42" }) && isHeld({ blockedBy: "user" }) && !isHeld({ blockedBy: "#42" }) && !isHeld({}), "the hold test reads the user token in any case and never a task ref");
+// #408 a task with a running agent pins above the rest of its station, the hold and the priority included
+const liveOn = [{ role: "developer", run: 0, alive: true, status: "live", handle: "h" }];
+const liveOrders = [
+	{ file: "000040_p.md", name: "p", priority: "low", state: "backlog", updated: 1, blockedBy: "user" },
+	{ file: "000041_q.md", name: "q", priority: "critical", state: "backlog", updated: 9 },
+	{ file: "000042_r.md", name: "r", priority: "medium", state: "backlog", updated: 8, agents: liveOn },
+	{ file: "000043_s.md", name: "s", priority: "critical", state: "backlog", updated: 9, agents: [{ ...liveOn[0], alive: false, status: "dead" }] },
+];
+sync(liveOrders, new Set(["queue"]));
+assert.deepEqual(shown("queue"), ["000042_r.md", "000040_p.md", "000041_q.md", "000043_s.md"], "a live task pins above a held task and above a critical one, while a dead run pins nothing");
+const twoLive = [
+	{ file: "000044_t.md", name: "t", priority: "low", state: "backlog", updated: 9, agents: liveOn },
+	{ file: "000045_u.md", name: "u", priority: "critical", state: "backlog", updated: 1, agents: liveOn },
+];
+assert.deepEqual(sortStation([...twoLive]).map((t) => t.file), ["000045_u.md", "000044_t.md"], "two live tasks keep the priority, then update order among themselves");
 
 // 000320: the held card carries the user-hold hook every pass, so a poll adds and removes the
 // pinned rule live, while the one-shot entrance class stays untouched

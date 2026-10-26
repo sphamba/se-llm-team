@@ -184,19 +184,15 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 /* the run row: a live run in the station accent, a finished run red and neutral about the card */
 .c-run { margin-top: var(--sp-2); font-size: 0.75rem; font-family: ${MONO}; color: var(--dim); }
 .c-run.dead { color: var(--error-text); }
-/* the meta row: the priority and complexity labels and the issuer at the right; it wraps so the labels survive a narrow station */
+/* the meta row: the complexity label, then the issuer and the waits-on marker at the right; it wraps so the labels survive a narrow station */
 .c-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: var(--sp-3); font-size: 0.75rem; font-family: ${MONO}; }
 .c-meta > span { background: none; padding: 0; border-radius: 0; }
-.c-meta .c-p { color: var(--text); }
-.c-meta .p-critical { color: var(--critical-fg); }
-.c-meta .p-high { color: var(--high-fg); }
-.c-meta .p-medium { color: var(--medium-fg); }
-.c-meta .p-low { color: var(--low-fg); }
 .c-cx { color: var(--dim); }
 .c-issuer { margin-left: auto; color: var(--faint); }
 /* #373 the waits-on marker: the resting fact that a relation exists, a real button in the meta row so
-touch and keyboard reach the popover; it sits right aligned, never wraps and keeps a 28px hit height */
-.c-wait { flex: 0 0 auto; margin-left: auto; min-height: 28px; display: inline-flex; align-items: center; white-space: nowrap; border: 1px solid var(--hairline); background: var(--raised); color: var(--text); border-radius: 6px; padding: 0 8px; font-family: inherit; font-size: 0.75rem; }
+touch and keyboard reach the popover; the issuer's own auto margin puts the pair at the right edge, so
+the marker takes none, and it never wraps and keeps a 28px hit height */
+.c-wait { flex: 0 0 auto; min-height: 28px; display: inline-flex; align-items: center; white-space: nowrap; border: 1px solid var(--hairline); background: var(--raised); color: var(--text); border-radius: 6px; padding: 0 8px; font-family: inherit; font-size: 0.75rem; }
 .c-wait.held { border-style: dashed; border-color: var(--dim); color: var(--dim); }
 .c-wait:hover { border-color: var(--link); color: var(--link); }
 .c-wait:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
@@ -231,6 +227,8 @@ names the reason where the station is wide enough */
 /* #366 the run row's totals (taskStats): the value already sits in the span, so no entrance animation runs on a poll */
 .card-stats { font-variant-numeric: tabular-nums; }
 .card-stats:empty { display: none; }
+/* #408 the phone card's token total: the desktop card reads the run row instead, so the cell hides */
+.card-tokens { display: none; }
 .p-low { background: var(--low-bg); color: var(--low-fg); }
 .p-medium { background: var(--medium-bg); color: var(--medium-fg); }
 .p-high { background: var(--high-bg); color: var(--high-fg); }
@@ -403,6 +401,14 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
 .station.strip .st-head h2 { writing-mode: horizontal-tb; }
 .station .cards { flex: 0 0 auto; min-height: auto; overflow: visible; }
 .card { flex: 0 0 auto; padding: 10px 12px 12px; }
+/* #408 a phone card is the id, the title and the tokens: the token cell takes the id row's right edge
+and the five desktop rows drop, while the live mark and the number stay */
+.card .ruler { display: none; }
+.card .c-live { display: none; }
+.card .ctx { display: none; }
+.card .c-run { display: none; }
+.card .c-meta { display: none; }
+.card .card-tokens { display: inline-block; margin-left: auto; font-variant-numeric: tabular-nums; }
 .station .cards > .card:last-child { border-bottom: 0; }
 .st-head { align-items: baseline; padding: 14px 12px 0; border-top: 1px solid var(--hairline); }
 .st-head h2 { font-size: 0.875rem; }
@@ -420,8 +426,9 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
    connector in ::after and a more specific rule, so it keeps the connector and goes without a band.
    #405 the theme toggle, the filter button, the chips and the close buttons take the one 32px --ctl-h
    box and lean on the same band for the 44px floor */
-.m-action, .seg, .toggle, .c-wait, #c-text summary, #theme, #f-toggle, .f-chip, #p-close, #c-close { position: relative; }
-.m-action::after, .seg::after, .toggle::after, .c-wait::after, #c-text summary::after, #theme::after, #f-toggle::after, .f-chip::after, #p-close::after, #c-close::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; margin-top: -22px; }
+/* #408 no phone card shows its meta row, so the waits-on marker takes no band */
+.m-action, .seg, .toggle, #c-text summary, #theme, #f-toggle, .f-chip, #p-close, #c-close { position: relative; }
+.m-action::after, .seg::after, .toggle::after, #c-text summary::after, #theme::after, #f-toggle::after, .f-chip::after, #p-close::after, #c-close::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; margin-top: -22px; }
 /* the neighbours still sit at least 8px apart */
 #p-actions, .f-group, #tabs, .c-top, .c-meta { gap: 8px; }
 /* #405 a wrapped chip row sits two band overhangs apart, so two chips' bands touch and never overlap;

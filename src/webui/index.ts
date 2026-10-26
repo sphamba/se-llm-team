@@ -4,6 +4,7 @@ export {
 	agentLabel,
 	agentRowSig,
 	agentStatsText,
+	agentLive,
 	applyStages,
 	buildShell,
 	cardBaseHtml,
@@ -12,6 +13,7 @@ export {
 	flipDiff,
 	fmtDur,
 	fmtTokens,
+	heldToken,
 	isHeld,
 	numLinkHtml,
 	priorityRuler,
@@ -25,6 +27,7 @@ export {
 	syncDoctorCards,
 	syncStatsLine,
 	taskStats,
+	taskTokenTotal,
 } from "./board.ts";
 export { agentLogPayload, cardStatsPayload, taskDetail, taskHistory, taskPayload } from "./payload.ts";
 export { CSS, MOBILE_MAX } from "./theme.ts";

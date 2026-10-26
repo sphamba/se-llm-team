@@ -53,12 +53,20 @@ export function agentStatsText(tokens, duration) {
 // stats lines use; empty when no entry carries a usage record (#183, usage-less logs and live
 // runs before their first usage record), or the task has no entries, or both totals are 0/null
 export function taskStats(t) {
+	const toks = taskTokenTotal(t);
+	if (toks === null) return "";
 	const agents = t.agents || [];
-	if (!agents.some((a) => typeof a.tokens === "number" && Number.isFinite(a.tokens))) return "";
-	const toks = agents.reduce((s, a) => s + (typeof a.tokens === "number" ? a.tokens : 0), 0);
 	const dur = agents.reduce((s, a) => s + (typeof a.duration === "number" ? a.duration : 0), 0);
 	if (!toks && !dur) return "";
 	return agentStatsText(toks, dur);
+}
+
+// #408 the summed tokens across the task's agent entries, null when no entry carries a usage record:
+// the run row and the phone card read one sum, and a genuine zero total still stays a number
+export function taskTokenTotal(t) {
+	const agents = t.agents || [];
+	if (!agents.some((a) => typeof a.tokens === "number" && Number.isFinite(a.tokens))) return null;
+	return agents.reduce((s, a) => s + (typeof a.tokens === "number" ? a.tokens : 0), 0);
 }
 
 // #380 the done archive's two stat cells, tokens then duration: the sum across the task's agents
@@ -196,9 +204,14 @@ export const STATIONS: readonly Station[] = [
 	{ id: "done", label: "Done", states: ["done"], accent: "done", empty: "nothing finished yet" },
 ];
 
-// 000320 the user hold: the blockedBy `user` token, any case, alone or mixed with task refs
+// 000320/#408 the user hold: the stored blockedBy `user` token, any case and trimmed, alone or mixed
+// with task refs; the marker prints it and the hold test reads it, so one parse feeds both
+export function heldToken(t: Task) {
+	return String(t.blockedBy || "").split(",").map((r) => r.trim()).find((r) => r.toLowerCase() === "user") ?? "";
+}
+
 export function isHeld(t: Task) {
-	return String(t.blockedBy || "").split(",").some((r) => r.trim().toLowerCase() === "user");
+	return heldToken(t) !== "";
 }
 
 // the station a state belongs to, named for a reader: the popover row and the off-board stub both
@@ -227,16 +240,23 @@ export function waitsOnText(t: Task, all: Task[] = []) {
 	const blockers = blockerTasks(t, all);
 	const open = blockers.filter((b) => b.state !== "done").length;
 	const wait = blockers.length ? "waits on " + (open || blockers.length - open) + (open ? "" : " ✓") : "";
-	return [isHeld(t) ? "held" : "", wait].filter(Boolean).join(" ");
+	return [heldToken(t), wait].filter(Boolean).join(" ");
 }
 
-// the station's rows in board order: a held task pins first, then priority-desc, then update-desc;
-// the sort is stable and the payload arrives in task-number order, so equal keys keep that order.
-// syncBoard and the payload's eager card set share it. #374 the done station passes byRecency, so it
-// answers "what just landed": newest update first, with no priority and no hold (done is never held)
+// #408 one liveness test: the card's live cell and its pin to the top of the column read the same
+// fact, so a card and its order never disagree
+export function agentLive(t: Task) {
+	return (t.agents || []).some((a) => a.alive);
+}
+
+// the station's rows in board order: a live task pins first, then a held one, then priority-desc,
+// then update-desc; the sort is stable and the payload arrives in task-number order, so equal keys
+// keep that order. syncBoard and the payload's eager card set share it. #374 the done station passes
+// byRecency, so it answers "what just landed": newest update first, and a done task never has a live
+// agent, so the live key stays out of that order
 export function sortStation(tasks: Task[], { byRecency = false }: { byRecency?: boolean } = {}): Task[] {
 	if (byRecency) return tasks.sort((a, b) => b.updated - a.updated);
-	return tasks.sort((a, b) => (isHeld(b) ? 1 : 0) - (isHeld(a) ? 1 : 0) || (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) || b.updated - a.updated);
+	return tasks.sort((a, b) => (agentLive(b) ? 1 : 0) - (agentLive(a) ? 1 : 0) || (isHeld(b) ? 1 : 0) - (isHeld(a) ? 1 : 0) || (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) || b.updated - a.updated);
 }
 
 // the liveness mark (#389 a pulsing square) marks a task the orchestrator is working on; a task that
@@ -257,33 +277,38 @@ export function priorityRuler(priority: string) {
 }
 
 // one card's markup; the live values (elapsed, tokens) stay out of it, so a poll never rewrites the
-// card and its mark keeps its pulse (000191); syncCardStats fills the live cell and the run
-// row in place. Every optional row drops when empty: the number, ruler and live cell on top, the
-// name, the summary as the context line, the run row, then the meta row with the priority,
-// complexity and issuer labels and the waits-on marker
+// card and its mark keeps its pulse (000191); syncCardStats fills the live cell, the token cell and the
+// run row in place. Every optional row drops when empty: the number, ruler, live cell and token cell
+// on top, the name, the summary as the context line, the run row, then the meta row with the
+// complexity and issuer labels and the waits-on marker. #408 the ruler alone carries the priority,
+// and a phone keeps the top row, the name and the token, so the stylesheet hides the rest
 export function cardBaseHtml(t: Task, st: string, all: Task[] = []) {
 	const issued = !!t.issuer && /^#\d+$/.test(t.issuer);
-	const live = (t.agents || []).some((a) => a.alive);
+	const live = agentLive(t);
 	const refs = String(t.blockedBy || "").split(",").map((r) => r.trim()).filter(Boolean);
-	const wait = waitsOnText(t, all);
+	const hold = heldToken(t);
+	const text = waitsOnText(t, all);
+	const rest = text.slice(hold.length).trim();
+	// the visible marker names the hold; the accessible name spells the relation out, never `user: user`
+	const name = [hold ? "blocked by " + hold : "", rest ? rest + ": " + refs.filter((r) => r.toLowerCase() !== "user").join(", ") : ""].filter(Boolean).join(", ");
 	return (
 		'<div class="c-top">' +
 		spinnerHtml(st) +
 		numLinkHtml(t.file, "num") +
 		priorityRuler(t.priority) +
 		(live ? '<span class="c-live"><span class="c-live-text"></span></span>' : "") +
+		'<span class="card-tokens"></span>' +
 		"</div>" +
 		'<div class="name' + (issued ? " issued" : "") + '">' + esc(t.name) + "</div>" +
 		(t.summary ? '<div class="ctx">' + esc(t.summary) + "</div>" : "") +
 		(t.agents && t.agents.length ? '<div class="c-run' + (live ? "" : " dead") + '"><span class="card-stats"></span></div>' : "") +
 		'<div class="c-meta">' +
-		'<span class="c-p p-' + esc(t.priority) + '">' + esc(t.priority) + "</span>" +
 		'<span class="c-cx cx-' + esc(t.complexity || "moderate") + '">' + esc(t.complexity || "moderate") + "</span>" +
 		'<span class="c-issuer">' + esc(t.issuer || "user") + "</span>" +
 		// #373 the marker is the resting fact the hover connectors only detail: a real button, so
 		// touch and keyboard reach the popover, and the accessible name lists the refs it covers
-		(wait
-			? '<button type="button" class="c-wait' + (isHeld(t) ? " held" : "") + '" data-wait="' + esc(refs.join(",")) + '" aria-label="' + esc(wait + (refs.length ? ": " + refs.join(", ") : "")) + '">' + esc(wait) + "</button>"
+		(text
+			? '<button type="button" class="c-wait' + (hold ? " held" : "") + '" data-wait="' + esc(refs.join(",")) + '" aria-label="' + esc(name) + '">' + esc(text) + "</button>"
 			: "") +
 		"</div>"
 	);
@@ -406,9 +431,9 @@ export function applyStages(stations, stages) {
 }
 
 // 000191/000366: the in-place live pass. The top-right live cell carries the role, the elapsed
-// time and the tokens, in the panel run row's order (#406); the run row the task's token totals;
-// both update without touching the card markup, so the live .spin node keeps its animation across
-// a poll (supersedes the accepted #178 restart)
+// time and the tokens, in the panel run row's order (#406); #408 the token cell carries the bare
+// total a phone reads, and the run row the task's token totals; all update without touching the card
+// markup, so the live .spin node keeps its animation across a poll (supersedes the accepted #178 restart)
 export function syncCardStats(el, t) {
 	const runs = t.agents || [];
 	const live = runs.find((a) => a.alive);
@@ -416,6 +441,9 @@ export function syncCardStats(el, t) {
 	const cell = el.querySelector(".c-live-text");
 	const meta = live ? [agentLabel(live, count), fmtDur(live.duration), fmtTokens(live.tokens)].filter(Boolean).join(" · ") : "";
 	if (cell && cell.textContent !== meta) cell.textContent = meta;
+	const tokens = el.querySelector(".card-tokens");
+	const total = fmtTokens(taskTokenTotal(t));
+	if (tokens && tokens.textContent !== total) tokens.textContent = total;
 	const stats = el.querySelector(".card-stats");
 	const text = taskStats(t);
 	if (stats && stats.textContent !== text) stats.textContent = text;
