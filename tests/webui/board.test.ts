@@ -318,7 +318,7 @@ assert.ok(cardA.className.includes("enter"), "a card created this pass carries t
 const later = { file: "000003_c.md", name: "feat: c", priority: "low", state: "backlog", updated: 4 };
 sync([...tasksA, later]);
 assert.ok(els.get("000003_c.md")!.className.includes("enter"), "a later insertion gains the entrance class too");
-assert.equal(cardA.className, "card enter", "an unchanged card keeps the class exactly once, never re-added");
+assert.equal(cardA.className, "card enter running", "an unchanged card keeps the entrance class exactly once and its running hook");
 sync([{ ...tasksA[0], state: "to-do", updated: 5 }, later]);
 assert.equal(cardA.className, "card enter", "a state rewrite does not re-add the entrance class");
 

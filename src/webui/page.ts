@@ -84,7 +84,7 @@ export const PAGE = `<!doctype html>
 ${CSS}</style>
 </head>
 <body>
-<header><h1>Software Engineering LLM Team</h1><span id="updated"></span><button id="theme" onclick="toggleTheme()">Dark</button></header>
+<header><h1>Software Engineering LLM Team</h1><span id="updated"></span><button id="motion" onclick="cycleMotion()" aria-pressed="true" aria-label="Motion: live, click to cycle" title="Motion: live, click to cycle">live</button><button id="theme" onclick="toggleTheme()">Dark</button></header>
 <nav id="tabs"></nav>
 <div id="filters" aria-label="Filter tasks">
 <input id="f-q" type="text" placeholder="filter: text or #num  (/)" aria-label="Filter by text or number" autocomplete="off">
@@ -147,6 +147,34 @@ function toggleTheme() {
 }
 try { const stored = localStorage.getItem("theme"); if (stored === "dark" || stored === "light") rootEl.dataset.theme = stored; } catch {}
 syncThemeBtn();
+// #369 one motion policy for the whole client: the stored choice, forced to none while the system
+// asks for reduced motion. The attribute lands before the first paint, so no frame shows the wrong
+// mode, and a document with no attribute paints no ambience at all
+const MOTION_KEY = "motion";
+const MOTIONS = ["live", "purposeful", "none"];
+const reduceMq = matchMedia("(prefers-reduced-motion: reduce)");
+let motionWant = "live", tickTimer = null, polledAt = 0;
+try { const stored = localStorage.getItem(MOTION_KEY); if (MOTIONS.includes(stored)) motionWant = stored; } catch {}
+const noMotion = () => reduceMq.matches || motionWant === "none";
+function syncMotionBtn() {
+	const b = document.getElementById("motion");
+	if (!b) return;
+	const m = reduceMq.matches ? "none" : motionWant;
+	b.textContent = m;
+	b.setAttribute("aria-pressed", String(m !== "none"));
+	b.setAttribute("aria-label", "Motion: " + m + (reduceMq.matches ? ", off because your system asks for reduced motion" : ", click to cycle"));
+	b.title = b.getAttribute("aria-label");
+	b.disabled = reduceMq.matches;
+}
+function applyMotion() { rootEl.dataset.motion = reduceMq.matches ? "none" : motionWant; syncMotionBtn(); syncTicker(); }
+function cycleMotion() {
+	motionWant = MOTIONS[(MOTIONS.indexOf(motionWant) + 1) % MOTIONS.length];
+	try { localStorage.setItem(MOTION_KEY, motionWant); } catch {}
+	applyMotion();
+}
+applyMotion();
+reduceMq.addEventListener("change", applyMotion);
+document.addEventListener("visibilitychange", () => { rootEl.classList.toggle("motion-paused", document.hidden); syncTicker(); });
 const inline = ${inline};
 ${md}
 // FLIP across a refresh: measure old positions, sync the cards, invert, play. Every card whose
@@ -409,6 +437,25 @@ function queueExpanded() { const b = activeBoard(); for (const st of b.expanded)
 // spinner animation and in-flight FLIP transform are never restarted
 const cardEls = new Map();
 let stations = null;
+// the one 1 px/s tick: a running card's elapsed time and its progress line advance between polls,
+// both reseeded from the authoritative payload on every render; paused while the tab is hidden or
+// the effective mode is not live, so purposeful and none run no JS loop at all
+function syncTicker() {
+	if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+	if (rootEl.dataset.motion !== "live" || document.hidden) return;
+	tickTimer = setInterval(tickCards, 1000);
+}
+function tickCards() {
+	const delta = polledAt ? Math.max(0, Date.now() - polledAt) : 0;
+	for (const el of cardEls.values()) {
+		if (!el.classList.contains("running")) continue;
+		const t = activeBoard().tasks.find(x => x.file === el.dataset.file);
+		const live = t && (t.agents || []).find(a => a.alive);
+		if (!live) continue;
+		syncCardStats(el, { agents: t.agents.map(a => (a === live ? { ...a, duration: (a.duration || 0) + delta } : a)) });
+		el.style.setProperty("--p", String(Math.min(1, ((live.duration || 0) + delta) / 1000 / (el.offsetWidth || 1))));
+	}
+}
 // 000264: the lazily-known card stats, keyed per project and task (statsKey)
 const statsKnown = Object.create(null);
 function makeCard(file) {
@@ -486,7 +533,7 @@ function render(skipFlip) {
 	}
 	const project = projects.find(t => t.id === active);
 	applyStages(stations, project?.stages ?? DEFAULT_STAGES);
-	const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+	const reduced = noMotion();
 	const old = {};
 	if (!skipFlip) for (const el of cardEls.values()) {
 		el.style.transition = "none";
@@ -497,6 +544,9 @@ function render(skipFlip) {
 	// agent-less cards 6+ never wipe revealed stats; the payload's eager first-5 agents win
 	applyCardStats(tab.tasks, statsKnown, localStorage, active);
 	syncBoard(stations, filterTasks(tab.tasks, filters), tab.expanded, cardEls, makeCard, VISIBLE, document, filterReason(filters));
+	// #369 the authoritative values land here on every poll; the 1 px/s tick advances from them
+	polledAt = Date.now();
+	syncTicker();
 	const now = {};
 	for (const el of cardEls.values()) now[el.dataset.file] = cardBox(el);
 	const diff = flipDiff(old, now);
@@ -518,7 +568,7 @@ function render(skipFlip) {
 // drops .closing first, so the late event must not re-hide
 function closeAnimated(el) {
 	if (el.classList.contains("closing")) return;
-	if (matchMedia("(prefers-reduced-motion: reduce)").matches) { el.classList.add("hidden"); return; }
+	if (noMotion()) { el.classList.add("hidden"); return; }
 	// 000194: a stale fallback from a cancelled close (the reopen dropped .closing) must not cut the next exit
 	clearTimeout(el.__closeTimer);
 	el.classList.add("closing");
@@ -909,7 +959,7 @@ function markLiveLine() {
 const atBottom = () => { const p = logPane(); return p.scrollTop + p.clientHeight >= p.scrollHeight - 4; };
 // the live auto-scroll glides to the bottom, an instant auto scroll under reduced motion
 function glide(p) {
-	const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+	const behavior = noMotion() ? "auto" : "smooth";
 	p.scrollTo({ top: p.scrollHeight, behavior: behavior });
 }
 // the rendered chunk lands in the pane first, then logFixups runs the cross-chunk fixes over it

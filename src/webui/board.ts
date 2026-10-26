@@ -484,6 +484,9 @@ export function syncBoard(stations, tasks, expanded, els, make, visible, doc, re
 			// 000320: the `user` blockedBy token holds the task, so the toggle runs every pass: a poll
 			// adds and removes the held marker live, and the one-shot "enter" class stays untouched
 			el.classList.toggle("user-hold", isHeld(t));
+			// #369 the running hook every pass: the live policy draws the progress line on it, and a
+			// toggle never rewrites the card, so the tick keeps its node
+			el.classList.toggle("running", spinnerHtml(t.state) !== "");
 			const html = cardBaseHtml(t, t.state);
 			if (el.__html !== html) {
 				el.innerHTML = html;

@@ -28,8 +28,8 @@ export const CSS = `* { box-sizing: border-box; }
 --cx-trivial-bg: rgba(100, 130, 165, .18); --shine-hi: #ffffff; --overlay: rgba(15, 23, 42, .45); --code-bg: #ebeef0;
 /* 000353: one accent per pipeline stage and agent role, plus the failed-run red; the -text step is the darker Ayu Light ladder step that keeps a label readable on the light panel */
 --accent-backlog: #828e9f; --accent-backlog-text: #74757a; --accent-todo: #eba400; --accent-todo-text: #a16a00; --accent-review: #fa8532; --accent-review-text: #ad6410; --accent-merge: #a37acc; --accent-merge-text: #8b64b6; --accent-live: #22a4e6; --accent-live-text: #1a7bb7; --accent-integration: #4cbf99; --accent-integration-text: #3b8264; --accent-done: #86b300; --accent-done-text: #647f00; --error: #e65050; --error-text: #cd474f;
-/* 000191: motion knobs, one place to retune the entrances, the chunk fade and the pulse loop; 000194: --exit runs the closes, --shine is the whiter band mix */
---enter: 200ms; --exit: 180ms; --fade: 150ms; --pulse: 2s; --shine: 45%; }
+/* 000191: motion knobs, one place to retune the entrances, the chunk fade and the pulse loop; 000194: --exit runs the closes, --shine is the whiter band mix; #369: one motion token set, every duration and easing in the sheet reads one of these */
+--t-fast: 120ms; --t-base: 180ms; --t-slow: 240ms; --t-breathe: 2s; --t-sweep: 6s; --t-spin: 900ms; --ease-enter: cubic-bezier(.2, .8, .2, 1); --ease-exit: cubic-bezier(.4, 0, .8, 1); --ease-breathe: ease-in-out; --shine: 45%; }
 ${DARK_VARS}
 /* the self-hosted faces: latin subsets served by the hub's /fonts route, no unicode-range, font-display swap so the fallback paints first */
 @font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 400; font-display: swap; src: url("/fonts/space-grotesk-400.woff2") format("woff2"); }
@@ -44,8 +44,11 @@ body { --panel-w: clamp(28rem, 32vw, 35rem); --console-h: 0px; --chrome: 0px; di
 button { font-family: inherit; }
 header { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 6px; }
 h1 { font-size: 1.0625rem; font-weight: 500; margin: 0; }
-#theme { margin-left: auto; border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.875rem; }
-#theme:hover { background: var(--raised); }
+#motion, #theme { border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.875rem; }
+/* #369 the motion control sits at the right edge as a three-value cycler; disabled rather than pretending to honour a mode the system forbids */
+#motion { margin-left: auto; min-width: 6.5rem; }
+#motion:disabled { opacity: .6; cursor: default; }
+#motion:hover, #theme:hover { background: var(--raised); }
 #updated { font-size: 0.75rem; color: var(--dim); font-family: ${MONO}; font-variant-numeric: tabular-nums; }
 /* 000165: the serving hub's identity, hidden until the first /api/hub answer fills it */
 #hub { padding: 2px 18px 8px; font-size: 0.75rem; color: var(--dim); }
@@ -104,7 +107,9 @@ body.panel-open #archive { padding-right: calc(18px + var(--panel-w)); }
 /* #366 the station spine: seven tracks, six even and done slightly wider; below 1100px the board alone scrolls horizontally with a 150px station floor, so the page never scrolls sideways (000247). The heads share one hairline grid item and each station body scrolls on its own */
 #board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)) minmax(0, 1.15fr); grid-template-rows: 1px minmax(0, 1fr); gap: 0 18px; padding: 10px 18px 18px; overflow-x: auto; overflow-y: hidden; position: relative; }
 @media (max-width: 1099px) { #board { grid-template-columns: repeat(6, minmax(150px, 1fr)) minmax(150px, 1.15fr); } }
-.spine { grid-column: 1 / -1; grid-row: 1; background: var(--hairline); }
+.spine { grid-column: 1 / -1; grid-row: 1; background: var(--hairline); position: relative; overflow: hidden; }
+/* #369 the sweep is one gradient element on the spine's own hairline, so the loop has one animation node the poll never touches */
+.spine::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 20%; background: linear-gradient(90deg, transparent, var(--link), transparent); }
 /* a disabled integration stage narrows its own track to a strip; below 1100px the floor still wins */
 #board.off-integration { grid-template-columns: repeat(5, minmax(0, 1fr)) 48px minmax(0, 1.15fr); }
 @media (max-width: 1099px) { #board.off-integration { grid-template-columns: repeat(5, minmax(150px, 1fr)) 48px minmax(150px, 1.15fr); } }
@@ -113,7 +118,7 @@ paints them above the station bodies and below the z-index-2 task cards, pointer
 card clicks pass through */
 #relations { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; overflow: visible; }
 /* 000127: the low opacity keeps the lines a subtle hint behind the semi-transparent cards; hovering either connected card raises it (.relations-hot) */
-#relations path { fill: none; stroke: var(--dim); stroke-width: 1.5; stroke-opacity: .3; stroke-dasharray: 6 4; animation: dashflow 1s linear infinite; transition: stroke-opacity .15s ease; animation-direction: reverse; }
+#relations path { fill: none; stroke: var(--dim); stroke-width: 1.5; stroke-opacity: .3; stroke-dasharray: 6 4; transition: stroke-opacity var(--t-fast) var(--ease-enter); }
 #relations path.relations-hot { stroke-opacity: .8; }
 @keyframes dashflow { to { stroke-dashoffset: -10; } }
 /* #366 one station per phase: the head keeps the tick, the label and the count while the body scrolls; --ac comes from the station class at the end of this sheet */
@@ -141,7 +146,7 @@ card clicks pass through */
 .card.user-hold { border-bottom-color: var(--dim); }
 /* 000191: genuinely new cards fade and rise in once at insertion; syncBoard adds .enter only at
 creation and the page drops it on animationend, so a poll or a reorder never replays it */
-.card.enter { animation: cardIn var(--enter) ease-out; }
+.card.enter { animation: cardIn var(--t-slow) var(--ease-enter); }
 @keyframes cardIn { from { opacity: 0; transform: translateY(3px); } }
 /* the top row: spinner, number, the held marker, the priority ruler, then the live cell pushed right;
    it wraps so a narrow station never clips the live cell */
@@ -175,9 +180,8 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .num { font-size: 0.75rem; font-family: ${MONO}; font-variant-numeric: tabular-nums; color: var(--dim); margin-right: 4px; }
 .num-link { color: var(--link); cursor: pointer; }
 .num-link:hover { text-decoration: underline; }
-.spin { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border: 2px solid var(--hairline); border-top-color: var(--text); border-radius: 50%; vertical-align: 0px; animation: spin .9s linear infinite; }
+.spin { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border: 2px solid var(--hairline); border-top-color: var(--text); border-radius: 50%; vertical-align: 0px; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spin { animation: none; } #relations path { animation: none; } }
 .chip { font-size: 0.75rem; padding: 1px 7px; border-radius: 999px; background: var(--hairline); color: var(--text); }
 .chip.issuer { background: var(--code-bg); color: var(--dim); }
 .chip.cx { background: var(--code-bg); color: var(--dim); }
@@ -223,9 +227,9 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 #panel { position: fixed; top: var(--chrome); right: 0; bottom: var(--console-h); width: var(--panel-w); z-index: 3; overflow-y: auto; overflow-x: hidden; background: var(--panel); border-left: 1px solid var(--hairline); padding: 0 18px 18px; }
 #panel.hidden { display: none; }
 /* 000191: the panel slides in over the exit step's 180ms and the refresh never replays it */
-#panel:not(.hidden) { animation: panelIn var(--exit) ease-out; }
+#panel:not(.hidden) { animation: panelIn var(--t-base) var(--ease-enter); }
 @keyframes panelIn { from { transform: translateX(100%); } }
-#panel.closing { animation: panelOut var(--exit) ease-in forwards; }
+#panel.closing { animation: panelOut var(--t-base) var(--ease-exit) forwards; }
 @keyframes panelOut { to { transform: translateX(100%); } }
 body.panel-open #board { padding-right: calc(18px + var(--panel-w)); }
 /* the header is sticky at every width, so the title and the close control never scroll away */
@@ -257,7 +261,7 @@ body.panel-open #board { padding-right: calc(18px + var(--panel-w)); }
 .m-action:hover { background: var(--raised); }
 /* #364 keyboard focus: every element the stylesheet marks interactive answers Tab with the same
    visible ring, so the pointer cue is never the only cue */
-#theme:focus-visible, .tab:focus-visible, .card:focus-visible, .num-link:focus-visible, .toggle:focus-visible, .run-row:focus-visible, summary:focus-visible, #p-close:focus-visible, #c-close:focus-visible, .seg:focus-visible, .m-action:focus-visible, .f-chip:focus-visible, .arch-row:focus-visible, .pal-row:focus-visible, #f-q:focus-visible, #filters select:focus-visible, #pal-input:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+#motion:focus-visible, #theme:focus-visible, .tab:focus-visible, .card:focus-visible, .num-link:focus-visible, .toggle:focus-visible, .run-row:focus-visible, summary:focus-visible, #p-close:focus-visible, #c-close:focus-visible, .seg:focus-visible, .m-action:focus-visible, .f-chip:focus-visible, .arch-row:focus-visible, .pal-row:focus-visible, #f-q:focus-visible, #filters select:focus-visible, #pal-input:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 .m-action:disabled { opacity: 0.6; cursor: default; }
 .m-block { color: var(--error-text); border: 1px solid var(--error); background: color-mix(in srgb, var(--error) 15%, var(--panel)); }
 .m-unblock { color: var(--accent-done-text); border: 1px solid var(--accent-done); background: color-mix(in srgb, var(--accent-done) 15%, var(--panel)); }
@@ -286,10 +290,10 @@ line, and the leftmost column pins left with a static right border as the cue */
    is its own var; the panel's bottom edge follows the same var */
 #console { flex: 0 0 auto; display: flex; flex-direction: column; height: var(--console-h); min-height: 0; border-top: 1px solid var(--hairline); background: var(--code-bg); }
 #console.hidden { display: none; }
-#console:not(.hidden) { animation: logIn var(--enter) ease-out; }
+#console:not(.hidden) { animation: logIn var(--t-base) var(--ease-enter); }
 @keyframes logIn { from { opacity: 0; transform: translateY(4px); } }
 /* 000194: the matching close, after the entrance rule so the equal-specificity logOut wins */
-#console.closing { animation: logOut var(--exit) ease-in forwards; }
+#console.closing { animation: logOut var(--t-base) var(--ease-exit) forwards; }
 @keyframes logOut { to { opacity: 0; transform: translateY(4px); } }
 #c-handle { flex: 0 0 auto; height: 8px; cursor: row-resize; background: var(--hairline); }
 #c-handle:hover { background: var(--dim); }
@@ -310,7 +314,7 @@ line, and the leftmost column pins left with a static right border as the cue */
 #c-text details > pre { padding-left: 12px; }
 /* 000191: appended chunks fade and rise in; a CSS animation replays only on newly inserted
 nodes, so untouched siblings never re-animate and only new content moves */
-#c-text > * { animation: chunkIn var(--fade) ease-out; }
+#c-text > * { animation: chunkIn var(--t-fast) var(--ease-enter); }
 @keyframes chunkIn { from { opacity: 0; transform: translateY(2px); } }
 /* 000194: the pulse brightens only the glyphs: background-clip: text clips the gradient to the
 block's text, the nested pre and summary children included, and color: transparent hides the box,
@@ -318,16 +322,12 @@ so the band passing reads as letters brightening, never a highlight bar; the det
 selectors outrank the muted color rule (color: transparent must stick there) and --shine-base
 follows the block's own color; 000198: flat shoulders (base 0-33% and 67-100%) so the 300%
 window sits on flat base at both loop endpoints, no partial-bright tail at the wrap */
-#c-text > .pulse, #c-text > details.lg-think.pulse, #c-text > details.lg-tool.pulse { --shine-base: var(--text); background-image: linear-gradient(90deg, var(--shine-base) 0%, var(--shine-base) 33%, color-mix(in srgb, var(--shine-hi) var(--shine), var(--shine-base)) 50%, var(--shine-base) 67%, var(--shine-base) 100%); background-size: 300% 100%; background-repeat: no-repeat; -webkit-background-clip: text; background-clip: text; color: transparent; animation: chunkIn var(--fade) ease-out, shimmer var(--pulse) linear infinite; }
-#c-text > details.lg-think.pulse, #c-text > details.lg-tool.pulse { --shine-base: var(--dim); }
+[data-motion="live"] #c-text > .pulse, [data-motion="live"] #c-text > details.lg-think.pulse, [data-motion="live"] #c-text > details.lg-tool.pulse { --shine-base: var(--text); background-image: linear-gradient(90deg, var(--shine-base) 0%, var(--shine-base) 33%, color-mix(in srgb, var(--shine-hi) var(--shine), var(--shine-base)) 50%, var(--shine-base) 67%, var(--shine-base) 100%); background-size: 300% 100%; background-repeat: no-repeat; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer var(--t-breathe) linear infinite; }
+[data-motion="live"] #c-text > details.lg-think.pulse, [data-motion="live"] #c-text > details.lg-tool.pulse { --shine-base: var(--dim); }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
-/* 000191: reduced motion stops the entrance, chunk and pulse animations too; the rule sits
-after every base animation rule so the later equal-specificity selectors cannot override it;
-000194: the details.pulse variants join it, only they outrank #c-text > * and .pulse */
-@media (prefers-reduced-motion: reduce) { .card.enter, #panel:not(.hidden), #console:not(.hidden), #c-text > *, #c-text > .pulse, #c-text > details.lg-think.pulse, #c-text > details.lg-tool.pulse { animation: none; } }
-/* 000194: under reduced motion the clip animation stops (above) and color: transparent would
-make the text vanish: the gradient drops and the solid color restores per block type */
-@media (prefers-reduced-motion: reduce) { #c-text > .pulse { background-image: none; color: var(--text); } #c-text > details.lg-think.pulse, #c-text > details.lg-tool.pulse { background-image: none; color: var(--dim); } }
+/* #369 the shine is live-only and rides the .pulse markLiveLine puts on the newest streaming block,
+so no historical line ever shines; because the color: transparent sits inside the same opt-in rule,
+an un-animated block can never strand invisible text, and the old reduced-motion restores are gone */
 /* one accent per stage, in pipeline order; the waiting and working states of a stage share it */
 /* #366 each station points --ac at its stage token, generated from the station table so the mapping lives in one place */
 ${STATIONS.map((s) => `.s-${s.id} { --ac: var(--accent-${s.accent}); }`).join("\n")}
@@ -335,4 +335,22 @@ ${STATIONS.map((s) => `.s-${s.id} { --ac: var(--accent-${s.accent}); }`).join("\
 @media (max-width: 600px) { html { font-size: 85%; } }
 /* 205: mobile, the task panel is a full-screen sheet, flush with all four sides and over the console */
 @media (max-width: 600px) { #panel { top: 0; bottom: 0; width: 100vw; padding: 0 12px 12px; } body.panel-open #board, body.panel-open #archive { padding-right: 18px; } }
+/* #369 one motion layer: the data-motion attribute on the root decides which loops run, the token
+block above decides how fast, and every ambient rule is opt-in, so a document with no attribute
+paints no ambience and a poll that rewrites a card's content never restarts a loop the spine or the
+dot owns. purposeful keeps the entrance and the closes only; live adds the breathing dot, the
+sweep, the 1 px/s progress line and the newest-line shine; none lands every change instantly */
+@keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.6); } }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(500%); } }
+[data-motion="purposeful"] .spin { animation: spin var(--t-spin) linear infinite; }
+[data-motion="live"] .spin { animation: breathe var(--t-breathe) var(--ease-breathe) infinite; }
+[data-motion="live"] #relations path { animation: dashflow var(--t-breathe) linear infinite; animation-direction: reverse; }
+[data-motion="live"] .spine::after { animation: sweep var(--t-sweep) linear infinite; }
+html.motion-paused .spine::after { animation-play-state: paused; }
+[data-motion="live"] .card.running { --p: 0; }
+[data-motion="live"] .card.running::after { content: ""; position: absolute; left: 0; bottom: 0; width: 100%; height: 1px; background: var(--ac, var(--link)); transform: scaleX(var(--p)); transform-origin: left center; }
+/* #369 the floor: none disables every animation and transition, the inlined FLIP travel included,
+and the system ask turns everything off whatever the stored choice says; one block, not five */
+[data-motion="none"] *, [data-motion="none"]::before, [data-motion="none"] *::before, [data-motion="none"] *::after { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) { [data-motion] *, [data-motion]::before, [data-motion] *::before, [data-motion] *::after { animation: none !important; transition: none !important; } }
 `;

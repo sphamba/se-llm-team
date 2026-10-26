@@ -100,7 +100,7 @@ for (const seg of themeCss.split("}")) {
 	const parts = seg.split("{");
 	for (const one of parts[parts.length - 2].split(",")) subjects.add(one.trim().split(/\s+/).pop()!);
 }
-assert.equal(subjects.size, 14, "fourteen selectors mark an element interactive with cursor: pointer");
+assert.equal(subjects.size, 15, "fifteen selectors mark an element interactive with cursor: pointer");
 assert.deepEqual([...subjects].filter((s) => !page.includes(`${s}:focus-visible`)), [], "every interactive selector the stylesheet marks with cursor: pointer has a :focus-visible rule");
 assert.match(page.match(/[^{}]*:focus-visible[^{}]*\{[^}]*\}/)![0], /outline: 2px solid var\(--link\)/, "the focus ring is a visible outline in the link colour");
 
@@ -427,8 +427,8 @@ class CloseEl {
 	removeEventListener(_type: string, fn: (e?: unknown) => void) { this.listeners = this.listeners.filter((l) => l !== fn); }
 }
 const closeTimers: Array<(() => void) | null> = [];
-const closeOf = (reduce: boolean) => new Function("matchMedia", "setTimeout", "clearTimeout", page.match(/function closeAnimated\(el\) \{[\s\S]*?\n\}/)![0] + "; return closeAnimated;")(
-	() => ({ matches: reduce }),
+const closeOf = (reduce: boolean) => new Function("noMotion", "setTimeout", "clearTimeout", page.match(/function closeAnimated\(el\) \{[\s\S]*?\n\}/)![0] + "; return closeAnimated;")(
+	() => reduce,
 	(fn: () => void) => { closeTimers.push(fn); return closeTimers.length - 1; },
 	(id?: number) => { if (id != null) closeTimers[id] = null; },
 );
@@ -775,5 +775,81 @@ assert.ok(!readFileSync(new URL("../../src/webui/board.ts", import.meta.url), "u
 assert.ok(page.includes("writeOutside(t)") && page.includes("matchesFilters(t, filters)"), "the panel notices a task the active filter hides");
 assert.ok(page.includes('h === "archive"') && page.includes('location.hash = archiveView ? "archive" : ""'), "the archive is a hash route and closing a task opened from it returns to the archive");
 for (const fn of [encodeFilters, decodeFilters, emptyFilters, filtersActive, matchesFilters, filterTasks, filterReason, paletteResults, archiveTasks, archivePage]) assert.ok(page.includes(String(fn)), `the page ships ${fn.name || "the helper"}`);
+
+// 24. #369 the motion layer: one token set, one policy attribute on the root with three values and
+// a four-signal live mode, one reduced-motion block, and a stored choice that lands before the
+// first paint. Every duration and easing reads a token, and only two pre-existing effects animate
+// a property other than transform or opacity
+const motionCss = themeCss;
+for (const tok of ["--t-fast: 120ms", "--t-base: 180ms", "--t-slow: 240ms", "--t-breathe: 2s", "--t-sweep: 6s", "--ease-enter:", "--ease-exit:"])
+	assert.ok(tokenBlocks[0].includes(tok), `the light :root block declares ${tok.split(":")[0]}, the one motion token set`);
+const stripVars = (s: string) => s.replace(/var\(--[\w-]+(?:,[^)]*)?\)/g, "");
+const ruleBodies = [...motionCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2] }));
+const timed = ruleBodies.filter((r) => /(^|;)\s*(animation|transition)(-[a-z]+)?\s*:/.test(r.body));
+assert.ok(timed.length >= 8, "the stylesheet carries the animating rules the audit reads");
+assert.deepEqual(timed.filter((r) => /\d+m?s\b/.test(stripVars(r.body))).map((r) => r.sel), [], "every animation and transition duration reads a motion token, no raw milliseconds outside the token block");
+assert.deepEqual(timed.filter((r) => /\b(cubic-bezier|ease|ease-in|ease-out|ease-in-out|steps)\b/.test(stripVars(r.body))).map((r) => r.sel), [], "every easing reads a motion token too, the linear keyword aside");
+const kfLines = motionCss.split("\n").filter((l) => l.startsWith("@keyframes"));
+assert.ok(kfLines.length >= 6, "the keyframes the audit reads are declared");
+const kfProps = (line: string) => [...line.replace(/@keyframes [\w-]+/, "").matchAll(/([\w-]+)\s*:/g)].map((m) => m[1]);
+assert.deepEqual([...new Set(kfLines.flatMap(kfProps).filter((p) => p !== "opacity" && p !== "transform"))].sort(), ["background-position", "stroke-dashoffset"], "only the two pre-existing effects, the SVG dash flow and the letter-band shimmer, animate a property other than transform or opacity");
+assert.equal((page.match(/@media \(prefers-reduced-motion: reduce\)/g) ?? []).length, 1, "the stylesheet keeps exactly one reduced-motion block");
+assert.equal((page.match(/prefers-reduced-motion/g) ?? []).length, 2, "the page names the reduced-motion ask once in the stylesheet and once in the policy store");
+assert.match(motionCss, /\[data-motion="none"\][^{]*\{[^}]*animation: none !important[^}]*transition: none !important/, "the none policy disables every animation and transition, the inlined FLIP travel included");
+assert.match(motionCss, /\[data-motion="live"\] \.spine::after \{[^}]*animation: sweep var\(--t-sweep\) linear infinite/, "one gradient element carries the spine sweep at 6 s linear");
+assert.match(motionCss, /\[data-motion="live"\] \.spin \{[^}]*animation: breathe var\(--t-breathe\) var\(--ease-breathe\)/, "the running dot breathes over the 2 s token");
+assert.match(motionCss, /\[data-motion="live"\] \.card\.running::after \{[^}]*transform: scaleX\(var\(--p\)\)/, "the progress line advances by a scale transform, never a width");
+assert.ok(!/\.running::after \{[^}]*width: calc/.test(motionCss), "the progress line never animates its width");
+assert.ok(motionCss.includes("animation-play-state: paused") && page.includes('classList.toggle("motion-paused", document.hidden)'), "the sweep pauses while the tab is hidden and resumes on visibilitychange");
+assert.match(motionCss, /\[data-motion="live"\] #c-text > \.pulse/, "the newest streaming line shines only in live mode, so historical lines never do");
+assert.equal((page.match(/buildShell\(board, document\)/g) ?? []).length, 1, "the shell, and with it the spine the sweep rides, is built once, so a poll never recreates it");
+assert.ok(readFileSync(new URL("../../src/webui/board.ts", import.meta.url), "utf8").includes('el.classList.toggle("running"'), "the card pass marks the running card every poll on the node it keeps");
+assert.ok(page.includes('el.style.setProperty("--p"') && page.includes("syncTicker") && page.includes("polledAt"), "the page runs the 1 px/s tick and reseeds the progress from the authoritative poll value");
+// the policy store and its control, run against the served source
+const motionSrc = page.slice(page.indexOf('const MOTION_KEY = "motion"'), page.indexOf("const inline = "));
+assert.ok(motionSrc.includes('const MOTIONS = ["live", "purposeful", "none"]'), "the policy names its three modes in cycle order");
+const makeMotion = (store: Record<string, string>, reduce: boolean) => {
+	const btn = {
+		textContent: "",
+		title: "",
+		disabled: false,
+		attrs: {} as Record<string, string>,
+		setAttribute(k: string, v: string) { this.attrs[k] = v; },
+		getAttribute(k: string) { return this.attrs[k] ?? null; },
+	};
+	const root = { dataset: {} as Record<string, string>, classList: { paused: false, toggle(_c: string, v: boolean) { this.paused = !!v; } } };
+	const mq = { matches: reduce, addEventListener() {} };
+	const api = new Function("rootEl", "localStorage", "matchMedia", "document", "syncTicker", motionSrc +
+		"\n; return { applyMotion: applyMotion, cycleMotion: cycleMotion, noMotion: noMotion, get want() { return motionWant; }, set want(v) { motionWant = v; } };")(
+		root,
+		{ getItem: (k: string) => store[k] ?? null, setItem: (k: string, v: string) => { store[k] = v; } },
+		() => mq,
+		{ getElementById: (id: string) => (id === "motion" ? btn : null), addEventListener() {} },
+		() => {},
+	);
+	return { api, btn, root, store };
+};
+const fresh = makeMotion({}, false);
+fresh.api.applyMotion();
+assert.equal(fresh.root.dataset.motion, "live", "the policy defaults to live");
+assert.deepEqual([fresh.btn.textContent, fresh.btn.attrs["aria-pressed"], fresh.btn.disabled], ["live", "true", false], "the control names the live mode, reads as pressed and is enabled");
+fresh.api.cycleMotion();
+assert.deepEqual([fresh.root.dataset.motion, fresh.store.motion], ["purposeful", "purposeful"], "a click cycles to purposeful and persists the choice under the documented motion key");
+fresh.api.cycleMotion();
+assert.deepEqual([fresh.root.dataset.motion, fresh.btn.attrs["aria-pressed"]], ["none", "false"], "the none mode reads as unpressed");
+fresh.api.cycleMotion();
+assert.equal(fresh.root.dataset.motion, "live", "the cycle wraps back to live");
+const stored = makeMotion({ motion: "purposeful" }, false);
+stored.api.applyMotion();
+assert.equal(stored.root.dataset.motion, "purposeful", "a stored choice wins over the default");
+const forced = makeMotion({ motion: "live" }, true);
+forced.api.applyMotion();
+assert.deepEqual([forced.root.dataset.motion, forced.btn.disabled, forced.btn.textContent], ["none", true, "none"], "reduced motion forces none and disables the control rather than pretending");
+assert.match(forced.btn.title, /reduced motion/, "the disabled control explains the system ask in its title");
+assert.equal(forced.api.noMotion(), true, "the one helper the JS gates read answers for the forced mode");
+assert.equal(makeMotion({}, false).api.noMotion(), false, "and stays false in the default mode");
+const motionTag = page.match(/<button id="motion"[^>]*>/)![0];
+assert.match(motionTag, /aria-pressed="true"/, "the control is a real button with a pressed state");
+assert.match(motionTag, /aria-label="Motion: live/, "and an accessible name");
 
 console.log("page.test.ts: all assertions passed");
