@@ -106,7 +106,7 @@ for (const seg of themeCss.split("}")) {
 	const parts = seg.split("{");
 	for (const one of parts[parts.length - 2].split(",")) subjects.add(one.trim().split(/\s+/).pop()!);
 }
-assert.equal(subjects.size, 16, "sixteen selectors mark an element interactive with cursor: pointer");
+assert.equal(subjects.size, 15, "fifteen selectors mark an element interactive with cursor: pointer, #motion gone with #377");
 assert.deepEqual([...subjects].filter((s) => !page.includes(`${s}:focus-visible`)), [], "every interactive selector the stylesheet marks with cursor: pointer has a :focus-visible rule");
 assert.match(page.match(/[^{}]*:focus-visible[^{}]*\{[^}]*\}/)![0], /outline: 2px solid var\(--link\)/, "the focus ring is a visible outline in the link colour");
 
@@ -783,10 +783,10 @@ assert.ok(page.includes("writeOutside(t)") && page.includes("matchesFilters(t, f
 assert.ok(page.includes('h === "archive"') && page.includes('location.hash = archiveView ? "archive" : ""'), "the archive is a hash route and closing a task opened from it returns to the archive");
 for (const fn of [encodeFilters, decodeFilters, emptyFilters, filtersActive, matchesFilters, filterTasks, filterReason, paletteResults, archiveTasks, archivePage]) assert.ok(page.includes(String(fn)), `the page ships ${fn.name || "the helper"}`);
 
-// 24. #369 the motion layer: one token set, one policy attribute on the root with three values and
-// a four-signal live mode, one reduced-motion block, and a stored choice that lands before the
-// first paint. Every duration and easing reads a token, and only two pre-existing effects animate
-// a property other than transform or opacity
+// 24. #369 the motion layer: one token set, one reduced-motion block, one policy attribute the system
+// ask alone can force to none, and every duration and easing read from a token. Only two pre-existing
+// effects animate a property other than transform or opacity. #377 drops the live/purposeful/none
+// selector: live is the default and the system preference the only override
 const motionCss = themeCss;
 for (const tok of ["--t-fast: 120ms", "--t-base: 180ms", "--t-slow: 240ms", "--t-breathe: 2s", "--t-sweep: 6s", "--ease-enter:", "--ease-exit:"])
 	assert.ok(tokenBlocks[0].includes(tok), `the light :root block declares ${tok.split(":")[0]}, the one motion token set`);
@@ -812,52 +812,30 @@ assert.match(motionCss, /\[data-motion="live"\] #c-text > \.pulse/, "the newest 
 assert.equal((page.match(/buildShell\(board, document\)/g) ?? []).length, 1, "the shell, and with it the spine the sweep rides, is built once, so a poll never recreates it");
 assert.ok(readFileSync(new URL("../../src/webui/board.ts", import.meta.url), "utf8").includes('el.classList.toggle("running"'), "the card pass marks the running card every poll on the node it keeps");
 assert.ok(page.includes('el.style.setProperty("--p"') && page.includes("syncTicker") && page.includes("polledAt"), "the page runs the 1 px/s tick and reseeds the progress from the authoritative poll value");
-// the policy store and its control, run against the served source
-const motionSrc = page.slice(page.indexOf('const MOTION_KEY = "motion"'), page.indexOf("const inline = "));
-assert.ok(motionSrc.includes('const MOTIONS = ["live", "purposeful", "none"]'), "the policy names its three modes in cycle order");
-const makeMotion = (store: Record<string, string>, reduce: boolean) => {
-	const btn = {
-		textContent: "",
-		title: "",
-		disabled: false,
-		attrs: {} as Record<string, string>,
-		setAttribute(k: string, v: string) { this.attrs[k] = v; },
-		getAttribute(k: string) { return this.attrs[k] ?? null; },
-	};
-	const root = { dataset: {} as Record<string, string>, classList: { paused: false, toggle(_c: string, v: boolean) { this.paused = !!v; } } };
+// #377 the selector is gone: no control, no mode list, no stored choice, no cycle handler
+assert.ok(!page.includes('id="motion"'), "the served page carries no motion control");
+assert.ok(!/MOTIONS|motionWant|cycleMotion|syncMotionBtn|MOTION_KEY/.test(page), "no motion list, stored choice or cycle handler survives");
+assert.ok(!/data-motion="purposeful"/.test(motionCss), "the purposeful mode is gone from the stylesheet");
+assert.match(motionCss, /@media \(prefers-reduced-motion: reduce\) \{ \[data-motion\]/, "the stylesheet keeps the reduced-motion block that turns every animation off");
+assert.match(page, /function syncTicker\(\) \{[\s\S]{0,200}?if \(document\.hidden\) return;/, "the ticker runs whenever the tab is visible, whatever the motion mode");
+// the reduced-motion path stays: the system ask forces none and the JS gates read the same helper
+const motionSrc = page.slice(page.indexOf("const reduceMq = "), page.indexOf("const inline = "));
+const makeMotion = (reduce: boolean) => {
+	const rootEl = { dataset: {} as Record<string, string> };
 	const mq = { matches: reduce, addEventListener() {} };
-	const api = new Function("rootEl", "localStorage", "matchMedia", "document", "syncTicker", motionSrc +
-		"\n; return { applyMotion: applyMotion, cycleMotion: cycleMotion, noMotion: noMotion, get want() { return motionWant; }, set want(v) { motionWant = v; } };")(
-		root,
-		{ getItem: (k: string) => store[k] ?? null, setItem: (k: string, v: string) => { store[k] = v; } },
+	const api = new Function("rootEl", "matchMedia", "document", "syncTicker", motionSrc +
+		"\n; return { applyMotion: applyMotion, noMotion: noMotion };")(
+		rootEl,
 		() => mq,
-		{ getElementById: (id: string) => (id === "motion" ? btn : null), addEventListener() {} },
+		{ addEventListener() {} },
 		() => {},
-	);
-	return { api, btn, root, store };
+	) as any;
+	return { api, rootEl };
 };
-const fresh = makeMotion({}, false);
-fresh.api.applyMotion();
-assert.equal(fresh.root.dataset.motion, "live", "the policy defaults to live");
-assert.deepEqual([fresh.btn.textContent, fresh.btn.attrs["aria-pressed"], fresh.btn.disabled], ["live", "true", false], "the control names the live mode, reads as pressed and is enabled");
-fresh.api.cycleMotion();
-assert.deepEqual([fresh.root.dataset.motion, fresh.store.motion], ["purposeful", "purposeful"], "a click cycles to purposeful and persists the choice under the documented motion key");
-fresh.api.cycleMotion();
-assert.deepEqual([fresh.root.dataset.motion, fresh.btn.attrs["aria-pressed"]], ["none", "false"], "the none mode reads as unpressed");
-fresh.api.cycleMotion();
-assert.equal(fresh.root.dataset.motion, "live", "the cycle wraps back to live");
-const stored = makeMotion({ motion: "purposeful" }, false);
-stored.api.applyMotion();
-assert.equal(stored.root.dataset.motion, "purposeful", "a stored choice wins over the default");
-const forced = makeMotion({ motion: "live" }, true);
-forced.api.applyMotion();
-assert.deepEqual([forced.root.dataset.motion, forced.btn.disabled, forced.btn.textContent], ["none", true, "none"], "reduced motion forces none and disables the control rather than pretending");
-assert.match(forced.btn.title, /reduced motion/, "the disabled control explains the system ask in its title");
-assert.equal(forced.api.noMotion(), true, "the one helper the JS gates read answers for the forced mode");
-assert.equal(makeMotion({}, false).api.noMotion(), false, "and stays false in the default mode");
-const motionTag = page.match(/<button id="motion"[^>]*>/)![0];
-assert.match(motionTag, /aria-pressed="true"/, "the control is a real button with a pressed state");
-assert.match(motionTag, /aria-label="Motion: live/, "and an accessible name");
+assert.equal(makeMotion(false).rootEl.dataset.motion, "live", "the policy defaults to live with no stored choice");
+assert.equal(makeMotion(false).api.noMotion(), false, "the default state animates");
+assert.equal(makeMotion(true).rootEl.dataset.motion, "none", "the system reduced-motion ask forces the none state");
+assert.equal(makeMotion(true).api.noMotion(), true, "the one helper the JS gates read answers for the system ask");
 
 // 25. #370 the phone layout: one breakpoint constant, media queries only, the same nodes reused as
 // sheets, and the two viewport hacks gone. The live geometry (the 44px rects, the three viewports,
@@ -911,5 +889,15 @@ sheetApi.closeFilters();
 assert.deepEqual([fBody.contains("filters-open"), fBadge.textContent], [false, "2"], "apply closes the sheet and the badge keeps its count");
 assert.ok(script.includes('c.classList.remove("raised")') && script.includes('c.classList.toggle("raised")'), "the console opens as one status line and a tap on the handle raises the sheet");
 assert.ok(script.includes("handleEl.onclick = toggleConsoleSheet"), "the console handle is the raise control, reachable by pointer and by keyboard");
+
+// 26. #377 the spacing scale: six steps in the light :root block, and the chrome, the station heads and
+// the cards read their spacing from it, so no rule carries a hand-picked pixel rhythm
+for (const tok of ["--sp-1: 4px", "--sp-2: 6px", "--sp-3: 8px", "--sp-4: 12px", "--sp-5: 16px", "--sp-6: 24px"])
+	assert.ok(tokenBlocks[0].includes(tok), `the light :root block declares ${tok.split(":")[0]}, the one spacing scale`);
+const spacingRule = (sel: string) => themeCss.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " \\{([^}]*)\\}"))?.[1] ?? "";
+for (const sel of ["header", "#filters", "#board", ".st-head", ".station .cards", ".card"])
+	assert.ok(spacingRule(sel).includes("var(--sp-"), `${sel} reads its spacing from the scale`);
+assert.match(spacingRule(".card"), /padding: var\(--sp-3\) var\(--sp-4\) var\(--sp-4\)/, "the card takes 12px of side padding from the scale, so its text clears the station hairline");
+assert.equal(spacingRule(".station .cards").includes("padding-top: var(--sp-4)"), true, "the station head keeps a clear gap to its first card");
 
 console.log("page.test.ts: all assertions passed");

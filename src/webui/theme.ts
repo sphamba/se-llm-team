@@ -33,7 +33,9 @@ export const CSS = `* { box-sizing: border-box; }
 /* 000353: one accent per pipeline stage and agent role, plus the failed-run red; the -text step is the darker Ayu Light ladder step that keeps a label readable on the light panel */
 --accent-backlog: #828e9f; --accent-backlog-text: #74757a; --accent-todo: #eba400; --accent-todo-text: #a16a00; --accent-review: #fa8532; --accent-review-text: #ad6410; --accent-merge: #a37acc; --accent-merge-text: #8b64b6; --accent-live: #22a4e6; --accent-live-text: #1a7bb7; --accent-integration: #4cbf99; --accent-integration-text: #3b8264; --accent-done: #86b300; --accent-done-text: #647f00; --error: #e65050; --error-text: #cd474f;
 /* 000191: motion knobs, one place to retune the entrances, the chunk fade and the pulse loop; 000194: --exit runs the closes, --shine is the whiter band mix; #369: one motion token set, every duration and easing in the sheet reads one of these */
---t-fast: 120ms; --t-base: 180ms; --t-slow: 240ms; --t-breathe: 2s; --t-sweep: 6s; --t-spin: 900ms; --ease-enter: cubic-bezier(.2, .8, .2, 1); --ease-exit: cubic-bezier(.4, 0, .8, 1); --ease-breathe: ease-in-out; --shine: 45%; }
+--t-fast: 120ms; --t-base: 180ms; --t-slow: 240ms; --t-breathe: 2s; --t-sweep: 6s; --t-spin: 900ms; --ease-enter: cubic-bezier(.2, .8, .2, 1); --ease-exit: cubic-bezier(.4, 0, .8, 1); --ease-breathe: ease-in-out; --shine: 45%;
+/* #377 one spacing scale: the chrome, the station heads and the cards read one of these six steps */
+--sp-1: 4px; --sp-2: 6px; --sp-3: 8px; --sp-4: 12px; --sp-5: 16px; --sp-6: 24px; }
 ${DARK_VARS}
 /* the self-hosted faces: latin subsets served by the hub's /fonts route, no unicode-range, font-display swap so the fallback paints first */
 @font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 400; font-display: swap; src: url("/fonts/space-grotesk-400.woff2") format("woff2"); }
@@ -46,13 +48,10 @@ html, body { height: 100%; }
 body { --panel-w: clamp(28rem, 32vw, 35rem); --console-h: 0px; --chrome: 0px; display: flex; flex-direction: column; margin: 0; background: var(--canvas); color: var(--text); font-family: ${SANS}; font-size: clamp(0.875rem, 0.35vw + 0.55rem, 1rem); }
 /* 000147: buttons inherit the page font instead of the UA Arial default */
 button { font-family: inherit; }
-header { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 6px; }
+header { display: flex; align-items: baseline; gap: 10px; padding: var(--sp-4) 18px var(--sp-3); }
 h1 { font-size: 1.0625rem; font-weight: 500; margin: 0; }
-#motion, #theme { border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.875rem; }
-/* #369 the motion control sits at the right edge as a three-value cycler; disabled rather than pretending to honour a mode the system forbids */
-#motion { margin-left: auto; min-width: 6.5rem; }
-#motion:disabled { opacity: .6; cursor: default; }
-#motion:hover, #theme:hover { background: var(--raised); }
+#theme { margin-left: auto; border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.875rem; }
+#theme:hover { background: var(--raised); }
 #updated { font-size: 0.75rem; color: var(--dim); font-family: ${MONO}; font-variant-numeric: tabular-nums; }
 /* 000165: the serving hub's identity, hidden until the first /api/hub answer fills it */
 #hub { padding: 2px 18px 8px; font-size: 0.75rem; color: var(--dim); }
@@ -65,12 +64,12 @@ h1 { font-size: 1.0625rem; font-weight: 500; margin: 0; }
 .tab.active { border-color: var(--link); color: var(--link); }
 /* #368 the filter bar: one wrapping row under the tabs and above the spine, every control a chip,
    a select or a text field on the chrome; clear sits at the row's end and hides while nothing filters */
-#filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 18px 8px; }
+#filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: var(--sp-3) 18px; }
 #f-q { flex: 0 1 15rem; min-width: 8rem; border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 3px 8px; font-family: inherit; font-size: 0.8125rem; }
 #f-q::placeholder { color: var(--dim); }
 #filters select { border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 2px 4px; font-family: inherit; font-size: 0.75rem; }
 #f-phases { display: flex; flex-wrap: wrap; gap: 4px; }
-.f-chip { border: 1px solid var(--hairline); background: var(--panel); color: var(--dim); border-radius: 999px; padding: 1px 9px; font-family: inherit; font-size: 0.75rem; }
+.f-chip { border: 1px solid var(--hairline); background: var(--panel); color: var(--dim); border-radius: 999px; padding: 3px 9px; font-family: inherit; font-size: 0.75rem; }
 .f-chip:hover { background: var(--raised); }
 .f-chip[aria-pressed="true"] { border-color: var(--link); color: var(--link); }
 #f-clear { margin-left: auto; }
@@ -111,7 +110,7 @@ body.panel-open #archive { padding-right: calc(18px + var(--panel-w)); }
 #p-outside.hidden { display: none; }
 #p-outside .m-action { margin-left: auto; }
 /* #366 the station spine: seven tracks, six even and done slightly wider. #374 the floor is derived, not a breakpoint: 9.375rem per station, so at any width too narrow for seven 150px tracks plus the 18px gaps and side padding the board alone scrolls horizontally (000247) and the page never does. The heads share one hairline grid item and each station body scrolls on its own */
-#board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(9.375rem, 1fr)) minmax(9.375rem, 1.15fr); grid-template-rows: 1px minmax(0, 1fr); gap: 0 18px; padding: 10px 18px 18px; overflow-x: auto; overflow-y: hidden; position: relative; }
+#board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(9.375rem, 1fr)) minmax(9.375rem, 1.15fr); grid-template-rows: 1px minmax(0, 1fr); gap: 0 18px; padding: var(--sp-3) 18px var(--sp-5); overflow-x: auto; overflow-y: hidden; position: relative; }
 .spine { grid-column: 1 / -1; grid-row: 1; background: var(--hairline); position: relative; overflow: hidden; }
 /* #369 the sweep is one gradient element on the spine's own hairline, so the loop has one animation node the poll never touches */
 .spine::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 20%; background: linear-gradient(90deg, transparent, var(--link), transparent); }
@@ -133,13 +132,13 @@ stays readable; the active card and its rimmed blockers keep full strength */
 /* #366 one station per phase: the head keeps the tick, the label and the count while the body scrolls; --ac comes from the station class at the end of this sheet */
 .station { grid-row: 2; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .station + .station { border-left: 1px solid var(--hairline); }
-.st-head { display: flex; align-items: baseline; gap: 8px; padding: 4px 0 10px; position: relative; flex: 0 0 auto; background: var(--canvas); z-index: 2; }
+.st-head { display: flex; align-items: baseline; gap: 8px; padding: var(--sp-2) 0 var(--sp-3); position: relative; flex: 0 0 auto; background: var(--canvas); z-index: 2; }
 .st-head h2 { flex: 1 1 auto; min-width: 0; font-size: 0.8125rem; font-weight: 500; text-transform: uppercase; letter-spacing: .05em; margin: 0; color: var(--dim); display: flex; align-items: center; gap: 6px; }
 /* the tick crosses the shared hairline; only a station with a running agent accents it and its label */
 .st-head::before { content: ""; position: absolute; left: 0; top: -9px; width: 1px; height: 18px; background: var(--hairline); }
 .station.live .st-head::before { background: var(--ac); box-shadow: 0 0 6px var(--ac); }
 .station.live .st-head h2 { color: var(--ac); }
-.station .cards { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
+.station .cards { flex: 1 1 auto; min-height: 0; padding-top: var(--sp-4); overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
 /* a disabled stage dims its station but keeps the cards reachable */
 .station.dim .cards, .station.dim .count { opacity: .4; }
 /* a disabled integration stage is a narrow labeled strip with no cards and no count */
@@ -149,7 +148,7 @@ stays readable; the active card and its rimmed blockers keep full strength */
 .station.strip .st-head h2 { writing-mode: vertical-rl; color: var(--faint); }
 .count { font-size: 2rem; font-weight: 500; font-family: ${MONO}; font-variant-numeric: tabular-nums; color: var(--dim); }
 /* #366 a card is a row, not a box: no border, no radius, no state tint, its group ends with a hairline. 000124: positioned above the z-index-1 relation lines; the semi-transparent background lets a line passing under the card show through faintly (no --card var, --panel is the card's base color in both themes) */
-.card { position: relative; z-index: 2; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 0; border-bottom: 1px solid var(--hairline); border-radius: 0; padding: 8px 2px 10px; cursor: pointer; }
+.card { position: relative; z-index: 2; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 0; border-bottom: 1px solid var(--hairline); border-radius: 0; padding: var(--sp-3) var(--sp-4) var(--sp-4); cursor: pointer; }
 .card:hover { background: color-mix(in srgb, var(--raised) 85%, transparent); }
 /* 000320: a task held by the user blockedBy token pins to the top of its station and ends with its own rule; the inline held marker carries the dashed form */
 .card.user-hold { border-bottom-color: var(--dim); }
@@ -169,14 +168,14 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .ruler.pr-high { color: var(--high-fg); }
 .ruler.pr-medium { color: var(--medium-fg); }
 .ruler.pr-low { color: var(--low-fg); }
-.name { font-size: 0.9375rem; font-weight: 500; line-height: 1.35; margin: 4px 0 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.name { font-size: 0.9375rem; font-weight: 500; line-height: 1.35; margin: var(--sp-2) 0 var(--sp-1); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 /* the idle card's summary: one dim line, the context the name cannot carry */
 .ctx { font-size: 0.75rem; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* the run row: a live run in the station accent, a finished run red and neutral about the card */
-.c-run { margin-top: 4px; font-size: 0.75rem; font-family: ${MONO}; color: var(--dim); }
+.c-run { margin-top: var(--sp-2); font-size: 0.75rem; font-family: ${MONO}; color: var(--dim); }
 .c-run.dead { color: var(--error-text); }
 /* the meta row: the sub-state marker for a non-primary state, then the priority and complexity labels and the issuer at the right; it wraps so the labels survive a narrow station */
-.c-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 5px; font-size: 0.75rem; font-family: ${MONO}; }
+.c-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: var(--sp-3); font-size: 0.75rem; font-family: ${MONO}; }
 .c-meta > span { background: none; padding: 0; border-radius: 0; }
 .c-meta .c-p { color: var(--text); }
 .c-meta .p-critical { color: var(--critical-fg); }
@@ -297,7 +296,7 @@ body.panel-open #board { padding-right: calc(18px + var(--panel-w)); }
 .m-action:hover { background: var(--raised); }
 /* #364 keyboard focus: every element the stylesheet marks interactive answers Tab with the same
    visible ring, so the pointer cue is never the only cue */
-#motion:focus-visible, #theme:focus-visible, .tab:focus-visible, .card:focus-visible, .num-link:focus-visible, .toggle:focus-visible, .run-row:focus-visible, summary:focus-visible, #p-close:focus-visible, #c-close:focus-visible, .seg:focus-visible, .m-action:focus-visible, .f-chip:focus-visible, .arch-row:focus-visible, .pal-row:focus-visible, #f-q:focus-visible, #filters select:focus-visible, #pal-input:focus-visible, #f-toggle:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+#theme:focus-visible, .tab:focus-visible, .card:focus-visible, .num-link:focus-visible, .toggle:focus-visible, .run-row:focus-visible, summary:focus-visible, #p-close:focus-visible, #c-close:focus-visible, .seg:focus-visible, .m-action:focus-visible, .f-chip:focus-visible, .arch-row:focus-visible, .pal-row:focus-visible, #f-q:focus-visible, #filters select:focus-visible, #pal-input:focus-visible, #f-toggle:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 .m-action:disabled { opacity: 0.6; cursor: default; }
 .m-block { color: var(--error-text); border: 1px solid var(--error); background: color-mix(in srgb, var(--error) 15%, var(--panel)); }
 .m-unblock { color: var(--accent-done-text); border: 1px solid var(--accent-done); background: color-mix(in srgb, var(--accent-done) 15%, var(--panel)); }
@@ -372,7 +371,7 @@ ${STATIONS.map((s) => `.s-${s.id} { --ac: var(--accent-${s.accent}); }`).join("\
    keeps the 16px base, so the type scale needs no mobile override except the station count */
 @media (max-width: ${MOBILE_MAX}px) {
 header { flex-wrap: wrap; padding: 10px 12px 6px; }
-#motion, #theme { min-height: 44px; padding: 0 14px; }
+#theme { min-height: 44px; padding: 0 14px; }
 #hub { padding: 2px 12px 8px; }
 #tabs { flex-wrap: nowrap; gap: 8px; overflow-x: auto; padding: 6px 12px 0; }
 .tab { min-height: 44px; padding: 0 16px; }
@@ -436,11 +435,10 @@ body.filters-open #filters { display: flex; position: fixed; left: 0; right: 0; 
 /* #369 one motion layer: the data-motion attribute on the root decides which loops run, the token
 block above decides how fast, and every ambient rule is opt-in, so a document with no attribute
 paints no ambience and a poll that rewrites a card's content never restarts a loop the spine or the
-dot owns. purposeful keeps the entrance and the closes only; live adds the breathing dot, the
-sweep, the 1 px/s progress line and the newest-line shine; none lands every change instantly */
+dot owns. live adds the breathing dot, the sweep, the 1 px/s progress line and the newest-line shine;
+#377 leaves one mode live and one floor, so the system ask is the only none */
 @keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.6); } }
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(500%); } }
-[data-motion="purposeful"] .spin { animation: spin var(--t-spin) linear infinite; }
 [data-motion="live"] .spin { animation: breathe var(--t-breathe) var(--ease-breathe) infinite; }
 [data-motion="live"] #relations path { animation: dashflow var(--t-breathe) linear infinite; animation-direction: reverse; }
 [data-motion="live"] .spine::after { animation: sweep var(--t-sweep) linear infinite; }

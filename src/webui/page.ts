@@ -84,7 +84,7 @@ export const PAGE = `<!doctype html>
 ${CSS}</style>
 </head>
 <body>
-<header><h1>Software Engineering LLM Team</h1><span id="updated"></span><button id="motion" onclick="cycleMotion()" aria-pressed="true" aria-label="Motion: live, click to cycle" title="Motion: live, click to cycle">live</button><button id="theme" onclick="toggleTheme()">Dark</button></header>
+<header><h1>Software Engineering LLM Team</h1><span id="updated"></span><button id="theme" onclick="toggleTheme()">Dark</button></header>
 <nav id="tabs"></nav>
 <button id="f-toggle" aria-expanded="false" aria-controls="filters" onclick="toggleFilters()">Filters<span id="f-count" hidden></span></button>
 <div id="filters" aria-label="Filter tasks">
@@ -151,31 +151,13 @@ function toggleTheme() {
 }
 try { const stored = localStorage.getItem("theme"); if (stored === "dark" || stored === "light") rootEl.dataset.theme = stored; } catch {}
 syncThemeBtn();
-// #369 one motion policy for the whole client: the stored choice, forced to none while the system
-// asks for reduced motion. The attribute lands before the first paint, so no frame shows the wrong
-// mode, and a document with no attribute paints no ambience at all
-const MOTION_KEY = "motion";
-const MOTIONS = ["live", "purposeful", "none"];
+// #377 one motion mode: the system preference alone, live unless it asks for reduced motion. The
+// attribute lands before the first paint, so no frame shows the wrong mode, and the JS gates below
+// read the same ask through noMotion()
 const reduceMq = matchMedia("(prefers-reduced-motion: reduce)");
-let motionWant = "live", tickTimer = null, polledAt = 0;
-try { const stored = localStorage.getItem(MOTION_KEY); if (MOTIONS.includes(stored)) motionWant = stored; } catch {}
-const noMotion = () => reduceMq.matches || motionWant === "none";
-function syncMotionBtn() {
-	const b = document.getElementById("motion");
-	if (!b) return;
-	const m = reduceMq.matches ? "none" : motionWant;
-	b.textContent = m;
-	b.setAttribute("aria-pressed", String(m !== "none"));
-	b.setAttribute("aria-label", "Motion: " + m + (reduceMq.matches ? ", off because your system asks for reduced motion" : ", click to cycle"));
-	b.title = b.getAttribute("aria-label");
-	b.disabled = reduceMq.matches;
-}
-function applyMotion() { rootEl.dataset.motion = reduceMq.matches ? "none" : motionWant; syncMotionBtn(); syncTicker(); }
-function cycleMotion() {
-	motionWant = MOTIONS[(MOTIONS.indexOf(motionWant) + 1) % MOTIONS.length];
-	try { localStorage.setItem(MOTION_KEY, motionWant); } catch {}
-	applyMotion();
-}
+let tickTimer = null, polledAt = 0;
+const noMotion = () => reduceMq.matches;
+function applyMotion() { rootEl.dataset.motion = reduceMq.matches ? "none" : "live"; syncTicker(); }
 applyMotion();
 reduceMq.addEventListener("change", applyMotion);
 document.addEventListener("visibilitychange", () => { rootEl.classList.toggle("motion-paused", document.hidden); syncTicker(); });
@@ -469,11 +451,11 @@ function queueExpanded() { const b = activeBoard(); for (const st of b.expanded)
 const cardEls = new Map();
 let stations = null;
 // the one 1 px/s tick: a running card's elapsed time and its progress line advance between polls,
-// both reseeded from the authoritative payload on every render; paused while the tab is hidden or
-// the effective mode is not live, so purposeful and none run no JS loop at all
+// both reseeded from the authoritative payload on every render; it runs whenever the tab is visible,
+// because the stylesheet floor lands every change with no animation under reduced motion
 function syncTicker() {
 	if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
-	if (rootEl.dataset.motion !== "live" || document.hidden) return;
+	if (document.hidden) return;
 	tickTimer = setInterval(tickCards, 1000);
 }
 function tickCards() {
