@@ -458,4 +458,11 @@ assert.ok([tabNames, tabsHtml].every((fn) => page.includes(String(fn))), "the pa
 assert.ok(page.includes('<nav id="tabs"></nav>') && page.includes("switchTab(b.dataset.project)"), "the page serves the tab bar and its switch handler");
 assert.match(page, /function switchTab\(name\) \{[\s\S]*?closePanel\(\);[\s\S]*?\}/, "a tab switch closes the open panel");
 
+// #368 the filter bar's empty state: a station whose tasks are all filtered out names the active
+// filters instead of its own job line, and the job line returns when nothing filters
+syncBoard(stations, [], new Set(), els, make, 5, { createElement: (tag: string) => new El(tag) }, "no task matches: work");
+assert.ok(STATIONS.every((s) => stations[s.id].empty.textContent === "no task matches: work"), "an empty station names the active filters while a filter is on");
+sync([]);
+assert.ok(STATIONS.every((s) => stations[s.id].empty.textContent === s.empty), "the station's own job line returns when nothing filters");
+
 ui.close();

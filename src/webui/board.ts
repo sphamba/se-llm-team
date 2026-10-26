@@ -450,7 +450,7 @@ export function makeStatsQueue(key, fetchStats, applyStats, setTimer = setTimeou
 // station never rebuilds the cards already in it. A genuinely new card gains the "enter" class for
 // the page's one-shot entrance animation. The caller measures card positions before and after this
 // pass to animate the moves
-export function syncBoard(stations, tasks, expanded, els, make, visible, doc) {
+export function syncBoard(stations, tasks, expanded, els, make, visible, doc, reason = "") {
 	const live = new Set();
 	for (const s of STATIONS) {
 		const part = stations[s.id];
@@ -459,8 +459,10 @@ export function syncBoard(stations, tasks, expanded, els, make, visible, doc) {
 		const running = inStation.some((t) => spinnerHtml(t.state) !== "");
 		part.count.textContent = String(inStation.length);
 		part.empty.style.display = shown.length ? "none" : "";
+		// #368 a station emptied by the filter bar names the active filters, not its own job line
+		const emptyText = shown.length ? s.empty : reason || s.empty;
+		if (part.empty.textContent !== emptyText) part.empty.textContent = emptyText;
 		part.toggle.style.display = inStation.length > visible ? "" : "none";
-		// done unfolds in place for now; the archive view task replaces this button
 		part.toggle.textContent = expanded.has(s.id) ? "show less" : "+" + (inStation.length - visible) + " more";
 		// #366 only a station with a running agent glows: its tick, its label and the live dot
 		part.el.classList.toggle("live", running);

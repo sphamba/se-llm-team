@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask, getTask, setState, STATES } from "../../src/kanban.ts";
 import { startHub } from "../../src/hub.ts";
-import { agentLabel, agentRowSig, agentStatsText, boardOf, curve, doctorCol, fmtDur, fmtTokens, isHeld, logFixups, mergeBoards, refreshMs, syncAgentStats, syncDoctorCards, syncStatsLine } from "../../src/webui.ts";
+import { agentLabel, agentRowSig, agentStatsText, ARCHIVE_PAGE, archivePage, archiveTasks, boardOf, curve, decodeFilters, doctorCol, emptyFilters, encodeFilters, FILTER_DEBOUNCE, filterReason, filtersActive, filterTasks, fmtDur, fmtTokens, isHeld, logFixups, matchesFilters, mergeBoards, PALETTE_MAX, paletteResults, refreshMs, syncAgentStats, syncDoctorCards, syncStatsLine } from "../../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the logpane module
 import { esc } from "../../src/webui/logpane.ts";
 
@@ -100,7 +100,7 @@ for (const seg of themeCss.split("}")) {
 	const parts = seg.split("{");
 	for (const one of parts[parts.length - 2].split(",")) subjects.add(one.trim().split(/\s+/).pop()!);
 }
-assert.equal(subjects.size, 11, "eleven selectors mark an element interactive with cursor: pointer");
+assert.equal(subjects.size, 14, "fourteen selectors mark an element interactive with cursor: pointer");
 assert.deepEqual([...subjects].filter((s) => !page.includes(`${s}:focus-visible`)), [], "every interactive selector the stylesheet marks with cursor: pointer has a :focus-visible rule");
 assert.match(page.match(/[^{}]*:focus-visible[^{}]*\{[^}]*\}/)![0], /outline: 2px solid var\(--link\)/, "the focus ring is a visible outline in the link colour");
 
@@ -462,7 +462,7 @@ assert.ok(still.classList.contains("hidden") && !still.classList.contains("closi
 // the panel and the console keep one close path each: the panel close clears the hash so back and
 // forward stay in step, and the console close clears the poll and the state before the visual hide
 const closePanelSrc = page.match(/function closePanel\(\) \{[\s\S]*?\n\}/)![0];
-assert.ok(closePanelSrc.includes('location.hash = ""') && closePanelSrc.includes("hidePanel()"), "the user close clears the hash and lets the route hide the panel");
+assert.ok(closePanelSrc.includes('location.hash = archiveView ? "archive" : ""') && closePanelSrc.includes("hidePanel()"), "the user close clears the hash, or returns to the archive, and lets the route hide the panel");
 const hideSrc = page.match(/function hidePanel\(\) \{[\s\S]*?\n\}/)![0];
 assert.ok(hideSrc.includes("closeAnimated(p)") && hideSrc.indexOf("panelFile = null") < hideSrc.indexOf("closeAnimated(p)"), "hidePanel clears the open task before the shared exit");
 assert.ok(hideSrc.includes("cardEls.get(openerFile)") && hideSrc.includes("card.focus()"), "on close, focus returns to the card that opened the panel");
@@ -656,8 +656,8 @@ assert.equal(bodyVars["--console-h"], "300px", "a closed console writes no heigh
 // paints into the open panel
 const routeSrc = page.slice(page.indexOf("function syncRoute() {"), page.indexOf("const visible = () =>"));
 const panelEl = { className: "hidden" as string, classList: { contains: (c: string) => panelEl.className.split(" ").includes(c) } };
-const nav = { opened: [] as any[], notFound: [] as number[], closed: 0, board: { tasks: [{ file: "000263_task.md", num: 263 }] }, served: false };
-const route = new Function("document", "location", "activeBoard", "openPanel", "writeNotFound", "hidePanel", "visible", "numOf",
+const nav = { opened: [] as any[], notFound: [] as number[], closed: 0, view: [] as boolean[], board: { tasks: [{ file: "000263_task.md", num: 263 }] }, served: false };
+const route = new Function("document", "location", "activeBoard", "openPanel", "writeNotFound", "hidePanel", "visible", "numOf", "showView",
 	'let routeNum = null, panelFile = null, notFoundNum = null, served = false;\n' + routeSrc +
 	"\n; return { syncRoute: syncRoute, hashNum: hashNum, set served(v) { served = v; }, set file(v) { panelFile = v; } };")(
 	{ getElementById: () => panelEl },
@@ -668,6 +668,7 @@ const route = new Function("document", "location", "activeBoard", "openPanel", "
 	() => { nav.closed++; },
 	() => false,
 	(f: string) => parseInt(f.slice(0, 6), 10),
+	(archive: boolean) => nav.view.push(archive),
 );
 nav.hash = "#task/263";
 assert.equal(route.hashNum(), 263, "a task hash resolves to its number");
@@ -679,6 +680,10 @@ nav.hash = "";
 panelEl.className = ""; // an open panel: the empty hash closes it
 route.syncRoute();
 assert.equal(nav.closed, 1, "an empty hash closes the open panel");
+assert.deepEqual(nav.view, [false], "an empty hash shows the board");
+nav.hash = "#archive";
+route.syncRoute();
+assert.deepEqual(nav.view, [false, true], "the archive hash shows the archive view");
 panelEl.className = "hidden";
 nav.hash = "#task/263";
 route.syncRoute();
@@ -703,5 +708,72 @@ const pollGate = new Function("document", "fetch", "detailUrl", "historyUrl", "o
 	() => true,
 );
 await pollGate();
+
+// 20. #368 the filter bar: the codec round-trips every field, a corrupt value decodes to no filter,
+// and the matcher reads the station, the priority, the complexity, the issuer, the hold and live
+const allFilters = { q: "café 263", phases: ["work", "done"], priorities: ["high", "low"], complexities: ["moderate"], issuer: "#263", held: true, live: true };
+assert.deepEqual(decodeFilters(encodeFilters(allFilters)), allFilters, "the filter encoding round-trips every field, a unicode query included");
+assert.deepEqual([decodeFilters(encodeFilters(emptyFilters())), decodeFilters(""), decodeFilters(null), decodeFilters("!!!!"), decodeFilters("e30=")].map(filtersActive), [false, false, false, false, false], "an empty, absent, unreadable or non-object filter value decodes to no filter");
+const hostile = btoa(JSON.stringify({ q: 5, p: ["work", "nope"], pr: "high", cx: ["complex", 7], i: {}, h: "yes", l: true }));
+assert.deepEqual(decodeFilters(hostile), { q: "", phases: ["work"], priorities: [], complexities: ["complex"], issuer: "", held: false, live: true }, "a value of the wrong shape keeps only the well-typed fields and never throws");
+const filterRows = [
+	{ file: "000263_docked.md", name: "feat: docked panel", summary: "the console moves", state: "reviewing", priority: "high", complexity: "moderate", issuer: "user", updated: 3, agents: [{ alive: true }] },
+	{ file: "000300_old.md", name: "fix: old thing", summary: "a repair", state: "done", priority: "low", complexity: "simple", issuer: "#263", updated: 9 },
+];
+const filesOf = (rows: any[]) => rows.map((t) => t.file);
+assert.equal(filterTasks(filterRows, emptyFilters()), filterRows, "no active filter passes the payload through untouched");
+assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), q: "#263" })), ["000263_docked.md"], "a number query matches the task number");
+assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), q: "console" })), ["000263_docked.md"], "the text query reads the summary as well as the name");
+assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), phases: ["review"] })), ["000263_docked.md"], "a phase toggle selects every state of its station");
+assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), priorities: ["low"], complexities: ["simple"] })), ["000300_old.md"], "the priority and complexity multi-selects narrow together");
+assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), issuer: "#263" })), ["000300_old.md"], "the issuer filter matches the stored issuer");
+assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), held: true })), [], "held only drops an unheld task");
+assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), live: true })), ["000263_docked.md"], "has live agent keeps the task with the live run");
+assert.ok(filterReason({ ...emptyFilters(), q: "x", phases: ["work"], held: true }).startsWith("no task matches: ") && filterReason(emptyFilters()) === "", "the empty reason names the active filters, and stays empty when nothing filters");
+assert.equal(matchesFilters(filterRows[0], { ...emptyFilters(), phases: ["review"] }), true, "the membership test the panel's outside-filter notice runs reads the same filter");
+assert.equal(matchesFilters(filterRows[1], { ...emptyFilters(), phases: ["work"] }), false, "a done task sits outside a work phase filter");
+
+// 21. #368 the command palette: a subsequence match over the name and the number, the 12-result cap
+// with the +N more count, and an empty query naming the newest tasks
+const palRows = Array.from({ length: 30 }, (_, i) => ({ file: `${1000 + i}_task.md`, name: `feat: task ${i}`, state: "to-do", updated: i }));
+const cappedHits = paletteResults(palRows, "task");
+assert.equal(PALETTE_MAX, 12, "the palette caps its result list at 12");
+assert.equal(cappedHits.hits.length, 12, "a query matching 30 tasks returns 12 rows");
+assert.equal(cappedHits.more, 18, "the dim line counts the results past the cap");
+assert.equal(cappedHits.hits[0].file, "1029_task.md", "equal scores fall back to the newest update");
+assert.deepEqual(filesOf(paletteResults(palRows, "#1003").hits), ["1003_task.md"], "an exact number query finds the task, with or without the hash");
+assert.equal(paletteResults([{ file: "000263_docked.md", name: "feat: docked panel", state: "reviewing", updated: 1 }], "ftp").hits.length, 1, "the fuzzy match reads the name as a subsequence");
+assert.equal(paletteResults(palRows, "zzz").hits.length, 0, "no match returns no rows");
+assert.equal(paletteResults(palRows, "").hits.length, 12, "an empty query still fills the newest 12 rows");
+assert.equal(paletteResults([], "x").more, 0, "an empty project has no more line");
+
+// 22. #368 the done archive: only done tasks, newest update first, 50 rows per page with a footer
+assert.equal(ARCHIVE_PAGE, 50, "the archive page size constant is 50");
+const doneRows = Array.from({ length: 120 }, (_, i) => ({ file: `${2000 + i}_done.md`, name: `done ${i}`, state: "done", updated: i }));
+const archived = archiveTasks([...doneRows, { file: "000999_open.md", name: "open", state: "doing", updated: 500 }], emptyFilters());
+assert.equal(archived.length, 120, "the archive holds only done tasks");
+assert.equal(archived[0].updated, 119, "the archive lists the newest update first");
+const firstPage = archivePage(archived, 0);
+assert.deepEqual([firstPage.page, firstPage.pages, firstPage.start, firstPage.end, firstPage.rows.length], [0, 3, 0, 50, 50], "the first page holds 50 rows of three");
+const lastPage = archivePage(archived, 5);
+assert.deepEqual([lastPage.page, lastPage.start, lastPage.end, lastPage.rows.length], [2, 100, 120, 20], "the last page holds the remainder and a page past the end clamps");
+assert.deepEqual([archivePage([], 0).pages, archivePage([], 0).rows.length], [1, 0], "an empty archive names one empty page");
+assert.deepEqual(filesOf(archiveTasks(filterRows, emptyFilters())), ["000300_old.md"], "the archive applies the active filter too");
+
+// 23. the served chrome: one filter bar above the spine, the labelled palette dialog over the panel,
+// the archive section, the debounce and the Done overflow that opens the archive
+for (const id of ["filters", "f-q", "f-phases", "f-prio", "f-cx", "f-issuer", "f-held", "f-live", "f-clear", "palette", "pal-input", "pal-list", "pal-empty", "pal-more", "archive", "arch-count", "arch-list", "arch-empty", "arch-page", "arch-more", "arch-newer", "arch-back", "p-outside"])
+	assert.ok(page.includes(`id="${id}"`), `the page serves #${id}`);
+assert.ok(page.indexOf('id="filters"') > page.indexOf('id="tabs"') && page.indexOf('id="filters"') < page.indexOf('id="board"'), "the filter bar is one row above the spine");
+assert.ok(page.indexOf('id="archive"') > page.indexOf('id="board"') && page.indexOf('id="archive"') < page.indexOf('id="panel"'), "the archive replaces the spine, above the panel in the body");
+assert.ok(page.includes('id="palette" class="hidden" role="dialog" aria-modal="true" aria-label="Find a task"'), "the palette is a labelled modal dialog");
+assert.ok(page.includes("input.focus()") && page.includes('id="pal-input" type="text" role="combobox"'), "the palette autofocuses a combobox input");
+assert.ok(page.includes("FILTER_DEBOUNCE = " + FILTER_DEBOUNCE) && FILTER_DEBOUNCE === 120, "the text input debounces at 120 ms");
+assert.ok(page.includes("localStorage.getItem(FILTERS_KEY)") && page.includes('new URLSearchParams(location.search)'), "the filter state reads the URL first and localStorage second");
+assert.ok(page.includes('id === "done" ? openArchive'), "the Done overflow opens the archive instead of unfolding in place");
+assert.ok(!readFileSync(new URL("../../src/webui/board.ts", import.meta.url), "utf8").includes("unfolds in place"), "the spine's temporary done comment is gone");
+assert.ok(page.includes("writeOutside(t)") && page.includes("matchesFilters(t, filters)"), "the panel notices a task the active filter hides");
+assert.ok(page.includes('h === "archive"') && page.includes('location.hash = archiveView ? "archive" : ""'), "the archive is a hash route and closing a task opened from it returns to the archive");
+for (const fn of [encodeFilters, decodeFilters, emptyFilters, filtersActive, matchesFilters, filterTasks, filterReason, paletteResults, archiveTasks, archivePage]) assert.ok(page.includes(String(fn)), `the page ships ${fn.name || "the helper"}`);
 
 console.log("page.test.ts: all assertions passed");

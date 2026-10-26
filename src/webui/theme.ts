@@ -56,6 +56,51 @@ h1 { font-size: 1.0625rem; font-weight: 500; margin: 0; }
 .tab { border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px 6px 0 0; padding: 4px 12px; font-size: 0.875rem; cursor: pointer; }
 .tab:hover { background: var(--raised); }
 .tab.active { border-color: var(--link); color: var(--link); }
+/* #368 the filter bar: one wrapping row under the tabs and above the spine, every control a chip,
+   a select or a text field on the chrome; clear sits at the row's end and hides while nothing filters */
+#filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 18px 8px; }
+#f-q { flex: 0 1 15rem; min-width: 8rem; border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 3px 8px; font-family: inherit; font-size: 0.8125rem; }
+#f-q::placeholder { color: var(--dim); }
+#filters select { border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 2px 4px; font-family: inherit; font-size: 0.75rem; }
+#f-phases { display: flex; flex-wrap: wrap; gap: 4px; }
+.f-chip { border: 1px solid var(--hairline); background: var(--panel); color: var(--dim); border-radius: 999px; padding: 1px 9px; font-family: inherit; font-size: 0.75rem; }
+.f-chip:hover { background: var(--raised); }
+.f-chip[aria-pressed="true"] { border-color: var(--link); color: var(--link); }
+#f-clear { margin-left: auto; }
+#f-clear[hidden] { display: none; }
+.f-chip, .arch-row, .pal-row { cursor: pointer; }
+/* #368 the done archive: the done station's overflow opens this view in place of the spine, same
+   window, one page of 50 rows and a footer with the newer and older controls */
+#board.hidden, #archive.hidden { display: none; }
+#archive { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px 18px 18px; }
+.arch-head { display: flex; align-items: baseline; gap: 10px; padding: 2px 0 8px; font-size: 0.875rem; }
+#arch-count { color: var(--dim); font-size: 0.75rem; font-family: ${MONO}; font-variant-numeric: tabular-nums; }
+.arch-head .m-action { margin-left: auto; }
+.arch-row { display: flex; align-items: baseline; gap: 10px; width: 100%; margin: 0; border: 0; border-bottom: 1px solid var(--hairline); background: none; color: var(--text); padding: 6px 2px; font-family: inherit; font-size: 0.8125rem; text-align: left; }
+.arch-row:hover { background: var(--raised); }
+.arch-num, .pal-num { color: var(--link); font-family: ${MONO}; font-variant-numeric: tabular-nums; }
+.arch-name, .pal-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arch-date, .pal-state { color: var(--dim); font-size: 0.75rem; font-family: ${MONO}; }
+.pal-live { color: var(--accent-todo); font-size: 0.75rem; font-family: ${MONO}; }
+#arch-foot { display: flex; align-items: baseline; gap: 10px; padding: 10px 0 0; color: var(--dim); font-size: 0.75rem; font-family: ${MONO}; }
+#arch-page { flex: 1 1 auto; }
+#arch-newer[hidden], #arch-more[hidden] { display: none; }
+#arch-empty, #pal-empty, #pal-more { padding: 6px 2px; color: var(--dim); font-size: 0.75rem; font-family: ${MONO}; }
+#arch-empty.hidden, #pal-empty.hidden, #pal-more.hidden { display: none; }
+body.panel-open #archive { padding-right: calc(18px + var(--panel-w)); }
+/* #368 the command palette: a centred dialog over the page chrome, the input above the capped list */
+#palette { position: fixed; inset: 0; z-index: 10; display: flex; justify-content: center; align-items: flex-start; padding-top: 8vh; background: color-mix(in srgb, var(--text) 35%, transparent); }
+#palette.hidden { display: none; }
+#pal-box { width: min(40rem, 92vw); max-height: 70vh; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px; padding: 8px; }
+#pal-input { border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 6px 10px; font-family: inherit; font-size: 0.9375rem; }
+#pal-list { display: flex; flex-direction: column; overflow-y: auto; margin-top: 6px; }
+.pal-row { display: flex; align-items: baseline; gap: 8px; width: 100%; margin: 0; border: 0; border-bottom: 1px solid var(--hairline); background: none; color: var(--text); padding: 5px 6px; font-family: inherit; font-size: 0.8125rem; text-align: left; }
+.pal-row[aria-selected="true"] { background: var(--raised); }
+/* #368 the panel's outside-filter notice: a task a palette or archive click reaches while the filter
+   hides it names itself here, and one click shows it */
+#p-outside { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; border: 1px solid var(--hairline); border-radius: 6px; padding: 4px 8px; color: var(--dim); font-size: 0.8125rem; }
+#p-outside.hidden { display: none; }
+#p-outside .m-action { margin-left: auto; }
 /* #366 the station spine: seven tracks, six even and done slightly wider; below 1100px the board alone scrolls horizontally with a 150px station floor, so the page never scrolls sideways (000247). The heads share one hairline grid item and each station body scrolls on its own */
 #board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)) minmax(0, 1.15fr); grid-template-rows: 1px minmax(0, 1fr); gap: 0 18px; padding: 10px 18px 18px; overflow-x: auto; overflow-y: hidden; position: relative; }
 @media (max-width: 1099px) { #board { grid-template-columns: repeat(6, minmax(150px, 1fr)) minmax(150px, 1.15fr); } }
@@ -212,7 +257,7 @@ body.panel-open #board { padding-right: calc(18px + var(--panel-w)); }
 .m-action:hover { background: var(--raised); }
 /* #364 keyboard focus: every element the stylesheet marks interactive answers Tab with the same
    visible ring, so the pointer cue is never the only cue */
-#theme:focus-visible, .tab:focus-visible, .card:focus-visible, .num-link:focus-visible, .toggle:focus-visible, .run-row:focus-visible, summary:focus-visible, #p-close:focus-visible, #c-close:focus-visible, .seg:focus-visible, .m-action:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+#theme:focus-visible, .tab:focus-visible, .card:focus-visible, .num-link:focus-visible, .toggle:focus-visible, .run-row:focus-visible, summary:focus-visible, #p-close:focus-visible, #c-close:focus-visible, .seg:focus-visible, .m-action:focus-visible, .f-chip:focus-visible, .arch-row:focus-visible, .pal-row:focus-visible, #f-q:focus-visible, #filters select:focus-visible, #pal-input:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 .m-action:disabled { opacity: 0.6; cursor: default; }
 .m-block { color: var(--error-text); border: 1px solid var(--error); background: color-mix(in srgb, var(--error) 15%, var(--panel)); }
 .m-unblock { color: var(--accent-done-text); border: 1px solid var(--accent-done); background: color-mix(in srgb, var(--accent-done) 15%, var(--panel)); }
@@ -289,5 +334,5 @@ ${STATIONS.map((s) => `.s-${s.id} { --ac: var(--accent-${s.accent}); }`).join("\
 /* 204: mobile, the root font size 15% smaller so every rem-based size scales down with it */
 @media (max-width: 600px) { html { font-size: 85%; } }
 /* 205: mobile, the task panel is a full-screen sheet, flush with all four sides and over the console */
-@media (max-width: 600px) { #panel { top: 0; bottom: 0; width: 100vw; padding: 0 12px 12px; } body.panel-open #board { padding-right: 18px; } }
+@media (max-width: 600px) { #panel { top: 0; bottom: 0; width: 100vw; padding: 0 12px 12px; } body.panel-open #board, body.panel-open #archive { padding-right: 18px; } }
 `;

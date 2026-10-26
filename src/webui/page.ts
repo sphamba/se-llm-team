@@ -3,6 +3,7 @@ import { readConfigFiles, type StageFlags } from "../orchestrator/config.ts";
 export type { StageFlags };
 import { esc, inline, logFixups, md } from "./logpane.ts";
 import { agentLabel, agentStatsText, applyCardStats, applyStages, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, isHeld, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, statsKey, STATIONS, syncBoard, syncCardStats, taskStats } from "./board.ts";
+import { ARCHIVE_PAGE, archivePage, archiveTasks, decodeFilters, emptyFilters, encodeFilters, FILTER_COMPLEXITIES, FILTER_DEBOUNCE, FILTER_PRIORITIES, FILTERS_KEY, filterReason, filterTasks, filtersActive, matchesFilters, PALETTE_MAX, paletteResults, PHASES } from "./filters.ts";
 import { CSS } from "./theme.ts";
 
 // the served page: PAGE interpolates the tested renderers and helpers as client source; the
@@ -85,10 +86,27 @@ ${CSS}</style>
 <body>
 <header><h1>Software Engineering LLM Team</h1><span id="updated"></span><button id="theme" onclick="toggleTheme()">Dark</button></header>
 <nav id="tabs"></nav>
+<div id="filters" aria-label="Filter tasks">
+<input id="f-q" type="text" placeholder="filter: text or #num  (/)" aria-label="Filter by text or number" autocomplete="off">
+<div id="f-phases" role="group" aria-label="Station"></div>
+<select id="f-prio" multiple size="1" aria-label="Priority"></select>
+<select id="f-cx" multiple size="1" aria-label="Complexity"></select>
+<select id="f-issuer" aria-label="Issuer"></select>
+<button id="f-held" class="f-chip" aria-pressed="false">held</button>
+<button id="f-live" class="f-chip" aria-pressed="false">live</button>
+<button id="f-clear" class="f-chip" hidden>clear</button>
+</div>
 <main id="board"></main>
+<section id="archive" class="hidden" aria-label="Done archive">
+<div class="arch-head"><span>Done</span><span id="arch-count"></span><button id="arch-back" class="m-action" onclick="backToBoard()">Board</button></div>
+<div id="arch-list"></div>
+<div id="arch-empty" class="empty"></div>
+<div id="arch-foot"><button id="arch-newer" class="m-action" hidden onclick="archNewer()">newer</button><span id="arch-page"></span><button id="arch-more" class="m-action" hidden onclick="loadOlder()">+50 older</button></div>
+</section>
 <footer id="hub"></footer>
 <aside id="panel" class="hidden" aria-label="Task detail">
 <div id="p-head"><h2 id="p-title" tabindex="-1"></h2><button id="p-close" onclick="closePanel()">Close</button></div>
+<div id="p-outside" class="hidden"></div>
 <div id="p-facts"></div>
 <div id="p-prio-wrap"><span class="k">priority</span><div id="p-prio" role="group" aria-label="Priority"></div><div id="p-prio-err" role="status"></div></div>
 <div id="p-actions"></div>
@@ -102,6 +120,14 @@ ${CSS}</style>
 <div id="c-meta" class="hidden"></div>
 <div id="c-log"><div id="c-text"></div></div>
 </section>
+<div id="palette" class="hidden" role="dialog" aria-modal="true" aria-label="Find a task">
+<div id="pal-box">
+<input id="pal-input" type="text" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list" placeholder="find a task: number, name or summary" autocomplete="off">
+<div id="pal-list" role="listbox" aria-label="Tasks"></div>
+<div id="pal-empty" class="hidden" role="status"></div>
+<div id="pal-more" class="hidden"></div>
+</div>
+</div>
 <script>
 "use strict";
 const VISIBLE = 5;
@@ -158,6 +184,200 @@ ${applyCardStats}
 ${mergeCardStats}
 ${makeStatsQueue}
 ${refreshMs}
+// #368 the filter bar: the URL's ?f=<base64> value is the filter and localStorage holds the last
+// used set for a URL that carries none; a corrupt value falls back to no filter
+let filters = null, archiveView = false, archPageNo = 0;
+let palOpen = false, palSel = 0, palHits = [], palReturn = null, fqTimer = null;
+const FILTERS_KEY = ${JSON.stringify(FILTERS_KEY)};
+const FILTER_DEBOUNCE = ${FILTER_DEBOUNCE};
+const PALETTE_MAX = ${PALETTE_MAX};
+const ARCHIVE_PAGE = ${ARCHIVE_PAGE};
+const PHASES = ${JSON.stringify(PHASES)};
+const FILTER_PRIORITIES = ${JSON.stringify(FILTER_PRIORITIES)};
+const FILTER_COMPLEXITIES = ${JSON.stringify(FILTER_COMPLEXITIES)};
+${emptyFilters}
+${encodeFilters}
+${decodeFilters}
+${filtersActive}
+${matchesFilters}
+${filterTasks}
+${filterReason}
+${paletteResults}
+${archiveTasks}
+${archivePage}
+filters = initialFilters();
+function initialFilters() {
+	const qs = new URLSearchParams(location.search);
+	let raw = qs.get("f");
+	if (!qs.has("f")) { try { raw = localStorage.getItem(FILTERS_KEY); } catch {} }
+	return decodeFilters(raw);
+}
+function applyFilters() {
+	saveFilters();
+	render();
+	const t = openDetail || (panelFile ? activeBoard().tasks.find(x => x.file === panelFile) : null);
+	if (t) writeOutside(t);
+}
+function saveFilters() {
+	const enc = encodeFilters(filters);
+	try { history.replaceState(null, "", (filtersActive(filters) ? "?f=" + enc : "") + location.hash); } catch {}
+	try { localStorage.setItem(FILTERS_KEY, enc); } catch {}
+}
+function clearFilters() { filters = emptyFilters(); applyFilters(); }
+function clearQuery() { filters.q = ""; const el = document.getElementById("f-q"); if (el) el.value = ""; applyFilters(); }
+// the panel's notice when a palette or archive click lands on a task the active filter hides: it
+// names the filter and offers the one click that shows the task, the filter itself stays
+function writeOutside(t) {
+	const el = document.getElementById("p-outside");
+	if (!el) return;
+	const outside = filtersActive(filters) && !matchesFilters(t, filters);
+	if (writeGated(el, outside ? '<span>outside the active filter</span><button class="m-action" onclick="clearFilters()">show it</button>' : "")) el.classList.toggle("hidden", !outside);
+}
+function renderFilterBar() {
+	const ph = document.getElementById("f-phases");
+	if (ph) {
+		if (ph.children.length !== STATIONS.length) {
+			ph.innerHTML = STATIONS.map(s => '<button class="f-chip" data-phase="' + s.id + '" aria-pressed="false">' + esc(s.label) + "</button>").join("");
+			for (const b of ph.children) b.onclick = () => togglePhase(b.dataset.phase);
+		}
+		for (const b of ph.children) b.setAttribute("aria-pressed", String(filters.phases.includes(b.dataset.phase)));
+	}
+	const q = document.getElementById("f-q");
+	if (q && document.activeElement !== q && q.value !== filters.q) q.value = filters.q;
+	fillSelect("f-prio", FILTER_PRIORITIES, filters.priorities);
+	fillSelect("f-cx", FILTER_COMPLEXITIES, filters.complexities);
+	fillIssuers(activeBoard().tasks);
+	const held = document.getElementById("f-held"), liveEl = document.getElementById("f-live");
+	if (held) held.setAttribute("aria-pressed", String(filters.held));
+	if (liveEl) liveEl.setAttribute("aria-pressed", String(filters.live));
+	const clear = document.getElementById("f-clear");
+	if (clear) clear.hidden = !filtersActive(filters);
+}
+function fillSelect(id, values, chosen) {
+	const el = document.getElementById(id);
+	if (!el) return;
+	if (el.children.length !== values.length) el.innerHTML = values.map(v => '<option value="' + v + '">' + v + "</option>").join("");
+	for (const o of el.children) o.selected = chosen.includes(o.value);
+}
+function fillIssuers(tasks) {
+	const el = document.getElementById("f-issuer");
+	if (!el) return;
+	const seen = [];
+	for (const t of tasks) { const v = t.issuer || "user"; if (!seen.includes(v)) seen.push(v); }
+	if (filters.issuer && !seen.includes(filters.issuer)) seen.push(filters.issuer);
+	seen.sort((a, b) => (a[0] === "#") === (b[0] === "#") ? (a[0] === "#" ? parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10) : a.localeCompare(b)) : a[0] === "#" ? 1 : -1);
+	const html = '<option value="">any issuer</option>' + seen.map(v => '<option value="' + esc(v) + '">' + esc(v) + "</option>").join("");
+	if (writeGated(el, html)) el.value = filters.issuer;
+}
+function togglePhase(id) {
+	const i = filters.phases.indexOf(id);
+	if (i < 0) filters.phases.push(id); else filters.phases.splice(i, 1);
+	applyFilters();
+}
+// the palette: a dialog over the chrome, the keyboard walks the capped list and Enter opens the row
+function openPalette() {
+	if (palOpen) return;
+	palOpen = true;
+	palSel = 0;
+	palReturn = document.activeElement;
+	const el = document.getElementById("palette");
+	if (el) el.classList.remove("hidden");
+	const input = document.getElementById("pal-input");
+	if (input) { input.value = ""; input.focus(); }
+	renderPalette();
+}
+function closePalette() {
+	if (!palOpen) return;
+	palOpen = false;
+	const el = document.getElementById("palette");
+	if (el) el.classList.add("hidden");
+	const back = palReturn;
+	palReturn = null;
+	if (back && back.focus) back.focus();
+}
+function renderPalette() {
+	const input = document.getElementById("pal-input");
+	const res = paletteResults(activeBoard().tasks, input ? input.value : "");
+	palHits = res.hits;
+	if (palSel >= palHits.length) palSel = Math.max(0, palHits.length - 1);
+	const list = document.getElementById("pal-list");
+	const html = palHits.map((t, i) => {
+		const live = (t.agents || []).find(a => a.alive);
+		return '<button class="pal-row" role="option" tabindex="0" id="pal-' + i + '" aria-selected="' + String(i === palSel) + '" data-task="' + esc(t.file) + '">' +
+			'<span class="pal-num">#' + String(parseInt(t.file, 10)) + '</span><span class="pal-name">' + esc(t.name || "") + '</span><span class="pal-state">' + esc(t.state || "") + "</span>" +
+			(live ? '<span class="pal-live">' + esc(live.role) + "</span>" : "") + "</button>";
+	}).join("");
+	if (list && writeGated(list, html)) for (const b of list.children) b.onclick = () => openTask(b.dataset.task);
+	const empty = document.getElementById("pal-empty");
+	if (empty) { const text = palHits.length ? "" : 'no task matches "' + (input ? input.value.trim() : "") + '"'; if (empty.textContent !== text) empty.textContent = text; empty.classList.toggle("hidden", !!palHits.length); }
+	const more = document.getElementById("pal-more");
+	if (more) { const text = res.more ? "+" + res.more + " more" : ""; if (more.textContent !== text) more.textContent = text; more.classList.toggle("hidden", !res.more); }
+}
+function setPalSel(i, focus) {
+	if (!palHits.length) return;
+	palSel = Math.max(0, Math.min(i, palHits.length - 1));
+	const list = document.getElementById("pal-list");
+	if (!list) return;
+	for (let k = 0; k < list.children.length; k++) list.children[k].setAttribute("aria-selected", String(k === palSel));
+	const row = list.children[palSel];
+	if (focus && row && row.focus) row.focus();
+}
+function paletteKeydown(e) {
+	if (e.key === "Escape") { e.stopPropagation(); return closePalette(); }
+	if (e.key === "ArrowDown") { e.preventDefault(); return setPalSel(palSel + 1, true); }
+	if (e.key === "ArrowUp") { e.preventDefault(); return setPalSel(palSel - 1, true); }
+	if (e.key !== "Enter") return;
+	e.preventDefault();
+	const t = palHits[palSel];
+	if (t) { closePalette(); openTask(t.file); }
+}
+// the done archive: one window of 50 done tasks, opened from the Done overflow or the #archive hash
+const archDate = ms => typeof ms === "number" && ms ? new Date(ms).toLocaleDateString() : "";
+function openArchive() { if (location.hash !== "#archive") location.hash = "archive"; }
+function backToBoard() { if (location.hash) location.hash = ""; else showView(false); }
+function loadOlder() { archPageNo++; renderArchive(); }
+function archNewer() { archPageNo = Math.max(0, archPageNo - 1); renderArchive(); }
+function showView(archive) {
+	if (archive && !archiveView) archPageNo = 0;
+	archiveView = archive;
+	const b = document.getElementById("board"), a = document.getElementById("archive");
+	if (b) b.classList.toggle("hidden", archive);
+	if (a) a.classList.toggle("hidden", !archive);
+	syncPanelTop();
+	if (archive) renderArchive();
+}
+function renderArchive() {
+	const all = activeBoard().tasks;
+	const rows = archiveTasks(all, filters);
+	const win = archivePage(rows, archPageNo);
+	archPageNo = win.page;
+	const done = all.filter(t => t.state === "done").length;
+	const count = document.getElementById("arch-count");
+	if (count) { const text = filtersActive(filters) ? rows.length + " of " + done + " done tasks match" : done + " done tasks"; if (count.textContent !== text) count.textContent = text; }
+	const list = document.getElementById("arch-list");
+	const html = win.rows.map(t => '<button class="arch-row" data-task="' + esc(t.file) + '"><span class="arch-num">#' + String(parseInt(t.file, 10)) + '</span><span class="arch-name">' + esc(t.name || "") + '</span><span class="arch-date">' + esc(archDate(t.updated)) + "</span></button>").join("");
+	if (list && writeGated(list, html)) for (const b of list.children) b.onclick = () => openTask(b.dataset.task);
+	const empty = document.getElementById("arch-empty");
+	if (empty) { const text = rows.length ? "" : filtersActive(filters) ? filterReason(filters) : "nothing finished yet"; if (empty.textContent !== text) empty.textContent = text; empty.classList.toggle("hidden", !!rows.length); }
+	const pageEl = document.getElementById("arch-page");
+	if (pageEl) { const text = win.pages > 1 ? "page " + (win.page + 1) + " of " + win.pages + " \u00b7 " + (win.start + 1) + "-" + win.end + " of " + rows.length : ""; if (pageEl.textContent !== text) pageEl.textContent = text; }
+	const older = document.getElementById("arch-more");
+	if (older) older.hidden = win.page >= win.pages - 1;
+	const newer = document.getElementById("arch-newer");
+	if (newer) newer.hidden = win.page <= 0;
+}
+const bind = (id, ev, fn) => { const el = document.getElementById(id); if (el) el[ev] = fn; };
+const typingTarget = el => !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable === true);
+bind("f-q", "oninput", e => { clearTimeout(fqTimer); fqTimer = setTimeout(() => { filters.q = e.target.value.trim(); applyFilters(); }, FILTER_DEBOUNCE); });
+bind("f-prio", "onchange", e => { filters.priorities = [...e.target.selectedOptions].map(o => o.value); applyFilters(); });
+bind("f-cx", "onchange", e => { filters.complexities = [...e.target.selectedOptions].map(o => o.value); applyFilters(); });
+bind("f-issuer", "onchange", e => { filters.issuer = e.target.value; applyFilters(); });
+bind("f-held", "onclick", () => { filters.held = !filters.held; applyFilters(); });
+bind("f-live", "onclick", () => { filters.live = !filters.live; applyFilters(); });
+bind("f-clear", "onclick", () => clearFilters());
+bind("pal-input", "oninput", () => { palSel = 0; renderPalette(); });
+bind("palette", "onkeydown", paletteKeydown);
+bind("palette", "onmousedown", e => { if (e.target && e.target.id === "palette") closePalette(); });
 // tabs: one per registered project, the active one renders that project's board
 function renderTabs() {
 	const el = document.getElementById("tabs");
@@ -252,6 +472,7 @@ function drawRelations() {
 }
 function render(skipFlip) {
 	renderTabs();
+	renderFilterBar();
 	const tab = activeBoard();
 	const board = document.getElementById("board");
 	if (!stations) {
@@ -260,7 +481,7 @@ function render(skipFlip) {
 		svg.id = "relations";
 		svg.setAttribute("pointer-events", "none");
 		board.insertBefore(svg, board.firstChild);
-		for (const id in stations) stations[id].toggle.onclick = () => toggleStation(id);
+		for (const id in stations) stations[id].toggle.onclick = id === "done" ? openArchive : () => toggleStation(id);
 		window.addEventListener("resize", drawRelations);
 	}
 	const project = projects.find(t => t.id === active);
@@ -275,7 +496,7 @@ function render(skipFlip) {
 	// 000264: the lazily-known stats land on the rows before the board pass, so the 5 s poll's
 	// agent-less cards 6+ never wipe revealed stats; the payload's eager first-5 agents win
 	applyCardStats(tab.tasks, statsKnown, localStorage, active);
-	syncBoard(stations, tab.tasks, tab.expanded, cardEls, makeCard, VISIBLE, document);
+	syncBoard(stations, filterTasks(tab.tasks, filters), tab.expanded, cardEls, makeCard, VISIBLE, document, filterReason(filters));
 	const now = {};
 	for (const el of cardEls.values()) now[el.dataset.file] = cardBox(el);
 	const diff = flipDiff(old, now);
@@ -290,6 +511,7 @@ function render(skipFlip) {
 		el.style.transform = "";
 		el.ontransitionend = () => { el.style.transition = ""; el.ontransitionend = null; drawRelations(); };
 	}
+	if (archiveView) renderArchive();
 }
 // the shared animated close: .closing runs the entrance in reverse, the element hides on
 // animationend with a fixed-timeout fallback (a background tab never fires the event); a reopen
@@ -503,6 +725,7 @@ function writeTitle(t) {
 // DOM nodes, the panel's scroll position and the focused control
 function writePanel(t, withBody) {
 	writeTitle(t);
+	writeOutside(t);
 	const facts = document.getElementById("p-facts");
 	if (writeGated(facts, factsHtml(t))) for (const a of facts.querySelectorAll(".num-link")) a.onclick = () => openTask(a.dataset.task);
 	writePriority(t);
@@ -515,8 +738,8 @@ function writePanel(t, withBody) {
 }
 // the page chrome's height, so the docked panel starts under it and never covers a station head
 function syncPanelTop() {
-	const board = document.getElementById("board");
-	if (board) document.body.style.setProperty("--chrome", Math.max(0, Math.round(board.getBoundingClientRect().top)) + "px");
+	const el = document.getElementById(archiveView ? "archive" : "board");
+	if (el) document.body.style.setProperty("--chrome", Math.max(0, Math.round(el.getBoundingClientRect().top)) + "px");
 }
 // on open, focus moves to the panel's first heading; the board keeps its own width, so no backdrop
 // and no dim
@@ -546,7 +769,7 @@ function hidePanel() {
 }
 // the user close: clearing the hash is the close, so back and forward stay in step
 function closePanel() {
-	if (location.hash.slice(1)) { location.hash = ""; return; }
+	if (location.hash.slice(1)) { location.hash = archiveView ? "archive" : ""; return; }
 	hidePanel();
 }
 // an unknown routed number: a dim line names it and the board stays usable
@@ -568,6 +791,9 @@ function writeNotFound(num) {
 // the hash is the route: #task/<num> opens that task, an empty hash closes the panel, and browser
 // back and forward replay both; a direct load resolves on the first /api/tasks response
 function syncRoute() {
+	const h = location.hash.slice(1);
+	if (h === "archive") showView(true);
+	else if (!h.startsWith("task/")) showView(false);
 	routeNum = hashNum();
 	const p = document.getElementById("panel");
 	if (routeNum == null) { if (!p.classList.contains("hidden") || panelFile || notFoundNum != null) hidePanel(); return; }
@@ -838,9 +1064,14 @@ handleEl.onkeydown = e => {
 	if (e.key === "End") { applyConsoleH(consoleMax()); e.preventDefault(); }
 };
 applyConsoleH(consoleH);
-// 000194: Esc closes the console first when it is open, then the panel
+// 000194: Esc clears the palette, then the filter query, then the console, then the panel; / and
+// Cmd-K (Ctrl-K) reach the filter bar and the palette from anywhere but a text field
 window.addEventListener("keydown", e => {
+	if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); return palOpen ? closePalette() : openPalette(); }
+	if (e.key === "/" && !typingTarget(e.target)) { e.preventDefault(); const el = document.getElementById("f-q"); if (el && el.focus) el.focus(); return; }
 	if (e.key !== "Escape") return;
+	if (palOpen) return closePalette();
+	if (filters && filters.q) return clearQuery();
 	if (!document.getElementById("console").classList.contains("hidden")) return closeConsole();
 	closePanel();
 });

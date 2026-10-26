@@ -218,7 +218,7 @@ assert.ok(PAGE.includes("function statsKey("), "statsKey interpolates into the p
 assert.ok(PAGE.includes("function applyCardStats("), "applyCardStats interpolates into the page");
 assert.ok(PAGE.includes("function mergeCardStats("), "mergeCardStats interpolates into the page");
 assert.ok(PAGE.includes("function makeStatsQueue("), "makeStatsQueue interpolates into the page");
-assert.ok(PAGE.indexOf("applyCardStats(tab.tasks") < PAGE.indexOf("syncBoard(stations, tab.tasks"), "the apply pass runs before the board pass");
+assert.ok(PAGE.indexOf("applyCardStats(tab.tasks") < PAGE.indexOf("syncBoard(stations, filterTasks(tab.tasks, filters)"), "the apply pass runs before the board pass");
 assert.ok(PAGE.includes('"/api/card-stats?files=" + encodeURIComponent(file)'), "each queued file fetches the pinned endpoint");
 assert.ok(PAGE.includes("statsQueue.enqueueStation(active, b.tasks, STATIONS.find(s => s.id === id), VISIBLE)"), "the unfold enqueues the station's beyond-fold cards");
 assert.ok(PAGE.includes("queueExpanded()"), "each poll re-queues the already-expanded stations");
