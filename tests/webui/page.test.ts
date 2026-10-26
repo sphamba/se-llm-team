@@ -1032,7 +1032,7 @@ assert.match(phoneRule("#board"), /padding: 8px 0 12px/, "the phone board drops 
 const flushRule = (sel: string) => phoneBoard.replace(/\/\*[\s\S]*?\*\//g, "").match(new RegExp(`(?:^|\\n)${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`))?.[1] ?? "";
 assert.match(flushRule(".station"), /padding-left: 0/, "the phone station drops the 12px inset, so the card box starts at 1 and the 1px rail keeps x 0 to 1");
 assert.match(flushRule(".st-head"), /padding: 10px 12px 6px/, "the phone head carries the 12px inset itself, so the title and the count start at the card text line");
-assert.match(flushRule(".st-head::before"), /left: 1px; top: 16px; width: 11px;/, "the phone tick starts on the rail and ends 12px in, on the title inset");
+assert.match(flushRule(".st-head::before"), /left: 1px; top: 16px; width: 7px;/, "the phone tick starts on the rail and stops 4px short of the title inset");
 assert.match(flushRule(".empty"), /padding: 0 12px/, "the phone empty line carries the 12px inset itself");
 
 console.log("page.test.ts: all assertions passed");

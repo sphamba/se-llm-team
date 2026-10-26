@@ -406,7 +406,7 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
 .card { flex: 0 0 auto; }
 .st-head { align-items: baseline; padding: 10px 12px 6px; }
 .st-head h2 { font-size: 0.875rem; }
-.st-head::before { left: 1px; top: 16px; width: 11px; height: 1px; }
+.st-head::before { left: 1px; top: 16px; width: 7px; height: 1px; }
 .empty { padding: 0 12px; }
 .count { font-size: 0.8125rem; }
 /* #387 the touch floor: a compact control keeps its desktop height and carries an invisible 44px band
