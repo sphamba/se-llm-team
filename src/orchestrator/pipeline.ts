@@ -153,7 +153,7 @@ export function ensureIntegrationTask(root: string, covered: Task): void {
 	log(root, `${fresh.file}: appended #${num}, now ${survivors.map((ref) => `#${ref}`).join(", ")}`);
 }
 
-function startTodo(root: string, cfg: Config, task: Task): void {
+function startTodo(root: string, cfg: Config, task: Task, tasks: Task[]): void {
 	const slug = taskSlug(task.file);
 	// a manual to-do rewrite can land while the spawned agent still runs: the live pid is the
 	// guard, the state alone is not, or a second sweep spawns a twin that overwrites the pid file
@@ -162,9 +162,10 @@ function startTodo(root: string, cfg: Config, task: Task): void {
 	// act on the file on disk, not on the snapshot, or a stale to-do call undoes the split
 	const fresh = getTask(root, task.file);
 	if (!fresh || fresh.state !== "to-do") return;
-	// a held task starts no stage: it keeps to-do, and removing the token restarts the path with
-	// the Splitter first because no splitter marker was written
-	if (hasUserHold(fresh.blockedBy)) return;
+	// the same gate as the promotion loop: a held token or a blocker that still blocks keeps the
+	// task in to-do, and removing the hold restarts the path with the Splitter first because no
+	// splitter marker was written
+	if (blockedByUndone(tasks, fresh)) return;
 	if (SPLITTER_COMPLEXITIES.has(fresh.complexity ?? "")) {
 		const entry = pidEntry(root, `${slug}.splitter`);
 		if (pidAlive(entry.pid, entry.disc)) return;
@@ -530,7 +531,7 @@ export function rescan(root: string, cfg: Config, force = false): void {
 					log(root, `${task.file}: back in to-do, review counter reset`);
 				}
 				// past the respawn cap the fresh developer waits for the idle cooldown (state unchanged)
-				if (!deadCooldownActive(root, cfg, task)) startTodo(root, cfg, task);
+				if (!deadCooldownActive(root, cfg, task)) startTodo(root, cfg, task, tasks);
 			} else if (task.state === "to-review" && !deadCooldownActive(root, cfg, task)) {
 				// reviews off: the task skips the reviewer lane and goes straight to the merge
 				if (!cfg.reviews) {

@@ -869,3 +869,39 @@ const { boardOrder } = await import("../../src/orchestrator/pipeline.ts");
 assert.deepEqual([...listAll(rootBM)].sort(boardOrder).map((t) => t.state), ["to-integration-test", "to-live-test", "to-merge", "to-review", "to-do"], "the global order runs later stage first");
 cleanupAll(rootBM);
 console.log("orchestrator.test.ts: ... + board order smoke passed");
+
+// --- part BN (394): a to-do task obeys the same blocker gate as the promotion loop: a numeric
+// ref whose blocker still blocks holds the to-do start, and the user hold token still holds it ---
+const rootBN = fixture();
+cleaned.push(rootBN);
+const homeBN = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeBN);
+mkdirSync(kanbanDir(rootBN), { recursive: true });
+const savedHomeBN = process.env.HOME;
+process.env.HOME = homeBN;
+let cfgBN: ReturnType<typeof loadConfig>;
+try {
+	cfgBN = loadConfig(rootBN);
+} finally {
+	process.env.HOME = savedHomeBN;
+}
+cfgBN.backlogIdleMinutes = 0;
+cfgBN.agent = deadStub(rootBN);
+const blockerBN = createTask(rootBN, { name: "feat: blocker in review", complexity: "simple", summary: "To-do blocker gate smoke", specs: "n/a" });
+setState(rootBN, blockerBN, "reviewing");
+const chainedBN = createTask(rootBN, { name: "feat: chained to do", complexity: "simple", summary: "To-do blocker gate smoke", specs: "n/a", blockedBy: `#${parseInt(blockerBN.file, 10)}` });
+setState(rootBN, chainedBN, "to-do");
+const heldBN = createTask(rootBN, { name: "feat: held to do", complexity: "simple", summary: "To-do blocker gate smoke", specs: "n/a", blockedBy: "user" });
+setState(rootBN, heldBN, "to-do");
+rescan(rootBN, cfgBN);
+assert.equal(parseTask(rootBN, chainedBN.file).state, "to-do", "the still-blocking numeric ref holds the to-do start");
+assert.ok(!existsSync(pidPath(rootBN, taskSlug(chainedBN.file))), "the blocked to-do spawned no developer");
+assert.equal(parseTask(rootBN, heldBN.file).state, "to-do", "the user hold token holds the to-do start");
+assert.ok(!existsSync(pidPath(rootBN, taskSlug(heldBN.file))), "the held to-do spawned no developer");
+setState(rootBN, blockerBN, "done");
+rescan(rootBN, cfgBN);
+assert.equal(parseTask(rootBN, chainedBN.file).state, "doing", "the chained task starts once the blocker is done");
+assert.ok(existsSync(pidPath(rootBN, taskSlug(chainedBN.file))), "the released developer pid file exists");
+assert.equal(parseTask(rootBN, heldBN.file).state, "to-do", "the user hold still holds after the sweep");
+cleanupAll(rootBN);
+console.log("orchestrator.test.ts: ... + to-do blocker gate smoke passed");
