@@ -27,6 +27,6 @@ export {
 	taskStats,
 } from "./board.ts";
 export { agentLogPayload, cardStatsPayload, taskDetail, taskHistory, taskPayload } from "./payload.ts";
-export { CSS } from "./theme.ts";
-export { ARCHIVE_PAGE, archivePage, archiveTasks, decodeFilters, emptyFilters, encodeFilters, FILTER_DEBOUNCE, FILTERS_KEY, filterReason, filtersActive, filterTasks, matchesFilters, PALETTE_MAX, paletteResults, type FilterState } from "./filters.ts";
+export { CSS, MOBILE_MAX } from "./theme.ts";
+export { ARCHIVE_PAGE, archivePage, archiveTasks, decodeFilters, emptyFilters, encodeFilters, FILTER_DEBOUNCE, FILTERS_KEY, filterReason, filtersActive, filtersCount, filterTasks, matchesFilters, PALETTE_MAX, paletteResults, type FilterState } from "./filters.ts";
 export { boardOf, DEFAULT_STAGES, loadWebUiConfig, mergeBoards, PAGE, refreshMs, tabNames, tabsHtml, type StageFlags, type WebUiConfig } from "./page.ts";

@@ -237,6 +237,10 @@ assert.equal(relationPaths([
 assert.equal(relationPaths([{ file: "000002_b.md", state: "to-do", blockedBy: "#9, junk, , " }], rectOf).length, 0, "ghost and unparseable refs draw nothing");
 assert.equal(relationPaths([{ file: "000002_b.md", state: "to-do", blockedBy: "#1" }], (f) => (f === "000001_a.md" ? rects["000001_a.md"] : null)).length, 0, "a ref whose card is not rendered draws nothing");
 assert.deepEqual(relationPaths([{ file: "000002_b.md", state: "to-do" }], rectOf), [], "an older payload without blockedBy draws nothing");
+assert.deepEqual(relationPaths([
+	{ file: "000002_b.md", state: "to-do", blockedBy: "#4" },
+	{ file: "000004_d.md", state: "to-do", blockedBy: "" },
+], rectOf, true), [], "#370 the vertical spine stacks every card in one column, so a cross-station curve has no span: the phone layout draws no relation line");
 
 // hovering highlights both ways (000144): the served client script's hotRelations for the blocked
 // file and for the blocker file both raise the same path, an unrelated file raises nothing

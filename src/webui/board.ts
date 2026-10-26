@@ -244,9 +244,12 @@ export function curve(from, to) {
 // one curve per stored relation the board can draw: the blocked task's card to each blocking
 // task's card, both currently rendered, carrying both endpoint files for the hover highlight
 // (000127, 000144). A "#<num>" ref maps to its task via parseInt(file); a ref
-// without a rendered card is skipped, and a done blocker draws nothing.
-export function relationPaths(tasks, rectOf) {
+// without a rendered card is skipped, and a done blocker draws nothing. #370: the phone layout stacks
+// every card in one column, so a blocked -> blocker curve has no horizontal span to cross and the
+// vertical flag draws nothing at all
+export function relationPaths(tasks, rectOf, vertical = false) {
 	const out = [];
+	if (vertical) return out;
 	for (const t of tasks) {
 		const from = rectOf(t.file);
 		if (!from) continue;

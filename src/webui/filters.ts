@@ -65,6 +65,11 @@ export function filtersActive(f: FilterState): boolean {
 	return !!(f.q || f.phases.length || f.priorities.length || f.complexities.length || f.issuer || f.held || f.live);
 }
 
+// #370 the phone filter button's badge: one count per active dimension, the empty set at 0
+export function filtersCount(f: FilterState): number {
+	return (f.q ? 1 : 0) + f.phases.length + f.priorities.length + f.complexities.length + (f.issuer ? 1 : 0) + (f.held ? 1 : 0) + (f.live ? 1 : 0);
+}
+
 // the membership test: the query reads the name, the summary and the number (a leading # is
 // optional), every other field is a set membership or a flag, and every set field must agree
 export function matchesFilters(t: Task, f: FilterState): boolean {

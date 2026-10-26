@@ -2,6 +2,10 @@
 
 import { STATIONS } from "./board.ts";
 
+// #370 one breakpoint for the whole phone layout: below this width the spine turns vertical and the
+// panel, the console and the filter bar become sheets. The stylesheet and the client read this value
+export const MOBILE_MAX = 700;
+
 // Space Grotesk carries the prose and the labels; IBM Plex Mono the numbers, the log and the code
 const SANS = `"Space Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
 const MONO = `"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace`;
@@ -71,6 +75,8 @@ h1 { font-size: 1.0625rem; font-weight: 500; margin: 0; }
 .f-chip[aria-pressed="true"] { border-color: var(--link); color: var(--link); }
 #f-clear { margin-left: auto; }
 #f-clear[hidden] { display: none; }
+/* #370 the phone filter button and its sheet's apply control: desktop keeps the visible bar */
+#f-toggle, #f-apply { display: none; }
 .f-chip, .arch-row, .pal-row { cursor: pointer; }
 /* #368 the done archive: the done station's overflow opens this view in place of the spine, same
    window, one page of 50 rows and a footer with the newer and older controls */
@@ -236,6 +242,8 @@ body.panel-open #board { padding-right: calc(18px + var(--panel-w)); }
 #p-head { position: sticky; top: 0; display: flex; align-items: flex-start; gap: 10px; padding: 14px 0 8px; background: var(--panel); z-index: 1; }
 #p-head h2 { flex: 1 1 auto; min-width: 0; font-size: 1.0625rem; font-weight: 500; margin: 0; line-height: 1.3; }
 #p-head h2:focus { outline: none; }
+/* #370 the phone sheet's drag handle, hidden on the desktop dock */
+#p-handle { display: none; }
 #p-close { border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.8125rem; }
 #p-close:hover { background: var(--raised); }
 #p-facts { font-size: 0.8125rem; margin-bottom: 10px; }
@@ -261,7 +269,7 @@ body.panel-open #board { padding-right: calc(18px + var(--panel-w)); }
 .m-action:hover { background: var(--raised); }
 /* #364 keyboard focus: every element the stylesheet marks interactive answers Tab with the same
    visible ring, so the pointer cue is never the only cue */
-#motion:focus-visible, #theme:focus-visible, .tab:focus-visible, .card:focus-visible, .num-link:focus-visible, .toggle:focus-visible, .run-row:focus-visible, summary:focus-visible, #p-close:focus-visible, #c-close:focus-visible, .seg:focus-visible, .m-action:focus-visible, .f-chip:focus-visible, .arch-row:focus-visible, .pal-row:focus-visible, #f-q:focus-visible, #filters select:focus-visible, #pal-input:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+#motion:focus-visible, #theme:focus-visible, .tab:focus-visible, .card:focus-visible, .num-link:focus-visible, .toggle:focus-visible, .run-row:focus-visible, summary:focus-visible, #p-close:focus-visible, #c-close:focus-visible, .seg:focus-visible, .m-action:focus-visible, .f-chip:focus-visible, .arch-row:focus-visible, .pal-row:focus-visible, #f-q:focus-visible, #filters select:focus-visible, #pal-input:focus-visible, #f-toggle:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 .m-action:disabled { opacity: 0.6; cursor: default; }
 .m-block { color: var(--error-text); border: 1px solid var(--error); background: color-mix(in srgb, var(--error) 15%, var(--panel)); }
 .m-unblock { color: var(--accent-done-text); border: 1px solid var(--accent-done); background: color-mix(in srgb, var(--accent-done) 15%, var(--panel)); }
@@ -331,10 +339,70 @@ an un-animated block can never strand invisible text, and the old reduced-motion
 /* one accent per stage, in pipeline order; the waiting and working states of a stage share it */
 /* #366 each station points --ac at its stage token, generated from the station table so the mapping lives in one place */
 ${STATIONS.map((s) => `.s-${s.id} { --ac: var(--accent-${s.accent}); }`).join("\n")}
-/* 204: mobile, the root font size 15% smaller so every rem-based size scales down with it */
-@media (max-width: 600px) { html { font-size: 85%; } }
-/* 205: mobile, the task panel is a full-screen sheet, flush with all four sides and over the console */
-@media (max-width: 600px) { #panel { top: 0; bottom: 0; width: 100vw; padding: 0 12px 12px; } body.panel-open #board, body.panel-open #archive { padding-right: 18px; } }
+/* #370 the phone layout, one breakpoint for every surface and media queries only: the spine stacks
+   vertically in pipeline order and the hairline becomes the connector on the left edge. The root
+   keeps the 16px base, so the type scale needs no mobile override except the station count */
+@media (max-width: ${MOBILE_MAX}px) {
+header { flex-wrap: wrap; padding: 10px 12px 6px; }
+#motion, #theme { min-height: 44px; padding: 0 14px; }
+#hub { padding: 2px 12px 8px; }
+#tabs { flex-wrap: nowrap; gap: 8px; overflow-x: auto; padding: 6px 12px 0; }
+.tab { min-height: 44px; padding: 0 16px; }
+#board { display: flex; flex-direction: column; gap: 0; padding: 8px 12px 12px; overflow-x: hidden; overflow-y: auto; }
+.spine, #relations { display: none; }
+.station { padding-left: 12px; border-left: 1px solid var(--hairline); }
+.station + .station { border-top: 0; border-left: 1px solid var(--hairline); }
+.station.strip { border-left: 1px dashed var(--hairline); }
+.station.strip .st-head { flex-direction: row; align-items: baseline; }
+.station.strip .st-head h2 { writing-mode: horizontal-tb; }
+.station .cards { overflow: visible; }
+.st-head { align-items: baseline; padding: 10px 0 6px; }
+.st-head h2 { font-size: 0.875rem; }
+.st-head::before { left: -13px; top: 16px; width: 12px; height: 1px; }
+.count { font-size: 0.8125rem; }
+/* the touch floor: every control clears 44px and its neighbours sit at least 8px apart */
+.m-action, .seg, .run-row, .arch-row, .toggle, .card, #c-text summary { min-height: 44px; }
+#p-actions, #f-phases, #tabs, .c-top, .c-meta { gap: 8px; }
+}
+/* #370 the panel: a full-screen sheet with a drag handle, the sticky header keeps the task identity
+   and a visible close button, and the back gesture follows the existing hash route */
+@media (max-width: ${MOBILE_MAX}px) {
+#panel { top: 0; bottom: 0; left: 0; width: auto; z-index: 5; border-left: 0; padding: 0 12px calc(12px + env(safe-area-inset-bottom)); }
+#p-head { gap: 12px; padding: calc(18px + env(safe-area-inset-top)) 0 8px; }
+#p-handle { display: block; position: absolute; top: calc(6px + env(safe-area-inset-top)); left: 50%; width: 40px; height: 4px; margin-left: -20px; border-radius: 2px; background: var(--hairline); }
+#p-close { min-width: 44px; min-height: 44px; }
+body.panel-open #board, body.panel-open #archive { padding-right: 12px; }
+}
+/* #370 the console: collapsed to one status line until a tap on the handle raises the bottom sheet to
+   at most 70% of the viewport; the close control stays visible and the log keeps its scroll */
+@media (max-width: ${MOBILE_MAX}px) {
+#console { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; height: calc(92px + env(safe-area-inset-bottom)); overflow: hidden; border-radius: 12px 12px 0 0; }
+#console.raised { height: 70vh; }
+#c-handle { position: relative; height: 44px; background: none; }
+#c-handle:hover { background: none; }
+#c-handle::before { content: ""; position: absolute; top: 10px; left: 50%; width: 40px; height: 4px; margin-left: -20px; border-radius: 2px; background: var(--hairline); }
+#c-head { align-items: center; min-height: 44px; gap: 8px; padding: 0 12px; }
+#c-close { min-width: 44px; min-height: 44px; }
+#c-text { padding: 6px 12px calc(10px + env(safe-area-inset-bottom)); }
+}
+/* #370 the filter bar collapses behind one button with an active-count badge; its sheet repeats the
+   same controls with an apply and a clear, and the palette goes full screen with an autofocused input */
+@media (max-width: ${MOBILE_MAX}px) {
+#f-toggle { display: inline-flex; align-items: center; gap: 8px; margin: 6px 12px; min-height: 44px; border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 8px; padding: 0 14px; font-family: inherit; font-size: 0.875rem; cursor: pointer; }
+#f-toggle[aria-expanded="true"] { border-color: var(--link); color: var(--link); }
+#f-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--link); color: var(--canvas); font-family: ${MONO}; font-size: 0.75rem; line-height: 20px; text-align: center; }
+#filters { display: none; }
+body.filters-open #filters { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 7; flex-direction: column; align-items: stretch; gap: 10px; max-height: 80vh; overflow-y: auto; padding: 14px 12px calc(14px + env(safe-area-inset-bottom)); background: var(--panel); border-top: 1px solid var(--hairline); border-radius: 12px 12px 0 0; }
+#f-q { flex: 0 0 auto; min-width: 0; min-height: 44px; font-size: 1rem; }
+#filters select { min-height: 44px; font-size: 0.875rem; }
+.f-chip { min-height: 44px; padding: 0 16px; }
+#f-clear { margin-left: 0; }
+#f-apply { display: inline-flex; align-items: center; margin-left: auto; }
+#palette { padding: 0; align-items: stretch; }
+#pal-box { width: 100%; height: 100%; max-height: none; border: 0; border-radius: 0; padding: calc(10px + env(safe-area-inset-top)) 12px calc(10px + env(safe-area-inset-bottom)); }
+#pal-input { min-height: 44px; font-size: 1rem; }
+.pal-row { min-height: 44px; align-items: center; }
+}
 /* #369 one motion layer: the data-motion attribute on the root decides which loops run, the token
 block above decides how fast, and every ambient rule is opt-in, so a document with no attribute
 paints no ambience and a poll that rewrites a card's content never restarts a loop the spine or the

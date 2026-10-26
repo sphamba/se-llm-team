@@ -3,8 +3,8 @@ import { readConfigFiles, type StageFlags } from "../orchestrator/config.ts";
 export type { StageFlags };
 import { esc, inline, logFixups, md } from "./logpane.ts";
 import { agentLabel, agentStatsText, applyCardStats, applyStages, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, isHeld, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, statsKey, STATIONS, syncBoard, syncCardStats, taskStats } from "./board.ts";
-import { ARCHIVE_PAGE, archivePage, archiveTasks, decodeFilters, emptyFilters, encodeFilters, FILTER_COMPLEXITIES, FILTER_DEBOUNCE, FILTER_PRIORITIES, FILTERS_KEY, filterReason, filterTasks, filtersActive, matchesFilters, PALETTE_MAX, paletteResults, PHASES } from "./filters.ts";
-import { CSS } from "./theme.ts";
+import { ARCHIVE_PAGE, archivePage, archiveTasks, decodeFilters, emptyFilters, encodeFilters, FILTER_COMPLEXITIES, FILTER_DEBOUNCE, FILTER_PRIORITIES, FILTERS_KEY, filterReason, filterTasks, filtersActive, filtersCount, matchesFilters, PALETTE_MAX, paletteResults, PHASES } from "./filters.ts";
+import { CSS, MOBILE_MAX } from "./theme.ts";
 
 // the served page: PAGE interpolates the tested renderers and helpers as client source; the
 // webui config loader and the per-tab client state helpers live here too
@@ -76,7 +76,7 @@ export const PAGE = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Software Engineering LLM Team</title>
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/space-grotesk-500.woff2">
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/ibm-plex-mono-400.woff2">
@@ -86,6 +86,7 @@ ${CSS}</style>
 <body>
 <header><h1>Software Engineering LLM Team</h1><span id="updated"></span><button id="motion" onclick="cycleMotion()" aria-pressed="true" aria-label="Motion: live, click to cycle" title="Motion: live, click to cycle">live</button><button id="theme" onclick="toggleTheme()">Dark</button></header>
 <nav id="tabs"></nav>
+<button id="f-toggle" aria-expanded="false" aria-controls="filters" onclick="toggleFilters()">Filters<span id="f-count" hidden></span></button>
 <div id="filters" aria-label="Filter tasks">
 <input id="f-q" type="text" placeholder="filter: text or #num  (/)" aria-label="Filter by text or number" autocomplete="off">
 <div id="f-phases" role="group" aria-label="Station"></div>
@@ -95,6 +96,7 @@ ${CSS}</style>
 <button id="f-held" class="f-chip" aria-pressed="false">held</button>
 <button id="f-live" class="f-chip" aria-pressed="false">live</button>
 <button id="f-clear" class="f-chip" hidden>clear</button>
+<button id="f-apply" class="f-chip" onclick="closeFilters()">apply</button>
 </div>
 <main id="board"></main>
 <section id="archive" class="hidden" aria-label="Done archive">
@@ -105,7 +107,7 @@ ${CSS}</style>
 </section>
 <footer id="hub"></footer>
 <aside id="panel" class="hidden" aria-label="Task detail">
-<div id="p-head"><h2 id="p-title" tabindex="-1"></h2><button id="p-close" onclick="closePanel()">Close</button></div>
+<div id="p-head"><div id="p-handle" aria-hidden="true"></div><h2 id="p-title" tabindex="-1"></h2><button id="p-close" onclick="closePanel()">Close</button></div>
 <div id="p-outside" class="hidden"></div>
 <div id="p-facts"></div>
 <div id="p-prio-wrap"><span class="k">priority</span><div id="p-prio" role="group" aria-label="Priority"></div><div id="p-prio-err" role="status"></div></div>
@@ -131,6 +133,8 @@ ${CSS}</style>
 <script>
 "use strict";
 const VISIBLE = 5;
+// #370 the stylesheet's one phone breakpoint, so the CSS switch and the JS check cannot drift
+const MOBILE_MAX = ${MOBILE_MAX};
 const DEFAULT_STAGES = ${JSON.stringify(DEFAULT_STAGES)};
 let projects = [{ id: "", label: "", stages: DEFAULT_STAGES }]; // one tab per registered project; id "" is the single-project ui, one board, no tabs
 let active = ""; // the active tab's id: a registry root, or "" for the single-project board
@@ -280,6 +284,7 @@ function renderFilterBar() {
 	if (liveEl) liveEl.setAttribute("aria-pressed", String(filters.live));
 	const clear = document.getElementById("f-clear");
 	if (clear) clear.hidden = !filtersActive(filters);
+	syncFilterToggle();
 }
 function fillSelect(id, values, chosen) {
 	const el = document.getElementById(id);
@@ -301,6 +306,28 @@ function togglePhase(id) {
 	const i = filters.phases.indexOf(id);
 	if (i < 0) filters.phases.push(id); else filters.phases.splice(i, 1);
 	applyFilters();
+}
+// #370 the phone filter button: the bar collapses behind one button, the badge counts the active
+// dimensions, and the sheet holds the same controls with an apply that closes it
+function syncFilterToggle() {
+	const b = document.getElementById("f-toggle"), n = document.getElementById("f-count");
+	const count = filtersCount(filters);
+	if (n) { const text = count ? String(count) : ""; if (n.textContent !== text) n.textContent = text; n.hidden = !count; }
+	if (b) b.setAttribute("aria-expanded", String(document.body.classList.contains("filters-open")));
+}
+function openFilters() {
+	document.body.classList.add("filters-open");
+	syncFilterToggle();
+	const q = document.getElementById("f-q");
+	if (q && q.focus) q.focus();
+}
+function closeFilters() {
+	document.body.classList.remove("filters-open");
+	syncFilterToggle();
+}
+function toggleFilters() {
+	if (document.body.classList.contains("filters-open")) return closeFilters();
+	return openFilters();
 }
 // the palette: a dialog over the chrome, the keyboard walks the capped list and Enter opens the row
 function openPalette() {
@@ -493,6 +520,8 @@ function hotRelations(file, on) {
 		if (p.dataset.file === file || p.dataset.blocker === file) p.classList.toggle("relations-hot", on);
 	}
 }
+// #370 the phone layout stacks every card in one column, so no relation curve has a span to cross
+const verticalSpine = () => matchMedia("(max-width: " + MOBILE_MAX + "px)").matches;
 // one dashed curve per drawn relation, sized to the rendered card extent; the bow paints outside
 // that box through overflow: visible, so the overlay adds no scroll width; rewritten only on
 // change, so the dash animation keeps running across refreshes
@@ -511,7 +540,7 @@ function drawRelations() {
 		h = Math.max(h, r.y + r.h);
 		return r;
 	};
-	const paths = relationPaths(activeBoard().tasks, rectOf);
+	const paths = relationPaths(activeBoard().tasks, rectOf, verticalSpine());
 	svg.setAttribute("width", w);
 	svg.setAttribute("height", h);
 	const html = paths.map(p => '<path d="' + p.d + '" data-file="' + esc(p.file) + '" data-blocker="' + esc(p.blocker) + '"/>').join("");
@@ -984,6 +1013,8 @@ function openConsole(handle, sub, role) {
 	const c = document.getElementById("console");
 	c.classList.remove("closing");
 	c.classList.remove("hidden");
+	c.classList.remove("raised");
+	syncConsoleSheet();
 	applyConsoleH(consoleH);
 	// the previous view's meta line must not flash before the init payload arrives
 	const meta = document.getElementById("c-meta");
@@ -1100,10 +1131,23 @@ function applyConsoleH(h) {
 	try { localStorage.setItem(CONSOLE_KEY, String(consoleH)); } catch {}
 }
 try { const stored = Number(localStorage.getItem(CONSOLE_KEY)); if (stored) consoleH = clampConsole(stored); } catch {}
+// #370 the console sheet: a run opens as one status line, a tap on the handle raises the sheet, and
+// the raised class is inert above the breakpoint so the desktop dock keeps its dragged height
+function syncConsoleSheet() {
+	const c = document.getElementById("console"), h = document.getElementById("c-handle");
+	if (c && h) h.setAttribute("aria-expanded", String(c.classList.contains("raised")));
+}
+function toggleConsoleSheet() {
+	const c = document.getElementById("console");
+	if (!c) return;
+	c.classList.toggle("raised");
+	syncConsoleSheet();
+}
 // the drag handle: a pointer drag on the top edge, and the arrow keys step it while Home and End
 // jump to the limits
 let dragging = false;
 const handleEl = document.getElementById("c-handle");
+handleEl.onclick = toggleConsoleSheet;
 handleEl.onpointerdown = e => { dragging = true; if (handleEl.setPointerCapture) handleEl.setPointerCapture(e.pointerId); e.preventDefault(); };
 handleEl.onpointermove = e => { if (dragging) applyConsoleH(innerHeight - e.clientY); };
 handleEl.onpointerup = handleEl.onpointercancel = () => { dragging = false; };
@@ -1111,16 +1155,19 @@ handleEl.onkeydown = e => {
 	const step = e.key === "ArrowUp" ? 24 : e.key === "ArrowDown" ? -24 : 0;
 	if (step) { applyConsoleH(consoleH + step); e.preventDefault(); return; }
 	if (e.key === "Home") { applyConsoleH(CONSOLE_MIN); e.preventDefault(); return; }
-	if (e.key === "End") { applyConsoleH(consoleMax()); e.preventDefault(); }
+	if (e.key === "End") { applyConsoleH(consoleMax()); e.preventDefault(); return; }
+	if (e.key === "Enter" || e.key === " ") { toggleConsoleSheet(); e.preventDefault(); }
 };
 applyConsoleH(consoleH);
+syncConsoleSheet();
 // 000194: Esc clears the palette, then the filter query, then the console, then the panel; / and
 // Cmd-K (Ctrl-K) reach the filter bar and the palette from anywhere but a text field
 window.addEventListener("keydown", e => {
 	if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); return palOpen ? closePalette() : openPalette(); }
-	if (e.key === "/" && !typingTarget(e.target)) { e.preventDefault(); const el = document.getElementById("f-q"); if (el && el.focus) el.focus(); return; }
+	if (e.key === "/" && !typingTarget(e.target)) { e.preventDefault(); openFilters(); return; }
 	if (e.key !== "Escape") return;
 	if (palOpen) return closePalette();
+	if (document.body.classList.contains("filters-open")) return closeFilters();
 	if (filters && filters.q) return clearQuery();
 	if (!document.getElementById("console").classList.contains("hidden")) return closeConsole();
 	closePanel();

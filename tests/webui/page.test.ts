@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask, getTask, setState, STATES } from "../../src/kanban.ts";
 import { startHub } from "../../src/hub.ts";
-import { agentLabel, agentRowSig, agentStatsText, ARCHIVE_PAGE, archivePage, archiveTasks, boardOf, curve, decodeFilters, doctorCol, emptyFilters, encodeFilters, FILTER_DEBOUNCE, filterReason, filtersActive, filterTasks, fmtDur, fmtTokens, isHeld, logFixups, matchesFilters, mergeBoards, PALETTE_MAX, paletteResults, refreshMs, syncAgentStats, syncDoctorCards, syncStatsLine } from "../../src/webui.ts";
+import { agentLabel, agentRowSig, agentStatsText, ARCHIVE_PAGE, archivePage, archiveTasks, boardOf, curve, decodeFilters, doctorCol, emptyFilters, encodeFilters, FILTER_DEBOUNCE, filterReason, filtersActive, filtersCount, filterTasks, fmtDur, fmtTokens, isHeld, logFixups, matchesFilters, mergeBoards, MOBILE_MAX, PALETTE_MAX, paletteResults, refreshMs, syncAgentStats, syncDoctorCards, syncStatsLine } from "../../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the logpane module
 import { esc } from "../../src/webui/logpane.ts";
 
@@ -100,7 +100,7 @@ for (const seg of themeCss.split("}")) {
 	const parts = seg.split("{");
 	for (const one of parts[parts.length - 2].split(",")) subjects.add(one.trim().split(/\s+/).pop()!);
 }
-assert.equal(subjects.size, 15, "fifteen selectors mark an element interactive with cursor: pointer");
+assert.equal(subjects.size, 16, "sixteen selectors mark an element interactive with cursor: pointer");
 assert.deepEqual([...subjects].filter((s) => !page.includes(`${s}:focus-visible`)), [], "every interactive selector the stylesheet marks with cursor: pointer has a :focus-visible rule");
 assert.match(page.match(/[^{}]*:focus-visible[^{}]*\{[^}]*\}/)![0], /outline: 2px solid var\(--link\)/, "the focus ring is a visible outline in the link colour");
 
@@ -730,6 +730,7 @@ assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), issuer: "#
 assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), held: true })), [], "held only drops an unheld task");
 assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), live: true })), ["000263_docked.md"], "has live agent keeps the task with the live run");
 assert.ok(filterReason({ ...emptyFilters(), q: "x", phases: ["work"], held: true }).startsWith("no task matches: ") && filterReason(emptyFilters()) === "", "the empty reason names the active filters, and stays empty when nothing filters");
+assert.deepEqual([emptyFilters(), { ...emptyFilters(), q: "x", held: true }, { ...emptyFilters(), phases: ["work"], priorities: ["high"], complexities: ["complex"], issuer: "#1", live: true }].map(filtersCount), [0, 2, 5], "the phone button's badge counts one step per active filter dimension");
 assert.equal(matchesFilters(filterRows[0], { ...emptyFilters(), phases: ["review"] }), true, "the membership test the panel's outside-filter notice runs reads the same filter");
 assert.equal(matchesFilters(filterRows[1], { ...emptyFilters(), phases: ["work"] }), false, "a done task sits outside a work phase filter");
 
@@ -851,5 +852,58 @@ assert.equal(makeMotion({}, false).api.noMotion(), false, "and stays false in th
 const motionTag = page.match(/<button id="motion"[^>]*>/)![0];
 assert.match(motionTag, /aria-pressed="true"/, "the control is a real button with a pressed state");
 assert.match(motionTag, /aria-label="Motion: live/, "and an accessible name");
+
+// 25. #370 the phone layout: one breakpoint constant, media queries only, the same nodes reused as
+// sheets, and the two viewport hacks gone. The live geometry (the 44px rects, the three viewports,
+// the rotation pass) is a browser check, left to the reviewer
+assert.ok(!/user-scalable|maximum-scale/.test(page), "the viewport no longer blocks zoom: no user-scalable and no maximum-scale flag");
+assert.ok(page.includes('<meta name="viewport" content="width=device-width, initial-scale=1">'), "the viewport is the plain device-width form");
+assert.ok(!/font-size: 85%/.test(themeCss) && !/html \{[^}]*font-size/.test(themeCss), "the 85% base font hack is gone, so the type scale holds a 16px base");
+assert.ok(!/navigator\.userAgent|maxTouchPoints|ontouchstart/.test(page), "the phone layer sniffs no user agent: media queries only");
+const themeSrc = readFileSync(new URL("../../src/webui/theme.ts", import.meta.url), "utf8");
+assert.equal((themeSrc.match(/export const MOBILE_MAX = \d+;/g) ?? []).length, 1, "the phone breakpoint is one exported constant");
+const phoneQueries = (themeCss.match(/@media \(max-width: 700px\)/g) ?? []).length;
+assert.ok(phoneQueries >= 4, "the phone layer is more than one rule");
+assert.equal(phoneQueries, (themeSrc.match(/@media \(max-width: \$\{MOBILE_MAX\}px\)/g) ?? []).length, "every phone media query interpolates that one constant, never a hand-written width");
+assert.deepEqual([...new Set([...themeCss.matchAll(/@media \(max-width: (\d+)px\)/g)].map((m) => m[1]))].sort(), ["1099", String(MOBILE_MAX)].sort(), "the sheet carries the tablet floor and one phone breakpoint, nothing else");
+assert.ok(page.includes(`const MOBILE_MAX = ${MOBILE_MAX}`), "the client reads the same constant, so the CSS switch and the JS check cannot drift");
+// the vertical spine: the stations stack in pipeline order, the hairline becomes the left connector
+assert.match(themeCss, /#board \{[^}]*flex-direction: column/, "the phone board stacks its stations instead of scrolling them sideways");
+assert.match(themeCss, /\.station \{[^}]*border-left: 1px solid var\(--hairline\)/, "the hairline becomes the vertical connector on the left edge");
+assert.match(themeCss, /\.station \.cards \{[^}]*overflow: visible/, "the phone stations spill into the one page scroll");
+assert.match(themeCss, /\.count \{[^}]*font-size: 0\.8125rem/, "the phone station count drops to the smaller type step");
+assert.match(themeCss, /\.station\.strip \.st-head \{[^}]*flex-direction: row/, "the integration off strip becomes a one-line row");
+assert.ok(page.includes("relationPaths(activeBoard().tasks, rectOf, verticalSpine())"), "the client tells relationPaths which layout it draws, so the vertical spine draws no cross-column curve");
+// the sheets reuse the same nodes: the panel, the console, the filter bar and the palette
+assert.ok(page.includes('<div id="p-handle"') && page.includes('id="p-close"'), "the panel sheet carries a drag handle and keeps its visible close button");
+assert.match(themeCss, /#panel \{[^}]*top: 0[^}]*bottom: 0/, "the phone panel is a full-screen sheet");
+assert.match(themeCss, /#console\.raised \{[^}]*70vh/, "a tap raises the console into a bottom sheet of at most 70 percent of the viewport");
+assert.match(themeCss, /body\.filters-open #filters \{[^}]*display: flex/, "the filter bar collapses behind one button that opens its sheet");
+assert.match(themeCss, /#f-toggle \{[^}]*min-height: 44px/, "the filter button clears the 44px touch floor");
+assert.match(themeCss, /#palette \{[^}]*padding: 0/, "the palette goes full screen on a phone");
+assert.ok((themeCss.match(/env\(safe-area-inset-(top|bottom)\)/g) ?? []).length >= 4, "the sheets and the console respect the safe-area insets");
+assert.ok((themeCss.match(/min-height: 44px/g) ?? []).length >= 10, "every phone control the layer restyles clears the 44px touch floor");
+assert.ok(page.includes('id="f-toggle"') && page.includes('id="f-count"') && page.includes('id="f-apply"'), "the phone filter button carries its count badge, and the sheet carries an apply control next to the clear");
+assert.ok(page.includes('aria-controls="filters"') && page.includes('id="f-apply" class="f-chip"'), "the filter button names the sheet it opens and the apply control is a chip");
+// the client side of the two sheets, run against the served source
+const sheetSrc = page.slice(page.indexOf("// #370 the phone filter button"), page.indexOf("// the palette: a dialog"));
+assert.ok(sheetSrc.includes("function toggleFilters()") && sheetSrc.includes("function closeFilters()") && sheetSrc.includes("function syncFilterToggle()"), "the client opens, closes and badges the filter sheet");
+const fBtn = { attrs: {} as Record<string, string>, setAttribute(k: string, v: string) { this.attrs[k] = v; } };
+const fBadge = { textContent: "", hidden: true };
+const fInput = { focused: false, focus() { this.focused = true; } };
+const fBody = { classes: new Set<string>(), contains(c: string) { return this.classes.has(c); }, add(c: string) { this.classes.add(c); }, remove(c: string) { this.classes.delete(c); } };
+const sheetApi = new Function("document", "filters", "filtersCount", sheetSrc + "\n; return { syncFilterToggle: syncFilterToggle, toggleFilters: toggleFilters, closeFilters: closeFilters };")(
+	{ getElementById: (id: string) => (id === "f-toggle" ? fBtn : id === "f-count" ? fBadge : id === "f-q" ? fInput : null), body: { classList: fBody } },
+	{ ...emptyFilters(), q: "x", held: true },
+	filtersCount,
+) as any;
+sheetApi.syncFilterToggle();
+assert.deepEqual([fBtn.attrs["aria-expanded"], fBadge.textContent, fBadge.hidden], ["false", "2", false], "a closed sheet reads collapsed and the badge counts the two active filters");
+sheetApi.toggleFilters();
+assert.deepEqual([fBody.contains("filters-open"), fBtn.attrs["aria-expanded"], fInput.focused], [true, "true", true], "the button opens the sheet and focuses the query field, so the on-screen keyboard has something to type into");
+sheetApi.closeFilters();
+assert.deepEqual([fBody.contains("filters-open"), fBadge.textContent], [false, "2"], "apply closes the sheet and the badge keeps its count");
+assert.ok(script.includes('c.classList.remove("raised")') && script.includes('c.classList.toggle("raised")'), "the console opens as one status line and a tap on the handle raises the sheet");
+assert.ok(script.includes("handleEl.onclick = toggleConsoleSheet"), "the console handle is the raise control, reachable by pointer and by keyboard");
 
 console.log("page.test.ts: all assertions passed");
