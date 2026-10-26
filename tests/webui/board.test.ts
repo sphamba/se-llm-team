@@ -390,13 +390,30 @@ assert.ok(page.includes(String(numLinkHtml)) && page.includes(String(curve)) && 
 assert.match(page, /#board \{[^}]*position: relative/, "#board is the overlay's containing block, so the lines scroll with the content");
 const zOf = (sel: string) => Number(page.match(new RegExp(sel + " \\{[^}]*z-index: (\\d+)"))?.[1]);
 assert.ok(zOf(".card") > zOf("#relations"), "the task cards paint above the relation overlay");
-assert.ok(page.includes('setAttribute("pointer-events", "none")') && page.includes('window.addEventListener("resize", drawRelations)'), "the overlay is created non-interactive and a resize recomputes the line endpoints");
+assert.ok(page.includes('setAttribute("pointer-events", "none")') && page.includes('window.addEventListener("resize", queueRelations)'), "the overlay is created non-interactive and a window resize queues a recompute of the line endpoints");
+// #392 the redraw triggers: one coalescing queue behind requestAnimationFrame, a capture scroll
+// listener on the board (the station bodies are rebuilt by every render) and an observer on the
+// board (the docked panel narrows it through a class toggle, which fires no resize)
+const queueSrc = page.match(/function queueRelations\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+const relationCalls = page.split("\n").filter((l) => l.includes("drawRelations(") && !l.includes("function drawRelations"));
+assert.ok(relationCalls.length === 1 && queueSrc.includes(relationCalls[0]), "one redraw entry: no handler draws directly, render and transitionend and the triggers all route through the queue");
+assert.ok(queueSrc.includes("if (relationsFrame) return") && queueSrc.includes("requestAnimationFrame("), "a burst of triggers yields one draw per frame");
+assert.ok(page.includes('board.addEventListener("scroll", queueRelations, true)'), "one capture scroll listener on the board redraws after any station body scrolls");
+assert.ok(page.includes("new ResizeObserver(queueRelations).observe(board)"), "the observer on the board redraws when the docked panel narrows it");
 assert.ok(page.includes("el.onmouseenter = () => hotRelations(file, true)") && page.includes("el.onmouseleave = () => hotRelations(file, false)"), "the card hover wires the highlight on mouseenter and reverts on mouseleave");
 assert.ok(page.includes("const mine = p.dataset.file === file || p.dataset.blocker === file;") && page.includes('p.classList.toggle("relations-hot", on && mine)'), "the hover matches paths by either endpoint's file in the dataset, no quote-unsafe selector interpolation");
 assert.ok(page.includes('" data-blocker="'), "each relation path carries the blocker's file alongside the blocked task's file");
 assert.ok(page.includes('facts.querySelectorAll(".num-link")') && page.includes("openTask(a.dataset.task)"), "the panel binds its id links to openTask through the facts block");
 assert.ok(page.includes(">blockedBy</span>"), "the panel builds a blockedBy row");
-assert.ok(page.includes("for (let p = el.parentElement; p && p !== board; p = p.parentElement)"), "the card box adds every scroll ancestor, so a scrolled station keeps the line endpoints on its cards");
+// #392 the drawn endpoint lives in board content coordinates: the board's own scroll is added back
+// and a station body's inner scroll never is, because the overlay is absolute in the board. The FLIP
+// box keeps the station scroll, which the re-render resets before the settled positions are measured
+const boardBox: any = { getBoundingClientRect: () => ({ left: 0, top: 0 }), scrollLeft: 10, scrollTop: 20 };
+const stationBox: any = { scrollLeft: 0, scrollTop: 40, parentElement: boardBox };
+const boxCard: any = { getBoundingClientRect: () => ({ left: 100, top: 300, width: 280, height: 60 }), parentElement: stationBox };
+const cardBoxOf = new Function("document", page.match(/function cardBox\([^)]*\) \{[\s\S]*?\n\}/)![0] + "; return cardBox;")({ getElementById: () => boardBox } as any) as (el: unknown, flip?: boolean) => { x: number; y: number; w: number; h: number };
+assert.deepEqual(cardBoxOf(boxCard), { x: 110, y: 320, w: 280, h: 60 }, "the drawn endpoint adds the board's own scroll and never a station body's inner scroll, so a scrolled station keeps its lines on its cards");
+assert.deepEqual(cardBoxOf(boxCard, true), { x: 110, y: 360, w: 280, h: 60 }, "the FLIP measurement still adds the station scroll, which the next render resets");
 
 // refresh identity: the 5 s poll keeps the node of every card whose markup did not change, so its
 // spinner element keeps spinning; a state change rewrites that card's markup and nothing else

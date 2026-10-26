@@ -508,14 +508,15 @@ function makeCard(file) {
 }
 // board-content relative: page scroll cancels, board scroll is added back, so a refresh after
 // scrolling measures identical positions and animates nothing; w/h feed the relation geometry.
-// #366 a card inside a scrolled station moves with that station's own scroll, so every scroll
-// ancestor up to the board adds its offset too
-function cardBox(el) {
+// #392 the overlay is absolute in the board, so a station body's inner scroll never moves a drawn
+// endpoint: the draw path adds the board scroll alone. #366 the FLIP step measures before the
+// re-render resets that inner scroll, so it alone adds every scroll ancestor up to the board
+function cardBox(el, flip) {
 	const board = document.getElementById("board");
 	const boardRect = board.getBoundingClientRect();
 	const r = el.getBoundingClientRect();
 	let dx = board.scrollLeft, dy = board.scrollTop;
-	for (let p = el.parentElement; p && p !== board; p = p.parentElement) { dx += p.scrollLeft; dy += p.scrollTop; }
+	if (flip) for (let p = el.parentElement; p && p !== board; p = p.parentElement) { dx += p.scrollLeft; dy += p.scrollTop; }
 	return { x: r.left - boardRect.left + dx, y: r.top - boardRect.top + dy, w: r.width, h: r.height };
 }
 // #373 hovering or focusing a card reveals its relations: the board gains a class, the paths raise,
@@ -562,6 +563,13 @@ function drawRelations() {
 	if (svg.__html !== html) { svg.innerHTML = html; svg.__html = html; }
 	drawStubs(paths);
 }
+// #392 one redraw entry, one draw per frame: a scroll burst, a resize and a poll in the same frame
+// coalesce into a single pass
+let relationsFrame = 0;
+function queueRelations() {
+	if (relationsFrame) return;
+	relationsFrame = requestAnimationFrame(() => { relationsFrame = 0; drawRelations(); });
+}
 // #373 an off-board blocker keeps a stub at its blocked card's right edge: two at most, then a count.
 // The element is reused across refreshes, so a poll neither flickers nor widens the board
 function drawStubs(paths) {
@@ -597,7 +605,11 @@ function render(skipFlip) {
 			e.stopPropagation();
 			toggleWaits(marker.closest(".card").dataset.file);
 		});
-		window.addEventListener("resize", drawRelations);
+		window.addEventListener("resize", queueRelations);
+		// #392 the station bodies are rebuilt by every render, so the board carries the capture-phase
+		// scroll listener; the observer covers the docked panel's class-toggle width change
+		board.addEventListener("scroll", queueRelations, true);
+		new ResizeObserver(queueRelations).observe(board);
 	}
 	const project = projects.find(t => t.id === active);
 	applyStages(stations, project?.stages ?? DEFAULT_STAGES);
@@ -606,7 +618,7 @@ function render(skipFlip) {
 	if (!skipFlip) for (const el of cardEls.values()) {
 		el.style.transition = "none";
 		el.style.transform = "";
-		old[el.dataset.file] = cardBox(el);
+		old[el.dataset.file] = cardBox(el, true);
 	}
 	// 000264: the lazily-known stats land on the rows before the board pass, so the 5 s poll's
 	// agent-less cards 6+ never wipe revealed stats; the payload's eager first-5 agents win
@@ -616,9 +628,9 @@ function render(skipFlip) {
 	polledAt = Date.now();
 	syncTicker();
 	const now = {};
-	for (const el of cardEls.values()) now[el.dataset.file] = cardBox(el);
+	for (const el of cardEls.values()) now[el.dataset.file] = cardBox(el, true);
 	const diff = flipDiff(old, now);
-	drawRelations(); // settled positions; transitionend redraws after a FLIP settles
+	queueRelations(); // settled positions; transitionend redraws after a FLIP settles
 	for (const el of cardEls.values()) {
 		const d = diff[el.dataset.file];
 		if (!d || reduced) continue;
@@ -627,7 +639,7 @@ function render(skipFlip) {
 		el.getBoundingClientRect();
 		el.style.transition = "transform .4s ease";
 		el.style.transform = "";
-		el.ontransitionend = () => { el.style.transition = ""; el.ontransitionend = null; drawRelations(); };
+		el.ontransitionend = () => { el.style.transition = ""; el.ontransitionend = null; queueRelations(); };
 	}
 	if (archiveView) renderArchive();
 }
