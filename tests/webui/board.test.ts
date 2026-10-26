@@ -113,6 +113,8 @@ class El {
 assert.deepEqual(STATIONS.flatMap((s) => [...s.states]), [...STATES], "the station table covers every state slug exactly once, in pipeline order");
 assert.deepEqual(STATIONS.map((s) => s.id), ["queue", "work", "review", "merge", "test", "integration", "done"], "the station order is the fixed process spine");
 assert.ok(STATIONS.find((s) => s.id === "queue")?.label === "Backlog" && !STATIONS.some((s) => s.label === "Queue"), "the first station reads Backlog, so no station still says Queue");
+assert.deepEqual(["work", "test", "integration"].map((id) => STATIONS.find((s) => s.id === id)?.label), ["Develop", "Live-test", "Integration-test"], "the three renamed stations read Develop, Live-test and Integration-test");
+assert.ok(!STATIONS.some((s) => ["Work", "Test", "Integration"].includes(s.label)), "no station still reads Work, Test or Integration");
 assert.deepEqual(STATIONS.map((s) => s.primary), ["backlog", "to-do", "to-review", "to-merge", "to-live-test", "to-integration-test", "done"], "each station names the state a card shows without a sub-state marker");
 const boardEl = new El("main");
 const stations: Record<string, any> = buildShell(boardEl, { createElement: (tag: string) => new El(tag) });

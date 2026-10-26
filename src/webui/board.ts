@@ -190,11 +190,11 @@ export interface Station {
 }
 export const STATIONS: readonly Station[] = [
 	{ id: "queue", label: "Backlog", states: ["backlog"], primary: "backlog", accent: "todo", empty: "nothing waiting to start" },
-	{ id: "work", label: "Work", states: ["to-do", "doing"], primary: "to-do", accent: "todo", empty: "no agent is working" },
+	{ id: "work", label: "Develop", states: ["to-do", "doing"], primary: "to-do", accent: "todo", empty: "no agent is working" },
 	{ id: "review", label: "Review", states: ["to-review", "reviewing"], primary: "to-review", accent: "review", empty: "nothing waiting for a reviewer" },
 	{ id: "merge", label: "Merge", states: ["to-merge", "merging"], primary: "to-merge", accent: "merge", empty: "nothing waiting to merge" },
-	{ id: "test", label: "Test", states: ["to-live-test", "live-testing"], primary: "to-live-test", accent: "live", empty: "nothing waiting for a live test" },
-	{ id: "integration", label: "Integration", states: ["to-integration-test", "integration-testing"], primary: "to-integration-test", accent: "integration", empty: "nothing waiting for an integration test" },
+	{ id: "test", label: "Live-test", states: ["to-live-test", "live-testing"], primary: "to-live-test", accent: "live", empty: "nothing waiting for a live test" },
+	{ id: "integration", label: "Integration-test", states: ["to-integration-test", "integration-testing"], primary: "to-integration-test", accent: "integration", empty: "nothing waiting for an integration test" },
 	{ id: "done", label: "Done", states: ["done"], primary: "done", accent: "done", empty: "nothing finished yet" },
 ];
 
