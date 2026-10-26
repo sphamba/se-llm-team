@@ -62,16 +62,21 @@ h1 { font-size: 1.0625rem; font-weight: 500; margin: 0; }
 .tab { border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px 6px 0 0; padding: 4px 12px; font-size: 0.875rem; cursor: pointer; }
 .tab:hover { background: var(--raised); }
 .tab.active { border-color: var(--link); color: var(--link); }
-/* #368 the filter bar: one wrapping row under the tabs and above the spine, every control a chip,
-   a select or a text field on the chrome; clear sits at the row's end and hides while nothing filters */
+/* #368 the filter bar: one wrapping row under the tabs and above the spine, every control a chip or a
+   text field on the chrome; clear sits at the row's end and hides while nothing filters */
 #filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: var(--sp-3) 18px; }
 #f-q { flex: 0 1 15rem; min-width: 8rem; border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 3px 8px; font-family: inherit; font-size: 0.8125rem; }
 #f-q::placeholder { color: var(--dim); }
-#filters select { border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 2px 4px; font-family: inherit; font-size: 0.75rem; }
-#f-phases { display: flex; flex-wrap: wrap; gap: 4px; }
-.f-chip { border: 1px solid var(--hairline); background: var(--panel); color: var(--dim); border-radius: 999px; padding: 3px 9px; font-family: inherit; font-size: 0.75rem; }
+.f-group { display: flex; flex-wrap: wrap; gap: 4px; }
+.f-chip { border: 1px solid var(--hairline); background: var(--panel); color: var(--dim); border-radius: 999px; padding: 3px 9px; min-height: 28px; font-family: inherit; font-size: 0.75rem; }
 .f-chip:hover { background: var(--raised); }
 .f-chip[aria-pressed="true"] { border-color: var(--link); color: var(--link); }
+/* #378 a pressed filter chip takes its own value hue, the same per-value colour the cards use (000129) */
+.f-chip.pr-low[aria-pressed="true"], .f-chip.cx-simple[aria-pressed="true"] { border-color: var(--low-fg); background: var(--low-bg); color: var(--low-fg); }
+.f-chip.pr-medium[aria-pressed="true"], .f-chip.cx-moderate[aria-pressed="true"] { border-color: var(--medium-fg); background: var(--medium-bg); color: var(--medium-fg); }
+.f-chip.pr-high[aria-pressed="true"] { border-color: var(--high-fg); background: var(--high-bg); color: var(--high-fg); }
+.f-chip.pr-critical[aria-pressed="true"], .f-chip.cx-complex[aria-pressed="true"] { border-color: var(--critical-fg); background: var(--critical-bg); color: var(--critical-fg); }
+.f-chip.cx-trivial[aria-pressed="true"] { border-color: var(--faint); background: var(--cx-trivial-bg); color: var(--text); }
 #f-clear { margin-left: auto; }
 #f-clear[hidden] { display: none; }
 /* #370 the phone filter button and its sheet's apply control: desktop keeps the visible bar */
@@ -296,7 +301,7 @@ body.panel-open #board { padding-right: calc(18px + var(--panel-w)); }
 .m-action:hover { background: var(--raised); }
 /* #364 keyboard focus: every element the stylesheet marks interactive answers Tab with the same
    visible ring, so the pointer cue is never the only cue */
-#theme:focus-visible, .tab:focus-visible, .card:focus-visible, .num-link:focus-visible, .toggle:focus-visible, .run-row:focus-visible, summary:focus-visible, #p-close:focus-visible, #c-close:focus-visible, .seg:focus-visible, .m-action:focus-visible, .f-chip:focus-visible, .arch-row:focus-visible, .pal-row:focus-visible, #f-q:focus-visible, #filters select:focus-visible, #pal-input:focus-visible, #f-toggle:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+#theme:focus-visible, .tab:focus-visible, .card:focus-visible, .num-link:focus-visible, .toggle:focus-visible, .run-row:focus-visible, summary:focus-visible, #p-close:focus-visible, #c-close:focus-visible, .seg:focus-visible, .m-action:focus-visible, .f-chip:focus-visible, .arch-row:focus-visible, .pal-row:focus-visible, #f-q:focus-visible, #pal-input:focus-visible, #f-toggle:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 .m-action:disabled { opacity: 0.6; cursor: default; }
 .m-block { color: var(--error-text); border: 1px solid var(--error); background: color-mix(in srgb, var(--error) 15%, var(--panel)); }
 .m-unblock { color: var(--accent-done-text); border: 1px solid var(--accent-done); background: color-mix(in srgb, var(--accent-done) 15%, var(--panel)); }
@@ -389,7 +394,7 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
 .count { font-size: 0.8125rem; }
 /* the touch floor: every control clears 44px and its neighbours sit at least 8px apart */
 .m-action, .seg, .run-row, .arch-row, .toggle, .card, .c-wait, #c-text summary { min-height: 44px; }
-#p-actions, #f-phases, #tabs, .c-top, .c-meta { gap: 8px; }
+#p-actions, .f-group, #tabs, .c-top, .c-meta { gap: 8px; }
 /* #373 the popover becomes a full width block under its card, never a floating panel */
 #waits-pop { min-width: 0; max-width: none; }
 }
@@ -423,7 +428,6 @@ body.panel-open #board, body.panel-open #archive { padding-right: 12px; }
 #filters { display: none; }
 body.filters-open #filters { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 7; flex-direction: column; align-items: stretch; gap: 10px; max-height: 80vh; overflow-y: auto; padding: 14px 12px calc(14px + env(safe-area-inset-bottom)); background: var(--panel); border-top: 1px solid var(--hairline); border-radius: 12px 12px 0 0; }
 #f-q { flex: 0 0 auto; min-width: 0; min-height: 44px; font-size: 1rem; }
-#filters select { min-height: 44px; font-size: 0.875rem; }
 .f-chip { min-height: 44px; padding: 0 16px; }
 #f-clear { margin-left: 0; }
 #f-apply { display: inline-flex; align-items: center; margin-left: auto; }

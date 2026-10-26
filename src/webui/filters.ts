@@ -2,7 +2,7 @@
 // palette search and the archive paging. PAGE interpolates this source as client code.
 
 import { COMPLEXITIES, PRIORITY_RANK, type Task } from "../kanban.ts";
-import { isHeld, STATIONS } from "./board.ts";
+import { isHeld } from "./board.ts";
 
 export const FILTERS_KEY = "boardFilters";
 export const FILTER_DEBOUNCE = 120;
@@ -10,11 +10,9 @@ export const PALETTE_MAX = 12;
 export const ARCHIVE_PAGE = 50;
 export const FILTER_PRIORITIES: string[] = Object.keys(PRIORITY_RANK).sort((a, b) => PRIORITY_RANK[a] - PRIORITY_RANK[b]);
 export const FILTER_COMPLEXITIES: string[] = [...COMPLEXITIES];
-export const PHASES: string[] = STATIONS.map((s) => s.id);
 
 export interface FilterState {
 	q: string;
-	phases: string[];
 	priorities: string[];
 	complexities: string[];
 	issuer: string;
@@ -23,20 +21,21 @@ export interface FilterState {
 }
 
 export function emptyFilters(): FilterState {
-	return { q: "", phases: [], priorities: [], complexities: [], issuer: "", held: false, live: false };
+	return { q: "", priorities: [], complexities: [], issuer: "", held: false, live: false };
 }
 
 // the URL's ?f= value: one compact JSON object, utf-8 safe because a query can carry any character,
 // never a name or a summary, so a link stays short
 export function encodeFilters(f: FilterState): string {
-	const bytes = new TextEncoder().encode(JSON.stringify({ q: f.q, p: f.phases, pr: f.priorities, cx: f.complexities, i: f.issuer, h: f.held, l: f.live }));
+	const bytes = new TextEncoder().encode(JSON.stringify({ q: f.q, pr: f.priorities, cx: f.complexities, i: f.issuer, h: f.held, l: f.live }));
 	let bin = "";
 	for (const b of bytes) bin += String.fromCharCode(b);
 	return btoa(bin);
 }
 
 // a hand-edited or truncated value keeps only the well-typed fields of a known enum, so a corrupt
-// link lands on a filtered board or none, never on a thrown error
+// link lands on a filtered board or none, never on a thrown error; #378 an old link's retired phase
+// key is ignored and the keys beside it still decode
 export function decodeFilters(raw: unknown): FilterState {
 	const f = emptyFilters();
 	let obj: any = null;
@@ -53,7 +52,6 @@ export function decodeFilters(raw: unknown): FilterState {
 	const pick = (v: unknown, keep: (s: string) => boolean) => (Array.isArray(v) ? v.filter((s: any) => typeof s === "string" && keep(s)) : []);
 	if (typeof obj.q === "string") f.q = obj.q;
 	if (typeof obj.i === "string") f.issuer = obj.i;
-	f.phases = pick(obj.p, (s) => PHASES.includes(s));
 	f.priorities = pick(obj.pr, (s) => FILTER_PRIORITIES.includes(s));
 	f.complexities = pick(obj.cx, (s) => FILTER_COMPLEXITIES.includes(s));
 	f.held = obj.h === true;
@@ -62,21 +60,17 @@ export function decodeFilters(raw: unknown): FilterState {
 }
 
 export function filtersActive(f: FilterState): boolean {
-	return !!(f.q || f.phases.length || f.priorities.length || f.complexities.length || f.issuer || f.held || f.live);
+	return !!(f.q || f.priorities.length || f.complexities.length || f.issuer || f.held || f.live);
 }
 
 // #370 the phone filter button's badge: one count per active dimension, the empty set at 0
 export function filtersCount(f: FilterState): number {
-	return (f.q ? 1 : 0) + f.phases.length + f.priorities.length + f.complexities.length + (f.issuer ? 1 : 0) + (f.held ? 1 : 0) + (f.live ? 1 : 0);
+	return (f.q ? 1 : 0) + f.priorities.length + f.complexities.length + (f.issuer ? 1 : 0) + (f.held ? 1 : 0) + (f.live ? 1 : 0);
 }
 
 // the membership test: the query reads the name, the summary and the number (a leading # is
 // optional), every other field is a set membership or a flag, and every set field must agree
 export function matchesFilters(t: Task, f: FilterState): boolean {
-	if (f.phases.length) {
-		const station = STATIONS.find((s) => s.states.includes(t.state));
-		if (!station || !f.phases.includes(station.id)) return false;
-	}
 	if (f.priorities.length && !f.priorities.includes(t.priority)) return false;
 	if (f.complexities.length && !f.complexities.includes(t.complexity)) return false;
 	if (f.issuer && (t.issuer || "user") !== f.issuer) return false;
@@ -97,7 +91,6 @@ export function filterTasks(tasks: Task[], f: FilterState): Task[] {
 export function filterReason(f: FilterState): string {
 	const parts: string[] = [];
 	if (f.q) parts.push('"' + f.q + '"');
-	if (f.phases.length) parts.push(f.phases.join("|"));
 	if (f.priorities.length) parts.push(f.priorities.join("|"));
 	if (f.complexities.length) parts.push(f.complexities.join("|"));
 	if (f.issuer) parts.push(f.issuer);

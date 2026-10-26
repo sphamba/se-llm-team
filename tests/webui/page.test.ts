@@ -716,12 +716,14 @@ const pollGate = new Function("document", "fetch", "detailUrl", "historyUrl", "o
 await pollGate();
 
 // 20. #368 the filter bar: the codec round-trips every field, a corrupt value decodes to no filter,
-// and the matcher reads the station, the priority, the complexity, the issuer, the hold and live
-const allFilters = { q: "café 263", phases: ["work", "done"], priorities: ["high", "low"], complexities: ["moderate"], issuer: "#263", held: true, live: true };
-assert.deepEqual(decodeFilters(encodeFilters(allFilters)), allFilters, "the filter encoding round-trips every field, a unicode query included");
+// and the matcher reads the priority, the complexity, the issuer, the hold and live
+const allFilters = { q: "café 263", priorities: ["high", "low"], complexities: ["moderate", "complex"], issuer: "user", held: true, live: true };
+assert.deepEqual(decodeFilters(encodeFilters(allFilters)), allFilters, "the filter encoding round-trips every field, a unicode query and two chips per group included");
+// #378 a link that still carries the retired phase key keeps its other keys
+assert.deepEqual(decodeFilters(btoa(JSON.stringify({ q: "x", p: ["work", "done"], pr: ["high"], i: "user" }))), { q: "x", priorities: ["high"], complexities: [], issuer: "user", held: false, live: false }, "a legacy phase key in an old link is ignored, never the whole filter");
 assert.deepEqual([decodeFilters(encodeFilters(emptyFilters())), decodeFilters(""), decodeFilters(null), decodeFilters("!!!!"), decodeFilters("e30=")].map(filtersActive), [false, false, false, false, false], "an empty, absent, unreadable or non-object filter value decodes to no filter");
 const hostile = btoa(JSON.stringify({ q: 5, p: ["work", "nope"], pr: "high", cx: ["complex", 7], i: {}, h: "yes", l: true }));
-assert.deepEqual(decodeFilters(hostile), { q: "", phases: ["work"], priorities: [], complexities: ["complex"], issuer: "", held: false, live: true }, "a value of the wrong shape keeps only the well-typed fields and never throws");
+assert.deepEqual(decodeFilters(hostile), { q: "", priorities: [], complexities: ["complex"], issuer: "", held: false, live: true }, "a value of the wrong shape keeps only the well-typed fields and never throws");
 const filterRows = [
 	{ file: "000263_docked.md", name: "feat: docked panel", summary: "the console moves", state: "reviewing", priority: "high", complexity: "moderate", issuer: "user", updated: 3, agents: [{ alive: true }] },
 	{ file: "000300_old.md", name: "fix: old thing", summary: "a repair", state: "done", priority: "low", complexity: "simple", issuer: "#263", updated: 9 },
@@ -730,15 +732,16 @@ const filesOf = (rows: any[]) => rows.map((t) => t.file);
 assert.equal(filterTasks(filterRows, emptyFilters()), filterRows, "no active filter passes the payload through untouched");
 assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), q: "#263" })), ["000263_docked.md"], "a number query matches the task number");
 assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), q: "console" })), ["000263_docked.md"], "the text query reads the summary as well as the name");
-assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), phases: ["review"] })), ["000263_docked.md"], "a phase toggle selects every state of its station");
-assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), priorities: ["low"], complexities: ["simple"] })), ["000300_old.md"], "the priority and complexity multi-selects narrow together");
+assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), priorities: ["low", "high"] })), ["000263_docked.md", "000300_old.md"], "#378 a second priority chip widens the set instead of replacing it");
+assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), priorities: ["low"], complexities: ["simple"] })), ["000300_old.md"], "the priority and complexity chip groups narrow together");
 assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), issuer: "#263" })), ["000300_old.md"], "the issuer filter matches the stored issuer");
+assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), issuer: "user" })), ["000263_docked.md"], "#378 the user chip hides the auto and task-issued work");
 assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), held: true })), [], "held only drops an unheld task");
 assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), live: true })), ["000263_docked.md"], "has live agent keeps the task with the live run");
-assert.ok(filterReason({ ...emptyFilters(), q: "x", phases: ["work"], held: true }).startsWith("no task matches: ") && filterReason(emptyFilters()) === "", "the empty reason names the active filters, and stays empty when nothing filters");
-assert.deepEqual([emptyFilters(), { ...emptyFilters(), q: "x", held: true }, { ...emptyFilters(), phases: ["work"], priorities: ["high"], complexities: ["complex"], issuer: "#1", live: true }].map(filtersCount), [0, 2, 5], "the phone button's badge counts one step per active filter dimension");
-assert.equal(matchesFilters(filterRows[0], { ...emptyFilters(), phases: ["review"] }), true, "the membership test the panel's outside-filter notice runs reads the same filter");
-assert.equal(matchesFilters(filterRows[1], { ...emptyFilters(), phases: ["work"] }), false, "a done task sits outside a work phase filter");
+assert.ok(filterReason({ ...emptyFilters(), q: "x", held: true }).startsWith("no task matches: ") && filterReason(emptyFilters()) === "", "the empty reason names the active filters, and stays empty when nothing filters");
+assert.deepEqual([emptyFilters(), { ...emptyFilters(), q: "x", held: true }, { ...emptyFilters(), priorities: ["high", "low"], complexities: ["complex"], issuer: "user", live: true }].map(filtersCount), [0, 2, 5], "the phone button's badge counts one step per active filter dimension");
+assert.equal(matchesFilters(filterRows[0], { ...emptyFilters(), priorities: ["high"], complexities: ["moderate"] }), true, "the membership test the panel's outside-filter notice runs reads the same filter");
+assert.equal(matchesFilters(filterRows[1], { ...emptyFilters(), issuer: "user" }), false, "a task-issued task sits outside the user chip");
 
 // 21. #368 the command palette: a subsequence match over the name and the number, the 12-result cap
 // with the +N more count, and an empty query naming the newest tasks
@@ -769,9 +772,30 @@ assert.deepEqual(filesOf(archiveTasks(filterRows, emptyFilters())), ["000300_old
 
 // 23. the served chrome: one filter bar above the spine, the labelled palette dialog over the panel,
 // the archive section, the debounce and the Done overflow that opens the archive
-for (const id of ["filters", "f-q", "f-phases", "f-prio", "f-cx", "f-issuer", "f-held", "f-live", "f-clear", "palette", "pal-input", "pal-list", "pal-empty", "pal-more", "archive", "arch-count", "arch-list", "arch-empty", "arch-page", "arch-more", "arch-newer", "arch-back", "p-outside"])
+for (const id of ["filters", "f-q", "f-prio", "f-cx", "f-user", "f-held", "f-live", "f-clear", "palette", "pal-input", "pal-list", "pal-empty", "pal-more", "archive", "arch-count", "arch-list", "arch-empty", "arch-page", "arch-more", "arch-newer", "arch-back", "p-outside"])
 	assert.ok(page.includes(`id="${id}"`), `the page serves #${id}`);
+// #378 the two chip groups replace the native multi-selects and the phase chips, and one user chip
+// replaces the 61-option issuer select
+assert.ok(!page.includes("<select") && !page.includes('id="f-issuer"'), "#378 no select remains in the bar, so neither a multiple select nor the issuer select does");
+assert.ok(!page.includes('id="f-phases"') && !page.includes("togglePhase"), "#378 the seven phase chips are gone from the markup and the client");
+assert.ok(page.includes('id="f-prio" class="f-group" role="group" aria-label="Priority"') && page.includes('id="f-cx" class="f-group" role="group" aria-label="Complexity"'), "#378 priority and complexity are labelled chip groups");
+assert.ok(page.includes('id="f-user" class="f-chip" aria-pressed="false">user<'), "#378 one user chip replaces the issuer select");
+assert.ok(page.indexOf('id="f-q"') < page.indexOf('id="f-prio"') && page.indexOf('id="f-prio"') < page.indexOf('id="f-cx"') && page.indexOf('id="f-cx"') < page.indexOf('id="f-user"') && page.indexOf('id="f-user"') < page.indexOf('id="f-held"'), "#378 the bar reads search, priority, complexity, user, held left to right");
+assert.match(themeCss, /\.f-chip \{[^}]*min-height: 28px/, "#378 a desktop chip clears the 28px pointer floor, and the phone block raises it to 44px");
+for (const hue of ["pr-critical", "pr-high", "pr-medium", "pr-low", "cx-trivial", "cx-simple", "cx-moderate", "cx-complex"])
+	assert.ok(themeCss.includes(`.f-chip.${hue}[aria-pressed="true"]`), `#378 a pressed ${hue} chip takes its own value hue`);
+// one click applies: the second chip joins the set and a second click drops it, against the served source
+const chipSource = page.match(/function toggleChip\(field, value\) \{[\s\S]*?\n\}/);
+assert.ok(chipSource, "#378 the client ships the chip toggle");
+const chipFilters = { ...emptyFilters(), priorities: ["high"] };
+let chipApplied = 0;
+const toggleChip = new Function("filters", "applyFilters", chipSource![0] + "; return toggleChip;")(chipFilters, () => chipApplied++) as (field: string, value: string) => void;
+toggleChip("priorities", "critical");
+assert.deepEqual([chipFilters.priorities, chipApplied], [["high", "critical"], 1], "#378 a second priority chip adds to the set and applies on that click");
+toggleChip("priorities", "high");
+assert.deepEqual([chipFilters.priorities, chipApplied], [["critical"], 2], "#378 clicking an active chip removes it from the set");
 assert.ok(page.indexOf('id="filters"') > page.indexOf('id="tabs"') && page.indexOf('id="filters"') < page.indexOf('id="board"'), "the filter bar is one row above the spine");
+assert.ok(page.includes('data-value="') && page.includes('String(chosen.includes(b.dataset.value))'), "#378 a chip carries its value and reads its pressed state from the filter");
 assert.ok(page.indexOf('id="archive"') > page.indexOf('id="board"') && page.indexOf('id="archive"') < page.indexOf('id="panel"'), "the archive replaces the spine, above the panel in the body");
 assert.ok(page.includes('id="palette" class="hidden" role="dialog" aria-modal="true" aria-label="Find a task"'), "the palette is a labelled modal dialog");
 assert.ok(page.includes("input.focus()") && page.includes('id="pal-input" type="text" role="combobox"'), "the palette autofocuses a combobox input");

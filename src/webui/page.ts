@@ -3,7 +3,7 @@ import { readConfigFiles, type StageFlags } from "../orchestrator/config.ts";
 export type { StageFlags };
 import { esc, inline, logFixups, md } from "./logpane.ts";
 import { agentLabel, agentStatsText, applyCardStats, applyStages, blockerTasks, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, isHeld, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, relationPaths, sortStation, spinnerHtml, stationFor, statsKey, STATIONS, syncBoard, syncCardStats, taskStats, waitsOnText } from "./board.ts";
-import { ARCHIVE_PAGE, archivePage, archiveTasks, decodeFilters, emptyFilters, encodeFilters, FILTER_COMPLEXITIES, FILTER_DEBOUNCE, FILTER_PRIORITIES, FILTERS_KEY, filterReason, filterTasks, filtersActive, filtersCount, matchesFilters, PALETTE_MAX, paletteResults, PHASES } from "./filters.ts";
+import { ARCHIVE_PAGE, archivePage, archiveTasks, decodeFilters, emptyFilters, encodeFilters, FILTER_COMPLEXITIES, FILTER_DEBOUNCE, FILTER_PRIORITIES, FILTERS_KEY, filterReason, filterTasks, filtersActive, filtersCount, matchesFilters, PALETTE_MAX, paletteResults } from "./filters.ts";
 import { CSS, MOBILE_MAX } from "./theme.ts";
 
 // the served page: PAGE interpolates the tested renderers and helpers as client source; the
@@ -89,10 +89,9 @@ ${CSS}</style>
 <button id="f-toggle" aria-expanded="false" aria-controls="filters" onclick="toggleFilters()">Filters<span id="f-count" hidden></span></button>
 <div id="filters" aria-label="Filter tasks">
 <input id="f-q" type="text" placeholder="filter: text or #num  (/)" aria-label="Filter by text or number" autocomplete="off">
-<div id="f-phases" role="group" aria-label="Station"></div>
-<select id="f-prio" multiple size="1" aria-label="Priority"></select>
-<select id="f-cx" multiple size="1" aria-label="Complexity"></select>
-<select id="f-issuer" aria-label="Issuer"></select>
+<div id="f-prio" class="f-group" role="group" aria-label="Priority"></div>
+<div id="f-cx" class="f-group" role="group" aria-label="Complexity"></div>
+<button id="f-user" class="f-chip" aria-pressed="false">user</button>
 <button id="f-held" class="f-chip" aria-pressed="false">held</button>
 <button id="f-live" class="f-chip" aria-pressed="false">live</button>
 <button id="f-clear" class="f-chip" hidden>clear</button>
@@ -209,7 +208,6 @@ const FILTERS_KEY = ${JSON.stringify(FILTERS_KEY)};
 const FILTER_DEBOUNCE = ${FILTER_DEBOUNCE};
 const PALETTE_MAX = ${PALETTE_MAX};
 const ARCHIVE_PAGE = ${ARCHIVE_PAGE};
-const PHASES = ${JSON.stringify(PHASES)};
 const FILTER_PRIORITIES = ${JSON.stringify(FILTER_PRIORITIES)};
 const FILTER_COMPLEXITIES = ${JSON.stringify(FILTER_COMPLEXITIES)};
 ${emptyFilters}
@@ -252,45 +250,40 @@ function writeOutside(t) {
 	if (writeGated(el, outside ? '<span>outside the active filter</span><button class="m-action" onclick="clearFilters()">show it</button>' : "")) el.classList.toggle("hidden", !outside);
 }
 function renderFilterBar() {
-	const ph = document.getElementById("f-phases");
-	if (ph) {
-		if (ph.children.length !== STATIONS.length) {
-			ph.innerHTML = STATIONS.map(s => '<button class="f-chip" data-phase="' + s.id + '" aria-pressed="false">' + esc(s.label) + "</button>").join("");
-			for (const b of ph.children) b.onclick = () => togglePhase(b.dataset.phase);
-		}
-		for (const b of ph.children) b.setAttribute("aria-pressed", String(filters.phases.includes(b.dataset.phase)));
-	}
 	const q = document.getElementById("f-q");
 	if (q && document.activeElement !== q && q.value !== filters.q) q.value = filters.q;
-	fillSelect("f-prio", FILTER_PRIORITIES, filters.priorities);
-	fillSelect("f-cx", FILTER_COMPLEXITIES, filters.complexities);
-	fillIssuers(activeBoard().tasks);
-	const held = document.getElementById("f-held"), liveEl = document.getElementById("f-live");
+	renderChips("f-prio", "priorities");
+	renderChips("f-cx", "complexities");
+	const user = document.getElementById("f-user"), held = document.getElementById("f-held"), liveEl = document.getElementById("f-live");
+	if (user) user.setAttribute("aria-pressed", String(filters.issuer === "user"));
 	if (held) held.setAttribute("aria-pressed", String(filters.held));
 	if (liveEl) liveEl.setAttribute("aria-pressed", String(filters.live));
 	const clear = document.getElementById("f-clear");
 	if (clear) clear.hidden = !filtersActive(filters);
 	syncFilterToggle();
 }
-function fillSelect(id, values, chosen) {
+// #378 the two chip groups: a chip is a real button over a set, its own value hue marks the pressed
+// state, and one click applies
+const CHIP_HUE = { priorities: "pr-", complexities: "cx-" };
+function renderChips(id, field) {
 	const el = document.getElementById(id);
 	if (!el) return;
-	if (el.children.length !== values.length) el.innerHTML = values.map(v => '<option value="' + v + '">' + v + "</option>").join("");
-	for (const o of el.children) o.selected = chosen.includes(o.value);
+	const values = field === "priorities" ? FILTER_PRIORITIES : FILTER_COMPLEXITIES;
+	const chosen = filters[field];
+	if (el.children.length !== values.length) {
+		el.innerHTML = values.map(v => '<button class="f-chip ' + CHIP_HUE[field] + v + '" data-value="' + v + '" aria-pressed="false">' + v + "</button>").join("");
+		for (const b of el.children) b.onclick = () => toggleChip(field, b.dataset.value);
+	}
+	for (const b of el.children) b.setAttribute("aria-pressed", String(chosen.includes(b.dataset.value)));
 }
-function fillIssuers(tasks) {
-	const el = document.getElementById("f-issuer");
-	if (!el) return;
-	const seen = [];
-	for (const t of tasks) { const v = t.issuer || "user"; if (!seen.includes(v)) seen.push(v); }
-	if (filters.issuer && !seen.includes(filters.issuer)) seen.push(filters.issuer);
-	seen.sort((a, b) => (a[0] === "#") === (b[0] === "#") ? (a[0] === "#" ? parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10) : a.localeCompare(b)) : a[0] === "#" ? 1 : -1);
-	const html = '<option value="">any issuer</option>' + seen.map(v => '<option value="' + esc(v) + '">' + esc(v) + "</option>").join("");
-	if (writeGated(el, html)) el.value = filters.issuer;
+function toggleChip(field, value) {
+	const list = filters[field];
+	const i = list.indexOf(value);
+	if (i < 0) list.push(value); else list.splice(i, 1);
+	applyFilters();
 }
-function togglePhase(id) {
-	const i = filters.phases.indexOf(id);
-	if (i < 0) filters.phases.push(id); else filters.phases.splice(i, 1);
+function toggleIssuer() {
+	filters.issuer = filters.issuer === "user" ? "" : "user";
 	applyFilters();
 }
 // #370 the phone filter button: the bar collapses behind one button, the badge counts the active
@@ -410,9 +403,7 @@ function renderArchive() {
 const bind = (id, ev, fn) => { const el = document.getElementById(id); if (el) el[ev] = fn; };
 const typingTarget = el => !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable === true);
 bind("f-q", "oninput", e => { clearTimeout(fqTimer); fqTimer = setTimeout(() => { filters.q = e.target.value.trim(); applyFilters(); }, FILTER_DEBOUNCE); });
-bind("f-prio", "onchange", e => { filters.priorities = [...e.target.selectedOptions].map(o => o.value); applyFilters(); });
-bind("f-cx", "onchange", e => { filters.complexities = [...e.target.selectedOptions].map(o => o.value); applyFilters(); });
-bind("f-issuer", "onchange", e => { filters.issuer = e.target.value; applyFilters(); });
+bind("f-user", "onclick", toggleIssuer);
 bind("f-held", "onclick", () => { filters.held = !filters.held; applyFilters(); });
 bind("f-live", "onclick", () => { filters.live = !filters.live; applyFilters(); });
 bind("f-clear", "onclick", () => clearFilters());
