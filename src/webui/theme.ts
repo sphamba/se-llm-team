@@ -33,7 +33,7 @@ export const CSS = `* { box-sizing: border-box; }
 /* 000353: one accent per pipeline stage and agent role, plus the failed-run red; the -text step is the darker Ayu Light ladder step that keeps a label readable on the light panel */
 --accent-backlog: #828e9f; --accent-backlog-text: #74757a; --accent-todo: #eba400; --accent-todo-text: #a16a00; --accent-review: #fa8532; --accent-review-text: #ad6410; --accent-merge: #a37acc; --accent-merge-text: #8b64b6; --accent-live: #22a4e6; --accent-live-text: #1a7bb7; --accent-integration: #4cbf99; --accent-integration-text: #3b8264; --accent-done: #86b300; --accent-done-text: #647f00; --error: #e65050; --error-text: #cd474f;
 /* 000191: motion knobs, one place to retune the entrances, the chunk fade and the pulse loop; 000194: --exit runs the closes, --shine is the whiter band mix; #369: one motion token set, every duration and easing in the sheet reads one of these */
---t-fast: 120ms; --t-base: 180ms; --t-slow: 240ms; --t-breathe: 2s; --t-sweep: 6s; --ease-enter: cubic-bezier(.2, .8, .2, 1); --ease-exit: cubic-bezier(.4, 0, .8, 1); --ease-breathe: ease-in-out; --shine: 45%;
+--t-fast: 120ms; --t-base: 180ms; --t-slow: 240ms; --t-breathe: 2s; --t-sweep: 6s; --t-slot: 800ms; --t-wave: 5.6s; --ease-enter: cubic-bezier(.2, .8, .2, 1); --ease-exit: cubic-bezier(.4, 0, .8, 1); --ease-breathe: ease-in-out; --shine: 45%;
 /* #377 one spacing scale: the chrome, the station heads and the cards read one of these six steps */
 --sp-1: 4px; --sp-2: 6px; --sp-3: 8px; --sp-4: 12px; --sp-5: 16px; --sp-6: 24px; }
 ${DARK_VARS}
@@ -138,7 +138,7 @@ stays readable; the active card and its rimmed blockers keep full strength */
 #relations path.relations-hot { stroke-opacity: .8; }
 @keyframes dashflow { to { stroke-dashoffset: -10; } }
 /* #366 one station per phase: the head keeps the tick, the label and the count while the body scrolls; --ac comes from the station class at the end of this sheet */
-.station { grid-row: 2; display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; min-height: 0; }
+.station { --i: 0; grid-row: 2; display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; min-height: 0; }
 .station + .station { border-left: 1px solid var(--hairline); }
 .st-head { display: flex; align-items: baseline; gap: 8px; padding: var(--sp-2) var(--sp-4) var(--sp-3); position: relative; flex: 0 0 auto; background: var(--canvas); z-index: 2; }
 .st-head h2 { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: 0.8125rem; font-weight: 500; text-transform: uppercase; letter-spacing: .05em; margin: 0; color: var(--dim); display: flex; align-items: center; gap: 6px; }
@@ -404,9 +404,12 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
 .station.strip .st-head h2 { writing-mode: horizontal-tb; }
 .station .cards { flex: 0 0 auto; min-height: auto; overflow: visible; }
 .card { flex: 0 0 auto; }
-.st-head { align-items: baseline; padding: 10px 12px 6px; }
+.st-head { align-items: baseline; padding: 10px 12px 6px; border-top: 1px solid var(--hairline); }
 .st-head h2 { font-size: 0.875rem; }
 .st-head::before { left: 1px; top: 16px; width: 7px; height: 1px; }
+/* #403 the phone head rules its column off and carries the desktop sweep as a glow on that rule; the
+   motion layer starts it at the station's own slot, so the wave walks down the stack */
+.st-head::after { content: ""; position: absolute; left: 0; top: -1px; width: 20%; height: 1px; background: linear-gradient(90deg, transparent, var(--link), transparent); }
 .empty { padding: 0 12px; }
 .count { font-size: 0.8125rem; }
 /* #387 the touch floor: a compact control keeps its desktop height and carries an invisible 44px band
@@ -467,10 +470,15 @@ dot owns. live adds the breathing dot, the sweep, the 1 px/s progress line and t
 #377 leaves one mode live and one floor, so the system ask is the only none */
 @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(500%); } }
+/* #403 the head glow: one cycle covers every station, one slot per station, and the boundaries are 1/7
+   of the cycle, so a station added later updates these percentages with the station count */
+@keyframes headWave { 0% { transform: translateX(-100%); opacity: 0; } 1% { opacity: 1; } 13% { opacity: 1; } 14.2857% { transform: translateX(500%); opacity: 0; } 100% { transform: translateX(500%); opacity: 0; } }
 [data-motion="live"] .spin { animation: breathe var(--t-breathe) var(--ease-breathe) infinite; }
 [data-motion="live"] #relations path { animation: dashflow var(--t-breathe) linear infinite; animation-direction: reverse; }
 [data-motion="live"] .spine::after { animation: sweep var(--t-sweep) linear infinite; }
 html.motion-paused .spine::after { animation-play-state: paused; }
+[data-motion="live"] .st-head::after { animation: headWave var(--t-wave) linear infinite; animation-delay: calc(var(--i, 0) * var(--t-slot) * -1); }
+html.motion-paused .st-head::after { animation-play-state: paused; }
 [data-motion="live"] .card.running { --p: 0; }
 [data-motion="live"] .card.running::after { content: ""; position: absolute; left: 0; bottom: 0; width: 100%; height: 1px; background: var(--ac, var(--link)); transform: scaleX(var(--p)); transform-origin: left center; }
 /* #369 the floor: none disables every animation and transition, the inlined FLIP travel included,

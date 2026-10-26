@@ -358,9 +358,11 @@ export function buildShell(parent, doc) {
 	spine.className = "spine";
 	parent.appendChild(spine);
 	const stations = {};
-	for (const s of STATIONS) {
+	for (const [index, s] of STATIONS.entries()) {
 		const el = doc.createElement("section");
 		el.className = "station s-" + s.id;
+		// #403 the station's own slot, so the phone head glow reaches it one column at a time
+		el.style.setProperty("--i", String(index));
 		// #364: the phase hook, so a reader or a test finds a station by data-station, not by class
 		el.dataset.station = s.id;
 		const head = doc.createElement("div");

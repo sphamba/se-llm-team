@@ -46,6 +46,11 @@ assert.ok(page.includes(String(flipDiff)), "the page ships the tested flipDiff s
 assert.ok(page.includes('transition = "transform .4s ease"'), "sibling shifts reuse the moved-card timing");
 
 // El is a minimal element stub: buildShell and syncBoard only touch this DOM surface.
+const styleStub = () => {
+	const style: Record<string, any> = {};
+	style.setProperty = (k: string, v: string) => { style[k] = v; };
+	return style;
+};
 class El {
 	tag: string;
 	className = "";
@@ -53,7 +58,7 @@ class El {
 	textContent = "";
 	dataset: Record<string, string> = {};
 	attrs: Record<string, string> = {};
-	style: Record<string, string> = {};
+	style: Record<string, any> = styleStub();
 	children: El[] = [];
 	parent: El | null = null;
 	get parentElement(): El | null { return this.parent; }
@@ -122,6 +127,8 @@ const stationEls = boardEl.children.filter((c: El) => c.className.split(" ").inc
 assert.deepEqual(stationEls.map((c: El) => c.dataset.station), STATIONS.map((s) => s.id), "the shell builds one station per phase, in order");
 assert.equal(boardEl.children.filter((c: El) => c.className === "spine").length, 1, "the shell adds one hairline element across all the station heads");
 assert.ok(STATIONS.every((s) => stations[s.id]?.el.dataset.station === s.id), "every station carries its phase as a data hook, not only as a class");
+// #403 the phone head glow reads --i, so the build stamps each station with its place in the table
+assert.deepEqual(STATIONS.map((s) => stations[s.id].el.style["--i"]), STATIONS.map((_, i) => String(i)), "every station carries its index in STATIONS order, so the glow walks the stack one column at a time");
 assert.ok(STATIONS.every((s) => stations[s.id].count.textContent === "0" && stations[s.id].empty.textContent === s.empty), "every station starts at a visible zero count and names its own job when empty");
 assert.ok(page.includes(JSON.stringify(STATIONS)), "the page ships the tested station table");
 assert.ok(page.includes(String(buildShell)) && page.includes(String(syncBoard)) && page.includes(String(cardBaseHtml)) && page.includes(String(syncCardStats)) && page.includes(String(sortStation)) && page.includes(String(taskStats)), "the page runs the tested shell, card, station-order and in-place live source");
@@ -134,7 +141,9 @@ assert.ok(!/@media \(max-width: 1099px\)/.test(themeCss), "no hand-picked breakp
 // #374 the body base scales the type with the viewport and stops at 1rem
 assert.match(themeCss, /body \{[^}]*font-size: clamp\(0\.875rem, 0\.35vw \+ 0\.55rem, 1rem\)/, "the body base clamps 14px to 16px, so a wide screen reads one step larger");
 assert.match(themeCss, /\.spine \{[^}]*grid-column: 1 \/ -1/, "the hairline spans every station as one grid item");
-assert.ok(!/\.st-head[^{]*\{[^}]*border-top/.test(themeCss), "the hairline is not a per-station top border");
+// #403 the phone block gives each head its own rule, so this guard reads the desktop part of the sheet
+const desktopCss = themeCss.slice(0, themeCss.indexOf(`@media (max-width: ${MOBILE_MAX}px)`));
+assert.ok(!/\.st-head[^{]*\{[^}]*border-top/.test(desktopCss), "the desktop hairline is not a per-station top border");
 assert.match(themeCss, /\.station \.cards \{[^}]*overflow-y: auto/, "vertical spill scrolls inside each station");
 assert.match(themeCss, /\.c-top \{[^}]*flex-wrap: wrap/, "the top row wraps the live cell instead of clipping it at 150px");
 assert.match(themeCss, /\.c-meta \{[^}]*flex-wrap: wrap/, "the meta row wraps instead of clipping the labels at 150px");
