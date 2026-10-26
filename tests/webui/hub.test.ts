@@ -157,10 +157,20 @@ assert.equal(hub.pid, process.pid, "/api/hub reports the serving process");
 assert.equal(hub.root, realpathSync(join(HERE, "..", "..")), "/api/hub names the code checkout hub.ts runs from");
 assert.equal(hub.commit, execFileSync("git", ["rev-parse", "HEAD"], { cwd: join(HERE, "..", "..") }).toString().trim(), "/api/hub reports the checkout's HEAD commit");
 for (const st of STATE_NAMES) assert.ok(page.includes(st), `page mentions state ${st}`);
+// 000383: the page follows the source, so a merged ui change lands on the next reload, no restart
+const themeFile = join(HERE, "..", "..", "src", "webui", "theme.ts");
+const themeSrc = readFileSync(themeFile, "utf8");
+const cssEnd = themeSrc.lastIndexOf("`;");
+try {
+	writeFileSync(themeFile, `${themeSrc.slice(0, cssEnd)}.live-marker { color: #123456; }\n${themeSrc.slice(cssEnd)}`);
+	assert.ok((await (await fetch(`${base}/`)).text()).includes(".live-marker"), "a stylesheet change serves on the next page load with no daemon restart");
+} finally {
+	writeFileSync(themeFile, themeSrc);
+}
+assert.ok(!(await (await fetch(`${base}/`)).text()).includes(".live-marker"), "a restored source is served back on the next load");
 assert.equal((await fetch(`${base}/nope`)).status, 404);
 assert.equal((await fetch(`${base}/api/tasks`, { method: "POST" })).status, 404);
-// 000192: the hub serves the statically imported webui module, so a page load writes no
-// temp copies under src/
+// 000192: a page load renders in a child process and writes no temp copies under src/
 assert.ok(!readdirSync(join(HERE, "..", "..", "src")).some((d) => d.startsWith(".webui-hot-")), "a page load writes no webui copy dirs under src/");
 
 

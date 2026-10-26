@@ -406,7 +406,7 @@ async function route(
 	} else if (req.method === "GET" && path === "/") {
 		// no-cache: a browser reload re-fetches the page instead of serving a stale one
 		res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache", connection: "close" });
-		res.end(webui.PAGE);
+		res.end(await webui.servedPage());
 	} else if (req.method === "GET" && path.startsWith("/fonts/")) {
 		const bytes = fontBytes(path.slice("/fonts/".length));
 		if (!bytes) {
