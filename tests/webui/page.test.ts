@@ -964,7 +964,7 @@ assert.equal(spacingRule(".empty").includes("padding: 0 var(--sp-4)"), true, "th
 assert.equal(spacingRule(".station .cards").includes("scrollbar-width: none"), true, "a scrolled station hides its scrollbar, so the cards stay flush on the right");
 assert.match(themeCss, /\.station \.cards::-webkit-scrollbar \{ width: 0; \}/, "webkit gets the same zero scrollbar inset");
 const phoneSheet = themeCss.slice(themeCss.indexOf(`@media (max-width: ${MOBILE_MAX}px)`));
-assert.match(phoneSheet, /\.empty \{ padding: 0; \}/, "the phone block pins the empty line back to the station's own 12px inset");
+assert.match(phoneSheet, /\.empty \{ padding: 0 12px; \}/, "the phone block gives the empty line its own 12px inset, since the station no longer carries one");
 
 // #386 the phone board: nothing inside it shrinks, so every box sizes to its content and #board stays the
 // one scroller. The live rect check (no two boxes intersect) is a browser pass, left to the reviewer
@@ -994,5 +994,17 @@ assert.ok(phoneRules.some((r) => /position: relative/.test(r.body) && bandHosts.
 assert.deepEqual(phoneRules.filter((r) => /min-height: 44px/.test(r.body) && bandHosts.some((h) => selParts(r.sel).includes(h))).map((r) => r.sel), [], "no compact control keeps the phone min-height floor, so each keeps its desktop height");
 assert.ok(!bandHosts.includes(".card"), "the card takes no band: its content already clears 44px and its ::after is the running progress line");
 assert.ok(!/\bagent-(sub|doctor)\b/.test(phoneBoard), "the phone block touches no nested run row, so the more specific connector ::after still wins over the band");
+
+// #388 the board is flush with the screen edges: the board keeps no side padding, so a card box starts
+// at 0 on the desktop and at the 1px phone rail, and the card text keeps its 12px inset. The live rects
+// and the overflow check are a browser pass, left to the reviewer
+assert.equal(spacingRule("#board").includes("padding: var(--sp-3) 0 var(--sp-5)"), true, "the desktop board drops its 18px side padding, so the first card box starts at 0");
+assert.equal(spacingRule(".toggle").includes("padding: 6px 12px"), true, "the more-toggle keeps a 12px text inset once the board padding is gone");
+assert.match(phoneRule("#board"), /padding: 8px 0 12px/, "the phone board drops its 12px side padding and keeps the 8px top and 12px bottom");
+const flushRule = (sel: string) => phoneBoard.replace(/\/\*[\s\S]*?\*\//g, "").match(new RegExp(`(?:^|\\n)${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`))?.[1] ?? "";
+assert.match(flushRule(".station"), /padding-left: 0/, "the phone station drops the 12px inset, so the card box starts at 1 and the 1px rail keeps x 0 to 1");
+assert.match(flushRule(".st-head"), /padding: 10px 12px 6px/, "the phone head carries the 12px inset itself, so the title and the count start at the card text line");
+assert.match(flushRule(".st-head::before"), /left: 1px; top: 16px; width: 11px;/, "the phone tick starts on the rail and ends 12px in, on the title inset");
+assert.match(flushRule(".empty"), /padding: 0 12px/, "the phone empty line carries the 12px inset itself");
 
 console.log("page.test.ts: all assertions passed");

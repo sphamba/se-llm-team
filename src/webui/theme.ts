@@ -117,8 +117,8 @@ body.panel-open #archive { padding-right: calc(18px + var(--panel-w)); }
 #p-outside { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; border: 1px solid var(--hairline); border-radius: 6px; padding: 4px 8px; color: var(--dim); font-size: 0.8125rem; }
 #p-outside.hidden { display: none; }
 #p-outside .m-action { margin-left: auto; }
-/* #366 the station spine: seven tracks, six even and done slightly wider. #374 the floor is derived, not a breakpoint: 9.375rem per station, so at any width too narrow for seven 150px tracks plus the separators and side padding the board alone scrolls horizontally (000247) and the page never does. The heads share one hairline grid item and each station body scrolls on its own */
-#board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(9.375rem, 1fr)) minmax(9.375rem, 1.15fr); grid-template-rows: 1px minmax(0, 1fr); gap: 0; padding: var(--sp-3) 18px var(--sp-5); overflow-x: auto; overflow-y: hidden; position: relative; }
+/* #366 the station spine: seven tracks, six even and done slightly wider. #374 the floor is derived, not a breakpoint: 9.375rem per station, so at any width too narrow for seven 150px tracks plus the separators the board alone scrolls horizontally (000247) and the page never does. #388 the board keeps no side padding, so the seven tracks fill the viewport and a card box starts at 0. The heads share one hairline grid item and each station body scrolls on its own */
+#board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(9.375rem, 1fr)) minmax(9.375rem, 1.15fr); grid-template-rows: 1px minmax(0, 1fr); gap: 0; padding: var(--sp-3) 0 var(--sp-5); overflow-x: auto; overflow-y: hidden; position: relative; }
 .spine { grid-column: 1 / -1; grid-row: 1; background: var(--hairline); position: relative; overflow: hidden; }
 /* #369 the sweep is one gradient element on the spine's own hairline, so the loop has one animation node the poll never touches */
 .spine::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 20%; background: linear-gradient(90deg, transparent, var(--link), transparent); }
@@ -243,7 +243,7 @@ names the reason where the station is wide enough */
 .chip.cx-moderate { background: var(--medium-bg); color: var(--medium-fg); }
 .chip.cx-complex { background: var(--critical-bg); color: var(--critical-fg); }
 .empty { padding: 0 var(--sp-4); font-size: 0.75rem; color: var(--dim); }
-.toggle { display: block; width: 100%; margin-top: 4px; border: 0; border-top: 1px solid var(--hairline); background: none; color: var(--link); border-radius: 0; padding: 6px 0; cursor: pointer; font-size: 0.75rem; font-family: ${MONO}; text-align: left; }
+.toggle { display: block; width: 100%; margin-top: 4px; border: 0; border-top: 1px solid var(--hairline); background: none; color: var(--link); border-radius: 0; padding: 6px 12px; cursor: pointer; font-size: 0.75rem; font-family: ${MONO}; text-align: left; }
 .toggle:hover { color: var(--text); }
 /* the panel's run rows: one row per agent run, sub run and doctor run. #353 kept one accent per
    role, and the failed-run red wins over it (two classes beat one) */
@@ -390,20 +390,20 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
 #hub { padding: 2px 12px 8px; }
 #tabs { flex-wrap: nowrap; gap: 8px; overflow-x: auto; padding: 6px 12px 0; }
 .tab { min-height: 44px; padding: 0 16px; }
-#board { display: flex; flex-direction: column; gap: 0; padding: 8px 12px 12px; overflow-x: hidden; overflow-y: auto; }
+#board { display: flex; flex-direction: column; gap: 0; padding: 8px 0 12px; overflow-x: hidden; overflow-y: auto; }
 .spine, #relations { display: none; }
 /* #386 nothing inside the phone board shrinks: the station, its cards and each card size to their content, so a card never paints over the next one and #board stays the one vertical scroller */
-.station { padding-left: 12px; border-left: 1px solid var(--hairline); flex: 0 0 auto; min-height: auto; }
+.station { padding-left: 0; border-left: 1px solid var(--hairline); flex: 0 0 auto; min-height: auto; }
 .station + .station { border-top: 0; border-left: 1px solid var(--hairline); }
 .station.strip { border-left: 1px dashed var(--hairline); }
 .station.strip .st-head { flex-direction: row; align-items: baseline; }
 .station.strip .st-head h2 { writing-mode: horizontal-tb; }
 .station .cards { flex: 0 0 auto; min-height: auto; overflow: visible; }
 .card { flex: 0 0 auto; }
-.st-head { align-items: baseline; padding: 10px 0 6px; }
+.st-head { align-items: baseline; padding: 10px 12px 6px; }
 .st-head h2 { font-size: 0.875rem; }
-.st-head::before { left: -13px; top: 16px; width: 12px; height: 1px; }
-.empty { padding: 0; }
+.st-head::before { left: 1px; top: 16px; width: 11px; height: 1px; }
+.empty { padding: 0 12px; }
 .count { font-size: 0.8125rem; }
 /* #387 the touch floor: a compact control keeps its desktop height and carries an invisible 44px band
    centred on its middle, so the look holds and the finger still lands; the band takes the tap, so two
