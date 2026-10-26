@@ -33,7 +33,7 @@ export const CSS = `* { box-sizing: border-box; }
 /* 000353: one accent per pipeline stage and agent role, plus the failed-run red; the -text step is the darker Ayu Light ladder step that keeps a label readable on the light panel */
 --accent-backlog: #828e9f; --accent-backlog-text: #74757a; --accent-todo: #eba400; --accent-todo-text: #a16a00; --accent-review: #fa8532; --accent-review-text: #ad6410; --accent-merge: #a37acc; --accent-merge-text: #8b64b6; --accent-live: #22a4e6; --accent-live-text: #1a7bb7; --accent-integration: #4cbf99; --accent-integration-text: #3b8264; --accent-done: #86b300; --accent-done-text: #647f00; --error: #e65050; --error-text: #cd474f;
 /* 000191: motion knobs, one place to retune the entrances, the chunk fade and the pulse loop; 000194: --exit runs the closes, --shine is the whiter band mix; #369: one motion token set, every duration and easing in the sheet reads one of these */
---t-fast: 120ms; --t-base: 180ms; --t-slow: 240ms; --t-breathe: 2s; --t-sweep: 6s; --t-spin: 900ms; --ease-enter: cubic-bezier(.2, .8, .2, 1); --ease-exit: cubic-bezier(.4, 0, .8, 1); --ease-breathe: ease-in-out; --shine: 45%;
+--t-fast: 120ms; --t-base: 180ms; --t-slow: 240ms; --t-breathe: 2s; --t-sweep: 6s; --ease-enter: cubic-bezier(.2, .8, .2, 1); --ease-exit: cubic-bezier(.4, 0, .8, 1); --ease-breathe: ease-in-out; --shine: 45%;
 /* #377 one spacing scale: the chrome, the station heads and the cards read one of these six steps */
 --sp-1: 4px; --sp-2: 6px; --sp-3: 8px; --sp-4: 12px; --sp-5: 16px; --sp-6: 24px; }
 ${DARK_VARS}
@@ -166,7 +166,7 @@ stays readable; the active card and its rimmed blockers keep full strength */
 creation and the page drops it on animationend, so a poll or a reorder never replays it */
 .card.enter { animation: cardIn var(--t-slow) var(--ease-enter); }
 @keyframes cardIn { from { opacity: 0; transform: translateY(3px); } }
-/* the top row: spinner, number, the held marker, the priority ruler, then the live cell pushed right;
+/* the top row: the liveness mark, number, the held marker, the priority ruler, then the live cell pushed right;
    it wraps so a narrow station never clips the live cell */
 .c-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.75rem; }
 .held { border: 1px dashed var(--dim); color: var(--dim); padding: 0 4px; font-size: 0.6875rem; font-family: ${MONO}; }
@@ -223,8 +223,9 @@ names the reason where the station is wide enough */
 .num { font-size: 0.75rem; font-family: ${MONO}; font-variant-numeric: tabular-nums; color: var(--dim); margin-right: 4px; }
 .num-link { color: var(--link); cursor: pointer; }
 .num-link:hover { text-decoration: underline; }
-.spin { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border: 2px solid var(--hairline); border-top-color: var(--text); border-radius: 50%; vertical-align: 0px; }
-@keyframes spin { to { transform: rotate(360deg); } }
+/* #389 the liveness glyph is a square, not a spinner ring: it keeps the breathe pulse and fills from the station accent's -text step, with --ac and then the link colour as the fallback the panel's loading line reads */
+.spin { display: inline-block; width: 7px; height: 7px; border: 0; border-radius: 0; background: var(--ac-t, var(--ac, var(--link))); margin-right: 6px; vertical-align: 1px; }
+.st-head h2 .spin { margin-right: 0; }
 .chip { font-size: 0.75rem; padding: 1px 7px; border-radius: 999px; background: var(--hairline); color: var(--text); }
 .chip.issuer { background: var(--code-bg); color: var(--dim); }
 .chip.cx { background: var(--code-bg); color: var(--dim); }
@@ -380,7 +381,7 @@ so no historical line ever shines; because the color: transparent sits inside th
 an un-animated block can never strand invisible text, and the old reduced-motion restores are gone */
 /* one accent per stage, in pipeline order; the waiting and working states of a stage share it */
 /* #366 each station points --ac at its stage token, generated from the station table so the mapping lives in one place */
-${STATIONS.map((s) => `.s-${s.id} { --ac: var(--accent-${s.accent}); }`).join("\n")}
+${STATIONS.map((s) => `.s-${s.id} { --ac: var(--accent-${s.accent}); --ac-t: var(--accent-${s.accent}-text); }`).join("\n")}
 /* #370 the phone layout, one breakpoint for every surface and media queries only: the spine stacks
    vertically in pipeline order and the hairline becomes the connector on the left edge. The root
    keeps the 16px base, so the type scale needs no mobile override except the station count */
@@ -459,7 +460,7 @@ block above decides how fast, and every ambient rule is opt-in, so a document wi
 paints no ambience and a poll that rewrites a card's content never restarts a loop the spine or the
 dot owns. live adds the breathing dot, the sweep, the 1 px/s progress line and the newest-line shine;
 #377 leaves one mode live and one floor, so the system ask is the only none */
-@keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.6); } }
+@keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .55; transform: scale(.85); } }
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(500%); } }
 [data-motion="live"] .spin { animation: breathe var(--t-breathe) var(--ease-breathe) infinite; }
 [data-motion="live"] #relations path { animation: dashflow var(--t-breathe) linear infinite; animation-direction: reverse; }

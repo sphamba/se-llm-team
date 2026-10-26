@@ -143,8 +143,8 @@ assert.match(themeCss, /\.card:focus-visible[^{]*\{[^}]*outline: 2px solid var\(
 
 // accents: the stylesheet points each station class at a stage accent token the theme declares
 const declared = new Set([...page.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
-assert.ok(STATIONS.every((s) => page.includes(`.s-${s.id} { --ac: var(--accent-${s.accent}); }`)), "each station points --ac at its own accent token");
-assert.ok(STATIONS.every((s) => declared.has(`--accent-${s.accent}`)), "each station accent names a token the theme declares");
+assert.ok(STATIONS.every((s) => page.includes(`.s-${s.id} { --ac: var(--accent-${s.accent}); --ac-t: var(--accent-${s.accent}-text); }`)), "each station points --ac at its own accent token and --ac-t at that accent's -text step");
+assert.ok(STATIONS.every((s) => declared.has(`--accent-${s.accent}`) && declared.has(`--accent-${s.accent}-text`)), "each station accent names a token the theme declares, and so does its -text step");
 
 // stage flags: only the integration station switches off, and it leaves a strip
 const off = (id: string) => stations[id].el.className.split(" ").includes("strip");

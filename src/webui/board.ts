@@ -123,7 +123,7 @@ export function syncStatsLine(card, tokens, duration, doc) {
 }
 
 // 000142: an unchanged agent row updates its cards' stats lines in place, so the live run's
-// spinner animation survives the poll; a structure change (a run added or gone, live -> dead)
+// pulse survives the poll; a structure change (a run added or gone, live -> dead)
 // returns false and the caller rebuilds, re-seeding the signature. The run row's cards sit in
 // .agent-col wrappers, the run card first (the doctor cards slot below the sub boxes). doc is
 // injected so tests run this without a DOM.
@@ -162,7 +162,7 @@ export function doctorCol(row, handle) {
 }
 
 // 000230 the doctor keep pass: an unchanged set whose cards still sit in their slots moves only
-// the stats lines in place, so the live doctor's spinner survives the poll; a structure change (a
+// the stats lines in place, so the live doctor's mark survives the poll; a structure change (a
 // doctor added or gone, a slot change, a run-row rebuild that detached the slotted cards, live ->
 // dead via the sig) returns false and renderDoctor rebuilds. residual is the #m-doctor fallback
 // row for the cards whose run column is gone. doc is injected so tests run this without a DOM
@@ -241,9 +241,9 @@ export function sortStation(tasks: Task[], { byRecency = false }: { byRecency?: 
 	return tasks.sort((a, b) => (isHeld(b) ? 1 : 0) - (isHeld(a) ? 1 : 0) || (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) || b.updated - a.updated);
 }
 
-// the spinner marks a task the orchestrator is working on; a task that changes station changes this
-// markup, so its animation starts or stops with the state, and prefers-reduced-motion turns the CSS
-// animation off underneath. PAGE interpolates this source, so the state list stays inside the
+// the liveness mark (#389 a pulsing square) marks a task the orchestrator is working on; a task that
+// changes station changes this markup, so its pulse starts or stops with the state, and
+// prefers-reduced-motion turns the CSS animation off underneath. PAGE interpolates this source, so the state list stays inside the
 // function: a module-scope constant would be undefined in the client
 export function spinnerHtml(st: string) {
 	return ["doing", "reviewing", "live-testing", "merging", "integration-testing"].includes(st) ? '<span class="spin"></span>' : "";
@@ -259,7 +259,7 @@ export function priorityRuler(priority: string) {
 }
 
 // one card's markup; the live values (elapsed, tokens) stay out of it, so a poll never rewrites the
-// card and its spinner keeps its animation (000191); syncCardStats fills the live cell and the run
+// card and its mark keeps its pulse (000191); syncCardStats fills the live cell and the run
 // row in place. Every optional row drops when empty: the number, ruler and live cell on top, the
 // name, the summary as the context line, the run row, then the meta row with the sub-state marker
 // (a non-primary state only), the priority, complexity and issuer labels and the waits-on marker
@@ -531,7 +531,7 @@ export function makeStatsQueue(key, fetchStats, applyStats, setTimer = setTimeou
 
 // one refresh pass: place every task's card in its station and update the counts, the glow and the
 // fold toggle. A card is rewritten only when its markup changed, so an unchanged card keeps its DOM
-// node and with it its running spinner animation and in-flight FLIP transform; the live values
+// node and with it its running pulse and in-flight FLIP transform; the live values
 // update in place (syncCardStats), and orders are fixed by moving nodes, so a card entering a
 // station never rebuilds the cards already in it. A genuinely new card gains the "enter" class for
 // the page's one-shot entrance animation. The caller measures card positions before and after this

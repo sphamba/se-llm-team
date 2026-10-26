@@ -894,6 +894,28 @@ assert.equal(makeMotion(false).api.noMotion(), false, "the default state animate
 assert.equal(makeMotion(true).rootEl.dataset.motion, "none", "the system reduced-motion ask forces the none state");
 assert.equal(makeMotion(true).api.noMotion(), true, "the one helper the JS gates read answers for the system ask");
 
+// #389 the liveness mark is a square on the station accent's -text step, not a spinner ring: the pulse
+// stays, the dead rotate keyframes and its token go
+const spinRule = ruleBodies.find((r) => r.sel === ".spin")!;
+assert.match(spinRule.body, /width: 7px; height: 7px/, "the liveness mark is a 7px square, not a 9px ring");
+assert.match(spinRule.body, /border: 0;/, "the mark paints no ring frame");
+assert.match(spinRule.body, /border-radius: 0;/, "the mark has square corners");
+assert.match(spinRule.body, /background: var\(--ac-t, var\(--ac, var\(--link\)\)\)/, "the mark fills from the station accent's -text step, falling back to the link colour in the panel");
+assert.match(motionCss, /\.s-work \{ --ac: var\(--accent-todo\); --ac-t: var\(--accent-todo-text\); \}/, "each station points --ac-t at its accent's contrast-safe step");
+assert.match(motionCss, /\.st-head h2 \.spin \{ margin-right: 0; \}/, "the head's flex gap owns the space, so the dot drops its own right margin");
+assert.match(motionCss, /@keyframes breathe \{ 0%, 100% \{ opacity: 1; transform: scale\(1\); \} 50% \{ opacity: \.55; transform: scale\(\.85\); \} \}/, "the pulse keeps a square legible at both ends");
+assert.ok(!/@keyframes spin /.test(motionCss) && !declared.has("--t-spin"), "the dead rotate keyframes and its token are gone");
+const lumOf = (hex: string) => {
+	const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+	return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+};
+const themeTok = (block: string, name: string) => block.match(new RegExp(name + ": (#[0-9a-f]{6})"))![1];
+const contrastOnCanvas = (block: string) => {
+	const [hi, lo] = [lumOf(themeTok(block, "--accent-todo-text")), lumOf(themeTok(block, "--canvas"))].sort((x, y) => y - x);
+	return (hi + 0.05) / (lo + 0.05);
+};
+assert.ok(contrastOnCanvas(tokenBlocks[0]) >= 3 && contrastOnCanvas(tokenBlocks[1]) >= 3, "the doing square clears the 3:1 floor that a mark carrying state needs, in both themes");
+
 // 25. #370 the phone layout: one breakpoint constant, media queries only, the same nodes reused as
 // sheets, and the two viewport hacks gone. The live geometry (the 44px rects, the three viewports,
 // the rotation pass) is a browser check, left to the reviewer
