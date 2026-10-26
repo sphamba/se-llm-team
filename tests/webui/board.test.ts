@@ -308,8 +308,8 @@ assert.deepEqual(relationPaths([
 	{ file: "000004_d.md", state: "to-do", blockedBy: "" },
 ], rectOf, true), [], "#370 the vertical spine stacks every card in one column, so a cross-station curve has no span: the phone layout draws no relation line");
 
-// the served client script's hotRelations lights only the paths that leave the hovered file: a hover
-// on a blocker raises nothing, and an unrelated file raises nothing
+// the served client script's hotRelations lights the paths that touch the file at either end: a hover
+// on a blocker raises the same line, and an unrelated file raises nothing
 const hotPath: any = { dataset: { file: "000002_b.md", blocker: "000004_d.md" }, hot: new Set<string>() };
 hotPath.classList = { toggle: (cls: string, on: boolean) => (on ? hotPath.hot.add(cls) : hotPath.hot.delete(cls)) };
 // #373 the reveal: the board gains a class, the blockers are rimmed, every other card dims, and
@@ -338,8 +338,10 @@ assert.ok(!hotBoard.cls.has("reveal") && !hotCards[1].cls.has("rim"), "leaving t
 hotFn("000009_x.md", true);
 assert.ok(!hotPath.hot.has("relations-hot"), "mouseleave reverts the highlight and an unrelated file raises nothing");
 hotFn("000004_d.md", true);
-assert.ok(!hotPath.hot.has("relations-hot"), "hovering the blocker card lights no line, because the line belongs to the blocked card");
-assert.ok(!hotCards[0].cls.has("rim"), "hovering a blocker rims its own blockers, not the cards it blocks");
+assert.ok(hotPath.hot.has("relations-hot"), "hovering the blocker card lights the same line, because a reveal runs in both directions");
+assert.ok(hotCards[0].cls.has("rim"), "the card that waits on the hovered blocker takes the rim, so line and ring read as one connection");
+assert.ok(hotCards[0].cls.has("hot"), "a line whose blocker is the hovered file keeps its blocked card lit, so no bright line starts on a dimmed card");
+assert.ok(!hotCards[2].cls.has("hot") && !hotCards[2].cls.has("rim"), "an unrelated card is lit by nothing in the reverse direction too");
 
 // #373 the stylesheet reads by selector and property: the marker is a button with a hit floor that
 // never wraps and sits right aligned, the lines exist only during a reveal, the dim keeps the marker
@@ -485,7 +487,7 @@ for (const fn of ["openTask", "showPanel", "hidePanel"]) {
 	const src = page.match(new RegExp(`function ${fn}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`))?.[0] ?? "";
 	assert.ok(src.includes("clearReveal()"), `${fn} clears the reveal, so no stuck state survives the open or the close`);
 }
-assert.ok(page.includes("const mine = p.dataset.file === file;") && page.includes('p.classList.toggle("relations-hot", on && mine)'), "the hover matches only the paths that leave the hovered file, no quote-unsafe selector interpolation");
+assert.ok(page.includes("const mine = p.dataset.file === file || p.dataset.blocker === file;") && page.includes('p.classList.toggle("relations-hot", on && mine)'), "the hover matches a path that touches the hovered file at either end, so the lines to its blockers and the lines from the cards that wait on it both light, with no quote-unsafe selector interpolation");
 assert.ok(page.includes('" data-blocker="'), "each relation path carries the blocker's file alongside the blocked task's file");
 assert.ok(page.includes('facts.querySelectorAll(".num-link")') && page.includes("openTask(a.dataset.task)"), "the panel binds its id links to openTask through the facts block");
 assert.ok(page.includes(">blockedBy</span>"), "the panel builds a blockedBy row");

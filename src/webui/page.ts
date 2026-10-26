@@ -528,16 +528,18 @@ function cardBox(el, flip) {
 	return { x: r.left - boardRect.left + dx, y: r.top - boardRect.top + dy, w: r.width, h: r.height };
 }
 // #373 hovering or focusing a card reveals its relations: the board gains a class, the paths that
-// leave the hovered card raise, the rendered blockers are rimmed and every other card dims. The paths
-// carry both endpoint files as data, so the match needs no selector interpolation
+// touch the hovered card raise in both directions, the far end of each line stays lit and takes the
+// rim, and every other card dims. The paths carry both endpoint files as data, so the match needs no
+// selector interpolation
 function hotRelations(file, on) {
 	const board = document.getElementById("board");
 	if (board) board.classList.toggle("reveal", on);
 	const lit = new Set([file]);
 	for (const p of document.querySelectorAll("#relations path")) {
-		const mine = p.dataset.file === file;
+		const mine = p.dataset.file === file || p.dataset.blocker === file;
 		p.classList.toggle("relations-hot", on && mine);
-		if (on && p.dataset.file === file) lit.add(p.dataset.blocker);
+		if (!on || !mine) continue;
+		lit.add(p.dataset.file === file ? p.dataset.blocker : p.dataset.file);
 	}
 	for (const el of document.querySelectorAll("#board .card")) {
 		el.classList.toggle("hot", on && lit.has(el.dataset.file));
