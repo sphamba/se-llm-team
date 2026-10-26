@@ -614,15 +614,17 @@ assert.match(page, /\.run-row\.agent-sub, \.run-row\.agent-doctor \{[^}]*padding
 assert.ok(page.includes(".run-group-live { --guide: var(--link); }"), "a live run's guide takes the run-level accent");
 
 // 16. the actions row: a done or unheld merging task offers no hold button, a held task offers
-// Unblock, every other state Block, both copy buttons carry their text, and a failed toggle
-// re-enables the button
+// Unblock, every other state Block, no copy button remains, and a failed toggle re-enables the
+// button
 const actionsOf = new Function("esc", "numOf", "isHeld", page.match(/function actionsHtml\(t\) \{[\s\S]*?\n\}/)![0] + "; return actionsHtml;")(esc, (f: string) => parseInt(f.slice(0, 6), 10), isHeld) as (t: any) => string;
 const file = "000263_task.md";
 assert.ok(actionsOf({ state: "doing", file }).includes('"m-action m-block"') && actionsOf({ state: "doing", file }).includes("<rect"), "an unheld task offers Block with the stop icon");
 assert.ok(actionsOf({ state: "doing", file, blockedBy: "user" }).includes('"m-action m-unblock"') && actionsOf({ state: "doing", file, blockedBy: "user" }).includes("<path"), "a held task offers Unblock with the play icon");
 assert.ok(!actionsOf({ state: "done", file, blockedBy: "user" }).includes("toggleHold") && !actionsOf({ state: "merging", file, blockedBy: "" }).includes("toggleHold"), "a done task offers no hold button, and neither does the merging task before a user hold");
-assert.ok(actionsOf({ state: "doing", file, worktree: ".worktrees/x" }).includes('data-copy=".worktrees/x"'), "the copy button carries the worktree when the task has one");
-assert.ok(actionsOf({ state: "doing", file }).includes('data-copy="000263_task.md"') && actionsOf({ state: "doing", file }).includes('data-copy="263"'), "with no worktree the copy button carries the file path, and the number always copies");
+assert.equal(actionsOf({ state: "done", file }), "", "a done task returns the empty string, so the :empty row collapses");
+assert.equal(actionsOf({ state: "merging", file }), "", "a merging task before a user hold returns the empty string");
+assert.ok(!actionsOf({ state: "doing", file, worktree: ".worktrees/x" }).includes("data-copy"), "a doing task offers no copy button");
+assert.ok(!page.includes("copyText") && !page.includes("data-copy"), "the page has no copy helper and no copy button");
 assert.ok(page.includes("writeGated(actions, actionsHtml(t))"), "the panel redraws the actions from the task through the html gate");
 assert.ok(page.includes('"/api/task-block?num=" + numOf(panelFile) + projectParam()') && page.includes("body: JSON.stringify({ action })"), "the toggle posts the open task number and the action as JSON");
 assert.ok(page.includes("btn.disabled = false"), "a failed toggle re-enables the button");

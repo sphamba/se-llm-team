@@ -780,15 +780,13 @@ function factsHtml(t) {
 		blockedRow(t) +
 		"<div><span class='k'>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>";
 }
-// the actions: block or unblock the user hold, copy the number, copy the worktree or the file path.
-// The hold toggle stays outside the rebuilt facts block, so a detail refresh never rebuilds it
+// the actions: block or unblock the user hold. The hold toggle stays outside the rebuilt facts
+// block, so a detail refresh never rebuilds it
 function actionsHtml(t) {
-	const copy = '<button class="m-action" data-copy="' + esc(String(numOf(t.file))) + '">Copy number</button>' +
-		(t.worktree ? '<button class="m-action" data-copy="' + esc(t.worktree) + '">Copy worktree</button>' : '<button class="m-action" data-copy="' + esc(t.file) + '">Copy file</button>');
-	if (t.state === "done") return copy;
-	if (isHeld(t)) return '<button class="m-action m-unblock" onclick="toggleHold(this)" title="Remove the user hold"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 1.5v9l8-4.5z" fill="currentColor"/></svg>Unblock</button>' + copy;
-	if (t.state === "merging") return copy;
-	return '<button class="m-action m-block" onclick="toggleHold(this)" title="Hold this task and stop its agent"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>Block</button>' + copy;
+	if (t.state === "done") return "";
+	if (isHeld(t)) return '<button class="m-action m-unblock" onclick="toggleHold(this)" title="Remove the user hold"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 1.5v9l8-4.5z" fill="currentColor"/></svg>Unblock</button>';
+	if (t.state === "merging") return "";
+	return '<button class="m-action m-block" onclick="toggleHold(this)" title="Hold this task and stop its agent"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>Block</button>';
 }
 // the detail poll redraws the row from the file once the hold lands; a failure keeps the button
 // usable and names the error in the header's status line
@@ -805,13 +803,6 @@ function toggleHold(btn) {
 			document.getElementById("updated").textContent = "block failed: " + ((e && e.error) || "request failed");
 			btn.disabled = false;
 		});
-}
-// copies through the clipboard api; the button's own label carries the feedback
-function copyText(btn) {
-	const label = btn.textContent;
-	const done = ok => { btn.textContent = ok ? "Copied" : "Copy failed"; setTimeout(() => { btn.textContent = label; }, 1200); };
-	if (navigator.clipboard) navigator.clipboard.writeText(btn.dataset.copy).then(() => done(true), () => done(false));
-	else done(false);
 }
 const PRIOS = ["low", "medium", "high", "critical"];
 // the optimistic priority: the control shows the chosen value at once, a non-200 reverts it, and a
@@ -929,7 +920,7 @@ function writePanel(t, withBody) {
 	if (writeGated(facts, factsHtml(t))) for (const a of facts.querySelectorAll(".num-link")) a.onclick = () => openTask(a.dataset.task);
 	writePriority(t);
 	const actions = document.getElementById("p-actions");
-	if (writeGated(actions, actionsHtml(t))) for (const b of actions.querySelectorAll("[data-copy]")) b.onclick = () => copyText(b);
+	writeGated(actions, actionsHtml(t));
 	writeRuns();
 	if (withBody !== false) writeGated(document.getElementById("p-body"), md(t.body || ""));
 	writeConsoleHead();
