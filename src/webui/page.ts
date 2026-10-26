@@ -692,7 +692,7 @@ function waitRows(t) {
 		const held = ref.toLowerCase() === "user";
 		const onBoard = !!(target && cardEls.has(target.file));
 		// a done blocker reads as satisfied first, because a done card is usually folded away as well
-		const badge = !target ? "" : held ? '<span class="wait-badge">held by user</span>' : target.state === "done" ? '<span class="wait-badge wait-done">✓</span>' : onBoard ? "" : '<span class="wait-badge">off board</span>';
+		const badge = held ? '<span class="wait-badge">held by user</span>' : !target ? "" : target.state === "done" ? '<span class="wait-badge wait-done">✓</span>' : onBoard ? "" : '<span class="wait-badge">off board</span>';
 		const cells = '<span class="wait-name">' + esc(target ? target.name : held ? "the user hold" : ref) + "</span>" +
 			(target ? '<span class="wait-state">' + esc(target.state) + '</span><span class="wait-st">' + esc(stationFor(target.state)) + "</span>" : "") + badge;
 		const num = target ? numLinkHtml(target.file) : esc(ref);

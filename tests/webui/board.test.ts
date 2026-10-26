@@ -510,6 +510,25 @@ const blockedRowOf = new Function("esc", "numLinkHtml", "taskByNum", page.match(
 assert.equal(blockedRowOf({ blockedBy: "user" }), "<div><span class='k'>blockedBy</span>user</div>", "the `user` ref prints as plain escaped text");
 assert.equal(blockedRowOf({ blockedBy: "user, #42" }), `<div><span class='k'>blockedBy</span>user, <span class="num-link" data-task="000042_x.md">#42</span></div>`, "a held ref mixes with a linked task ref");
 
+// #376 the waits-on popover row: a `user` token resolves to no task, so the held badge must come
+// before the missing-target guard, and a mixed `user, #N` card keeps the held badge and the
+// normal blocker row
+const waitRowsOf = new Function("esc", "numLinkHtml", "taskByNum", "cardEls", "stationFor", page.match(/function waitRows\(t\) \{[\s\S]*?\n\}/)![0] + "; return waitRows;") as
+	(esc: any, numLinkHtml: any, taskByNum: any, cardEls: any, stationFor: any) => (t: any) => string;
+const waitRows = waitRowsOf(
+	esc,
+	numLinkHtml,
+	(ref: string) => (ref === "#42" ? { file: "000042_x.md", name: "x", state: "to-review" } : undefined),
+	new Set(["000042_x.md"]),
+	(st: string) => st,
+);
+const userRow = waitRows({ blockedBy: "user" });
+assert.ok(userRow.includes('<span class="wait-badge">held by user</span>'), "the `user` token row carries the held by user badge");
+assert.ok(userRow.includes('<span class="wait-name">the user hold</span>'), "and the name reads the user hold");
+assert.ok(!userRow.includes("wait-state") && !userRow.includes("wait-st"), "and no state or station cell shows for the token");
+const mixedRow = waitRows({ blockedBy: "user, #42" });
+assert.ok(mixedRow.includes('<span class="wait-badge">held by user</span>') && mixedRow.includes('data-wait-open="000042_x.md"'), "a mixed card keeps the held badge and the normal blocker row");
+
 // tabs: one per registered project; a single project keeps the old ui, no tab bar
 assert.ok(tabNames([]).length === 0 && tabNames([{ name: "solo", root: "/r1", branch: "main" }]).length === 0, "an empty or single-project registry renders no tab bar");
 assert.deepEqual(
