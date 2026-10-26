@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getTask, isLinkedWorktree, kanbanDir, taskFiles, taskNum, taskSlug, updateAttrs } from "./kanban.ts";
+import { getTask, isLinkedWorktree, kanbanDir, PRIORITIES, taskFiles, taskNum, taskSlug, updateAttrs } from "./kanban.ts";
 import type { StageFlags } from "./orchestrator/config.ts";
 import { readMergerSlug } from "./orchestrator/spawn.ts";
 import { agentPidName, clearPid, killTree, pidAlive, pidEntry } from "./pid.ts";
@@ -322,6 +322,59 @@ async function taskBlock(
 	json(res, { ok: true });
 }
 
+// The task panel's priority control. Unlike task-block, the project and the task number arrive in
+// the JSON body (the acceptance curl carries no query string), and only the priority frontmatter
+// line changes: updateAttrs notes the self-write and skips an unchanged value, so a no-op request
+// leaves the file byte-identical. The body is a trust boundary: the priority must be one of the
+// four literals and num an integer, and no filesystem path is ever built from either.
+const PRIORITY_CONTENT_TYPES = new Set(["application/json", "application/x-www-form-urlencoded"]); // the latter is curl -d's default
+
+async function taskPriority(opts: HubOptions, entries: Map<string, HubEntry>, req: IncomingMessage, res: ServerResponse): Promise<void> {
+	const fail = (status: number, error: string): void => json(res, { error }, status);
+	// a client bug, not a missing endpoint: any other verb answers 405 instead of the default 404
+	if (req.method !== "POST") {
+		res.setHeader("allow", "POST");
+		return fail(405, "method not allowed, use POST");
+	}
+	// same-origin only: a present Origin must name this host, and the UI's own fetch sends none
+	const origin = req.headers.origin;
+	if (origin) {
+		let host = "";
+		try {
+			host = new URL(origin).host;
+		} catch {
+			/* malformed origin: refused below */
+		}
+		if (host !== req.headers.host) return fail(403, "cross-origin request refused");
+	}
+	// the form default is let through because `curl -d` sends it; the body must still parse as JSON
+	const contentType = String(req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
+	if (!PRIORITY_CONTENT_TYPES.has(contentType)) return fail(415, "content-type must be application/json");
+	if (Number(req.headers["content-length"] ?? 0) > BLOCK_BODY_CAP) return fail(413, "body too large");
+	const raw = await readCapped(req);
+	if (raw === null || raw.length > BLOCK_BODY_CAP) return fail(413, "body too large");
+	let body: any;
+	try {
+		body = JSON.parse(raw);
+	} catch {
+		return fail(400, "invalid JSON");
+	}
+	if (!body || typeof body !== "object" || Array.isArray(body)) return fail(400, "invalid JSON body");
+	const priority = body.priority;
+	if (typeof priority !== "string" || !(PRIORITIES as readonly string[]).includes(priority))
+		return fail(400, `priority must be one of ${PRIORITIES.join(", ")}`);
+	const num = body.num;
+	if (typeof num !== "number" || !Number.isInteger(num)) return fail(400, "num must be an integer");
+	// the project selects an already registered entry: a name or root never becomes a path here
+	const entry = resolveEntry(entries, typeof body.project === "string" && body.project ? body.project : opts.root);
+	if (!entry) return fail(400, "unknown project");
+	const file = taskFiles(entry.root).find((f) => taskNum(f) === num);
+	const task = file ? getTask(entry.root, file) : undefined;
+	if (!task) return fail(404, "unknown task");
+	updateAttrs(entry.root, task, { priority });
+	json(res, webui.taskDetail(entry.root, num));
+}
+
 // project selects by root (the tab identity); a bare name still finds its entry when unique, so
 // name-only clients keep working. With duplicate names a bare name is ambiguous and answers none
 function resolveEntry(entries: Map<string, HubEntry>, project: string): HubEntry | undefined {
@@ -416,8 +469,11 @@ async function route(
 			json(res, await webui.cardStatsPayload(entry.root, files));
 		}
 	} else if (req.method === "POST" && path === "/api/task-block") {
-		// the detail dialog's hold toggle: one task write, then the agent stop
+		// the task panel's hold toggle: one task write, then the agent stop
 		await taskBlock(opts, entries, url, req, res);
+	} else if (path === "/api/task-priority") {
+		// the task panel's priority control; every verb lands in the handler so a GET answers 405
+		await taskPriority(opts, entries, req, res);
 	} else if (req.method === "GET" && path === "/api/agent-log") {
 		const entry = resolveEntry(entries, project);
 		const payload = entry ? await webui.agentLogPayload(entry.root, url.searchParams) : null;

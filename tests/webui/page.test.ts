@@ -1,6 +1,6 @@
 // the webui page group: the served client contract (one stylesheet, one script, element ids,
-// endpoint list, state slugs, poll cadence, token integrity, focus floor) and the behaviour of the
-// helpers the page runs. Every literal CSS pin moved to a structural or behavioural equivalent
+// endpoint list, state slugs, poll cadence, token integrity, focus floor), the docked panel and the
+// bottom console, and the behaviour of the helpers the page runs. Every literal CSS pin moved to a structural or behavioural equivalent
 // (#364), so a redesign of the stylesheet does not edit this file.
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask, getTask, setState, STATES } from "../../src/kanban.ts";
 import { startHub } from "../../src/hub.ts";
-import { agentLabel, agentRowSig, agentStatsText, boardOf, curve, doctorCol, logFixups, mergeBoards, refreshMs, syncAgentStats, syncDoctorCards, syncStatsLine } from "../../src/webui.ts";
+import { agentLabel, agentRowSig, agentStatsText, boardOf, curve, doctorCol, fmtDur, fmtTokens, isHeld, logFixups, mergeBoards, refreshMs, syncAgentStats, syncDoctorCards, syncStatsLine } from "../../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the logpane module
 import { esc } from "../../src/webui/logpane.ts";
 
@@ -42,20 +42,29 @@ assert.equal((page.match(/<script>/g) ?? []).length, 1, "the page serves exactly
 const script = page.match(/<script>([\s\S]*?)<\/script>/)![1];
 assert.doesNotThrow(() => new Function(script), "the extracted client script parses");
 // the hub shell keeps the element ids the client addresses
-for (const id of ["theme", "hub", "board", "tabs", "updated"]) assert.ok(page.includes(`id="${id}"`), `the page keeps #${id}, an element the client addresses`);
+const sheetIds = ["theme", "hub", "board", "tabs", "updated", "panel", "p-title", "p-facts", "p-prio", "p-actions", "p-runs", "p-body", "p-history", "console", "c-handle", "c-head", "c-title", "c-meta", "c-log", "c-text"];
+for (const id of sheetIds) assert.ok(page.includes(`id="${id}"`), `the page keeps #${id}, an element the client addresses`);
 // every state slug reaches the page source, and the layout covers each one exactly once
 for (const st of STATES) assert.ok(page.includes(st), `the page source names the ${st} state`);
 // the client still calls every hub endpoint the board, the detail card and the tabs need
-for (const ep of ["/api/tasks", "/api/task-detail", "/api/task-history", "/api/card-stats", "/api/agent-log", "/api/hub", "/api/projects"]) assert.ok(page.includes(ep), `the client still calls ${ep}`);
+for (const ep of ["/api/tasks", "/api/task-detail", "/api/task-history", "/api/card-stats", "/api/agent-log", "/api/hub", "/api/projects", "/api/task-block", "/api/task-priority"]) assert.ok(page.includes(ep), `the client still calls ${ep}`);
 
-// 2. the detail card's structural order: the hold row sits outside the two rebuilt regions
-const atAttrs = page.indexOf('<div id="m-attrs"></div>');
-const atActions = page.indexOf('<div id="m-actions"></div>');
-const atAgent = page.indexOf('<div id="m-agent">');
-assert.ok(atAttrs >= 0 && atActions > atAttrs && atAgent > atActions, "#m-actions sits between #m-attrs and #m-agent, so a detail refresh never rebuilds the hold row");
-assert.ok(page.indexOf('id="m-doctor"') > page.indexOf('id="m-agent-btns"') && page.indexOf('id="m-doctor"') < page.indexOf('id="m-log-meta"'), "#m-doctor sits between the run columns and the log meta line inside the agent area");
-const zOf = (sel: string) => Number(page.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " \\{[^}]*z-index: (\\d+)"))?.[1]);
-assert.ok(zOf("#modal") > zOf("#relations") && zOf("#modal") > zOf(".card"), "the #modal backdrop stacks above the relation lines and the task cards");
+// 2. the panel and the console: the retired modal ids are gone, the panel is a labelled
+// complementary landmark holding its five sections in spec order, and the console is the last
+// painted surface in the body
+for (const dead of ["modal", "m-box", "m-head", "m-attrs", "m-actions", "m-body", "m-log", "m-log-meta", "m-log-text", "m-agent"])
+	assert.ok(!page.includes(`id="${dead}"`), `the retired #${dead} id is gone from the page`);
+for (const dead of ["closeModal", "openLog(", "closeLog(", "renderAgent", "renderDoctor", "fetchSubs", "drawAgentRelations"])
+	assert.ok(!page.includes(dead), `the retired ${dead} entry point is gone from the client`);
+assert.ok(page.includes('<aside id="panel" class="hidden" aria-label="Task detail">'), "the panel is a labelled complementary landmark");
+const panelOrder = ["p-head", "p-facts", "p-prio-wrap", "p-actions", "p-runs", "p-body", "p-history"].map((id) => page.indexOf(`id="${id}"`));
+assert.ok(panelOrder.every((at, i) => at > 0 && (i === 0 || at > panelOrder[i - 1])), "the panel holds the header, the priority control, the actions, the runs, the body and the history in spec order");
+assert.ok(page.indexOf('id="console"') > page.indexOf('id="panel"') && page.indexOf('id="console"') < page.indexOf("<script>"), "the console follows the panel in the body, the last painted surface");
+assert.ok(page.includes('<div id="c-handle" role="separator" tabindex="0"') && page.includes('aria-orientation="horizontal"'), "the resize handle is a focusable separator that names its orientation");
+assert.match(page, /#panel \{[^}]*top: var\(--chrome\)[^}]*bottom: var\(--console-h\)/, "the panel starts under the page chrome and stops above the console, so neither surface covers the other's close control");
+assert.match(page, /#console \{[^}]*height: var\(--console-h\)/, "the console takes its height from the one page variable");
+assert.ok(page.includes("syncPanelTop()") && page.includes('setProperty("--chrome"'), "the panel measures the page chrome on open and on resize");
+assert.ok(!/backdrop-filter|::backdrop|\.backdrop \{/.test(page) && /#panel \{[^}]*position: fixed/.test(page), "the panel is a fixed dock with no backdrop rule, so the board keeps its width");
 
 // 3. token integrity: no rule reads a name nothing declares, both themes declare the same names,
 // and every raw hex value sits in a token block. --ac and --shine-base stay rule-local: the column
@@ -79,7 +88,7 @@ for (const seg of themeCss.split("}")) {
 	const parts = seg.split("{");
 	for (const one of parts[parts.length - 2].split(",")) subjects.add(one.trim().split(/\s+/).pop()!);
 }
-assert.equal(subjects.size, 9, "nine selectors mark an element interactive with cursor: pointer");
+assert.equal(subjects.size, 11, "eleven selectors mark an element interactive with cursor: pointer");
 assert.deepEqual([...subjects].filter((s) => !page.includes(`${s}:focus-visible`)), [], "every interactive selector the stylesheet marks with cursor: pointer has a :focus-visible rule");
 assert.match(page.match(/[^{}]*:focus-visible[^{}]*\{[^}]*\}/)![0], /outline: 2px solid var\(--link\)/, "the focus ring is a visible outline in the link colour");
 
@@ -335,8 +344,6 @@ syncStatsLine(lone, 999, 1200, docStub);
 assert.equal(lone.children[1].textContent, "999 · 1s", "the span joins the card when stats arrive");
 syncStatsLine(lone, null, null, docStub);
 assert.equal(lone.children.length, 1, "the span drops when the stats vanish");
-assert.ok(page.includes(String(agentRowSig)) && page.includes(String(syncAgentStats)) && page.includes(String(syncStatsLine)), "the page runs the tested agent-row and stats helpers");
-assert.ok(page.includes(String(doctorCol)) && page.includes(String(syncDoctorCards)), "the page runs the tested doctor-slot helpers");
 // the integration tester's label comes from the shared agentLabel pass (the role capitalized,
 // 1-based when the role has several runs)
 assert.equal(agentLabel({ role: "integration-tester", run: 0 }, { "integration-tester": 1 }), "Integration-tester", "the integration-tester run card reads its role as a label");
@@ -367,12 +374,12 @@ const markOf = (children: ShineEl[], opts: { alive?: boolean; hidden?: boolean; 
 	container.children = children;
 	const pane = new ShineEl("div");
 	if (opts.hidden) pane.className = "hidden";
-	const mark = new Function("openDetail", "modalFile", "logPane", "logState", "document", page.match(/function markLiveLine\(\) \{[\s\S]*?\n\}/)![0] + "; return markLiveLine;")(
+	const mark = new Function("openDetail", "panelFile", "logPane", "logState", "document", page.match(/function markLiveLine\(\) \{[\s\S]*?\n\}/)![0] + "; return markLiveLine;")(
 		{ file: "t.md", agents: [{ handle: "h", alive: opts.alive !== false }] },
 		"t.md",
 		() => pane,
 		{ handle: opts.handle ?? "h" },
-		{ getElementById: (id: string) => (id === "m-log-text" ? container : null) },
+		{ getElementById: (id: string) => (id === "c-text" ? container : null) },
 	);
 	return () => mark();
 };
@@ -440,186 +447,138 @@ assert.ok(!reopened.classList.contains("hidden"), "a reopen during the close can
 const still = new CloseEl();
 closeOf(true)(still);
 assert.ok(still.classList.contains("hidden") && !still.classList.contains("closing"), "reduced motion hides at once with no exit");
-const closeFn = page.match(/function closeModal\(\) \{[\s\S]*?\n\}/)![0];
-assert.ok(closeFn.includes("closeLog()") && closeFn.includes("closeAnimated(modal)"), "the modal close clears the log state and runs the shared exit");
-// 000251: the loaded log text is the heavy part of the detail card, dropped at close so the tab
-// holds no transcript memory while the card is shut; the run cards stay mounted for the reopen
-assert.ok(closeFn.includes('getElementById("m-log-text")') && closeFn.includes('textContent = "";'), "the modal close discards the loaded log text");
-const closeLogFn = page.match(/function closeLog\(\) \{[\s\S]*?\n\}/)![0];
-assert.ok(closeLogFn.indexOf("clearInterval") < closeLogFn.indexOf("closeAnimated") && closeLogFn.includes("logState = null;"), "closeLog clears the poll and the state before the visual hide");
-assert.ok(page.includes('onclick="closeModal()"') && page.includes('if (e.target.id === "modal") closeModal();') && page.includes('if (e.key === "Escape") closeModal();'), "the X button, the overlay click and Esc all use the shared close path");
+// the panel and the console keep one close path each: the panel close clears the hash so back and
+// forward stay in step, and the console close clears the poll and the state before the visual hide
+const closePanelSrc = page.match(/function closePanel\(\) \{[\s\S]*?\n\}/)![0];
+assert.ok(closePanelSrc.includes('location.hash = ""') && closePanelSrc.includes("hidePanel()"), "the user close clears the hash and lets the route hide the panel");
+const hideSrc = page.match(/function hidePanel\(\) \{[\s\S]*?\n\}/)![0];
+assert.ok(hideSrc.includes("closeAnimated(p)") && hideSrc.indexOf("panelFile = null") < hideSrc.indexOf("closeAnimated(p)"), "hidePanel clears the open task before the shared exit");
+assert.ok(hideSrc.includes("cardEls.get(openerFile)") && hideSrc.includes("card.focus()"), "on close, focus returns to the card that opened the panel");
+const closeConsoleSrc = page.match(/function closeConsole\(\) \{[\s\S]*?\n\}/)![0];
+assert.ok(closeConsoleSrc.indexOf("clearInterval") < closeConsoleSrc.indexOf("closeAnimated") && closeConsoleSrc.includes("logState = null;"), "closeConsole clears the poll and the state before the visual hide");
+assert.ok(closeConsoleSrc.includes('getElementById("c-text")') && closeConsoleSrc.includes('textContent = "";'), "the console close discards the loaded log text, the heavy part of the view");
+assert.ok(page.includes('onclick="closeConsole()"') && page.includes('onclick="closePanel()"'), "the two close buttons use their own shared close paths");
+assert.ok(!hideSrc.includes("closeConsole") && !closeConsoleSrc.includes("hidePanel"), "closing the panel keeps the console open and closing the console keeps the panel open");
+assert.ok(page.includes('if (e.key !== "Escape") return;') && page.includes('if (!document.getElementById("console").classList.contains("hidden")) return closeConsole();'), "Escape closes the console first when it is open, then the panel");
 
-// 14. 000246/000274 the loading state pins the modal height and the body arrival grows it to the
-// content height; the html gate keeps an identical repeat delivery from restarting the 400 ms
-// unpin, and a mobile full-screen sheet never gets an inline height
-const setBodySrc = page.match(/function setBody\(t\) \{[\s\S]*?\n\}/)![0];
-class GrowEl {
-	className = "grow";
-	scrollHeight = 480;
-	style: Record<string, string> = { height: "120px" };
-	classList = {
-		contains: (cls: string) => this.className.split(" ").includes(cls),
-		add: (cls: string) => { if (!this.classList.contains(cls)) this.className += (this.className ? " " : "") + cls; },
-		remove: (cls: string) => { this.className = this.className.split(" ").filter((c) => c !== cls).join(" "); },
-	};
-}
-const growTimers: Array<(() => void) | null> = [];
-const growBox = new GrowEl();
-const growBody: Record<string, any> = {};
-const makeSetBody = (reduce: boolean, box: GrowEl, body: Record<string, any>) => new Function(
-	"document", "matchMedia", "setTimeout", "clearTimeout", "md",
-	setBodySrc + "; return setBody;",
-)(
-	{ getElementById: (id: string) => (id === "m-body" ? body : id === "m-box" ? box : null) },
-	() => ({ matches: reduce }),
-	(fn: () => void) => { growTimers.push(fn); return growTimers.length - 1; },
-	(id?: number) => { if (id != null) growTimers[id] = null; },
-	(b: string) => "<p>" + b + "</p>",
-);
-const setBodyFn = makeSetBody(false, growBox, growBody);
-setBodyFn({ body: "first" });
-assert.ok(growBox.style.height === "480px" && growTimers.length === 1, "a body landing while the pin is set grows to the measured content height and arms the unpin");
-setBodyFn({ body: "first" });
-assert.equal(growTimers.length, 1, "an identical poll delivery is html-gated, the unpin timer is not restarted");
-setBodyFn({ body: "second" });
-assert.equal(growTimers.length, 2, "a changed body while the pin is still set re-runs the grow");
-growTimers[1]!();
-assert.ok(growBox.style.height === "" && !growBox.classList.contains("grow"), "the unpin returns the height to auto and drops the grow class");
-setBodyFn({ body: "third" });
-assert.ok(growBox.style.height === "" && growTimers.length === 2, "a body landing after the unpin writes no height and arms no timer");
-const mobileBox = new GrowEl();
-makeSetBody(true, mobileBox, {})({ body: "mobile" });
-assert.equal(mobileBox.style.height, "120px", "the mobile full-screen sheet never gets an inline height");
-
-// 15. 000237 the detail card's relation lines: the run chain uses the board curve, and each run
-// card drops a line from its bottom edge into every sub and doctor card's left side
-const relDrop = new Function(page.match(/function dropCurve\(from, to\) \{[\s\S]*?\n\}/)![0] + "; return dropCurve;")();
-const dropPath = relDrop({ x: 0, y: 0, w: 200, h: 40 }, { x: 0, y: 44, w: 200, h: 30 });
-assert.ok(dropPath.startsWith("M 100 40 C"), "the drop leaves the run card's bottom edge at its centre");
-assert.ok(dropPath.endsWith(", 0 59"), "the drop enters the sub card's left side at its vertical middle");
-const dropSeg = dropPath.match(/C (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+)$/)!;
-assert.ok(Number(dropSeg[1]) === 100 && Number(dropSeg[2]) === 49.5 && Number(dropSeg[3]) === -90 && Number(dropSeg[4]) === 59, "the departure control heads down and the approach is uncapped, so a card at the area's left edge takes the full 90px run-in");
-assert.equal(relDrop({ x: 0, y: 0, w: 200, h: 40 }, { x: 300, y: 44, w: 200, h: 30 }), "M 100 40 C 100 49.5, 150 59, 300 59", "a card with space to its left gets the base capped at 60px, 2.5 times to 150px and rounded to 5px");
-const relDropD = (x1, x2) => {
-	const m = relDrop({ x: x1 - 100, y: 0, w: 200, h: 40 }, { x: x2, y: 44, w: 200, h: 30 }).match(/C -?[\d.]+ (-?[\d.]+), (-?[\d.]+) -?[\d.]+, -?[\d.]+ -?[\d.]+$/)!;
-	return x2 - Number(m[2]);
-};
-for (const [x1, x2, d] of [[100, 123, 20], [100, 157, 50], [100, 200, 90], [100, 300, 150], [240, 40, 150], [100, 6, 80]])
-	assert.equal(relDropD(x1, x2), d, "a " + Math.abs(x1 - x2) + "px span with " + x2 + "px of space left of the card gets a " + d + "px approach");
-// run the served draw against a stub agent area: two run columns with run 2 wrapped below run 1,
-// two subs under run 1, one doctor card in the residual #m-doctor row. The wrap must not break the
-// chain: curve spans any x/y pair, so the line still connects the wrapped pair
-class RelEl {
-	className = "";
-	dataset: Record<string, string> = {};
-	children: RelEl[] = [];
-	parentElement: RelEl | null = null;
-	scrollLeft = 0;
-	scrollTop = 0;
-	innerHTML = "";
+// 14. the priority control: four options, never a select; the write is optimistic, a poll that
+// lands mid-flight never clobbers it, a non-200 reverts and names the reason inline, and only a
+// confirming poll drops the optimistic value
+class PrioEl {
+	children: Array<{ dataset: { p: string }; pressed: string; setAttribute(k: string, v: string): void }> = [];
 	__html: string | undefined;
-	rect: { left: number; top: number; width: number; height: number };
-	constructor(rect: { left: number; top: number; width: number; height: number }) { this.rect = rect; }
-	classList = {
-		contains: (cls: string) => this.className.split(" ").includes(cls),
-		toggle: (cls: string, on: boolean) => { this.className = on ? (this.className ? this.className + " " + cls : cls) : this.className.split(" ").filter((c) => c !== cls).join(" "); },
-	};
-	querySelector(sel: string): RelEl | null { return this.children.find((c) => c.className.split(" ").includes(sel.replace(".", ""))) ?? null; }
-	querySelectorAll(sel: string): RelEl[] { return sel === ".agent-card" ? this.children.filter((c) => c.classList.contains("agent-card")) : []; }
-	getBoundingClientRect() { return { left: this.rect.left, top: this.rect.top, width: this.rect.width, height: this.rect.height }; }
+	#html = "";
+	get innerHTML() { return this.#html; }
+	set innerHTML(v: string) {
+		this.#html = v;
+		// the only markup this stub parses: one button per priority, in source order
+		this.children = [...v.matchAll(/data-p="(\w+)"/g)].map((m) => ({
+			dataset: { p: m[1] },
+			pressed: "",
+			setAttribute(_k: string, val: string) { this.pressed = val; },
+		}));
+	}
+	querySelectorAll(sel: string) { return sel === ".seg" ? this.children : []; }
 }
-const relHost = new RelEl({ left: 0, top: 0, width: 760, height: 400 });
-const relSvg = new RelEl({ left: 0, top: 0, width: 760, height: 400 });
-const relModal = new RelEl({ left: 0, top: 0, width: 800, height: 600 });
-const relRun1 = new RelEl({ left: 0, top: 0, width: 200, height: 40 });
-relRun1.dataset.handle = "t.dev.0";
-const relSubs1 = new RelEl({ left: 0, top: 0, width: 200, height: 68 });
-relSubs1.className = "agent-subs";
-const relSub1 = new RelEl({ left: 0, top: 44, width: 200, height: 30 });
-const relSub2 = new RelEl({ left: 0, top: 78, width: 200, height: 30 });
-for (const s of [relSub1, relSub2]) { s.dataset.handle = "t.dev.0"; s.className = "agent-card agent-sub"; s.parentElement = relSubs1; relSubs1.children.push(s); }
-const relCol1 = new RelEl({ left: 0, top: 0, width: 200, height: 108 });
-relCol1.children = [relRun1, relSubs1];
-relRun1.parentElement = relCol1;
-const relRun2 = new RelEl({ left: 0, top: 150, width: 200, height: 40 });
-relRun2.dataset.handle = "t.rev.1";
-const relCol2 = new RelEl({ left: 0, top: 150, width: 200, height: 40 });
-relCol2.children = [relRun2];
-relRun2.parentElement = relCol2;
-const relDoctor = new RelEl({ left: 0, top: 200, width: 200, height: 30 });
-relDoctor.dataset.handle = "t.dev.0.doctor";
-relDoctor.className = "agent-card agent-doctor agent-past";
-const relDoc = {
-	getElementById: (id: string) => ({ "m-agent": relHost, "agent-relations": relSvg, "modal": relModal } as Record<string, RelEl>)[id] ?? null,
-	querySelectorAll: (sel: string): RelEl[] => sel.includes(":not(.agent-doctor)") ? [relRun1, relRun2] : sel.includes(".agent-doctor") ? [relDoctor] : [],
-};
-let relMarks = 0;
-let relHotApply: string | null = null;
-const relDraw = new Function("document", "curve", "esc", "markActiveAgent", "dropCurve", "hotAgentRelations", "hoverHandle", page.match(/function drawAgentRelations\(\) \{[\s\S]*?\n\}/)![0] + "; return drawAgentRelations;")(relDoc, curve, esc, () => { relMarks++; }, relDrop, (h: string | null) => { relHotApply = h; }, "t.dev.0");
-relDraw();
-const drawn = relSvg.innerHTML.match(/<path [^>]*\/>/g) ?? [];
-assert.ok(relHotApply === "t.dev.0" && drawn.length >= 1, "a rewrite re-applies the hovered handle's highlight");
-assert.equal(drawn.length, 4, "two wrapped runs, two subs and one doctor draw four lines");
-assert.ok(drawn[0].includes('data-from="t.dev.0"') && drawn[0].includes('data-to="t.rev.1"'), "the chain path carries both run handles");
-const chainSeg = drawn[0].match(/d="M (-?[\d.]+) (-?[\d.]+) C (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+)"/)!;
-assert.ok(chainSeg[1] === "200" && chainSeg[2] === "20" && chainSeg[7] === "0" && chainSeg[8] === "170", "the chain leaves the first run card's right edge and enters the wrapped run card's left edge, so the wrap does not break the pair");
-assert.ok(drawn[3].includes('data-to="t.dev.0.doctor"') && drawn[3].includes('d="M 100 40 C 100 100, -90 215, 0 215"'), "a doctor card in the residual row still drops from its analysed run's card");
-relHotApply = null;
-relDraw();
-assert.ok(relMarks === 1 && relHotApply === null, "the rewrite is html-gated: an unchanged redraw neither rewrites nor re-runs markActiveAgent");
-relRun2.rect = { left: 0, top: 160, width: 200, height: 40 };
-relDraw();
-assert.ok(relSvg.innerHTML !== drawn.join("") && relMarks === 2 && relHotApply === "t.dev.0", "a layout change rewrites the lines and re-applies the selection and the hovered handle's highlight");
-const htmlHidden = relSvg.innerHTML;
-relModal.className = "hidden";
-relDraw();
-assert.equal(relSvg.innerHTML, htmlHidden, "a draw with the modal hidden bails before measuring display: none rects");
-relModal.className = "";
-// 000237 hover and selection: the hot function toggles only the paths the hovered card connects
-// to; the selected card's lines carry .relations-sel while its log is open
-const hotPath1 = new RelEl({ left: 0, top: 0, width: 0, height: 0 });
-hotPath1.dataset.from = "t.dev.0";
-hotPath1.dataset.to = "t.rev.1";
-const hotPath2 = new RelEl({ left: 0, top: 0, width: 0, height: 0 });
-hotPath2.dataset.from = "t.rev.1";
-hotPath2.dataset.to = "t.rev.1.doctor";
-const hotDoc = { querySelectorAll: (sel: string): RelEl[] => sel.includes("path") ? [hotPath1, hotPath2] : [] };
-const relHot = new Function("document", page.match(/function hotAgentRelations\(handle, on\) \{[\s\S]*?\n\}/)![0] + "; return hotAgentRelations;")(hotDoc);
-relHot("t.dev.0", true);
-assert.ok(hotPath1.classList.contains("relations-hot") && !hotPath2.classList.contains("relations-hot"), "hovering a run card raises its connected lines only");
-relHot("t.dev.0", false);
-assert.ok(!hotPath1.classList.contains("relations-hot"), "mouseleave reverts the raise");
-const selRun = new RelEl({ left: 0, top: 0, width: 0, height: 0 });
-selRun.dataset.handle = "t.dev.0";
-const selSub = new RelEl({ left: 0, top: 0, width: 0, height: 0 });
-selSub.dataset.handle = "t.dev.0";
-selSub.dataset.sub = "2";
-const selPath1 = new RelEl({ left: 0, top: 0, width: 0, height: 0 });
-selPath1.dataset.from = "t.dev.0";
-selPath1.dataset.to = "t.rev.1";
-const selPath2 = new RelEl({ left: 0, top: 0, width: 0, height: 0 });
-selPath2.dataset.from = "t.other.0";
-selPath2.dataset.to = "t.other.1";
-const selPane = new RelEl({ left: 0, top: 0, width: 0, height: 0 });
-const selDoc = { querySelectorAll: (sel: string): RelEl[] => sel.includes(".agent-card") ? [selRun, selSub] : [selPath1, selPath2] };
-const markSel = new Function("logPane", "logState", "document", page.match(/function markActiveAgent\(\) \{[\s\S]*?\n\}/)![0] + "; return markActiveAgent;")(() => selPane, { handle: "t.dev.0", sub: null }, selDoc);
-markSel();
-assert.ok(selRun.classList.contains("agent-card-active") && selPath1.className.includes("relations-sel") && !selPath2.className.includes("relations-sel"), "the open run's card is active and its connected lines highlight, unconnected ones stay dim");
-const markSubSel = new Function("logPane", "logState", "document", page.match(/function markActiveAgent\(\) \{[\s\S]*?\n\}/)![0] + "; return markActiveAgent;")(() => selPane, { handle: "t.dev.0", sub: "2" }, selDoc);
-markSubSel();
-assert.ok(selSub.classList.contains("agent-card-active") && selPath1.className.includes("relations-sel"), "a sub view selects through the parent run's handle, its run's lines stay lit");
-const markNone = new Function("logPane", "logState", "document", page.match(/function markActiveAgent\(\) \{[\s\S]*?\n\}/)![0] + "; return markActiveAgent;")(() => selPane, null, selDoc);
-markNone();
-assert.ok(!selRun.classList.contains("agent-card-active") && !selPath1.className.includes("relations-sel"), "closing the log clears the active card and the line highlight");
+const prioEl = new PrioEl();
+const prioErr = { textContent: "" };
+let prioFetch: any = null;
+const prioSrc = page.slice(page.indexOf("const PRIOS = ["), page.indexOf("// payload role to row marker class"));
+const makePrio = () => new Function("document", "fetch", "render", "activeBoard", "pollDetail", "numOf",
+	'let openDetail = null, panelFile = null; const active = "";\n' + prioSrc +
+	"\n; return { writePriority: writePriority, setPriority: setPriority, prioValue: prioValue, get want() { return prioWant; }, set open(v) { openDetail = v; }, set file(v) { panelFile = v; } };")(
+	{ getElementById: (id: string) => (id === "p-prio" ? prioEl : id === "p-prio-err" ? prioErr : null) },
+	(u: string, init: unknown) => prioFetch(u, init),
+	() => {},
+	() => ({ tasks: [] }),
+	() => Promise.resolve(),
+	(f: string) => parseInt(f.slice(0, 6), 10),
+);
+const prio = makePrio();
+const pressed = () => prioEl.children.filter((b) => b.pressed === "true").map((b) => b.dataset.p);
+prio.file = "000263_task.md";
+const t263 = { file: "000263_task.md", priority: "medium" };
+prio.open = t263;
+prio.writePriority(t263);
+assert.deepEqual(prioEl.children.map((b) => b.dataset.p), ["low", "medium", "high", "critical"], "the control is a four-option segmented control, never a select");
+assert.deepEqual(pressed(), ["medium"], "the stored priority is the only pressed option");
+let resolveWrite: (v: unknown) => void = () => {};
+prioFetch = () => new Promise((res) => { resolveWrite = res; });
+prio.setPriority("high");
+assert.deepEqual(pressed(), ["high"], "the chosen priority shows at once, before the response");
+prio.writePriority({ file: "000263_task.md", priority: "medium" });
+assert.deepEqual(pressed(), ["high"], "a poll that lands during the in-flight write never clobbers the optimistic value");
+resolveWrite({ ok: false, json: () => Promise.resolve({ error: "priority not allowed" }) });
+await new Promise((r) => setTimeout(r, 0));
+assert.deepEqual(pressed(), ["medium"], "a non-200 response reverts the control to the stored priority");
+assert.ok(prioErr.textContent.includes("priority not allowed"), "the failure reason shows inline under the control");
+prioErr.textContent = "";
+resolveWrite = () => {};
+prioFetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+prio.setPriority("high");
+await new Promise((r) => setTimeout(r, 0));
+assert.deepEqual(pressed(), ["high"], "a saved write keeps the chosen value on screen");
+prio.writePriority({ file: "000263_task.md", priority: "medium" });
+assert.deepEqual(pressed(), ["high"], "a stale poll started before the write still cannot revert it");
+prio.writePriority({ file: "000263_task.md", priority: "high" });
+assert.equal(prio.want, null, "the confirming poll drops the optimistic value");
+prio.writePriority({ file: "000263_task.md", priority: "medium" });
+assert.deepEqual(pressed(), ["medium"], "after the confirmation the control follows the file again");
 
-// 16. the detail card's hold row: a done or unheld merging task offers nothing, a held task
-// offers Unblock, every other state Block, and a failed toggle re-enables the button
-const actionsOf = new Function(page.match(/function actionsHtml\(t\) \{[\s\S]*?\n\}/)![0] + "; return actionsHtml;")() as (t: any) => string;
-assert.ok(actionsOf({ state: "doing" }).includes('"m-action m-block"') && actionsOf({ state: "doing" }).includes("<rect"), "an unheld task offers Block with the stop icon");
-assert.ok(actionsOf({ state: "doing", blockedBy: "user" }).includes('"m-action m-unblock"') && actionsOf({ state: "doing", blockedBy: "user" }).includes("<path"), "a held task offers Unblock with the play icon");
-assert.ok(actionsOf({ state: "done", blockedBy: "user" }) === "" && actionsOf({ state: "merging", blockedBy: "" }) === "", "a done task offers no hold button, and neither does the merging task before a user hold");
-assert.ok(page.includes('document.getElementById("m-actions").innerHTML = actionsHtml(t)'), "the head write redraws the hold row from the task, outside the rebuilt attrs");
-assert.ok(page.includes('"/api/task-block?num=" + parseInt(modalFile.slice(0, 6), 10) + projectParam()') && page.includes("body: JSON.stringify({ action })"), "the toggle posts the open task number and the action as JSON");
+// 15. the run rows: one row per run with its role, start, duration and tokens, a spinner on a live
+// run, a red cross on a dead one, the subagent rows stacked under their run, and the row that
+// matches the open console carrying the active marker
+const writeGatedSrc = page.match(/function writeGated\(el, html\) \{[\s\S]*?\n\}/)![0];
+const runsSrc = page.slice(page.indexOf("const ROLE_CLS = "), page.indexOf("// the history block"));
+const runsEl: Record<string, any> = { __html: undefined, innerHTML: "", querySelectorAll: () => [] };
+const runLog = { handle: "t.dev.1", sub: null as number | null };
+let subFetches: string[] = [];
+const makeRuns = () => new Function("esc", "fmtDur", "fmtTokens", "logState", "agentLabel", "document", "fetch", "encodeURIComponent", "projectParam", "openConsole",
+	writeGatedSrc + "\nlet openDetail = null, panelFile = null;\n" + runsSrc +
+	"\n; return { writeRuns: writeRuns, subCache: subCache, set open(v) { openDetail = v; }, set file(v) { panelFile = v; } };")(
+	esc, fmtDur, fmtTokens, runLog, agentLabel,
+	{ getElementById: (id: string) => (id === "p-runs" || id === "p-history" ? runsEl : null) },
+	(u: string) => { subFetches.push(u); return new Promise(() => {}); },
+	encodeURIComponent,
+	() => "",
+	() => {},
+);
+const runs = makeRuns();
+runs.file = "000263_task.md";
+runs.open = { file: "000263_task.md", agents: [{ role: "developer", handle: "t.dev.1", run: 0, alive: true, start: 1700000000000, duration: 65000, tokens: 1234 }] };
+runs.writeRuns();
+const liveRow = runsEl.innerHTML as string;
+assert.ok(liveRow.includes("agent-developer") && liveRow.includes("agent-live") && liveRow.includes('<span class="spin"></span>'), "a live run keeps its role class and its spinner");
+assert.ok(liveRow.includes('data-handle="t.dev.1"') && liveRow.includes('data-role="developer"'), "the row carries the run handle and role the console click needs");
+assert.ok(liveRow.includes(fmtTokens(1234)) && liveRow.includes(fmtDur(65000)) && liveRow.includes(new Date(1700000000000).toLocaleTimeString()), "the row shows the start, the duration and the tokens");
+assert.equal(subFetches.length, 1, "a run with no cached sub list starts exactly one fetch");
+const rowOf = new Function("esc", "fmtDur", "fmtTokens", "logState", "ROLE_CLS", "startText", page.slice(page.indexOf("function runRowHtml("), page.indexOf("// the subagent rows of one run")) + "; return runRowHtml;")(esc, fmtDur, fmtTokens, runLog, { developer: "agent-developer" }, (ms: number) => "T" + ms);
+assert.ok(rowOf({ role: "developer", handle: "d", status: "dead", tokens: 0, duration: 0 }, "", "Developer", null).includes("agent-dead"), "a dead run keeps its red marker");
+assert.ok(rowOf({ role: "developer", handle: "d", status: "dead", tokens: 0, duration: 0 }, "", "Developer", null).includes("cross"), "the dead marker is the cross");
+assert.ok(rowOf({ role: "developer", handle: "d", status: "done", tokens: 0, duration: 0 }, "", "Developer", null).includes("agent-past"), "a finished run keeps the past marker");
+runs.subCache["t.dev.1"] = [{ index: 0, tokens: 10, duration: 2000 }, { index: 1, tokens: 0, duration: 0 }];
+runs.writeRuns();
+assert.ok(runsEl.innerHTML.includes('data-sub="0"') && runsEl.innerHTML.includes('data-sub="1"'), "the subagent rows stack under their run, each with its sub index");
+assert.equal(subFetches.length, 1, "the cached sub list means no second fetch");
+assert.ok(runsEl.innerHTML.includes("Sub-developer"), "a sub row names itself under its run's role");
+runLog.handle = "t.dev.1";
+runLog.sub = 1;
+runsEl.__html = undefined;
+runs.writeRuns();
+assert.ok((runsEl.innerHTML as string).includes("agent-row-active"), "the row that matches the open console carries the active marker");
+
+// 16. the actions row: a done or unheld merging task offers no hold button, a held task offers
+// Unblock, every other state Block, both copy buttons carry their text, and a failed toggle
+// re-enables the button
+const actionsOf = new Function("esc", "numOf", "isHeld", page.match(/function actionsHtml\(t\) \{[\s\S]*?\n\}/)![0] + "; return actionsHtml;")(esc, (f: string) => parseInt(f.slice(0, 6), 10), isHeld) as (t: any) => string;
+const file = "000263_task.md";
+assert.ok(actionsOf({ state: "doing", file }).includes('"m-action m-block"') && actionsOf({ state: "doing", file }).includes("<rect"), "an unheld task offers Block with the stop icon");
+assert.ok(actionsOf({ state: "doing", file, blockedBy: "user" }).includes('"m-action m-unblock"') && actionsOf({ state: "doing", file, blockedBy: "user" }).includes("<path"), "a held task offers Unblock with the play icon");
+assert.ok(!actionsOf({ state: "done", file, blockedBy: "user" }).includes("toggleHold") && !actionsOf({ state: "merging", file, blockedBy: "" }).includes("toggleHold"), "a done task offers no hold button, and neither does the merging task before a user hold");
+assert.ok(actionsOf({ state: "doing", file, worktree: ".worktrees/x" }).includes('data-copy=".worktrees/x"'), "the copy button carries the worktree when the task has one");
+assert.ok(actionsOf({ state: "doing", file }).includes('data-copy="000263_task.md"') && actionsOf({ state: "doing", file }).includes('data-copy="263"'), "with no worktree the copy button carries the file path, and the number always copies");
+assert.ok(page.includes("writeGated(actions, actionsHtml(t))"), "the panel redraws the actions from the task through the html gate");
+assert.ok(page.includes('"/api/task-block?num=" + numOf(panelFile) + projectParam()') && page.includes("body: JSON.stringify({ action })"), "the toggle posts the open task number and the action as JSON");
 assert.ok(page.includes("btn.disabled = false"), "a failed toggle re-enables the button");
 // the issuer row: a task-issued issuer links to its card when that task is on the active board;
 // "user", the orchestrator's "auto", an absent issuer or an off-board number stays plain text
@@ -627,12 +586,110 @@ const issuerOf = new Function("esc", "numLinkHtml", "taskByNum", page.match(/fun
 assert.equal(issuerOf({ issuer: "#42" }), "[000042_x.md]", "a task-issued issuer links to its card");
 assert.equal(issuerOf({ issuer: "auto" }), "auto", "an auto issuer stays plain text, never a task link");
 
-// 17. the open path: the scroll reset runs after the un-hide (a write while display: none is
-// discarded), and the light detail is requested before the heavy history
+// 17. the open path: the panel un-hides before the detail lands, the light row paints the shell
+// while the heavy detail loads, the detail fetch precedes the history fetch, and a response that
+// lands after another open is discarded
+const openPanelSrc = page.match(/function openPanel\(t\) \{[\s\S]*?\n\}/)![0];
+assert.ok(openPanelSrc.indexOf("showPanel()") < openPanelSrc.indexOf("fetch(detailUrl(t.file))"), "the panel un-hides before the detail request, so the loading line is on screen");
+assert.ok(openPanelSrc.indexOf("fetch(detailUrl(t.file))") < openPanelSrc.indexOf("fetch(historyUrl(t.file))"), "the open path requests the light detail before the heavy history");
+assert.ok(openPanelSrc.includes("panelFile !== t.file || !visible()"), "a detail that lands after another open is discarded");
+const pollSrc = page.match(/function pollDetail\(\) \{[\s\S]*?\n\}/)![0];
+assert.ok(pollSrc.indexOf("fetch(detailUrl(file))") < pollSrc.indexOf("fetch(historyUrl(file))"), "the poll chains the detail before the history");
+assert.ok(pollSrc.includes("panelFile !== d.file"), "a poll response for another file never paints");
 const openTaskSrc = page.match(/function openTask\(file\) \{[\s\S]*?\n\}/)![0];
-assert.ok(openTaskSrc.indexOf('classList.remove("hidden")') < openTaskSrc.indexOf("scrollTop = 0"), "openTask resets the scroll after the un-hide, so every open shows the top");
-assert.ok(openTaskSrc.indexOf("fetch(detailUrl(file))") < openTaskSrc.indexOf("fetch(historyUrl(file))"), "the open path requests the detail markdown before the heavy history");
-const pollDetailSrc = page.match(/function pollDetail\(\) \{[\s\S]*?\n\}/)![0];
-assert.ok(pollDetailSrc.indexOf("fetch(detailUrl(modalFile))") < pollDetailSrc.indexOf("fetch(historyUrl(modalFile))"), "the poll path chains detail before history too");
+assert.ok(openTaskSrc.includes('location.hash = "task/" + t.num'), "a card click routes to the task number, so back closes the panel");
+
+// 18. the console height: clamped between 120px and 60vh, rounded, persisted under one key, the
+// assigned height exposed on the handle, and the page variable written only while the console shows
+class StubEl {
+	className = "";
+	attrs: Record<string, string> = {};
+	setAttribute(k: string, v: string) { this.attrs[k] = v; }
+	classList = { contains: (c: string) => this.className.split(" ").includes(c) };
+}
+const heightSrc = page.slice(page.indexOf("const CONSOLE_KEY = "), page.indexOf("try { const stored = Number(localStorage"));
+const bodyVars: Record<string, string> = {};
+const heightStore: Record<string, string> = {};
+const makeHeight = (visible: boolean) => {
+	const consoleEl = new StubEl();
+	const handleEl = new StubEl();
+	if (!visible) consoleEl.className = "hidden";
+	const api = new Function("document", "innerHeight", "localStorage", heightSrc + "\n; return { applyConsoleH: applyConsoleH, get h() { return consoleH; } };")(
+		{
+			getElementById: (id: string) => (id === "console" ? consoleEl : id === "c-handle" ? handleEl : null),
+			body: { style: { setProperty: (k: string, v: string) => { bodyVars[k] = v; } } },
+		},
+		900,
+		{ setItem: (k: string, v: string) => { heightStore[k] = v; } },
+	);
+	return { api, handleEl, consoleEl };
+};
+const shown = makeHeight(true);
+shown.api.applyConsoleH(10);
+assert.equal(shown.api.h, 120, "a drag below the floor clamps to the 120px minimum");
+shown.api.applyConsoleH(9999);
+assert.equal(shown.api.h, 540, "a drag above the ceiling clamps to 60 percent of the viewport");
+shown.api.applyConsoleH(300);
+assert.equal(bodyVars["--console-h"], "300px", "the visible console carries its height in the page variable");
+assert.equal(shown.handleEl.attrs["aria-valuenow"], "300", "the handle exposes its position to assistive technology");
+assert.equal(shown.handleEl.attrs["aria-valuemin"], "120", "the handle names the minimum");
+assert.equal(shown.handleEl.attrs["aria-valuemax"], "540", "the handle names the maximum");
+assert.equal(heightStore.consoleHeight, "300", "the height persists under one key");
+const hiddenHeight = makeHeight(false);
+hiddenHeight.api.applyConsoleH(300);
+assert.equal(bodyVars["--console-h"], "300px", "a closed console writes no height, so the panel keeps the full viewport");
+
+// 19. the routing: an empty hash closes the panel, #task/<num> opens the matching task once the
+// board has served, an unknown number writes the not-found line, and a superseded response never
+// paints into the open panel
+const routeSrc = page.slice(page.indexOf("function syncRoute() {"), page.indexOf("const visible = () =>"));
+const panelEl = { className: "hidden" as string, classList: { contains: (c: string) => panelEl.className.split(" ").includes(c) } };
+const nav = { opened: [] as any[], notFound: [] as number[], closed: 0, board: { tasks: [{ file: "000263_task.md", num: 263 }] }, served: false };
+const route = new Function("document", "location", "activeBoard", "openPanel", "writeNotFound", "hidePanel", "visible", "numOf",
+	'let routeNum = null, panelFile = null, notFoundNum = null, served = false;\n' + routeSrc +
+	"\n; return { syncRoute: syncRoute, hashNum: hashNum, set served(v) { served = v; }, set file(v) { panelFile = v; } };")(
+	{ getElementById: () => panelEl },
+	{ get hash() { return nav.hash; } },
+	() => nav.board,
+	(t: any) => nav.opened.push(t.file),
+	(n: number) => nav.notFound.push(n),
+	() => { nav.closed++; },
+	() => false,
+	(f: string) => parseInt(f.slice(0, 6), 10),
+);
+nav.hash = "#task/263";
+assert.equal(route.hashNum(), 263, "a task hash resolves to its number");
+for (const bad of ["", "#other", "#task/", "#task/x", "#task/0"]) {
+	nav.hash = bad;
+	assert.equal(route.hashNum(), null, "a hash that is not a task route resolves to null");
+}
+nav.hash = "";
+panelEl.className = ""; // an open panel: the empty hash closes it
+route.syncRoute();
+assert.equal(nav.closed, 1, "an empty hash closes the open panel");
+panelEl.className = "hidden";
+nav.hash = "#task/263";
+route.syncRoute();
+assert.deepEqual(nav.opened, ["000263_task.md"], "#task/263 opens that task");
+nav.hash = "#task/999";
+route.served = false;
+route.syncRoute();
+assert.deepEqual(nav.notFound, [], "an unknown number shows nothing before the board has served");
+route.served = true;
+route.syncRoute();
+assert.deepEqual(nav.notFound, [999], "once the board has served, an unknown number writes the not-found line");
+const pollGate = new Function("document", "fetch", "detailUrl", "historyUrl", "openDetail", "panelFile", "writePanel", "markLiveLine", "visible",
+	page.match(/function pollDetail\(\) \{[\s\S]*?\n\}/)![0] + "; return pollDetail;")(
+	{},
+	() => Promise.resolve({ ok: true, json: () => Promise.resolve({ file: "000999_other.md", body: "x" }) }),
+	(f: string) => "/d?" + f,
+	(f: string) => "/h?" + f,
+	{ file: "000263_task.md" },
+	"000263_task.md",
+	() => { throw new Error("a superseded poll response painted into the panel"); },
+	() => {},
+	() => true,
+);
+await pollGate();
 
 console.log("page.test.ts: all assertions passed");

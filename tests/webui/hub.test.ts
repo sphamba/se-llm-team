@@ -491,4 +491,89 @@ assert.equal(chunkedStatus, 413, "a chunked body over 1 KiB answers 413");
 cleanup();
 blockUi.close();
 rmSync(blockRoot, { recursive: true, force: true });
+
+// --- part: POST /api/task-priority rewrites the priority line of one task's frontmatter and
+// nothing else; project and num arrive in the JSON body, and a GET on the path is a 405 ---
+const prioRoot = mkdtempSync(join(tmpdir(), "webui-prior-"));
+const prioHome = mkdtempSync(join(tmpdir(), "webui-prior-home-"));
+const prioRealHome = process.env.HOME;
+// the file's first hub closed at ui.close(), the block part closed its own: this part serves its
+// own board, and HOME at its own temp home keeps the hub registry and lock out of the real dir
+process.env.HOME = prioHome;
+const prioUi = await startHub({ name: "priority-test", root: prioRoot, host: "localhost", port: 0 });
+assert.ok(prioUi, "the priority fixture hub starts on port 0");
+const prioBase = `http://localhost:${prioUi.port}`;
+// the client shape: POST, JSON body, no query string (the acceptance curl carries none either)
+const prioReq = (body: unknown, init: { method?: string; headers?: Record<string, string> } = {}) =>
+	fetch(`${prioBase}/api/task-priority`, {
+		method: init.method ?? "POST",
+		headers: init.headers ?? { "content-type": "application/json" },
+		body: init.method && init.method !== "POST" ? undefined : typeof body === "string" ? body : JSON.stringify(body),
+	});
+const prioText = (file: string) => readFileSync(join(prioRoot, ".kanban", file), "utf8");
+const prioTask = (name: string, priority = "medium") => createTask(prioRoot, { name, summary: "Priority smoke", specs: "n/a", priority }).file;
+
+const raised = prioTask("feat: priority raise");
+const raisedBefore = prioText(raised);
+const raisedRes = await prioReq({ num: numOf(raised), priority: "high" });
+assert.equal(raisedRes.status, 200, "a valid priority write answers 200");
+const raisedBody = await raisedRes.json();
+assert.equal(raisedBody.num, numOf(raised), "the response is the updated per-task detail payload");
+assert.equal(raisedBody.priority, "high", "the payload carries the new priority");
+assert.equal(raisedBody.file, raised, "the payload names the same task file");
+const raisedAfter = prioText(raised);
+assert.notEqual(raisedAfter, raisedBefore, "the write lands on disk");
+const beforeLines = raisedBefore.split("\n");
+const afterLines = raisedAfter.split("\n");
+assert.equal(afterLines.length, beforeLines.length, "the write changes no line count");
+const changedAt = beforeLines.map((line, i) => (line === afterLines[i] ? -1 : i)).filter((i) => i >= 0);
+assert.equal(changedAt.length, 1, `exactly one line changes, got ${JSON.stringify(changedAt.map((i) => beforeLines[i]))}`);
+assert.equal(beforeLines[changedAt[0]], 'priority: "medium"', "the changed line is the priority line");
+assert.equal(afterLines[changedAt[0]], 'priority: "high"', "and it now carries the requested priority");
+assert.equal(parseTask(prioRoot, raised).priority, "high", "a re-read agrees with the response, so the next poll cannot disagree");
+
+// a no-op write must not rewrite the file at all (updateAttrs skips an unchanged key)
+const sameFile = prioTask("feat: priority same", "low");
+const sameBefore = prioText(sameFile);
+const sameRes = await prioReq({ num: numOf(sameFile), priority: "low" });
+assert.equal(sameRes.status, 200, "a task already at the requested priority answers 200");
+assert.equal((await sameRes.json()).priority, "low", "and the payload carries the unchanged priority");
+assert.equal(prioText(sameFile), sameBefore, "the unchanged priority leaves the file byte-identical");
+
+// the project is read from the body; an unknown one is a client error, not a missing task
+const projFile = prioTask("feat: priority project");
+const projRes = await prioReq({ project: prioRoot, num: numOf(projFile), priority: "critical" });
+assert.equal(projRes.status, 200, "the body's project names the entry");
+assert.equal(parseTask(prioRoot, projFile).priority, "critical", "the root-project write lands");
+for (const [body, status, message] of [
+	[{ num: numOf(projFile), priority: "urgent" }, 400, "a priority outside the allowlist answers 400"],
+	[{ num: numOf(projFile), priority: "HIGH" }, 400, "the allowlist is case-sensitive"],
+	[{ num: numOf(projFile) }, 400, "a missing priority answers 400"],
+	[{ num: String(numOf(projFile)), priority: "high" }, 400, "a string num answers 400"],
+	[{ num: 1.5, priority: "high" }, 400, "a fractional num answers 400"],
+	[{ num: 999999, priority: "high" }, 404, "an unknown task number answers 404"],
+	[{ project: "/no/such/project", num: numOf(projFile), priority: "high" }, 400, "an unknown project answers 400"],
+] as const)
+	assert.equal((await prioReq(body)).status, status, message);
+assert.ok((await (await prioReq({ num: numOf(projFile), priority: "urgent" })).json()).error, "a rejection carries a JSON error body");
+assert.equal((await prioReq("{not json")).status, 400, "a malformed JSON body answers 400");
+// any other verb on this path is 405, never the default 404
+const prioGet = await prioReq({}, { method: "GET" });
+assert.equal(prioGet.status, 405, "a GET on the path answers 405");
+assert.ok((await prioGet.json()).error, "the 405 carries a JSON error body");
+// the acceptance command `curl -XPOST ... -d '{...}'` sends the form default content-type
+assert.equal(
+	(await prioReq({ num: numOf(projFile), priority: "low" }, { headers: { "content-type": "application/x-www-form-urlencoded" } })).status,
+	200,
+	"the bare curl content-type is accepted",
+);
+assert.equal(parseTask(prioRoot, projFile).priority, "low", "and that write lands too");
+assert.equal((await prioReq({ num: numOf(projFile), priority: "high" }, { headers: { "content-type": "text/plain" } })).status, 415, "a non-JSON content-type is refused");
+assert.equal(parseTask(prioRoot, projFile).priority, "low", "a refused request writes nothing");
+
+prioUi.close();
+process.env.HOME = prioRealHome;
+cleanup();
+rmSync(prioRoot, { recursive: true, force: true });
+rmSync(prioHome, { recursive: true, force: true });
 console.log("hub.test.ts: all assertions passed");

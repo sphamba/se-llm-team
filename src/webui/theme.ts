@@ -39,7 +39,7 @@ ${DARK_VARS}
 @font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 500; font-display: swap; src: url("/fonts/ibm-plex-mono-500.woff2") format("woff2"); }
 /* the type scale, 16px base: 2rem count, 1.0625rem title, 0.9375rem task name, 0.875rem body, 0.8125rem station label and log, 0.75rem meta; nothing falls below 0.75rem */
 html, body { height: 100%; }
-body { display: flex; flex-direction: column; margin: 0; background: var(--canvas); color: var(--text); font-family: ${SANS}; font-size: 0.875rem; }
+body { --panel-w: clamp(28rem, 32vw, 35rem); --console-h: 0px; --chrome: 0px; display: flex; flex-direction: column; margin: 0; background: var(--canvas); color: var(--text); font-family: ${SANS}; font-size: 0.875rem; }
 /* 000147: buttons inherit the page font instead of the UA Arial default */
 button { font-family: inherit; }
 header { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 6px; }
@@ -50,7 +50,7 @@ h1 { font-size: 1.0625rem; font-weight: 500; margin: 0; }
 /* 000165: the serving hub's identity, hidden until the first /api/hub answer fills it */
 #hub { padding: 2px 18px 8px; font-size: 0.75rem; color: var(--dim); }
 #hub:empty { display: none; }
-/* 000091: a relative #tabs at z-index 1 keeps the bar above the overlay and clickable while a modal is open; 000119: #modal must sit above #tabs and #relations (both z-index 1) or the relation lines paint over it; 000124: the task cards stack at z-index 2, so #modal bumps to 3 */
+/* 000091: a relative #tabs at z-index 1 keeps the bar above the board's relation lines; 000124: the task cards stack at z-index 2 */
 #tabs { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 18px 0; }
 #tabs:empty { display: none; }
 .tab { border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px 6px 0 0; padding: 4px 12px; font-size: 0.875rem; cursor: pointer; }
@@ -132,7 +132,7 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .num-link:hover { text-decoration: underline; }
 .spin { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border: 2px solid var(--hairline); border-top-color: var(--text); border-radius: 50%; vertical-align: 0px; animation: spin .9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spin { animation: none; } #relations path, #agent-relations path { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } #relations path { animation: none; } }
 .chip { font-size: 0.75rem; padding: 1px 7px; border-radius: 999px; background: var(--hairline); color: var(--text); }
 .chip.issuer { background: var(--code-bg); color: var(--dim); }
 .chip.cx { background: var(--code-bg); color: var(--dim); }
@@ -153,84 +153,119 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 .empty { font-size: 0.75rem; color: var(--dim); }
 .toggle { display: block; width: 100%; margin-top: 4px; border: 0; border-top: 1px solid var(--hairline); background: none; color: var(--link); border-radius: 0; padding: 6px 0; cursor: pointer; font-size: 0.75rem; font-family: ${MONO}; text-align: left; }
 .toggle:hover { color: var(--text); }
-/* 000120: each run as a card, its subagent cards stacked below it in the same column;
-   000238: the main view card's translucent rest background lets the relation lines show through
-   faintly, hover and active keep their own looks */
-.agent-card { display: block; border: 1px solid var(--hairline); background: color-mix(in srgb, var(--panel) 85%, transparent); color: var(--text); border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 0.875rem; text-align: left; position: relative; z-index: 2; }
-.agent-card:hover { background: var(--raised); }
-/* 000191: a genuinely new run card rises in with the board cards' entrance */
-.agent-card.enter { animation: cardIn var(--enter) ease-out; }
-.agent-card-active { border-color: var(--link); background: color-mix(in srgb, var(--link) 20%, var(--panel)); }
-.agent-stats { display: block; font-size: 0.75rem; font-family: ${MONO}; font-variant-numeric: tabular-nums; color: var(--dim); margin-top: 2px; }
-.agent-col { display: flex; flex-direction: column; gap: 8px; }
-.agent-subs { display: flex; flex-direction: column; gap: 8px; }
-.agent-subs:empty { display: none; }
-#m-agent-btns { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; }
-#m-doctor { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; margin-top: 8px; }
-#m-doctor:empty { display: none; }
-/* 000353: run and sub cards read their role's stage accent and the stage's darker label step;
-at rest only the text and check mark take the color and the plain .agent-card outline and panel
-background show through, while the opened card keeps the role-colored outline and a 20% panel mix
-via .agent-card-active */
+/* the panel's run rows: one row per agent run, sub run and doctor run. #353 kept one accent per
+   role, and the failed-run red wins over it (two classes beat one) */
+#p-runs, #p-history { display: flex; flex-direction: column; margin-bottom: 14px; }
+#p-runs:empty, #p-history:empty { display: none; }
+.run-row { display: flex; align-items: baseline; gap: 8px; width: 100%; margin: 0; border: 0; border-bottom: 1px solid var(--hairline); background: none; color: inherit; padding: 5px 2px; cursor: pointer; font-family: inherit; font-size: 0.8125rem; text-align: left; }
+.run-row:hover { background: var(--raised); }
+.run-row .row-meta { margin-left: auto; font-family: ${MONO}; font-size: 0.75rem; color: var(--dim); font-variant-numeric: tabular-nums; }
+.run-row.agent-sub, .run-row.agent-doctor { padding-left: 16px; font-size: 0.75rem; }
+.run-row.agent-sub .row-role { color: var(--dim); }
+.run-row.agent-row-active { background: color-mix(in srgb, var(--link) 12%, var(--panel)); }
+.run-row.agent-dead { color: var(--error-text); }
 .agent-doctor { color: var(--accent-done-text); }
-.agent-doctor.agent-card-active { border-color: var(--accent-done); background: color-mix(in srgb, var(--accent-done) 20%, var(--panel)); }
-.agent-doctor .check { color: var(--accent-done); }
 .agent-splitter { color: var(--accent-backlog-text); }
-.agent-splitter.agent-card-active { border-color: var(--accent-backlog); background: color-mix(in srgb, var(--accent-backlog) 20%, var(--panel)); }
-.agent-splitter .check { color: var(--accent-backlog); }
 .agent-developer { color: var(--accent-todo-text); }
-.agent-developer.agent-card-active { border-color: var(--accent-todo); background: color-mix(in srgb, var(--accent-todo) 20%, var(--panel)); }
-.agent-developer .check { color: var(--accent-todo); }
 .agent-reviewer { color: var(--accent-review-text); }
-.agent-reviewer.agent-card-active { border-color: var(--accent-review); background: color-mix(in srgb, var(--accent-review) 20%, var(--panel)); }
-.agent-reviewer .check { color: var(--accent-review); }
 .agent-merger { color: var(--accent-merge-text); }
-.agent-merger.agent-card-active { border-color: var(--accent-merge); background: color-mix(in srgb, var(--accent-merge) 20%, var(--panel)); }
-.agent-merger .check { color: var(--accent-merge); }
 .agent-livetest { color: var(--accent-live-text); }
-.agent-livetest.agent-card-active { border-color: var(--accent-live); background: color-mix(in srgb, var(--accent-live) 20%, var(--panel)); }
-.agent-livetest .check { color: var(--accent-live); }
 .agent-integration { color: var(--accent-integration-text); }
-.agent-integration.agent-card-active { border-color: var(--accent-integration); background: color-mix(in srgb, var(--accent-integration) 20%, var(--panel)); }
-.agent-integration .check { color: var(--accent-integration); }
-/* 000353: a dead run turns the whole card red; two classes beat every role rule above, so the
-label, the outline and the active tint all lose to the failed-run red */
-.agent-card.agent-dead { color: var(--error-text); border-color: var(--error); background: color-mix(in srgb, var(--error) 15%, var(--panel)); }
-/* 000276: the sub, splitter and doctor cards read at the meta step, one step under the role cards */
-.agent-sub, .agent-splitter, .agent-doctor { font-size: 0.75rem; }
 .check { color: var(--low-fg); margin-right: 5px; }
 .cross { color: var(--error-text); margin-right: 5px; }
-#m-agent { position: relative; z-index: 0; margin-bottom: 12px; }
-/* 000237: the detail card's relation lines, behind the cards: the agent area is the svg's offset
-parent and its own stacking context (z-index 0), so the z-index-2 agent cards stay under the
-sticky #m-head while the svg (z-index 1) paints under them; pointer-events none lets the card
-clicks through, the canvas fills the area, the paths carry the geometry; 000304: the layer paints
-outside the area box, bounded by the dialog card's border */
-#agent-relations { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; overflow: visible; }
-#agent-relations path { fill: none; stroke: var(--dim); stroke-width: 1.5; stroke-opacity: .3; stroke-dasharray: 6 4; animation: dashflow 1s linear infinite; transition: stroke-opacity .15s ease; }
-#agent-relations path.relations-hot, #agent-relations path.relations-sel { stroke-opacity: .8; }
-/* 000152: the pane grows to 70vh so long logs show more content; 000304: its own layer keeps it
-above the connector svg */
-#m-log { position: relative; z-index: 2; margin-top: 6px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--code-bg); max-height: 70vh; overflow: auto; }
-#m-log.hidden { display: none; }
-/* 000191: the pane fades and rises on open */
-#m-log:not(.hidden) { animation: logIn var(--enter) ease-out; }
+/* the docked task panel: full height below the page chrome, the board gives up the panel's width so
+   the panel never covers a station head, and the console lifts the panel's bottom edge */
+#panel { position: fixed; top: var(--chrome); right: 0; bottom: var(--console-h); width: var(--panel-w); z-index: 3; overflow-y: auto; overflow-x: hidden; background: var(--panel); border-left: 1px solid var(--hairline); padding: 0 18px 18px; }
+#panel.hidden { display: none; }
+/* 000191: the panel slides in over the exit step's 180ms and the refresh never replays it */
+#panel:not(.hidden) { animation: panelIn var(--exit) ease-out; }
+@keyframes panelIn { from { transform: translateX(100%); } }
+#panel.closing { animation: panelOut var(--exit) ease-in forwards; }
+@keyframes panelOut { to { transform: translateX(100%); } }
+body.panel-open #board { padding-right: calc(18px + var(--panel-w)); }
+/* the header is sticky at every width, so the title and the close control never scroll away */
+#p-head { position: sticky; top: 0; display: flex; align-items: flex-start; gap: 10px; padding: 14px 0 8px; background: var(--panel); z-index: 1; }
+#p-head h2 { flex: 1 1 auto; min-width: 0; font-size: 1.0625rem; font-weight: 500; margin: 0; line-height: 1.3; }
+#p-head h2:focus { outline: none; }
+#p-close { border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 0.8125rem; }
+#p-close:hover { background: var(--raised); }
+#p-facts { font-size: 0.8125rem; margin-bottom: 10px; }
+#p-facts div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 2px 0; }
+#p-facts .k { min-width: 84px; color: var(--dim); }
+/* the priority control is a four-option segmented group: the active option takes its own hue */
+#p-prio { display: flex; margin-bottom: 6px; }
+.seg { border: 1px solid var(--hairline); background: var(--panel); color: var(--dim); padding: 2px 8px; font-size: 0.75rem; font-family: ${MONO}; cursor: pointer; }
+.seg + .seg { border-left: 0; }
+.seg:first-child { border-radius: 6px 0 0 6px; }
+.seg:last-child { border-radius: 0 6px 6px 0; }
+.seg:hover { background: var(--raised); }
+.seg[aria-pressed="true"] { background: var(--raised); font-weight: 500; }
+.seg.p-low[aria-pressed="true"] { color: var(--low-fg); }
+.seg.p-medium[aria-pressed="true"] { color: var(--medium-fg); }
+.seg.p-high[aria-pressed="true"] { color: var(--high-fg); }
+.seg.p-critical[aria-pressed="true"] { color: var(--critical-fg); }
+#p-prio-err { font-size: 0.75rem; color: var(--error-text); margin-bottom: 6px; }
+#p-prio-err:empty { display: none; }
+#p-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+#p-actions:empty { display: none; }
+.m-action { display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; padding: 3px 10px; font-size: 0.8125rem; font-family: inherit; cursor: pointer; border: 1px solid var(--hairline); background: var(--panel); color: var(--text); }
+.m-action:hover { background: var(--raised); }
+/* #364 keyboard focus: every element the stylesheet marks interactive answers Tab with the same
+   visible ring, so the pointer cue is never the only cue */
+#theme:focus-visible, .tab:focus-visible, .card:focus-visible, .num-link:focus-visible, .toggle:focus-visible, .run-row:focus-visible, summary:focus-visible, #p-close:focus-visible, #c-close:focus-visible, .seg:focus-visible, .m-action:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.m-action:disabled { opacity: 0.6; cursor: default; }
+.m-block { color: var(--error-text); border: 1px solid var(--error); background: color-mix(in srgb, var(--error) 15%, var(--panel)); }
+.m-unblock { color: var(--accent-done-text); border: 1px solid var(--accent-done); background: color-mix(in srgb, var(--accent-done) 15%, var(--panel)); }
+#p-body { font-size: 0.875rem; line-height: 1.5; }
+#p-body h1, #p-body h2, #p-body h3 { font-size: 0.9375rem; font-weight: 500; margin: 12px 0 4px; }
+#p-body ul { margin: 4px 0; padding-left: 20px; }
+/* #310 quoted covered-task summaries render as blockquotes: a subtle left border, small left
+padding and the soft colour, with a vertical margin only so the paragraphs around it do not shift */
+#p-body blockquote { border-left: 3px solid var(--hairline); padding-left: 10px; margin: 4px 0; color: var(--dim); }
+#p-body pre { background: var(--code-bg); border-radius: 6px; padding: 8px 10px; overflow: auto; font-size: 0.8125rem; }
+#p-body code { background: var(--code-bg); border-radius: 4px; padding: 0 4px; font-size: 0.8125rem; }
+#p-body pre code { padding: 0; background: none; }
+/* 000153: the console is already mono, so the inline and fenced code inside the panel and the log
+keep the same mono stack and only drop the code surface */
+#c-text code, #c-text pre code, #p-body code, #p-body pre { font-family: ${MONO}; }
+#p-body a { color: var(--link); }
+/* #291 md() tables in the panel and the log: the wrapper scrolls on its own, cells stay on one
+line, and the leftmost column pins left with a static right border as the cue */
+.md-table-wrap { overflow-x: auto; }
+.md-table-wrap table { border-collapse: collapse; }
+.md-table-wrap th, .md-table-wrap td { white-space: nowrap; text-align: left; padding: 3px 10px; border-bottom: 1px solid var(--hairline); }
+.md-table-wrap .md-pin { position: sticky; left: 0; background: var(--panel); border-right: 1px solid var(--hairline); }
+/* the console sits on the code background, not the panel, so its pinned column matches the pane */
+#c-text .md-table-wrap .md-pin { background: var(--code-bg); }
+/* the docked console is the column's last child, so its top edge is the drag handle and its height
+   is its own var; the panel's bottom edge follows the same var */
+#console { display: flex; flex-direction: column; height: var(--console-h); min-height: 0; border-top: 1px solid var(--hairline); background: var(--code-bg); }
+#console.hidden { display: none; }
+#console:not(.hidden) { animation: logIn var(--enter) ease-out; }
 @keyframes logIn { from { opacity: 0; transform: translateY(4px); } }
 /* 000194: the matching close, after the entrance rule so the equal-specificity logOut wins */
-#m-log.closing { animation: logOut var(--exit) ease-in forwards; }
+#console.closing { animation: logOut var(--exit) ease-in forwards; }
 @keyframes logOut { to { opacity: 0; transform: translateY(4px); } }
-#m-log-meta { padding: 6px 10px 0; font-size: 0.75rem; line-height: 1.45; color: var(--dim); font-family: ${MONO}; font-variant-numeric: tabular-nums; }
-#m-log-meta.hidden { display: none; }
+#c-handle { flex: 0 0 auto; height: 8px; cursor: row-resize; background: var(--hairline); }
+#c-handle:hover { background: var(--dim); }
+#c-handle:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
+#c-head { flex: 0 0 auto; display: flex; align-items: baseline; gap: 10px; padding: 2px 18px 4px; font-size: 0.75rem; font-family: ${MONO}; color: var(--dim); font-variant-numeric: tabular-nums; }
+#c-title { color: var(--text); }
+#c-close { margin-left: auto; border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 1px 9px; cursor: pointer; font-size: 0.75rem; }
+#c-close:hover { background: var(--raised); }
+#c-log { flex: 1 1 auto; min-height: 0; overflow: auto; }
+#c-meta { padding: 4px 18px 0; font-size: 0.75rem; line-height: 1.45; color: var(--dim); font-family: ${MONO}; font-variant-numeric: tabular-nums; }
+#c-meta.hidden { display: none; }
 /* the log text renders in IBM Plex Mono at the log step; blocks are collapsed <details> the client fills in */
-#m-log-text { margin: 0; padding: 8px 10px; font-size: 0.8125rem; line-height: 1.45; font-family: ${MONO}; white-space: pre-wrap; overflow-wrap: break-word; }
-#m-log-text pre { font: inherit; margin: 0; padding: 0; white-space: pre-wrap; overflow-wrap: break-word; }
-#m-log-text details { margin: 2px 0; }
-#m-log-text summary { cursor: pointer; }
-#m-log-text details.lg-think, #m-log-text details.lg-tool { color: var(--dim); }
-#m-log-text details > pre { padding-left: 12px; }
+#c-text { margin: 0; padding: 6px 18px 10px; font-size: 0.8125rem; line-height: 1.45; font-family: ${MONO}; white-space: pre-wrap; overflow-wrap: break-word; }
+#c-text pre { font: inherit; margin: 0; padding: 0; white-space: pre-wrap; overflow-wrap: break-word; }
+#c-text details { margin: 2px 0; }
+#c-text summary { cursor: pointer; }
+#c-text details.lg-think, #c-text details.lg-tool { color: var(--dim); }
+#c-text details > pre { padding-left: 12px; }
 /* 000191: appended chunks fade and rise in; a CSS animation replays only on newly inserted
 nodes, so untouched siblings never re-animate and only new content moves */
-#m-log-text > * { animation: chunkIn var(--fade) ease-out; }
+#c-text > * { animation: chunkIn var(--fade) ease-out; }
 @keyframes chunkIn { from { opacity: 0; transform: translateY(2px); } }
 /* 000194: the pulse brightens only the glyphs: background-clip: text clips the gradient to the
 block's text, the nested pre and summary children included, and color: transparent hides the box,
@@ -238,82 +273,21 @@ so the band passing reads as letters brightening, never a highlight bar; the det
 selectors outrank the muted color rule (color: transparent must stick there) and --shine-base
 follows the block's own color; 000198: flat shoulders (base 0-33% and 67-100%) so the 300%
 window sits on flat base at both loop endpoints, no partial-bright tail at the wrap */
-#m-log-text > .pulse, #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { --shine-base: var(--text); background-image: linear-gradient(90deg, var(--shine-base) 0%, var(--shine-base) 33%, color-mix(in srgb, var(--shine-hi) var(--shine), var(--shine-base)) 50%, var(--shine-base) 67%, var(--shine-base) 100%); background-size: 300% 100%; background-repeat: no-repeat; -webkit-background-clip: text; background-clip: text; color: transparent; animation: chunkIn var(--fade) ease-out, shimmer var(--pulse) linear infinite; }
-#m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { --shine-base: var(--dim); }
+#c-text > .pulse, #c-text > details.lg-think.pulse, #c-text > details.lg-tool.pulse { --shine-base: var(--text); background-image: linear-gradient(90deg, var(--shine-base) 0%, var(--shine-base) 33%, color-mix(in srgb, var(--shine-hi) var(--shine), var(--shine-base)) 50%, var(--shine-base) 67%, var(--shine-base) 100%); background-size: 300% 100%; background-repeat: no-repeat; -webkit-background-clip: text; background-clip: text; color: transparent; animation: chunkIn var(--fade) ease-out, shimmer var(--pulse) linear infinite; }
+#c-text > details.lg-think.pulse, #c-text > details.lg-tool.pulse { --shine-base: var(--dim); }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
-#modal { position: fixed; inset: 0; z-index: 3; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
-#modal.hidden { display: none; }
-/* 000191: the overlay fades and the panel rises slightly on open, and the refresh never replays
-it (the class list is untouched while the card stays open) */
-#modal:not(.hidden) { animation: fadeIn var(--enter) ease-out; }
-#modal:not(.hidden) #m-box { animation: boxIn var(--enter) ease-out; }
-@keyframes fadeIn { from { opacity: 0; } }
-@keyframes boxIn { from { opacity: 0; transform: translateY(6px) scale(.985); } }
-/* 000194: the exits run the entrances in reverse; .closing sits after the entrance rules so the
-equal-specificity close animation wins, the JS drops .closing and hides on animationend with a
-fixed-timeout fallback */
-#modal.closing { animation: fadeOut var(--exit) ease-in forwards; }
-#modal.closing #m-box { animation: boxOut var(--exit) ease-in forwards; }
-@keyframes fadeOut { to { opacity: 0; } }
-@keyframes boxOut { to { opacity: 0; transform: translateY(6px) scale(.985); } }
 /* 000191: reduced motion stops the entrance, chunk and pulse animations too; the rule sits
 after every base animation rule so the later equal-specificity selectors cannot override it;
-000194: the details.pulse variants join it, only they outrank #m-log-text > * and .pulse */
-@media (prefers-reduced-motion: reduce) { .card.enter, .agent-card.enter, .card-stats, #modal:not(.hidden), #modal:not(.hidden) #m-box, #m-log:not(.hidden), #m-log-text > *, #m-log-text > .pulse, #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { animation: none; } }
+000194: the details.pulse variants join it, only they outrank #c-text > * and .pulse */
+@media (prefers-reduced-motion: reduce) { .card.enter, #panel:not(.hidden), #console:not(.hidden), #c-text > *, #c-text > .pulse, #c-text > details.lg-think.pulse, #c-text > details.lg-tool.pulse { animation: none; } }
 /* 000194: under reduced motion the clip animation stops (above) and color: transparent would
 make the text vanish: the gradient drops and the solid color restores per block type */
-@media (prefers-reduced-motion: reduce) { #m-log-text > .pulse { background-image: none; color: var(--text); } #m-log-text > details.lg-think.pulse, #m-log-text > details.lg-tool.pulse { background-image: none; color: var(--dim); } }
-/* 206/207: the close header is sticky at every width, mobile and desktop: sticky is clamped to the
-containing block, so #m-box drops its top padding and #m-head carries it (else the header pins 18px
-down and scrolled text peeks above it); its own bottom padding keeps 10px clearance under the title
-while content scrolls */
-#m-box { background: var(--panel); border-radius: 10px; padding: 0 18px 18px; width: min(760px, calc(100vw - 32px)); max-height: 82vh; overflow-y: auto; overflow-x: hidden; }
-/* 000246: the detail arrival grows the modal from the loading height pinned by openTask to the
-content height; the class drops at the transition end, and reduced motion keeps the instant resize */
-#m-box.grow { transition: height var(--enter) ease-out; }
-@media (prefers-reduced-motion: reduce) { #m-box.grow { transition: none; } }
-#m-head { display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; margin-bottom: 0; padding: 18px 0 10px; background: var(--panel); z-index: 1; }
-#m-head h2 { font-size: 1.0625rem; font-weight: 500; margin: 0; }
-#m-close { border: 1px solid var(--hairline); background: var(--panel); color: var(--text); border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 0.875rem; }
-#m-close:hover { background: var(--raised); }
-#m-attrs { font-size: 0.875rem; color: var(--text); margin-bottom: 12px; }
-#m-attrs div { padding: 3px 0; }
-#m-attrs span:not(.chip):not(.num-link) { display: inline-block; min-width: 80px; color: var(--dim); }
-#m-actions { display: flex; justify-content: flex-start; margin-bottom: 12px; }
-#m-actions:empty { display: none; }
-.m-action { display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; padding: 4px 12px; font-size: 0.875rem; font-family: inherit; cursor: pointer; }
-/* #364 keyboard focus: every element the stylesheet marks with cursor: pointer answers Tab with the
-same visible ring, so the pointer cue is never the only cue */
-#theme:focus-visible, .tab:focus-visible, .card:focus-visible, .num-link:focus-visible, .toggle:focus-visible, .agent-card:focus-visible, #m-log-text summary:focus-visible, #m-close:focus-visible, .m-action:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
-.m-action:disabled { opacity: 0.6; cursor: default; }
-.m-block { color: var(--error-text); border: 1px solid var(--error); background: color-mix(in srgb, var(--error) 15%, var(--panel)); }
-.m-unblock { color: var(--accent-done-text); border: 1px solid var(--accent-done); background: color-mix(in srgb, var(--accent-done) 15%, var(--panel)); }
-#m-body { font-size: 0.875rem; line-height: 1.5; }
-#m-body h1, #m-body h2, #m-body h3 { font-size: 0.9375rem; font-weight: 500; margin: 12px 0 4px; }
-#m-body ul { margin: 4px 0; padding-left: 20px; }
-/* #310 quoted covered-task summaries render as blockquotes: a subtle left border, small left
-padding and the soft colour, with a vertical margin only so the paragraphs around it do not shift */
-#m-body blockquote { border-left: 3px solid var(--hairline); padding-left: 10px; margin: 4px 0; color: var(--dim); }
-#m-body pre { background: var(--code-bg); border-radius: 6px; padding: 8px 10px; overflow: auto; font-size: 0.8125rem; }
-#m-body code { background: var(--code-bg); border-radius: 4px; padding: 0 4px; font-size: 0.8125rem; }
-#m-body pre code { padding: 0; background: none; }
-/* 000153: the pane is already mono, so the inline and fenced code inside the dialog and the log keep the same mono stack and only drop the code surface */
-#m-log-text code, #m-log-text pre code, #m-body code, #m-body pre { font-family: ${MONO}; }
-#m-body a { color: var(--link); }
-/* #291 md() tables in the dialog and the log pane: the wrapper scrolls on its own, cells stay on
-one line, and the leftmost column pins left with a static right border as the cue */
-.md-table-wrap { overflow-x: auto; }
-.md-table-wrap table { border-collapse: collapse; }
-.md-table-wrap th, .md-table-wrap td { white-space: nowrap; text-align: left; padding: 3px 10px; border-bottom: 1px solid var(--hairline); }
-.md-table-wrap .md-pin { position: sticky; left: 0; background: var(--panel); border-right: 1px solid var(--hairline); }
-/* the log pane sits on the code background, not the dialog panel, so its pinned column matches the pane */
-#m-log-text .md-table-wrap .md-pin { background: var(--code-bg); }
+@media (prefers-reduced-motion: reduce) { #c-text > .pulse { background-image: none; color: var(--text); } #c-text > details.lg-think.pulse, #c-text > details.lg-tool.pulse { background-image: none; color: var(--dim); } }
 /* one accent per stage, in pipeline order; the waiting and working states of a stage share it */
 /* #366 each station points --ac at its stage token, generated from the station table so the mapping lives in one place */
 ${STATIONS.map((s) => `.s-${s.id} { --ac: var(--accent-${s.accent}); }`).join("\n")}
 /* 204: mobile, the root font size 15% smaller so every rem-based size scales down with it */
 @media (max-width: 600px) { html { font-size: 85%; } }
-/* 205: mobile, the task details popup is a full-screen sheet, flush with all four sides; the vh
-line is the fallback for the dvh line (older mobile browsers), max-height none lifts the 82vh cap */
-@media (max-width: 600px) { #m-box { width: 100vw; margin: 0; border-radius: 0; height: 100vh; height: 100dvh; max-height: none; } }
+/* 205: mobile, the task panel is a full-screen sheet, flush with all four sides and over the console */
+@media (max-width: 600px) { #panel { top: 0; bottom: 0; width: 100vw; padding: 0 12px 12px; } body.panel-open #board { padding-right: 18px; } }
 `;

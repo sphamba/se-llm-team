@@ -20,6 +20,7 @@ interface AgentEntry {
 	alive: boolean;
 	status: "live" | "dead" | "ok";
 	handle: string;
+	start?: number | null; // first in-log record timestamp, epoch ms; null on a legacy log
 	tokens: number | null;
 	duration: number | null;
 }
@@ -211,7 +212,7 @@ async function agentHistory(root: string, t: Task, files: string[]): Promise<Age
 	// stable sort: the enumeration order (role order, legacy first, index ascending) breaks the ties
 	return entries
 		.sort((a, b) => (a.start ?? a.mtime) - (b.start ?? b.mtime) || a.mtime - b.mtime)
-		.map(({ role, run, alive, status, handle, tokens, duration }) => ({ role, run, alive, status, handle, tokens, duration }));
+		.map(({ role, run, alive, status, handle, tokens, duration, start }) => ({ role, run, alive, status, handle, tokens, duration, ...(start ? { start } : {}) }));
 }
 
 // one entry per existing doctor log `.logs/<slug>.<analysed role>.<n>.doctor.log`: the doctor
@@ -244,7 +245,7 @@ async function doctorHistory(root: string, t: Task, files: string[]): Promise<Ag
 	// stable sort: the readdir order breaks the ties
 	return entries
 		.sort((a, b) => (a.start ?? a.mtime) - (b.start ?? b.mtime) || a.mtime - b.mtime)
-		.map(({ role, run, alive, status, handle, tokens, duration }) => ({ role, run, alive, status, handle, tokens, duration }));
+		.map(({ role, run, alive, status, handle, tokens, duration, start }) => ({ role, run, alive, status, handle, tokens, duration, ...(start ? { start } : {}) }));
 }
 
 // rebuild the log path from the handle: the task must exist on the board and the handle must be

@@ -282,8 +282,8 @@ assert.ok(page.includes('setAttribute("pointer-events", "none")') && page.includ
 assert.ok(page.includes("el.onmouseenter = () => hotRelations(file, true)") && page.includes("el.onmouseleave = () => hotRelations(file, false)"), "the card hover wires the highlight on mouseenter and reverts on mouseleave");
 assert.ok(page.includes('if (p.dataset.file === file || p.dataset.blocker === file) p.classList.toggle("relations-hot", on)'), "the hover matches paths by either endpoint's file in the dataset, no quote-unsafe selector interpolation");
 assert.ok(page.includes('" data-blocker="'), "each relation path carries the blocker's file alongside the blocked task's file");
-assert.ok(page.includes('querySelectorAll("#m-attrs .num-link")'), "the detail card binds its id links to openTask after render");
-assert.ok(page.includes('"<div><span>blockedBy</span>"'), "the detail card builds a blockedBy row");
+assert.ok(page.includes('facts.querySelectorAll(".num-link")') && page.includes("openTask(a.dataset.task)"), "the panel binds its id links to openTask through the facts block");
+assert.ok(page.includes(">blockedBy</span>"), "the panel builds a blockedBy row");
 assert.ok(page.includes("for (let p = el.parentElement; p && p !== board; p = p.parentElement)"), "the card box adds every scroll ancestor, so a scrolled station keeps the line endpoints on its cards");
 
 // refresh identity: the 5 s poll keeps the node of every card whose markup did not change, so its
@@ -416,8 +416,8 @@ const blockedRowOf = new Function("esc", "numLinkHtml", "taskByNum", page.match(
 	numLinkHtml,
 	(ref: string) => (ref === "#42" ? { file: "000042_x.md" } : undefined),
 ) as (t: any) => string;
-assert.equal(blockedRowOf({ blockedBy: "user" }), "<div><span>blockedBy</span>user</div>", "the `user` ref prints as plain escaped text");
-assert.equal(blockedRowOf({ blockedBy: "user, #42" }), '<div><span>blockedBy</span>user, <span class="num-link" data-task="000042_x.md">#42</span></div>', "a held ref mixes with a linked task ref");
+assert.equal(blockedRowOf({ blockedBy: "user" }), "<div><span class='k'>blockedBy</span>user</div>", "the `user` ref prints as plain escaped text");
+assert.equal(blockedRowOf({ blockedBy: "user, #42" }), `<div><span class='k'>blockedBy</span>user, <span class="num-link" data-task="000042_x.md">#42</span></div>`, "a held ref mixes with a linked task ref");
 
 // tabs: one per registered project; a single project keeps the old ui, no tab bar
 assert.ok(tabNames([]).length === 0 && tabNames([{ name: "solo", root: "/r1", branch: "main" }]).length === 0, "an empty or single-project registry renders no tab bar");
@@ -456,6 +456,6 @@ assert.equal(
 );
 assert.ok([tabNames, tabsHtml].every((fn) => page.includes(String(fn))), "the page ships the tested tab helpers");
 assert.ok(page.includes('<nav id="tabs"></nav>') && page.includes("switchTab(b.dataset.project)"), "the page serves the tab bar and its switch handler");
-assert.match(page, /function switchTab\(name\) \{[\s\S]*?closeModal\(\);[\s\S]*?\}/, "a tab switch closes the open modal");
+assert.match(page, /function switchTab\(name\) \{[\s\S]*?closePanel\(\);[\s\S]*?\}/, "a tab switch closes the open panel");
 
 ui.close();

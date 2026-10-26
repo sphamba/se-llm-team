@@ -981,14 +981,18 @@ writeFileSync(join(docLogs, `${docSlug}.developer.1.doctor.log`), [
 const otherTask = createTask(docRoot, { name: "fix: other doctor task", summary: "s", specs: "s" });
 const otherSlug = otherTask.file.replace(/\.md$/, "");
 writeFileSync(join(docLogs, `${otherSlug}.developer.0.doctor.log`), "OTHER TASK DOCTOR\n");
+const docDoctors: any[] = (await docDetail(docTask)).doctors;
 assert.deepEqual(
-	(await docDetail(docTask)).doctors,
+	docDoctors.map(({ start, ...rest }) => rest),
 	[
 		{ role: "doctor", run: 0, alive: false, status: "ok", handle: `${docSlug}.developer.0.doctor`, tokens: 20, duration: 5000 },
 		{ role: "doctor", run: 1, alive: false, status: "ok", handle: `${docSlug}.developer.1.doctor`, tokens: 30, duration: 3000 },
 	],
 	"one doctor entry per doctor log, tokens sum input + output (cache excluded), duration is last - first record timestamp, sorted oldest first",
 );
+// the start is the log's own first record timestamp: the fixture writes it relative to now, so the
+// pin is the 10 s offset between the two runs, never an absolute epoch
+assert.ok(docDoctors.every((d) => Number.isFinite(d.start)) && docDoctors[1].start - docDoctors[0].start === 10000, "each doctor row carries its first record timestamp as start");
 assert.deepEqual(
 	(await docDetail(otherTask)).doctors,
 	[{ role: "doctor", run: 0, alive: false, status: "ok", handle: `${otherSlug}.developer.0.doctor`, tokens: null, duration: null }],
