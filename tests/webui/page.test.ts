@@ -947,9 +947,10 @@ assert.ok(script.includes("handleEl.onclick = toggleConsoleSheet"), "the console
 for (const tok of ["--sp-1: 4px", "--sp-2: 6px", "--sp-3: 8px", "--sp-4: 12px", "--sp-5: 16px", "--sp-6: 24px"])
 	assert.ok(tokenBlocks[0].includes(tok), `the light :root block declares ${tok.split(":")[0]}, the one spacing scale`);
 const spacingRule = (sel: string) => themeCss.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " \\{([^}]*)\\}"))?.[1] ?? "";
-for (const sel of ["header", "#filters", "#board", ".st-head", ".station .cards", ".card"])
+for (const sel of ["header", "#filters", "#board", ".st-head", ".station", ".card"])
 	assert.ok(spacingRule(sel).includes("var(--sp-"), `${sel} reads its spacing from the scale`);
 assert.match(spacingRule(".card"), /padding: var\(--sp-3\) var\(--sp-4\) var\(--sp-4\)/, "the card takes 12px of side padding from the scale, so its text clears the station hairline");
-assert.equal(spacingRule(".station .cards").includes("padding-top: var(--sp-4)"), true, "the station head keeps a clear gap to its first card");
+assert.equal(spacingRule(".station").includes("gap: var(--sp-4)"), true, "the station head gap belongs to the column, so it holds at every scroll position");
+assert.equal(spacingRule(".station .cards").includes("padding-top"), false, "the scrolling cards container carries no gap of its own");
 
 console.log("page.test.ts: all assertions passed");

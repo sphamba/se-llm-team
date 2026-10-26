@@ -135,7 +135,7 @@ stays readable; the active card and its rimmed blockers keep full strength */
 #relations path.relations-hot { stroke-opacity: .8; }
 @keyframes dashflow { to { stroke-dashoffset: -10; } }
 /* #366 one station per phase: the head keeps the tick, the label and the count while the body scrolls; --ac comes from the station class at the end of this sheet */
-.station { grid-row: 2; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.station { grid-row: 2; display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; min-height: 0; }
 .station + .station { border-left: 1px solid var(--hairline); }
 .st-head { display: flex; align-items: baseline; gap: 8px; padding: var(--sp-2) 0 var(--sp-3); position: relative; flex: 0 0 auto; background: var(--canvas); z-index: 2; }
 .st-head h2 { flex: 1 1 auto; min-width: 0; font-size: 0.8125rem; font-weight: 500; text-transform: uppercase; letter-spacing: .05em; margin: 0; color: var(--dim); display: flex; align-items: center; gap: 6px; }
@@ -143,7 +143,7 @@ stays readable; the active card and its rimmed blockers keep full strength */
 .st-head::before { content: ""; position: absolute; left: 0; top: -9px; width: 1px; height: 18px; background: var(--hairline); }
 .station.live .st-head::before { background: var(--ac); box-shadow: 0 0 6px var(--ac); }
 .station.live .st-head h2 { color: var(--ac); }
-.station .cards { flex: 1 1 auto; min-height: 0; padding-top: var(--sp-4); overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
+.station .cards { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
 /* a disabled stage dims its station but keeps the cards reachable */
 .station.dim .cards, .station.dim .count { opacity: .4; }
 /* a disabled integration stage is a narrow labeled strip with no cards and no count */
