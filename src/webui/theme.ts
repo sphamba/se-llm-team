@@ -184,7 +184,7 @@ creation and the page drops it on animationend, so a poll or a reorder never rep
 /* the run row: a live run in the station accent, a finished run red and neutral about the card */
 .c-run { margin-top: var(--sp-2); font-size: 0.75rem; font-family: ${MONO}; color: var(--dim); }
 .c-run.dead { color: var(--error-text); }
-/* the meta row: the sub-state marker for a non-primary state, then the priority and complexity labels and the issuer at the right; it wraps so the labels survive a narrow station */
+/* the meta row: the priority and complexity labels and the issuer at the right; it wraps so the labels survive a narrow station */
 .c-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: var(--sp-3); font-size: 0.75rem; font-family: ${MONO}; }
 .c-meta > span { background: none; padding: 0; border-radius: 0; }
 .c-meta .c-p { color: var(--text); }
@@ -217,7 +217,6 @@ names the reason where the station is wide enough */
 .c-stub { position: absolute; top: 6px; right: 2px; display: flex; align-items: baseline; gap: 6px; max-width: 45%; overflow: hidden; pointer-events: none; color: var(--dim); font-family: ${MONO}; font-size: 0.6875rem; }
 .c-stub-item { flex: 0 0 auto; white-space: nowrap; }
 .stub-tag { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--faint); margin-left: 4px; }
-.sub-state { color: var(--dim); }
 /* #373 the blocker rim: an inset ring on the cards the active card waits on */
 .card.rim { box-shadow: inset 0 0 0 1px var(--link); }
 .num { font-size: 0.75rem; font-family: ${MONO}; font-variant-numeric: tabular-nums; color: var(--dim); margin-right: 4px; }

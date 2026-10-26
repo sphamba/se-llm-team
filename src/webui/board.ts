@@ -177,25 +177,23 @@ export function syncDoctorCards(cards, docs, row, residual, doc) {
 }
 
 // #366 the process spine: one station per phase, each grouping the phase's waiting and working
-// states. primary is the state a card shows without a sub-state marker, accent is the stage token
-// the stylesheet points --ac at, empty names the station's job when it holds nothing. The order is
-// the pipeline order and the keyboard tab order
+// states. accent is the stage token the stylesheet points --ac at, empty names the station's job
+// when it holds nothing. The order is the pipeline order and the keyboard tab order
 export interface Station {
 	id: string;
 	label: string;
 	states: readonly string[];
-	primary: string;
 	accent: string;
 	empty: string;
 }
 export const STATIONS: readonly Station[] = [
-	{ id: "queue", label: "Backlog", states: ["backlog"], primary: "backlog", accent: "todo", empty: "nothing waiting to start" },
-	{ id: "work", label: "Develop", states: ["to-do", "doing"], primary: "to-do", accent: "todo", empty: "no agent is working" },
-	{ id: "review", label: "Review", states: ["to-review", "reviewing"], primary: "to-review", accent: "review", empty: "nothing waiting for a reviewer" },
-	{ id: "merge", label: "Merge", states: ["to-merge", "merging"], primary: "to-merge", accent: "merge", empty: "nothing waiting to merge" },
-	{ id: "test", label: "Live-test", states: ["to-live-test", "live-testing"], primary: "to-live-test", accent: "live", empty: "nothing waiting for a live test" },
-	{ id: "integration", label: "Integration-test", states: ["to-integration-test", "integration-testing"], primary: "to-integration-test", accent: "integration", empty: "nothing waiting for an integration test" },
-	{ id: "done", label: "Done", states: ["done"], primary: "done", accent: "done", empty: "nothing finished yet" },
+	{ id: "queue", label: "Backlog", states: ["backlog"], accent: "todo", empty: "nothing waiting to start" },
+	{ id: "work", label: "Develop", states: ["to-do", "doing"], accent: "todo", empty: "no agent is working" },
+	{ id: "review", label: "Review", states: ["to-review", "reviewing"], accent: "review", empty: "nothing waiting for a reviewer" },
+	{ id: "merge", label: "Merge", states: ["to-merge", "merging"], accent: "merge", empty: "nothing waiting to merge" },
+	{ id: "test", label: "Live-test", states: ["to-live-test", "live-testing"], accent: "live", empty: "nothing waiting for a live test" },
+	{ id: "integration", label: "Integration-test", states: ["to-integration-test", "integration-testing"], accent: "integration", empty: "nothing waiting for an integration test" },
+	{ id: "done", label: "Done", states: ["done"], accent: "done", empty: "nothing finished yet" },
 ];
 
 // 000320 the user hold: the blockedBy `user` token, any case, alone or mixed with task refs
@@ -261,14 +259,11 @@ export function priorityRuler(priority: string) {
 // one card's markup; the live values (elapsed, tokens) stay out of it, so a poll never rewrites the
 // card and its mark keeps its pulse (000191); syncCardStats fills the live cell and the run
 // row in place. Every optional row drops when empty: the number, ruler and live cell on top, the
-// name, the summary as the context line, the run row, then the meta row with the sub-state marker
-// (a non-primary state only, because a column's primary is the word its head already says), the
-// priority, complexity and issuer labels and the waits-on marker
+// name, the summary as the context line, the run row, then the meta row with the priority,
+// complexity and issuer labels and the waits-on marker
 export function cardBaseHtml(t: Task, st: string, all: Task[] = []) {
 	const issued = !!t.issuer && /^#\d+$/.test(t.issuer);
 	const live = (t.agents || []).some((a) => a.alive);
-	const primary = STATIONS.some((s) => s.primary === st);
-	const implied = primary;
 	const refs = String(t.blockedBy || "").split(",").map((r) => r.trim()).filter(Boolean);
 	const wait = waitsOnText(t, all);
 	return (
@@ -282,7 +277,6 @@ export function cardBaseHtml(t: Task, st: string, all: Task[] = []) {
 		(t.summary ? '<div class="ctx">' + esc(t.summary) + "</div>" : "") +
 		(t.agents && t.agents.length ? '<div class="c-run' + (live ? "" : " dead") + '"><span class="card-stats"></span></div>' : "") +
 		'<div class="c-meta">' +
-		(implied ? "" : '<span class="sub-state">' + esc(st) + "</span>") +
 		'<span class="c-p p-' + esc(t.priority) + '">' + esc(t.priority) + "</span>" +
 		'<span class="c-cx cx-' + esc(t.complexity || "moderate") + '">' + esc(t.complexity || "moderate") + "</span>" +
 		'<span class="c-issuer">' + esc(t.issuer || "user") + "</span>" +

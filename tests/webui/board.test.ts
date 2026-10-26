@@ -120,7 +120,6 @@ assert.deepEqual(STATIONS.map((s) => s.id), ["queue", "work", "review", "merge",
 assert.ok(STATIONS.find((s) => s.id === "queue")?.label === "Backlog" && !STATIONS.some((s) => s.label === "Queue"), "the first station reads Backlog, so no station still says Queue");
 assert.deepEqual(["work", "test", "integration"].map((id) => STATIONS.find((s) => s.id === id)?.label), ["Develop", "Live-test", "Integration-test"], "the three renamed stations read Develop, Live-test and Integration-test");
 assert.ok(!STATIONS.some((s) => ["Work", "Test", "Integration"].includes(s.label)), "no station still reads Work, Test or Integration");
-assert.deepEqual(STATIONS.map((s) => s.primary), ["backlog", "to-do", "to-review", "to-merge", "to-live-test", "to-integration-test", "done"], "each station names the state a card shows without a sub-state marker");
 const boardEl = new El("main");
 const stations: Record<string, any> = buildShell(boardEl, { createElement: (tag: string) => new El(tag) });
 const stationEls = boardEl.children.filter((c: El) => c.className.split(" ").includes("station"));
@@ -189,10 +188,12 @@ assert.ok(rich.includes('<div class="name">a &amp; b</div>'), "the name is escap
 assert.ok(rich.includes('<div class="ctx">the board is rebuilt</div>'), "an idle card shows its summary as the context line");
 assert.ok(rich.includes('<div class="c-run"><span class="card-stats"></span></div>'), "a live run gets a run row, its values filled in place");
 assert.ok(rich.includes('<span class="c-p p-high">high</span>') && rich.includes('<span class="c-cx cx-complex">complex</span>') && !rich.includes('class="chip'), "the meta row shows priority and complexity as small mono labels, not pill chips");
-assert.ok(!rich.includes('<span class="sub-state">'), "a primary state shows no sub-state marker");
-assert.ok(cardBaseHtml({ file: "000053_r.md", name: "r", priority: "low" }, "doing").includes('<span class="sub-state">doing</span>'), "a doing card names its own state, because Work's primary is to-do");
-assert.ok(cardBaseHtml({ file: "000048_m.md", name: "m", priority: "low" }, "reviewing").includes('<span class="sub-state">reviewing</span>'), "a non-primary state shows its raw slug in the meta row");
-assert.ok(!cardBaseHtml({ file: "000049_n.md", name: "n", priority: "low" }, "backlog").includes('<span class="sub-state">'), "a backlog card carries no sub-state marker, because backlog is its column's primary");
+// #404 no card names its own state: the column head and the agent pill already say it, so every state
+// of every station renders the same meta row, looped over the station table so a new state is covered
+for (const st of STATIONS.flatMap((s) => [...s.states])) {
+	const card = cardBaseHtml({ file: "000057_u.md", name: "u", priority: "low" }, st);
+	assert.ok(!card.includes('<span class="sub-state">') && !card.includes('class="chip'), `a ${st} card prints no state chip`);
+}
 assert.ok(cardBaseHtml({ file: "000050_o.md", name: "o", priority: "low", blockedBy: "user" }, "to-do").includes('<button type="button" class="c-wait held"'), "a held task gets the held marker in the meta row");
 assert.ok(!cardBaseHtml({ file: "000051_p.md", name: "p", priority: "low" }, "to-do").includes("c-live"), "an idle card gets no live cell");
 assert.ok(!cardBaseHtml({ file: "000052_q.md", name: "q", priority: "low" }, "to-do").includes("ctx"), "a card without a summary drops the context line");
