@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { kanbanDir, listAll, taskNum, taskSlug, type Task } from "../kanban.ts";
+import { pidAlive, pidDiscriminator } from "../pid.ts";
 import { log } from "./log.ts";
 
 // 1h delivery cutoff: the extension drain delivers reports younger than this and discards
@@ -8,6 +9,63 @@ import { log } from "./log.ts";
 export const REPORT_MAX_AGE_MS = 3_600_000;
 
 export const reportsDir = (root: string) => join(kanbanDir(root), ".reports");
+
+// The session that owns the report queue: orchestrator_start claims it, so the report goes to the
+// session that started the pipeline, not to the first root session that looks at the directory
+export const ownerPath = (root: string) => join(kanbanDir(root), ".pids", "pm-owner.pid");
+
+// the sid becomes part of a report file name and any process can write the record, so only a
+// plain token is usable: no path separator can reach the name
+const SID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
+export function writeOwner(root: string, sid: string): void {
+	const path = ownerPath(root);
+	mkdirSync(dirname(path), { recursive: true });
+	// the discriminator makes the liveness check pid-reuse-proof, as the pid files do
+	const disc = pidDiscriminator(process.pid);
+	const tmp = `${path}.tmp`;
+	writeFileSync(tmp, disc === null ? `${sid} ${process.pid}` : `${sid} ${process.pid} ${disc}`);
+	renameSync(tmp, path);
+}
+
+// the owner sid of a live process, or null: a dead pid (or a recycled one), a malformed record
+// and an unacceptable sid all read as none, and a stale record is removed
+const dropOwner = (path: string) => {
+	try {
+		rmSync(path, { force: true });
+	} catch {
+		/* already gone */
+	}
+};
+
+export function liveOwner(root: string): { sid: string } | null {
+	const path = ownerPath(root);
+	let raw: string;
+	try {
+		raw = readFileSync(path, "utf8").trim();
+	} catch {
+		return null; // no record yet
+	}
+	const [sid, pidStr, ...rest] = raw.split(/\s+/);
+	if (SID_RE.test(sid ?? "") && pidAlive(parseInt(pidStr, 10) || 0, rest.length ? rest.join(" ") : null)) return { sid };
+	dropOwner(path);
+	return null;
+}
+
+// the sid segment of an addressed report name (`<timestamp>.<sid>.md`), null for an unaddressed one
+export function reportSid(file: string): string | null {
+	const base = file.replace(/\.md$/, "");
+	const dot = base.lastIndexOf(".");
+	return dot === -1 ? null : base.slice(dot + 1);
+}
+
+// one eligibility rule for both consumers, so the extension and the Claude Code hook cannot drift:
+// a session takes its own report, an unaddressed one, and anything when no owner is registered;
+// a report addressed to another live session stays on disk for that session
+export function canTake(root: string, file: string, ownSid: string | null): boolean {
+	const sid = reportSid(file);
+	return (sid !== null && sid === ownSid) || sid === null || liveOwner(root) === null;
+}
 
 // the orchestrator-to-PM channel: on the sweep that moves one or several tasks to done, the
 // daemon queues ONE report for the PM session. The extension claims it by rename and sends it
@@ -31,11 +89,13 @@ export function composeReport(root: string, finished: Task[], scheduled: Task[])
 }
 
 // atomic write (tmp file + rename): a partial file is never claimable. The name is a sortable
-// timestamp, so lexicographic order is chronological and the extension delivers oldest first
+// timestamp plus the owner sid, so lexicographic order stays chronological and the extension
+// delivers oldest first. No live owner leaves the name unaddressed, today's work-stealing name
 export function writeReport(root: string, content: string): void {
 	const dir = reportsDir(root);
 	mkdirSync(dir, { recursive: true });
-	const name = `${new Date().toISOString().replace(/[:.]/g, "-")}.md`;
+	const owner = liveOwner(root);
+	const name = `${new Date().toISOString().replace(/[:.]/g, "-")}${owner ? `.${owner.sid}` : ""}.md`;
 	const tmp = join(dir, `.${name}.tmp`);
 	writeFileSync(tmp, content);
 	renameSync(tmp, join(dir, name));

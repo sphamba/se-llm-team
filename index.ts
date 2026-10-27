@@ -2,7 +2,7 @@ import { closeSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isLinkedWorktree, kanbanDir, listAll } from "./src/kanban.ts";
-import { REPORT_MAX_AGE_MS, reportsDir } from "./src/orchestrator/report.ts";
+import { canTake, REPORT_MAX_AGE_MS, reportsDir } from "./src/orchestrator/report.ts";
 import { TOOLS, type ToolCtx, type ToolResult } from "./src/tools.ts";
 
 const LABELS: Record<string, string> = {
@@ -28,6 +28,7 @@ export default function (pi: ExtensionAPI) {
 	// spawn, and pi as the default agent the daemon runs on a bare config
 	const toolCtx = (ctx: ExtensionContext): ToolCtx => ({
 		cwd: ctx.cwd,
+		sid: ctx.sessionManager?.getSessionId(),
 		notify: (message, level) => ctx.ui.notify(message, level),
 		defaultAgent: "pi",
 	});
@@ -68,13 +69,15 @@ export default function (pi: ExtensionAPI) {
 			/* no board watching in this session */
 		}
 	};
-	// PM report delivery: the orchestrator queues one report per done sweep in .kanban/.reports/.
-	// Every session watches the queue (same lifecycle as the board watcher); only the session at
-	// the repo root consumes it: a worktree session shares the board through the .kanban symlink,
-	// so the gate is the git-topology check of the hub candidacy rule. Consumption claims the
-	// oldest report by rename, sends it to the PM chat and deletes it: a second root session
-	// loses the rename and never double-sends
+	// PM report delivery: the orchestrator queues one report per done sweep in .kanban/.reports/,
+	// addressed to the owner session when one is registered (orchestrator_start claims it). Every
+	// session watches the queue (same lifecycle as the board watcher); only the session at the repo
+	// root consumes it: a worktree session shares the board through the .kanban symlink, so the gate
+	// is the git-topology check of the hub candidacy rule. Consumption claims one report by rename,
+	// sends it to the PM chat and deletes it: a second root session loses the rename and never
+	// double-sends, and a report addressed to another live session is never claimed at all
 	const canDeliver = (ctx: ExtensionContext) => ctx.hasUI && !isLinkedWorktree(ctx.cwd);
+	const ownSid = (ctx: ExtensionContext) => ctx.sessionManager?.getSessionId() ?? null;
 	const deliverReport = (ctx: ExtensionContext, dir: string, file: string): boolean => {
 		const claim = join(dir, `${file}.claiming`);
 		try {
@@ -94,14 +97,17 @@ export default function (pi: ExtensionAPI) {
 	const consumeReports = (ctx: ExtensionContext) => {
 		if (!canDeliver(ctx)) return;
 		const dir = reportsDir(ctx.cwd);
+		const sid = ownSid(ctx);
 		for (;;) {
-			let oldest: string | undefined;
+			let next: string | undefined;
 			try {
-				oldest = readdirSync(dir).filter((f) => f.endsWith(".md")).sort()[0];
+				next = readdirSync(dir)
+					.filter((f) => f.endsWith(".md") && canTake(ctx.cwd, f, sid))
+					.sort()[0];
 			} catch {
 				return; // no reports dir in this session
 			}
-			if (!oldest || !deliverReport(ctx, dir, oldest)) return;
+			if (!next || !deliverReport(ctx, dir, next)) return;
 		}
 	};
 	// session start at the repo root drains the queue: reports younger than the cutoff are
@@ -109,6 +115,7 @@ export default function (pi: ExtensionAPI) {
 	const drainReports = (ctx: ExtensionContext) => {
 		if (!canDeliver(ctx)) return;
 		const dir = reportsDir(ctx.cwd);
+		const sid = ownSid(ctx);
 		let files: string[];
 		try {
 			files = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
@@ -118,8 +125,10 @@ export default function (pi: ExtensionAPI) {
 		const now = Date.now();
 		for (const f of files) {
 			try {
+				// the age prune drops every aged file, addressed or not; delivery skips what the
+				// owner rule leaves to another live session
 				if (now - statSync(join(dir, f)).mtimeMs > REPORT_MAX_AGE_MS) rmSync(join(dir, f));
-				else deliverReport(ctx, dir, f);
+				else if (canTake(ctx.cwd, f, sid)) deliverReport(ctx, dir, f);
 			} catch {
 				/* vanished mid-drain */
 			}

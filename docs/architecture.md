@@ -33,7 +33,7 @@ A successful finish moves the developer to to-review. It moves the live-tester a
 
 A task file with conflict markers stays untouched. The daemon spawns no agent and writes nothing for it until the merger or the user resolves the conflict.
 
-On a sweep that moves tasks to done, the daemon queues one board report in `.kanban/.reports/`. The extension delivers it to the Project manager session. The report lists the done tasks, the promoted tasks, the live-test findings, and the PM instructions. An integration task has issuer `auto`, so the report never counts it as a finding. Only a session at the repo root receives it.
+On a sweep that moves tasks to done, the daemon queues one board report in `.kanban/.reports/`. The extension delivers it to the Project manager session. The report lists the done tasks, the promoted tasks, the live-test findings, and the PM instructions. An integration task has issuer `auto`, so the report never counts it as a finding. The report carries the session id of its owner in the file name. The owner is the session that called `orchestrator_start`, or the last session that attached to the pipeline with it. Another root session never takes the report. With no live owner, the first root session to look takes it. Only a session at the repo root consumes reports.
 
 ### Board mirror to origin
 

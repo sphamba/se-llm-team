@@ -5,15 +5,16 @@
 // are dropped, matching the pi extension drain. Zero dependencies, node >= 24.
 import { readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { REPORT_MAX_AGE_MS, reportsDir } from "../src/orchestrator/report.ts";
+import { REPORT_MAX_AGE_MS, canTake, reportsDir } from "../src/orchestrator/report.ts";
 
 // the claim by rename is the race guard, the same atomic approach the pi extension drain
 // uses: the daemon writer renames a tmp file into place, so a visible file is complete, and
 // a concurrent consumer loses the rename and never double-drains
 let dir: string;
 let files: string[];
+const root = process.cwd();
 try {
-	dir = reportsDir(process.cwd());
+	dir = reportsDir(root);
 	files = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
 } catch {
 	process.exit(0); // no reports dir: nothing pending
@@ -27,6 +28,9 @@ for (const f of files) {
 			rmSync(join(dir, f));
 			continue;
 		}
+		// no session id here: the hook takes unaddressed and orphaned reports only, and leaves a
+		// report addressed to a live owner for that session
+		if (!canTake(root, f, null)) continue;
 		renameSync(join(dir, f), claim);
 	} catch {
 		continue; // vanished or claimed mid-drain

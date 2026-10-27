@@ -37,7 +37,7 @@ function procCmdline(pid: number): string | null {
 	}
 }
 
-function pidDiscriminator(pid: number): string | null {
+export function pidDiscriminator(pid: number): string | null {
 	return procStartTicks(pid) ?? procCmdline(pid);
 }
 

@@ -12,6 +12,7 @@ import { createTask, getTask, gitWritableError, kanbanDir, listAll, listTasks, p
 import { pidAlive, procPgrp } from "./pid.ts";
 import { removeTask } from "./orchestrator.ts";
 import { loadConfig, resolveLlm } from "./orchestrator/config.ts";
+import { writeOwner } from "./orchestrator/report.ts";
 
 export interface ToolResult {
 	text: string;
@@ -24,6 +25,8 @@ export interface ToolCtx {
 	notify?: (message: string, level: "info" | "error") => void;
 	// the default agent the daemon runs when the config sets none (pi: "pi", MCP: "claude")
 	defaultAgent: string;
+	// the pi session id that owns the board reports (MCP has none, so it never claims)
+	sid?: string;
 }
 
 export interface ToolDef {
@@ -239,6 +242,15 @@ export const TOOLS: Record<string, ToolDef> = {
 			const root = resolveRoot(ctx.cwd);
 			if (!root) return ok("Not a git repository: agents cannot run without git (worktrees, branches, board commits). No orchestrator started.");
 			const pid = readPid(root);
+			// 428: the session that starts the pipeline, or attaches to it, owns the board reports.
+			// An unusable board is reported by the git check below, so the claim never throws here
+			if (ctx.sid) {
+				try {
+					writeOwner(root, ctx.sid);
+				} catch {
+					/* the next check reports the .kanban write failure */
+				}
+			}
 			// 000253: the daemon is a plain node process, so no supervisor check is needed
 			if (pid && pidAlive(pid)) return ok(`Orchestrator already running (pid ${pid})`);
 			const gitReason = gitWritableError(root);
