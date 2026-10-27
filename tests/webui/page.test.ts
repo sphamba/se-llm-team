@@ -1107,6 +1107,22 @@ const contrastOnRaised = (name: string) => {
 };
 const lightTexts = [...["backlog", "todo", "review", "merge", "live", "integration", "done"].map((n) => `--accent-${n}-text`), "--error-text"];
 assert.deepEqual(lightTexts.filter((n) => contrastOnRaised(n) < 4.5), [], "every light -text step clears 4.5:1 on the raised panel, so a tinted label reads");
+// #429 the neutral ladder: --text, --dim and --faint each clear the floor of the step they hold, on the
+// surface they sit on, and --text steps clear of --dim, so the three tones read apart in both themes
+const contrastOf = (block: string, fg: string, bg: string) => {
+	const [hi, lo] = [lumOf(themeTok(block, fg)), lumOf(themeTok(block, bg))].sort((x, y) => y - x);
+	return (hi + 0.05) / (lo + 0.05);
+};
+const neutrals = tokenBlocks.slice(0, 2);
+const perTheme = (fg: string, bg: string) => neutrals.map((b) => contrastOf(b, fg, bg));
+const dimRaised = perTheme("--dim", "--raised");
+assert.deepEqual(dimRaised.filter((r) => r < 4.5), [], `--dim clears 4.5:1 on the raised panel in both themes, so a grey label reads on a hovered card: ${dimRaised.map((r) => r.toFixed(2)).join(" ")}`);
+const textRaised = perTheme("--text", "--raised");
+assert.deepEqual(textRaised.filter((r) => r < 8), [], `--text clears 8:1 on the raised panel in both themes, so the brightest copy reads as the first step: ${textRaised.map((r) => r.toFixed(2)).join(" ")}`);
+const faintPanel = perTheme("--faint", "--panel");
+assert.deepEqual(faintPanel.filter((r) => r < 3), [], `--faint clears 3:1 on the panel in both themes, because the issuer, the stub tag and the strip title are real text: ${faintPanel.map((r) => r.toFixed(2)).join(" ")}`);
+const textStep = perTheme("--text", "--dim");
+assert.deepEqual(textStep.filter((r) => r < 1.6 || r > 2.8), [], `--text steps clear of --dim in both themes, between 1.6 and 2.8, so the grey reads below the darkest step and not as one tone: ${textStep.map((r) => r.toFixed(2)).join(" ")}`);
 
 // 25. #370 the phone layout: one breakpoint constant, media queries only, the same nodes reused as
 // sheets, and the two viewport hacks gone. The live geometry (the 44px rects, the three viewports,

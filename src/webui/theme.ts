@@ -10,8 +10,8 @@ export const MOBILE_MAX = 700;
 const SANS = `"Space Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
 const MONO = `"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace`;
 
-// the Ink black dark palette, written once and applied twice: explicit choice via data-theme, browser default via media query; the token names match the light :root block one for one
-const DARK_TOKENS = `--canvas: #05080a; --panel: #0b1118; --raised: #111a24; --hairline: #18222e; --text: #b3b1aa; --dim: #75808e; --faint: #4d5866; --link: #e6b450;
+// the Ink black dark palette, written once and applied twice: explicit choice via data-theme, browser default via media query; the token names match the light :root block one for one; #429 the bright step stays the warm Ayu Dark foreground, so the hues hold and only the luminance moves
+const DARK_TOKENS = `--canvas: #05080a; --panel: #0b1118; --raised: #111a24; --hairline: #18222e; --text: #ded9cf; --dim: #7d8896; --faint: #5b6673; --link: #e6b450;
 /* 000129: medium/critical hues widened (yellow / strong red) so the priority chips read apart; -bg tints match their fg */
 --low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252;
 --cx-trivial-bg: rgba(100, 130, 165, .18); --shine-hi: #ffffff; --overlay: rgba(0, 0, 0, .6); --code-bg: #010102;
@@ -26,8 +26,8 @@ ${themeButton(':root:not([data-theme="light"])')} }
 `;
 
 export const CSS = `* { box-sizing: border-box; }
-/* Ayu Light retuned for contrast: the same token names as the dark blocks, the -dim and -text steps carry the 4.5:1 floor */
-:root { --canvas: #fcfcfc; --panel: #ffffff; --raised: #f6f8fa; --hairline: rgba(107, 125, 143, .15); --text: #5c6166; --dim: #6f7478; --faint: #b8bbbf; --link: #f29718;
+/* #429 Ayu Light retuned for contrast, the same token names as the dark blocks: the neutral ladder reads 9:1 light and 13:1 dark for --text, 5:1 for --dim and 3:1 for --faint, all on the panel */
+:root { --canvas: #fcfcfc; --panel: #ffffff; --raised: #f6f8fa; --hairline: rgba(107, 125, 143, .15); --text: #42474c; --dim: #676c70; --faint: #8f9296; --link: #f29718;
 --low-bg: rgba(134, 179, 0, .15); --low-fg: #86b300; --medium-bg: rgba(201, 151, 0, .15); --medium-fg: #c99700; --high-bg: rgba(250, 133, 50, .15); --high-fg: #fa8532; --critical-bg: rgba(230, 80, 80, .15); --critical-fg: #e65050;
 --cx-trivial-bg: rgba(100, 130, 165, .18); --shine-hi: #ffffff; --overlay: rgba(15, 23, 42, .45); --code-bg: #ebeef0;
 /* 000353: one accent per pipeline stage and agent role, plus the failed-run red; the -text step is the darker Ayu Light ladder step that keeps a label readable on the light panel */
