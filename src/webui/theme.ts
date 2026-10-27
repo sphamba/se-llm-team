@@ -160,8 +160,7 @@ stays readable; the active card and its rimmed blockers keep full strength */
 /* #366 a card is a row, not a box: no border, no radius, no state tint, its group ends with a hairline. 000124: positioned above the z-index-1 relation lines; the semi-transparent background lets a line passing under the card show through faintly (no --card var, --panel is the card's base color in both themes) */
 .card { position: relative; z-index: 2; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 0; border-bottom: 1px solid var(--hairline); border-radius: 0; padding: var(--sp-3) var(--sp-4) var(--sp-4); cursor: pointer; }
 .card:hover { background: color-mix(in srgb, var(--raised) 85%, transparent); }
-/* 000320: a task held by the user blockedBy token pins to the top of its station and ends with its own rule; the inline held marker carries the dashed form */
-.card.user-hold { border-bottom-color: var(--dim); }
+/* 000320: a task held by the user blockedBy token pins to the top of its station; #427 the held paint is the .c-wait.held marker only, so the card keeps the shared hairline and no grey line reads as a full progress bar */
 /* 000191: genuinely new cards fade and rise in once at insertion; syncBoard adds .enter only at
 creation and the page drops it on animationend, so a poll or a reorder never replays it */
 .card.enter { animation: cardIn var(--t-slow) var(--ease-enter); }

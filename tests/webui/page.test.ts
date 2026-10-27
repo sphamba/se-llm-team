@@ -1297,3 +1297,9 @@ assert.ok(!/(?:^|\})\s*#p-prio-wrap \{[^}]*font-size/.test(themeCss), "the prior
 assert.ok(!/\.run-row\.agent-sub \.row-role/.test(themeCss), "no rule dims a sub row's role name, so the Sub-developer name keeps the developer accent");
 
 console.log("page.test.ts: all assertions passed");
+
+// #427 a held card keeps the shared row hairline: the grey dim bottom line read as a full progress bar
+const heldBorderRules = ruleBodies.filter((r) => selParts(r.sel).includes(".card.user-hold") && /(^|;)\s*border(-bottom|-bottom-color)?\s*:/.test(r.body));
+assert.deepEqual(heldBorderRules.map((r) => r.sel), [], `no rule paints a held card's border, so the shared hairline shows: ${JSON.stringify(heldBorderRules)}`);
+const plainCardBody = ruleBodies.find((r) => r.sel === ".card")!.body;
+assert.match(plainCardBody, /(^|;)\s*border-bottom: 1px solid var\(--hairline\)/, `the plain card keeps its row hairline, so a held card separates like any other: ${plainCardBody}`);
