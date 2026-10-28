@@ -292,6 +292,7 @@ const alertE = readFileSync(join(reportsDir(rootE), reportsE()[0]), "utf8");
 assert.match(alertE, /## Merge stuck/, "the alert names the stuck merge");
 assert.ok(alertE.includes(`git -C ${rootE} merge --ff-only feat/off-base`), "the recipe names the root and the branch");
 assert.ok(alertE.includes(`git -C ${rootE} stash push --include-untracked`), "the recipe stashes the root work first");
+assert.ok(alertE.includes(`status --porcelain -z --no-renames -- . ':(exclude).kanban' ':(exclude).worktrees' | cut -z -c4- | xargs -0 -r git -C ${rootE} stash push --include-untracked -m "orchestrator: merge repair" --`), "the recipe stashes only the explicit dirty paths, never the ignored board or worktree dirs");
 // the poll leaves it alone, and the Merge column stays shut for the next to-merge task
 poll(rootE, 5);
 assert.equal(parseTask(rootE, taskE.file).state, "merging", "the poll does not bounce a stuck merge");
@@ -327,21 +328,28 @@ assert.equal(parseTask(rootE2, taskE2.file).state, "to-do", "a merger question l
 assert.deepEqual(subjects(rootE2, "-1 main"), ["init"], "the root never fast-forwarded under the question");
 console.log("merge.test.ts: + merger question smoke passed");
 
-// --- part F: a dirty root checkout. Uncommitted and untracked files survive the fast-forward,
-// the merge succeeds and the stash list is empty afterwards ---
+// --- part F: a dirty root checkout with the board and the worktrees gitignored. Uncommitted,
+// untracked and staged files survive the fast-forward, the merge succeeds and the stash list is
+// empty afterwards ---
 const rootF = mergeRoot();
+writeFileSync(join(rootF, ".gitignore"), "AGENTS.md\nSPECS.md\n.kanban\n.worktrees\n");
 writeFileSync(join(rootF, "dirty.txt"), "clean\n");
-execSync("git add dirty.txt && git commit -qm dirty-base", { cwd: rootF, shell: "/bin/bash" });
+execSync("git add .gitignore dirty.txt && git commit -qm dirty-base", { cwd: rootF, shell: "/bin/bash" });
 execSync("git checkout -qb feat/dirty-root && git commit -q --allow-empty -m dirty-branch && git checkout -q main", { cwd: rootF, shell: "/bin/bash" });
 const taskF = createTask(rootF, { name: "feat: dirty root", summary: "Dirty root smoke", specs: "n/a" });
 setWorktree(rootF, taskF, "feat/dirty-root");
 setState(rootF, taskF, "to-merge");
 writeFileSync(join(rootF, "dirty.txt"), "uncommitted\n");
 writeFileSync(join(rootF, "untracked.txt"), "untracked\n");
+writeFileSync(join(rootF, "staged.txt"), "staged\n");
+execSync("git add staged.txt", { cwd: rootF, shell: "/bin/bash" });
 await drive(rootF, cfgFor(rootF, caseStub(rootF, "")));
 assert.equal(parseTask(rootF, taskF.file).state, "to-live-test", "the merge succeeds over a dirty root");
 assert.equal(readFileSync(join(rootF, "dirty.txt"), "utf8"), "uncommitted\n", "the uncommitted change survives");
 assert.equal(readFileSync(join(rootF, "untracked.txt"), "utf8"), "untracked\n", "the untracked file survives");
+assert.equal(readFileSync(join(rootF, "staged.txt"), "utf8"), "staged\n", "the staged file survives");
+assert.deepEqual(existsSync(reportsDir(rootF)) ? readdirSync(reportsDir(rootF)).filter((f) => f.endsWith(".md")) : [], [], "no merge-stuck alert for a dirty root");
+assert.ok(existsSync(join(rootF, ".kanban")), "the board state stays in place");
 assert.equal(execSync("git stash list", { cwd: rootF, encoding: "utf8" }).trim(), "", "the stash list is empty");
 assert.ok(subjects(rootF, "-1 main").includes("dirty-branch"), "the fast-forward landed");
 console.log("merge.test.ts: + dirty root smoke passed");

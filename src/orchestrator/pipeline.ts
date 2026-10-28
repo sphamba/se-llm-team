@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { isSelfWrite, kanbanDir, getTask, hasHold, listAll, PRIORITY_RANK, questionOpen, setState, setWorktree, taskFiles, taskSlug, updateAttrs, ROLE_NOTES_RE, type Task } from "../kanban.ts";
@@ -250,10 +251,12 @@ export function mergeStuck(root: string, slug: string): boolean {
 // the merge repair the PM runs by hand: an off-base branch is rebased onto the base in its
 // worktree first, because the fast-forward cannot move a base that is not an ancestor; the
 // root's own uncommitted work must then survive the fast-forward, and the board and the
-// worktrees are daemon state, never stashed with it
+// worktrees are daemon state, never stashed with it. The stash takes the same explicit dirty
+// paths as the daemon, so the ignored board and worktree dirs never trip the gitignore
+// advisory that makes a bare `.` push exit 1 after it already saved the stash
 const mergeRepairRecipe = (root: string, branch: string, base: string) => [
 	...(branch !== "(none)" && base ? [`git -C ${join(root, ".worktrees", branch)} rebase ${base}`] : []),
-	`git -C ${root} stash push --include-untracked -m "orchestrator: merge repair" -- . ':(exclude).kanban' ':(exclude).worktrees'`,
+	`git -C ${root} status --porcelain -z --no-renames -- . ':(exclude).kanban' ':(exclude).worktrees' | cut -z -c4- | xargs -0 -r git -C ${root} stash push --include-untracked -m "orchestrator: merge repair" --`,
 	`git -C ${root} merge --ff-only ${branch}`,
 	`git -C ${root} stash pop`,
 ];
@@ -276,9 +279,23 @@ function parkStuckMerge(root: string, task: Task, reason: string, base: string):
 // of the merge, and a log write into .kanban during that window breaks the stash pop for good
 const MANAGED_PATHS = [".", ":(exclude).kanban", ":(exclude).worktrees"];
 
+// the root's own dirty paths, one per status entry; the explicit list keeps the stash push off
+// the ignored-dir walk, whose advisory prints and exits 1 after the stash was already saved.
+// execFileSync, not git(): its trim would eat the leading space of the first " M path" entry
+function dirtyPaths(root: string): string[] {
+	let out: string;
+	try {
+		out = execFileSync("git", ["status", "--porcelain", "-z", "--no-renames", "--", ...MANAGED_PATHS], { cwd: root, encoding: "utf8" });
+	} catch {
+		return [];
+	}
+	return out.split("\0").filter(Boolean).map((entry) => entry.slice(3));
+}
+
 function fastForward(root: string, base: string, wt: string): boolean {
-	if (git(root, ["status", "--porcelain", "--", ...MANAGED_PATHS], true) === "") return git(root, ["merge", "--ff-only", wt], true) !== null;
-	if (git(root, ["stash", "push", "--include-untracked", "-m", `orchestrator: fast-forward to ${wt}`, "--", ...MANAGED_PATHS], true) === null) return false;
+	const dirty = dirtyPaths(root);
+	if (!dirty.length) return git(root, ["merge", "--ff-only", wt], true) !== null;
+	if (git(root, ["stash", "push", "--include-untracked", "-m", `orchestrator: fast-forward to ${wt}`, "--", ...dirty], true) === null) return false;
 	if (git(root, ["merge", "--ff-only", wt], true) === null) {
 		git(root, ["stash", "pop"], true);
 		return false;
