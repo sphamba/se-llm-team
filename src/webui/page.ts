@@ -2,7 +2,7 @@ import { PRIORITY_RANK } from "../kanban.ts";
 import { readConfigFiles, type StageFlags } from "../orchestrator/config.ts";
 export type { StageFlags };
 import { esc, inline, logFixups, md } from "./logpane.ts";
-import { agentLabel, agentStatsText, agentLive, applyCardStats, applyStages, archRowHtml, archStatsText, blockerTasks, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, groupRuns, heldToken, isHeld, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, PROGRESS_HALF_S, progressOf, relationPaths, sortStation, spinnerHtml, stationFor, statsKey, STATIONS, syncBoard, syncCardStats, taskStats, waitsOnText } from "./board.ts";
+import { agentLabel, agentStatsText, agentLive, applyCardStats, applyStages, archRowHtml, archStatsText, blockerTasks, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, groupRuns, heldToken, holdsToken, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, PROGRESS_HALF_S, progressOf, relationPaths, sortStation, spinnerHtml, stationFor, statsKey, STATIONS, syncBoard, syncCardStats, taskStats, waitsOnText } from "./board.ts";
 import { ARCHIVE_PAGE, archivePage, archiveTasks, decodeFilters, emptyFilters, encodeFilters, FILTER_COMPLEXITIES, FILTER_DEBOUNCE, FILTER_PRIORITIES, FILTERS_KEY, filterReason, filterTasks, filtersActive, filtersCount, matchesFilters, PALETTE_MAX, paletteResults } from "./filters.ts";
 import { CSS, MOBILE_MAX } from "./theme.ts";
 
@@ -92,7 +92,7 @@ ${CSS}</style>
 <div id="f-prio" class="f-group" role="group" aria-label="Priority"></div>
 <div id="f-cx" class="f-group" role="group" aria-label="Complexity"></div>
 <div class="f-group" role="group" aria-label="Issuer"><span class="f-label" aria-hidden="true">issuer</span><button id="f-user" class="f-chip" aria-pressed="false">user</button></div>
-<div class="f-group" role="group" aria-label="State"><span class="f-label" aria-hidden="true">state</span><button id="f-held" class="f-chip" aria-pressed="false">held</button><button id="f-live" class="f-chip" aria-pressed="false">live</button></div>
+<div class="f-group" role="group" aria-label="State"><span class="f-label" aria-hidden="true">state</span><button id="f-held" class="f-chip" aria-pressed="false">held</button><button id="f-question" class="f-chip" aria-pressed="false">question</button><button id="f-live" class="f-chip" aria-pressed="false">live</button></div>
 <button id="f-clear" class="f-chip" hidden>clear</button>
 <button id="f-apply" class="f-chip" onclick="closeFilters()">apply</button>
 </div>
@@ -172,6 +172,7 @@ ${curve}
 ${relationPaths}
 ${blockerTasks}
 ${heldToken}
+${holdsToken}
 ${waitsOnText}
 ${stationFor}
 // board layout and the card pass, interpolated as source so the client runs the tested code;
@@ -181,7 +182,6 @@ const PRIORITY_RANK = ${JSON.stringify(PRIORITY_RANK)};
 ${spinnerHtml}
 ${numLinkHtml}
 ${priorityRuler}
-${isHeld}
 ${agentLive}
 ${cardBaseHtml}
 ${buildShell}
@@ -263,9 +263,10 @@ function renderFilterBar() {
 	if (q && document.activeElement !== q && q.value !== filters.q) q.value = filters.q;
 	renderChips("f-prio", "priorities");
 	renderChips("f-cx", "complexities");
-	const user = document.getElementById("f-user"), held = document.getElementById("f-held"), liveEl = document.getElementById("f-live");
+	const user = document.getElementById("f-user"), held = document.getElementById("f-held"), question = document.getElementById("f-question"), liveEl = document.getElementById("f-live");
 	if (user) user.setAttribute("aria-pressed", String(filters.issuer === "user"));
 	if (held) held.setAttribute("aria-pressed", String(filters.held));
+	if (question) question.setAttribute("aria-pressed", String(filters.question));
 	if (liveEl) liveEl.setAttribute("aria-pressed", String(filters.live));
 	const clear = document.getElementById("f-clear");
 	if (clear) clear.hidden = !filtersActive(filters);
@@ -439,6 +440,7 @@ const typingTarget = el => !!el && (el.tagName === "INPUT" || el.tagName === "TE
 bind("f-q", "oninput", e => { clearTimeout(fqTimer); fqTimer = setTimeout(() => { filters.q = e.target.value.trim(); applyFilters(); }, FILTER_DEBOUNCE); });
 bind("f-user", "onclick", toggleIssuer);
 bind("f-held", "onclick", () => { filters.held = !filters.held; applyFilters(); });
+bind("f-question", "onclick", () => { filters.question = !filters.question; applyFilters(); });
 bind("f-live", "onclick", () => { filters.live = !filters.live; applyFilters(); });
 bind("f-clear", "onclick", () => clearFilters());
 bind("pal-input", "oninput", () => { palSel = 0; renderPalette(); });
@@ -714,15 +716,16 @@ const historyUrl = file => "/api/task-history?num=" + numOf(file) + projectParam
 function taskByNum(ref) {
 	return activeBoard().tasks.find(x => numOf(x.file) === parseInt(ref.replace(/^#/, ""), 10));
 }
-// the blockedBy row: the user hold leads as a held item, each stored task ref links to its card
+// the blockedBy row: a hold token leads as a held item, each stored task ref links to its card
 // when that task is on the board, and the row is dropped when the list is empty and unheld
 function blockedRow(t) {
 	const refs = String(t.blockedBy || "").split(",").map(s => s.trim()).filter(Boolean);
-	const items = refs.filter(ref => ref.toLowerCase() !== "user").map(ref => {
+	const items = refs.filter(ref => ref.toLowerCase() !== "user" && ref.toLowerCase() !== "question").map(ref => {
 		const target = taskByNum(ref);
 		return target ? numLinkHtml(target.file) : esc(ref);
 	});
-	if (isHeld(t)) items.unshift('<span class="held">held</span>');
+	if (holdsToken(t, "user")) items.unshift('<span class="held">held</span>');
+	if (holdsToken(t, "question")) items.unshift('<span class="held">question</span>');
 	if (!items.length) return "";
 	return "<div><span class='k'>blockedBy</span>" + items.join(", ") + "</div>";
 }
@@ -827,10 +830,12 @@ function factsHtml(t) {
 		blockedRow(t) +
 		"<div><span class='k'>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>";
 }
-// the actions: hold or unhold the task. The hold toggle stays outside the rebuilt facts block, so
-// a detail refresh never rebuilds it
+// the actions: hold or unhold the task, except that a question never takes the unhold button,
+// because only the answer clears that hold. The hold toggle stays outside the rebuilt facts block,
+// so a detail refresh never rebuilds it
 function actionsHtml(t) {
 	if (t.state === "done") return "";
+	if (holdsToken(t, "question") && !holdsToken(t, "user")) return "Answer the question and fold the answer into the Specs to clear it.";
 	if (isHeld(t)) return '<button class="m-action m-unblock" onclick="toggleHold(this)" title="Remove the user hold"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 1.5v9l8-4.5z" fill="currentColor"/></svg>Unhold</button>';
 	if (t.state === "merging") return "";
 	return '<button class="m-action m-block" onclick="toggleHold(this)" title="Hold this task and stop its agent"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>Hold</button>';

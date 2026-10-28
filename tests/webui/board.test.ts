@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startHub } from "../../src/hub.ts";
 import { PRIORITY_RANK, STATES } from "../../src/kanban.ts";
-import { applyStages, buildShell, cardBaseHtml, curve, DEFAULT_STAGES, flipDiff, isHeld, MOBILE_MAX, numLinkHtml, priorityRuler, PROGRESS_HALF_S, progressOf, relationPaths, sortStation, spinnerHtml, STATIONS, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats } from "../../src/webui.ts";
-import { groupRuns } from "../../src/webui/board.ts";
+import { applyStages, buildShell, cardBaseHtml, curve, DEFAULT_STAGES, flipDiff, heldToken, isHeld, MOBILE_MAX, numLinkHtml, priorityRuler, PROGRESS_HALF_S, progressOf, relationPaths, sortStation, spinnerHtml, STATIONS, syncBoard, syncCardStats, tabNames, tabsHtml, taskStats } from "../../src/webui.ts";
+import { groupRuns, holdsToken } from "../../src/webui/board.ts";
 import { esc } from "../../src/webui/logpane.ts";
 
 const root = mkdtempSync(join(tmpdir(), "webui-board-"));
@@ -228,8 +228,12 @@ assert.equal(markerOf("#4, #5, #7")?.[1], "waits on 3", "three blockers count as
 assert.equal(markerOf("#6")?.[1], "waits on 1 ✓", "a satisfied blocker is a check, not a wait");
 assert.equal(markerOf("#4, #6")?.[1], "waits on 1", "a mixed set waits on the unsatisfied blockers only");
 assert.equal(markerOf("user")?.[1], "user", "the hold marker names the stored blockedBy token, not the word held");
-assert.equal(markerOf("USER")?.[1], "USER", "and keeps the token's stored case");
+assert.equal(markerOf("USER")?.[1], "user", "#433 the hold marker lower-cases the token, so the label is stable");
 assert.equal(markerOf("user, #4")?.[1], "user waits on 1", "a held task that also waits shows the hold first, then the wait");
+assert.equal(markerOf("question")?.[1], "question", "#433 a question gets its own marker label");
+assert.equal(markerOf("question, #4")?.[1], "question waits on 1", "#433 a question that also waits shows the question first, then the wait");
+assert.ok((markerOf("question")?.[0] ?? "").includes('aria-label="waiting on an answer"'), "#433 the question marker's accessible name reads as a wait for an answer");
+assert.ok((markerOf("question")?.[0] ?? "").includes('class="c-wait held"'), "#433 the question marker keeps the hold paint, so a hold reads as a hold");
 assert.ok((markerOf("user")?.[0] ?? "").includes('aria-label="blocked by user"'), "the hold's accessible name spells the relation out instead of reading the token twice");
 assert.ok((markerOf("user, #4")?.[0] ?? "").includes('aria-label="blocked by user, waits on 1: #4"'), "a hold that also waits names both relations and the refs");
 assert.equal(markerOf("#9, junk"), null, "a ref no task resolves leaves no marker");
@@ -237,6 +241,12 @@ assert.ok((markerOf("#4, #5")?.[0] ?? "").includes('aria-label="waits on 2: #4, 
 assert.ok((markerOf("#4")?.[0] ?? "").includes('data-wait="#4"'), "the marker carries its refs as data for the popover");
 const markerCard = cardBaseHtml({ file: "000002_b.md", name: "b", priority: "low", blockedBy: "#4" }, "to-do", boardTasks);
 assert.ok(markerCard.indexOf('<div class="c-meta">') < markerCard.indexOf('class="c-wait"'), "the marker sits in the meta row, so the name and the context line stay put");
+// #433 the stuck merge lane: the hub attaches the flag from the merge-stuck marker, so the board
+// names the pending root fast-forward instead of showing a quiet merging card
+const stuckCard = cardBaseHtml({ file: "000036_s.md", name: "s", priority: "low", state: "merging", mergeStuck: true }, "merging");
+assert.ok(stuckCard.includes("merge stuck: pending root fast-forward"), "a merging task with the marker names the pending root fast-forward");
+assert.ok(!cardBaseHtml({ file: "000036_s.md", name: "s", priority: "low", state: "merging" }, "merging").includes("fast-forward"), "a merging task without the marker shows no stuck label");
+assert.ok(!cardBaseHtml({ file: "000036_s.md", name: "s", priority: "low", state: "to-live-test", mergeStuck: true }, "to-live-test").includes("fast-forward"), "the stuck label belongs to the merging state only");
 
 // relation lines: one dashed curve per stored relation between rendered cards, running from the
 // blocked task's card to the blocker's card. A done blocker, a ghost ref and a blocker with no
@@ -615,6 +625,19 @@ const heldOrders = [
 sync(heldOrders, new Set(["queue"]));
 assert.deepEqual(shown("queue"), ["000012_l.md", "000010_j.md", "000011_k.md"], "held tasks pin above the rest of their station, in priority order among themselves");
 assert.ok(isHeld({ blockedBy: "USER, #42" }) && isHeld({ blockedBy: "user" }) && !isHeld({ blockedBy: "#42" }) && !isHeld({}), "the hold test reads the user token in any case and never a task ref");
+// #433 heldToken names which hold it found, so the pin, the classes and the chips can tell the
+// manual hold from a question; both read in lower case wherever they sit in the list
+assert.equal(heldToken({ blockedBy: "USER" }), "user", "heldToken reads the user token in any case");
+assert.equal(heldToken({ blockedBy: "#4, Question" }), "question", "heldToken reads a question token mixed with a ref");
+assert.equal(heldToken({ blockedBy: "#4" }), "", "heldToken never reads a task ref as a hold");
+assert.equal(heldToken({}), "", "heldToken is empty without a blockedBy");
+assert.ok(isHeld({ blockedBy: "question" }), "a question is still a hold, so the card shows its marker and the filter state renders");
+// #433 only the manual hold pins: a question waits where it is
+const questionOrders = [
+	{ file: "000013_m.md", name: "m", priority: "low", state: "backlog", updated: 1, blockedBy: "question" },
+	{ file: "000014_n.md", name: "n", priority: "critical", state: "backlog", updated: 9 },
+];
+assert.deepEqual(sortStation([...questionOrders]).map((t) => t.file), ["000014_n.md", "000013_m.md"], "a question task does not pin to the top of its station");
 // #408 a task with a running agent pins above the rest of its station, the hold and the priority included
 const liveOn = [{ role: "developer", run: 0, alive: true, status: "live", handle: "h" }];
 const liveOrders = [
@@ -642,25 +665,29 @@ sync([heldTask("000031_h.md", ""), heldTask("000032_i.md", "USER, #42"), heldTas
 assert.ok(!heldOf("000031_h.md").includes("user-hold") && heldOf("000032_i.md").includes("user-hold") && !heldOf("000033_j.md").includes("user-hold"), "the next pass drops the class once the token is gone, a still-held card stays held, a task ref alone never holds");
 assert.ok(!els.get("000031_h.md")!.innerHTML.includes("c-wait"), "and drops the held marker with it");
 assert.equal(els.get("000031_h.md")!.className, "card enter", "the toggle neither replays nor loses the one-shot entrance class");
+// #433 the two holds take two card classes, so each can read apart from the other
+sync([heldTask("000034_q.md", "question"), heldTask("000035_r.md", "user")]);
+assert.ok(heldOf("000034_q.md").includes("question-hold") && !heldOf("000034_q.md").includes("user-hold"), "a question task gets the question-hold class and never the user hold class");
+assert.ok(heldOf("000035_r.md").includes("user-hold") && !heldOf("000035_r.md").includes("question-hold"), "a user hold gets the user-hold class and never the question class");
 
 // a held ref draws no relation line and prints as plain escaped text in the detail card
 assert.equal(relationPaths([{ file: "000002_b.md", state: "to-do", blockedBy: "user" }], rectOf).length, 0, "a `user` ref draws no relation line");
-const blockedRowOf = new Function("esc", "numLinkHtml", "taskByNum", "isHeld", page.match(/function blockedRow\(t\) \{[\s\S]*?\n\}/)![0] + "; return blockedRow;")(
+const blockedRowOf = new Function("esc", "numLinkHtml", "taskByNum", "holdsToken", page.match(/function blockedRow\(t\) \{[\s\S]*?\n\}/)![0] + "; return blockedRow;")(
 	esc,
 	numLinkHtml,
 	(ref: string) => (ref === "#42" ? { file: "000042_x.md" } : undefined),
-	isHeld,
+	holdsToken,
 ) as (t: any) => string;
 assert.equal(blockedRowOf({ blockedBy: "user" }), `<div><span class='k'>blockedBy</span><span class="held">held</span></div>`, "the hold leads the blockedBy row and the bare token never prints");
 assert.equal(blockedRowOf({ blockedBy: "user, #42" }), `<div><span class='k'>blockedBy</span><span class="held">held</span>, <span class="num-link" data-task="000042_x.md">#42</span></div>`, "a held ref mixes with a linked task ref, held first");
 
 // #396 the facts block carries the state slug alone and no separate hold row: the hold shows in the
 // blockedBy row that blockedRow builds
-const factsHtmlOf = new Function("esc", "numOf", "STATIONS", "isHeld", "issuerCell", "blockedRow", page.match(/function factsHtml\(t\) \{[\s\S]*?\n\}/)![0] + "; return factsHtml;")(
+const factsHtmlOf = new Function("esc", "numOf", "STATIONS", "holdsToken", "issuerCell", "blockedRow", page.match(/function factsHtml\(t\) \{[\s\S]*?\n\}/)![0] + "; return factsHtml;")(
 	esc,
 	(f: string) => parseInt(f.slice(0, 6), 10),
 	STATIONS,
-	isHeld,
+	holdsToken,
 	() => "user",
 	blockedRowOf,
 ) as (t: any) => string;

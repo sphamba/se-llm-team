@@ -206,10 +206,14 @@ export const STATIONS: readonly Station[] = [
 	{ id: "done", label: "Done", states: ["done"], accent: "done", empty: "nothing finished yet" },
 ];
 
-// 000320/#408 the user hold: the stored blockedBy `user` token, any case and trimmed, alone or mixed
-// with task refs; the marker prints it and the hold test reads it, so one parse feeds both
+// #433 the two hold tokens the board reads: `user` is a manual hold and `question` waits for an
+// answer. One parse feeds the marker, the classes, the chips and the pin, so they never disagree
+export function holdsToken(t: Task, token: string) {
+	return String(t.blockedBy || "").split(",").some((r) => r.trim().toLowerCase() === token);
+}
+
 export function heldToken(t: Task) {
-	return String(t.blockedBy || "").split(",").map((r) => r.trim()).find((r) => r.toLowerCase() === "user") ?? "";
+	return String(t.blockedBy || "").split(",").map((r) => r.trim().toLowerCase()).find((r) => r === "user" || r === "question") ?? "";
 }
 
 export function isHeld(t: Task) {
@@ -222,13 +226,14 @@ export function stationFor(state: string) {
 	return STATIONS.find((s) => s.states.includes(state))?.label ?? state;
 }
 
-// #373 the stored blockedBy refs resolved against the board's task list, in stored order: the
-// `user` token is a hold and not a task, and a ref that resolves to no task is junk, so both drop
+// #373 the stored blockedBy refs resolved against the board's task list, in stored order: a hold
+// token is not a task, and a ref that resolves to no task is junk, so both drop
 export function blockerTasks(t: Task, all: Task[] = []) {
 	const out: Task[] = [];
 	for (const raw of String(t.blockedBy || "").split(",")) {
 		const ref = raw.trim();
-		if (!ref || ref.toLowerCase() === "user") continue;
+		const token = ref.toLowerCase();
+		if (!ref || token === "user" || token === "question") continue;
 		const num = parseInt(ref.replace(/^#/, ""), 10);
 		const hit = all.find((x) => parseInt(x.file, 10) === num);
 		if (hit && !out.includes(hit)) out.push(hit);
@@ -251,14 +256,14 @@ export function agentLive(t: Task) {
 	return (t.agents || []).some((a) => a.alive);
 }
 
-// the station's rows in board order: a live task pins first, then a held one, then priority-desc,
+// the station's rows in board order: a live task pins first, then a manual hold, then priority-desc,
 // then update-desc; the sort is stable and the payload arrives in task-number order, so equal keys
 // keep that order. syncBoard and the payload's eager card set share it. #374 the done station passes
 // byRecency, so it answers "what just landed": newest update first, and a done task never has a live
-// agent, so the live key stays out of that order
+// agent, so the live key stays out of that order. #433 only `user` pins: a question waits in place
 export function sortStation(tasks: Task[], { byRecency = false }: { byRecency?: boolean } = {}): Task[] {
 	if (byRecency) return tasks.sort((a, b) => b.updated - a.updated);
-	return tasks.sort((a, b) => (agentLive(b) ? 1 : 0) - (agentLive(a) ? 1 : 0) || (isHeld(b) ? 1 : 0) - (isHeld(a) ? 1 : 0) || (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) || b.updated - a.updated);
+	return tasks.sort((a, b) => (agentLive(b) ? 1 : 0) - (agentLive(a) ? 1 : 0) || (heldToken(b) === "user" ? 1 : 0) - (heldToken(a) === "user" ? 1 : 0) || (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) || b.updated - a.updated);
 }
 
 // the liveness mark (#389 a pulsing square) marks a task the orchestrator is working on; a task that
@@ -290,8 +295,11 @@ export function cardBaseHtml(t: Task, st: string, all: Task[] = []) {
 	const hold = heldToken(t);
 	const text = waitsOnText(t, all);
 	const rest = text.slice(hold.length).trim();
+	// #433 the stuck merge marker is a row flag the hub attaches: while the root fast-forward is
+	// pending, the merging card says so instead of reading as quiet work in progress
+	const stuck = st === "merging" && (t as Task & { mergeStuck?: boolean }).mergeStuck === true;
 	// the visible marker names the hold; the accessible name spells the relation out, never `user: user`
-	const name = [hold ? "blocked by " + hold : "", rest ? rest + ": " + refs.filter((r) => r.toLowerCase() !== "user").join(", ") : ""].filter(Boolean).join(", ");
+	const name = [hold ? (hold === "question" ? "waiting on an answer" : "blocked by " + hold) : "", rest ? rest + ": " + refs.filter((r) => r.toLowerCase() !== "user" && r.toLowerCase() !== "question").join(", ") : ""].filter(Boolean).join(", ");
 	return (
 		'<div class="c-top">' +
 		spinnerHtml(st) +
@@ -310,6 +318,7 @@ export function cardBaseHtml(t: Task, st: string, all: Task[] = []) {
 		(text
 			? '<button type="button" class="c-wait' + (hold ? " held" : "") + '" data-wait="' + esc(refs.join(",")) + '" aria-label="' + esc(name) + '">' + esc(text) + "</button>"
 			: "") +
+		(stuck ? '<span class="held">merge stuck: pending root fast-forward</span>' : "") +
 		"</div>"
 	);
 }
@@ -583,9 +592,10 @@ export function syncBoard(stations, tasks, expanded, els, make, visible, doc, re
 			// #364: the card's own hooks, refreshed every pass, so a reader finds it by data-num and data-state
 			el.dataset.num = String(parseInt(t.file, 10));
 			el.dataset.state = t.state;
-			// 000320: the `user` blockedBy token holds the task, so the toggle runs every pass: a poll
-			// adds and removes the held marker live, and the one-shot "enter" class stays untouched
-			el.classList.toggle("user-hold", isHeld(t));
+			// #433 the two holds take two classes, so each reads on its own; both toggle every pass, so a
+			// poll adds and removes the marker live, and the one-shot "enter" class stays untouched
+			el.classList.toggle("user-hold", holdsToken(t, "user"));
+			el.classList.toggle("question-hold", holdsToken(t, "question"));
 			// #369 the running hook every pass: the live policy draws the progress line on it, and a
 			// toggle never rewrites the card, so the tick keeps its node
 			el.classList.toggle("running", spinnerHtml(t.state) !== "");

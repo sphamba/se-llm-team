@@ -301,6 +301,7 @@ async function taskBlock(
 	if (!entry || !task) return fail(404, "unknown task");
 	const refs = withoutUserHold(task.blockedBy);
 	if (action === "unblock") {
+		// #433 an unblock clears the manual hold only: a question token stays until the answer lands
 		updateAttrs(entry.root, task, { blockedBy: refs.join(", ") });
 		pokeDaemon(entry.root);
 		return json(res, { ok: true });
@@ -424,7 +425,10 @@ async function route(
 		if (!entry) {
 			res.writeHead(404).end(); // unknown projects are rejected
 		} else {
-			json(res, await webui.taskPayload(entry.root));
+			const rows = await webui.taskPayload(entry.root);
+			// #433 the merge-stuck marker is daemon state on disk, so the hub reads it and attaches the
+			// flag; the board cannot stat a file and only renders the labels
+			json(res, rows.map((row) => (row.state === "merging" && existsSync(join(kanbanDir(entry.root), ".logs", `${taskSlug(row.file)}.merge-stuck`)) ? { ...row, mergeStuck: true } : row)));
 		}
 	} else if (req.method === "GET" && path === "/api/task-detail") {
 		// 000242, 000248: the light per-task detail (body, sections, attributes, no log parsing),

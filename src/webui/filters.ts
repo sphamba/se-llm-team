@@ -2,7 +2,7 @@
 // palette search and the archive paging. PAGE interpolates this source as client code.
 
 import { COMPLEXITIES, PRIORITY_RANK, type Task } from "../kanban.ts";
-import { isHeld } from "./board.ts";
+import { holdsToken } from "./board.ts";
 
 export const FILTERS_KEY = "boardFilters";
 export const FILTER_DEBOUNCE = 120;
@@ -17,17 +17,18 @@ export interface FilterState {
 	complexities: string[];
 	issuer: string;
 	held: boolean;
+	question: boolean;
 	live: boolean;
 }
 
 export function emptyFilters(): FilterState {
-	return { q: "", priorities: [], complexities: [], issuer: "", held: false, live: false };
+	return { q: "", priorities: [], complexities: [], issuer: "", held: false, question: false, live: false };
 }
 
 // the URL's ?f= value: one compact JSON object, utf-8 safe because a query can carry any character,
 // never a name or a summary, so a link stays short
 export function encodeFilters(f: FilterState): string {
-	const bytes = new TextEncoder().encode(JSON.stringify({ q: f.q, pr: f.priorities, cx: f.complexities, i: f.issuer, h: f.held, l: f.live }));
+	const bytes = new TextEncoder().encode(JSON.stringify({ q: f.q, pr: f.priorities, cx: f.complexities, i: f.issuer, h: f.held, qn: f.question, l: f.live }));
 	let bin = "";
 	for (const b of bytes) bin += String.fromCharCode(b);
 	return btoa(bin);
@@ -55,17 +56,18 @@ export function decodeFilters(raw: unknown): FilterState {
 	f.priorities = pick(obj.pr, (s) => FILTER_PRIORITIES.includes(s));
 	f.complexities = pick(obj.cx, (s) => FILTER_COMPLEXITIES.includes(s));
 	f.held = obj.h === true;
+	f.question = obj.qn === true;
 	f.live = obj.l === true;
 	return f;
 }
 
 export function filtersActive(f: FilterState): boolean {
-	return !!(f.q || f.priorities.length || f.complexities.length || f.issuer || f.held || f.live);
+	return !!(f.q || f.priorities.length || f.complexities.length || f.issuer || f.held || f.question || f.live);
 }
 
 // #370 the phone filter button's badge: one count per active dimension, the empty set at 0
 export function filtersCount(f: FilterState): number {
-	return (f.q ? 1 : 0) + f.priorities.length + f.complexities.length + (f.issuer ? 1 : 0) + (f.held ? 1 : 0) + (f.live ? 1 : 0);
+	return (f.q ? 1 : 0) + f.priorities.length + f.complexities.length + (f.issuer ? 1 : 0) + (f.held ? 1 : 0) + (f.question ? 1 : 0) + (f.live ? 1 : 0);
 }
 
 // the membership test: the query reads the name, the summary and the number (a leading # is
@@ -74,7 +76,8 @@ export function matchesFilters(t: Task, f: FilterState): boolean {
 	if (f.priorities.length && !f.priorities.includes(t.priority)) return false;
 	if (f.complexities.length && !f.complexities.includes(t.complexity)) return false;
 	if (f.issuer && (t.issuer || "user") !== f.issuer) return false;
-	if (f.held && !isHeld(t)) return false;
+	if (f.held && !holdsToken(t, "user")) return false;
+	if (f.question && !holdsToken(t, "question")) return false;
 	if (f.live && !(t.agents || []).some((a) => a.alive)) return false;
 	const q = f.q.trim().toLowerCase();
 	if (!q) return true;
@@ -95,6 +98,7 @@ export function filterReason(f: FilterState): string {
 	if (f.complexities.length) parts.push(f.complexities.join("|"));
 	if (f.issuer) parts.push(f.issuer);
 	if (f.held) parts.push("held");
+	if (f.question) parts.push("question");
 	if (f.live) parts.push("live");
 	return parts.length ? "no task matches: " + parts.join(", ") : "";
 }
