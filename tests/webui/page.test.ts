@@ -1328,6 +1328,11 @@ assert.ok(!/(?:^|\})\s*#p-prio-wrap \{[^}]*font-size/.test(themeCss), "the prior
 // #426 a subagent name takes its run's role accent, exactly like its parent
 assert.ok(!/\.run-row\.agent-sub \.row-role/.test(themeCss), "no rule dims a sub row's role name, so the Sub-developer name keeps the developer accent");
 
+// #443 a disabled stage dims its head too: the column name rides the same rule as the cards and
+// the count, and the liveness dot sits inside the h2, so one rule greys both
+assert.match(themeCss, /\.station\.dim [^{}]*\.st-head h2[^{}]*\{[^}]*opacity: \.4/, "a dim station dims its head name, so a disabled column greys its label like its cards");
+assert.ok(page.includes("h2.appendChild(dot)"), "the head liveness dot sits inside the h2, so the head dim rule greys it too");
+
 console.log("page.test.ts: all assertions passed");
 
 // #427 a held card keeps the shared row hairline: the grey dim bottom line read as a full progress bar

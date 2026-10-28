@@ -147,8 +147,8 @@ stays readable; the active card and its rimmed blockers keep full strength */
 /* #385 the scrollbar inset would push a scrolled card off the separator, so the wheel, the trackpad and the keyboard do the scrolling */
 .station .cards { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; scrollbar-width: none; }
 .station .cards::-webkit-scrollbar { width: 0; }
-/* a disabled stage dims its station but keeps the cards reachable */
-.station.dim .cards, .station.dim .count { opacity: .4; }
+/* a disabled stage dims its station but keeps the cards reachable; #443 the head name dims with them, and the head dot rides inside the h2 so it dims too */
+.station.dim .cards, .station.dim .count, .station.dim .st-head h2 { opacity: .4; }
 .count { font-size: 2rem; font-weight: 500; font-family: ${MONO}; font-variant-numeric: tabular-nums; color: var(--dim); }
 /* #366 a card is a row, not a box: no border, no radius, no state tint, its group ends with a hairline. 000124: positioned above the z-index-1 relation lines; the semi-transparent background lets a line passing under the card show through faintly (no --card var, --panel is the card's base color in both themes) */
 .card { position: relative; z-index: 2; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 0; border-bottom: 1px solid var(--hairline); border-radius: 0; padding: var(--sp-3) var(--sp-4) var(--sp-4); cursor: pointer; }
