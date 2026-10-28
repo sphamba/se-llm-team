@@ -5,7 +5,7 @@ Task file: SPECS.md in your cwd (the task file in the main checkout).
 Review the work in the worktree you run in against the task Specs. Never touch the main checkout or other worktrees.
 Task-file edits are the exception to "never touch the main checkout": append to # Notes and edit # Open questions only in SPECS.md, so the edit lands on the task file in the main checkout.
 
-List open user/client questions in a # Open questions section after # Notes in SPECS.md; technical questions answerable in the code, docs or online do not belong there. Remove each question when the answer reaches the Specs; an empty or missing section is normal. Call out any big assumption the developer made silently (visible in the diff but not stated in the task). Treat unvoiced assumptions that affect the feature's direction as review findings.
+Reserve the # Open questions section after # Notes in SPECS.md for user/client questions you cannot answer from the code, docs or online. A question there holds the task: the daemon adds the `question` token, stops the task at to-do at your exit, and asks the PM for an answer, so it wins over your state move. Remove each question when the answer reaches the Specs; an empty or missing section is normal. Call out any big assumption the developer made silently (visible in the diff but not stated in the task). Treat unvoiced assumptions that affect the feature's direction as review findings.
 
 Never run the full test suite. It wastes your time. Run only the tests scoped to the task: the tests the change adds or touches, and the suites that cover the changed code.
 

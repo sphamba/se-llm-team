@@ -17,17 +17,21 @@ The orchestrator also reads the project root's `AGENTS.md`. When it exists and i
 | Live-tester | the task worktree | [agents/live-tester.md](../agents/live-tester.md) |
 | Doctor | the task worktree | [agents/doctor.md](../agents/doctor.md) |
 
-The Merger rebases the task branch onto the base branch, resolves the conflicts, and runs the full project test suite in its worktree. The daemon only proves that result and fast-forwards the root checkout to that branch.
+The Merger rebases the task branch onto the base branch, resolves the conflicts, and runs the full project test suite in its worktree. The daemon only proves that result and fast-forwards the root checkout to that branch. A merger that gives up on the rebase leaves the task in merging and writes `.kanban/.logs/<slug>.merge-stuck` with the reason, the branch and the base. That marker blocks the whole merge lane. The daemon reports the hand-repair recipe, and the sweep moves the task to to-live-test after the root fast-forward.
+
+A non-empty `# Open questions` section holds the task. The sweep adds the `question` token to `blockedBy`, moves the task to to-do at the agent exit, and queues one PM report. `question` holds the task like the `user` manual hold: it starts no stage. A `question` token on a done task does not reopen it. `kanban_create` never adds the token: the sweep adds it at its next pass.
 
 Agent logs live in `.kanban/.logs/`. The web UI renders them readably. The orchestrator reads the role prompt from `agents/` in its own checkout at each spawn. A prompt fix on a task branch applies only after that branch merges.
 
-Agents append notes to the task file directly. On a successful finish, the orchestrator moves the developer to to-review and the live-tester to done. A merger leaves the task in merging, and the orchestrator then proves the rebase and moves it to to-live-test. The Reviewer sets its own states: to-merge on approval, to-review after fixes, to-do on a Specs violation. The Live-tester ends with a finish message that reports its findings. It creates no task and moves no state. A Doctor pass follows every successful run of the developer, reviewer, merger, and live-tester. It rewrites that role's notes file.
+Agents append notes to the task file directly. On a successful finish, the orchestrator moves the developer to to-review and the live-tester to done. A merger leaves the task in merging, and the orchestrator then proves the rebase and moves it to to-live-test. The Reviewer sets its own states: to-merge on approval, to-review after fixes, to-do on a Specs violation. The Live-tester ends with a finish message that reports its findings, and it names the task numbers it filed. It moves no state. It files each defect as a new task with `kanban_create`, with `issuer` set to `#<num>` of the tested task. It never writes an open question on the tested task: when a finding needs a user decision, the same `kanban_create` call carries `openQuestions` and `blockedBy: "question"`. An environment problem stays in its own `# Notes`. A Doctor pass follows every successful run of the developer, reviewer, merger, and live-tester. It rewrites that role's notes file.
 
 ## Tools
 
 The PM session gets 13 kanban and orchestrator tools: `kanban_list`, `kanban_get`, `kanban_create`, `kanban_update`, `kanban_set_state`, `kanban_set_worktree`, `kanban_delete`, `kanban_mark_processed`, `orchestrator_start`, `orchestrator_status`, `orchestrator_stop`, `orchestrator_poke`, and `efficiency_analysis` (the run-analysis tool that turns one agent log into a markdown report, see [src/tools.ts:316](../src/tools.ts)).
 
 `kanban_get`, `kanban_update`, and `kanban_set_state` take an optional `file`. When omitted, the task resolves from the session cwd through the `SPECS.md` symlink. With no `SPECS.md` in the cwd, the tool reports `no task; pass the file name or run from a worktree with SPECS.md`.
+
+`kanban_update` takes `openQuestions` with replace semantics. Clearing the section with `openQuestions: ""` requires `specs` in the same call, so an answer never disappears without landing in the Specs. The PM answers, folds the answer into the Specs, then clears the section. The sweep removes the `question` token when the section is empty.
 
 `kanban_delete` removes a mistaken task. It deletes the task file and commits a whole-board mirror snapshot in one operation. The daemon cannot restore the task. Never delete a board file by hand, because the daemon restores hand-deleted files from the mirror. `kanban_mark_processed` records that the PM handled a done task.
 
