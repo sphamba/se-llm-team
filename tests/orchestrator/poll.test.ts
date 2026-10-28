@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn, execSync, type ChildProcess } from "node:child_process";
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask, kanbanDir, parseTask, setState, setWorktree, taskSlug } from "../../src/kanban.ts";
 import { loadConfig, poll } from "../../src/orchestrator.ts";
-import { rescan } from "../../src/orchestrator/pipeline.ts";
+import { rescan, stuckPath } from "../../src/orchestrator/pipeline.ts";
 import { agentPid, pidAlive, pidPath } from "../../src/pid.ts";
-import { exitFilePath, readExitCode, spawnAgent } from "../../src/orchestrator/spawn.ts";
+import { exitFilePath, readExitCode, spawnAgent, writeMergerSlug } from "../../src/orchestrator/spawn.ts";
 import { fixture, roleStub, deadStub, runDaemon, waitFor, cleaned } from "../helpers.ts";
 
 // --- part B: dead agents bounce unconditionally; past the respawn cap the fresh spawn waits for the idle cooldown ---
@@ -401,3 +401,37 @@ poll(rootAT, 5);
 assert.equal(parseTask(rootAT, taskAT.file).state, "to-review", "the second poll in to-review does not bounce again");
 assert.ok(!orchLogAT().includes("agent pid=0 dead without state update"), "no spurious dead-pid bounce for the pid-less to-review task");
 console.log("orchestrator.test.ts: ... + exit-code file smoke passed");
+
+// --- part AU2: a stuck merge is never bounced. The lane-mismatch pass and the dead-pid pass
+// both leave the task in merging while the repair marker exists, and each bounces as today
+// without it ---
+const rootAU2 = fixture();
+cleaned.push(rootAU2);
+mkdirSync(kanbanDir(rootAU2), { recursive: true });
+const taskAU2 = createTask(rootAU2, { name: "feat: stuck merge poll", summary: "Stuck merge smoke", specs: "n/a" });
+setWorktree(rootAU2, taskAU2, "feat/stuck");
+setState(rootAU2, taskAU2, "merging");
+const slugAU2 = taskSlug(taskAU2.file);
+const stuckAU2 = stuckPath(rootAU2, slugAU2);
+// no marker: a merger slug that names another task bounces the task, as before
+writeMergerSlug(rootAU2, "999999_other_task");
+poll(rootAU2, 5);
+assert.equal(parseTask(rootAU2, taskAU2.file).state, "to-merge", "a superseded lane bounces without the marker");
+// the marker: the same pass leaves the task in merging
+mkdirSync(join(kanbanDir(rootAU2), ".logs"), { recursive: true });
+writeFileSync(stuckAU2, "the branch does not sit on the base branch\nfeat/stuck\nmain\n");
+setState(rootAU2, taskAU2, "merging");
+poll(rootAU2, 5);
+assert.equal(parseTask(rootAU2, taskAU2.file).state, "merging", "the lane-mismatch pass leaves a stuck merge alone");
+// a dead merger with the marker: the dead-pid pass leaves it in merging too
+writeMergerSlug(rootAU2, slugAU2);
+writeFileSync(pidPath(rootAU2, "merger"), "999999 123");
+writeFileSync(exitFilePath(rootAU2, "merger"), "7");
+poll(rootAU2, 5);
+assert.equal(parseTask(rootAU2, taskAU2.file).state, "merging", "the dead-pid pass leaves a stuck merge alone");
+assert.ok(!existsSync(pidPath(rootAU2, "merger")), "the dead merger's pid file is still consumed");
+// without the marker the dead merger bounces as today
+rmSync(stuckAU2);
+poll(rootAU2, 5);
+assert.equal(parseTask(rootAU2, taskAU2.file).state, "to-merge", "a crashed merger with no marker bounces to to-merge");
+console.log("orchestrator.test.ts: ... + stuck merge holds the poll smoke passed");

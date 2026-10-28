@@ -1,11 +1,11 @@
 import { readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { getTask, kanbanDir, listAll, setState, taskSlug, type Task, type TaskState } from "../kanban.ts";
+import { getTask, heldToken, kanbanDir, listAll, setState, taskSlug, type Task, type TaskState } from "../kanban.ts";
 import { clearPid, killTree, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP } from "./config.ts";
 import { armedPath, bumpCounter, classifyRunLog, compactFinishedLogs, counterPath, log, logPath, newestRunLogPath, newestRunRole, nextRunIndex, readCounter } from "./log.ts";
 import { clearContextSymlinks, clearExitFile, readExitCode, readMergerSlug, spawnRunAnalysis } from "./spawn.ts";
-import { dropDoneBlockers, finishMerge, promoteBacklog } from "./pipeline.ts";
+import { dropDoneBlockers, finishMerge, mergeStuck, promoteBacklog } from "./pipeline.ts";
 
 // the working states with an agent out: next is the one-state-back bounce target when the
 // agent dies, failure is the bounce target of a run that ended in a terminal error (the same
@@ -133,6 +133,13 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 			const lane = LANES[task.state];
 			if (lane && readMergerSlug(root, lane.pid) !== slug) {
 				dropLogSamples(slug);
+				// a stuck merge keeps its state: the marker is the repair signal, and a bounce would
+				// hide it behind a fresh to-merge and a new merger run
+				if (mergeStuck(root, slug)) {
+					ended = true;
+					log(root, `${slug}: ${task.state} run superseded, the merge is stuck, left in ${task.state}`);
+					continue;
+				}
 				// re-read + state-match: a task that moved on underneath (PM or user) wins
 				const fresh = getTask(root, task.file);
 				if (fresh && fresh.state === task.state) {
@@ -217,13 +224,14 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 					const fresh = getTask(root, task.file);
 					if (fresh && fresh.state === task.state) finishMerge(root, fresh);
 				} else if (working.success) {
-					// the orchestrator owns the state move (developer -> to-review, merger ->
-					// to-merge, live-tester -> done). Re-read + state-match: a task that moved on
-					// underneath (PM or user) wins
+					// the orchestrator owns the state move (developer -> to-review, live-tester -> done).
+					// Re-read + state-match: a task that moved on underneath (PM or user) wins
 					const fresh = getTask(root, task.file);
 					if (fresh && fresh.state === task.state) {
-						setState(root, fresh, working.success);
-						log(root, `${slug}: agent exited 0, ${task.state} -> ${working.success}`);
+						// an open question outranks the lane's success: the answer comes first
+						const next = heldToken(fresh.blockedBy) === "question" ? "to-do" : working.success;
+						setState(root, fresh, next);
+						log(root, `${slug}: agent exited 0, ${task.state} -> ${next}`);
 					}
 				} else if (getTask(root, task.file)?.state === "reviewing") {
 					// the reviewer sets the state itself; exit 0 with the task still in reviewing
@@ -243,7 +251,16 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 			// a classified terminal error, or a non-zero or missing exit code: a failed run, today's
 			// dead-pid bounce. The bounce is unconditional: a frozen mid-flight task is worse than
 			// a bounced one
-			const target = failedRun ? (working.failure ?? working.next) : working.next;
+			// a stuck merge is no crash to bounce: the branch sits off the base and only the PM's
+			// repair moves it, so the task stays in merging and the lane stays blocked
+			if (task.state === "merging" && mergeStuck(root, slug)) {
+				ended = true;
+				log(root, `${slug}: merger gone, the merge is still stuck, left in merging`);
+				continue;
+			}
+			// an open question outranks the crash bounce too: the task waits for the answer
+			const fresh = getTask(root, task.file);
+			const target = fresh && heldToken(fresh.blockedBy) === "question" ? "to-do" : failedRun ? (working.failure ?? working.next) : working.next;
 			log(
 				root,
 				failedRun

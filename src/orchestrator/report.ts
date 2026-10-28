@@ -83,9 +83,69 @@ export function composeReport(root: string, finished: Task[], scheduled: Task[])
 	}
 	parts.push("", "## Instructions for the Project manager");
 	parts.push('- Create new tasks based on the findings above (kanban_create; issuer "#<num>" of the task whose live test produced the finding).');
-	parts.push('- Ask the user every open question above immediately via the structured question dialogs; fold each answer into the finding task\'s Specs with kanban_update, then clear the section (openQuestions: "") so the orchestrator promotes the task.');
 	parts.push("- After processing, mark the done tasks processed with kanban_mark_processed, so future PM sessions know they were handled.");
 	return `${parts.join("\n")}\n`;
+}
+
+export type Alert =
+	| { kind: "waiting"; tasks: Task[] }
+	| { kind: "merge-stuck"; task: Task; reason: string; branch: string; recipe: string[] }
+	| { kind: "detached-root"; task: Task };
+
+// one composer for the three PM alerts: the title names the repair the PM owns
+// the waiting report is the daemon's own channel for the question hold, so the done report no
+// longer sends the PM hunting questions on done tasks
+export function composeAlert(alert: Alert): string {
+	if (alert.kind === "waiting") {
+		const parts = [
+			"# Board alert",
+			"",
+			"## Waiting on an answer",
+			"",
+			'The tasks below wait for an answer. Ask the user every question above its task, fold the answer into the task\'s Specs with `specs`, then clear the section with `openQuestions: ""` in the same `kanban_update` call.',
+		];
+		for (const t of alert.tasks) parts.push("", `### ${t.name} (${t.file})`, "", t.openQuestions);
+		return `${parts.join("\n")}\n`;
+	}
+	if (alert.kind === "merge-stuck") {
+		return [
+			"# Board alert",
+			"",
+			"## Merge stuck",
+			"",
+			`- ${alert.task.name} (${alert.task.file}): ${alert.reason}`,
+			`- branch: ${alert.branch}`,
+			"",
+			"The Merge column waits for this task. Repair the root checkout by hand:",
+			"",
+			"```",
+			...alert.recipe,
+			"```",
+			"",
+			"The sweep releases the task once the branch sits on the base branch.",
+			"",
+		].join("\n");
+	}
+	return [
+		"# Board alert",
+		"",
+		"## Root checkout detached",
+		"",
+		`- ${alert.task.name} (${alert.task.file})`,
+		"",
+		"The merger has no base branch to rebase onto. Put the root checkout back on a branch; the task waits in to-merge meanwhile.",
+		"",
+	].join("\n");
+}
+
+// an alert never breaks the sweep: a failed write goes to the log and the next pass retries
+// nothing, because the board is still the state that a later reconcile reads
+export function queueAlert(root: string, alert: Alert): void {
+	try {
+		writeReport(root, composeAlert(alert));
+	} catch (err) {
+		log(root, `board alert write failed: ${err instanceof Error ? err.message : err}`);
+	}
 }
 
 // atomic write (tmp file + rename): a partial file is never claimable. The name is a sortable
@@ -95,7 +155,11 @@ export function writeReport(root: string, content: string): void {
 	const dir = reportsDir(root);
 	mkdirSync(dir, { recursive: true });
 	const owner = liveOwner(root);
-	const name = `${new Date().toISOString().replace(/[:.]/g, "-")}${owner ? `.${owner.sid}` : ""}.md`;
+	const base = new Date().toISOString().replace(/[:.]/g, "-");
+	// two reports in the same millisecond (a waiting alert and a done report) must not overwrite:
+	// the suffix keeps the name unique, and reportSid still reads the sid segment
+	let name = `${base}${owner ? `.${owner.sid}` : ""}.md`;
+	for (let i = 1; existsSync(join(dir, name)); i++) name = `${base}-${i}${owner ? `.${owner.sid}` : ""}.md`;
 	const tmp = join(dir, `.${name}.tmp`);
 	writeFileSync(tmp, content);
 	renameSync(tmp, join(dir, name));

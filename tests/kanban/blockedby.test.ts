@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTask, getTask, hasUserHold, listTasks, parseTask, setState, taskFiles, taskNum, updateTask } from "../../src/kanban.ts";
+import { createTask, getTask, hasHold, heldToken, listAll, listTasks, parseTask, setState, taskFiles, taskNum, updateTask } from "../../src/kanban.ts";
+import { dropDoneBlockers } from "../../src/orchestrator/pipeline.ts";
 
 const root = mkdtempSync(join(tmpdir(), "kanban-blockedby-"));
 const t1 = createTask(root, { name: "feat: nice thing", summary: "s" });
@@ -85,21 +86,34 @@ assert.throws(() => createTask(cRoot, { name: "feat: cycle e", summary: "s", blo
 assert.equal(taskFiles(cRoot).length, 3);
 rmSync(cRoot, { recursive: true, force: true });
 
-// the user hold token: a "user" ref is a hold on the task, not a task ref. It parses, it
-// round-trips, and it mixes with task refs, which keep their old meaning
+// the hold tokens: "user" and "question" are holds on the task, not task refs. They parse,
+// they round-trip, and they mix with task refs, which keep their old meaning
 const hRoot = mkdtempSync(join(tmpdir(), "kanban-userhold-"));
 const th = createTask(hRoot, { name: "feat: held by the user", summary: "s", blockedBy: "user" });
 assert.equal(th.blockedBy, "user");
 assert.equal(parseTask(hRoot, th.file).blockedBy, "user", "the hold token round-trips");
 const thm = createTask(hRoot, { name: "feat: held with a ref", summary: "s", blockedBy: "user, #42" });
 assert.equal(parseTask(hRoot, thm.file).blockedBy, "user, #42", "the token mixes with task refs and is kept verbatim");
-// the shared predicate: any comma part that trims and lowercases to "user" is a hold
-for (const refs of ["user", "USER", " user ", "user, #42", "#42, User"]) {
-	assert.equal(hasUserHold(refs), true, `hasUserHold(${JSON.stringify(refs)}) is true`);
+const tq = createTask(hRoot, { name: "feat: held by a question", summary: "s", blockedBy: "question" });
+assert.equal(parseTask(hRoot, tq.file).blockedBy, "question", "the question token round-trips");
+const tqm = createTask(hRoot, { name: "feat: question with a ref", summary: "s", blockedBy: "question, #42" });
+assert.equal(parseTask(hRoot, tqm.file).blockedBy, "question, #42", "the question token mixes with task refs");
+// the shared predicate: any comma part that trims and lowercases to a hold token is a hold,
+// and heldToken names the token that matched
+for (const [refs, token] of [["user", "user"], ["USER", "user"], [" user ", "user"], ["user, #42", "user"], ["#42, User", "user"], ["question", "question"], [" Question , #42", "question"], ["#42, QUESTION", "question"]] as const) {
+	assert.equal(heldToken(refs), token, `heldToken(${JSON.stringify(refs)}) is ${token}`);
+	assert.equal(hasHold(refs), true, `hasHold(${JSON.stringify(refs)}) is true`);
 }
-for (const refs of ["#42", "", "   ", "users", "#42, #43"]) {
-	assert.equal(hasUserHold(refs), false, `hasUserHold(${JSON.stringify(refs)}) is false`);
+for (const refs of ["#42", "", "   ", "users", "questions", "#42, #43"]) {
+	assert.equal(heldToken(refs), "", `heldToken(${JSON.stringify(refs)}) is empty`);
+	assert.equal(hasHold(refs), false, `hasHold(${JSON.stringify(refs)}) is false`);
 }
+// the auto-drop of a satisfied ref keeps the question token: it is no task ref at all
+const doneH = createTask(hRoot, { name: "feat: done blocker", summary: "s" });
+setState(hRoot, doneH, "done");
+const tqs = createTask(hRoot, { name: "feat: question over a done ref", summary: "s", blockedBy: `question, #${taskNum(doneH.file)}` });
+dropDoneBlockers(hRoot, listAll(hRoot));
+assert.equal(parseTask(hRoot, tqs.file).blockedBy, "question", "the auto-drop keeps the question token and drops the done ref");
 // the cycle guard ignores the token: a hold alone never trips it, and a real 2-cycle is still
 // caught with the token beside the ref
 const thn = createTask(hRoot, { name: "feat: cycle partner", summary: "s" });

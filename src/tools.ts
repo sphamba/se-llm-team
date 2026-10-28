@@ -145,6 +145,12 @@ export const TOOLS: Record<string, ToolDef> = {
 			if (!task) return ok(params.file ? `No task ${params.file}` : NO_TASK);
 			const hasField = Object.entries(params).some(([k, v]) => k !== "file" && v !== undefined);
 			if (!hasField) return ok(`Nothing to update in ${task.file}`);
+			// the answer guard: an empty openQuestions clears the section the daemon holds the task
+			// on, so the same call must carry the answer in specs. Nothing judges the answer itself
+			const clearing = typeof params.openQuestions === "string" && params.openQuestions.trim() === "";
+			const answer = typeof params.specs === "string" && params.specs.trim() !== "";
+			if (clearing && !answer)
+				return ok(`${task.file}: refusing to clear the open questions. Fold the answer into the Specs first (specs: "<the answer>") and clear both in the same kanban_update call.`);
 			updateTask(ctx.cwd, task, params);
 			return ok(`Updated ${task.file} (#${taskNum(task.file)})`);
 		},

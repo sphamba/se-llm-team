@@ -200,7 +200,7 @@ const rootL = fixture();
 cleaned.push(rootL);
 mkdirSync(kanbanDir(rootL), { recursive: true });
 writeFileSync(join(rootL, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootL), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
-const taskL = createTask(rootL, { name: "fix: bootstrap board", summary: "Bootstrap smoke", specs: "n/a", openQuestions: "- [user] Which API?" });
+const taskL = createTask(rootL, { name: "fix: bootstrap board", summary: "Bootstrap smoke", specs: "n/a", blockedBy: "user" });
 // board content on refs/heads/meta/kanban via the same plumbing the daemon uses, then the
 // working board file removed: the daemon must materialize it on startup (fresh clone)
 const shaL = execSync(`git hash-object -w .kanban/${taskL.file}`, { cwd: rootL, encoding: "utf8", shell: "/bin/bash" }).trim();
@@ -284,7 +284,7 @@ const rootP = fixture();
 cleaned.push(rootP);
 mkdirSync(kanbanDir(rootP), { recursive: true });
 writeFileSync(join(rootP, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootP), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
-const taskP = createTask(rootP, { name: "fix: external move", summary: "Reconcile smoke", specs: "n/a", openQuestions: "- [user] Which API?" });
+const taskP = createTask(rootP, { name: "fix: external move", summary: "Reconcile smoke", specs: "n/a", blockedBy: "user" });
 const p = await runDaemon(rootP);
 await waitFor(() => mirrorSubjects(rootP) !== "", 30000, "task mirrored", p.output);
 const contentP = readFileSync(join(kanbanDir(rootP), taskP.file), "utf8");
@@ -350,8 +350,8 @@ cleaned.push(rootWt, homeWt);
 const portWt = await freePort();
 mkdirSync(join(homeWt, ".se-llm-team"), { recursive: true });
 writeFileSync(join(homeWt, ".se-llm-team", "config.json"), JSON.stringify({ webUi: { enabled: true, host: "127.0.0.1", port: portWt }, backlogIdleMinutes: 0 }));
-// the owner task: open (openQuestions keep the sweep from promoting it), worktree attribute set
-const taskWt = createTask(rootWt, { name: "feat: worktree daemon", summary: "Hub candidacy smoke", specs: "n/a", openQuestions: "smoke: stays open" });
+// the owner task: held by the user token (kept in backlog, never promoted), worktree attribute set
+const taskWt = createTask(rootWt, { name: "feat: worktree daemon", summary: "Hub candidacy smoke", specs: "n/a", blockedBy: "user" });
 setWorktree(rootWt, taskWt, "fix/1-wt");
 setState(rootWt, taskWt, "doing");
 execSync("git worktree add .worktrees/fix/1-wt -b fix/1-wt", { cwd: rootWt, shell: "/bin/bash" });

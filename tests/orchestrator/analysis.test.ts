@@ -124,7 +124,7 @@ try {
 	assert.equal(parseTask(rootAT2, taskFilesAT2.developer).state, "to-review", "the developer's exit 0 moved doing -> to-review");
 	assert.equal(parseTask(rootAT2, taskFilesAT2.reviewer).state, "to-review", "the reviewer's no-move exit 0 bounced it to to-review");
 	assert.ok(!existsSync(join(pidsAT2, `${slugsAT2.reviewer}.exit`)), "every end clears the exit file, the reviewer's included");
-	assert.equal(parseTask(rootAT2, taskFilesAT2.merger).state, "to-merge", "the merger's exit 0 kept merging -> to-merge");
+	assert.equal(parseTask(rootAT2, taskFilesAT2.merger).state, "merging", "the merger's give-up keeps it in merging for the repair");
 	assert.equal(parseTask(rootAT2, taskFilesAT2["live-tester"]).state, "done", "the live-tester's exit 0 moved live-testing -> done");
 	// wait for every detached analysis: the runner's exit file, the doctor stream and the report
 	await waitFor(

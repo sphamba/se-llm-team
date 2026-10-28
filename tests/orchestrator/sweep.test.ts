@@ -30,8 +30,10 @@ const findingN = createTask(rootN, { name: "fix: regression found in live test",
 const schedN = createTask(rootN, { name: "feat: scheduled next", summary: "Promoted", specs: "n/a" });
 rescan(rootN, loadConfig(rootN));
 const reportsN = readdirSync(reportsDir(rootN)).filter((f) => f.endsWith(".md")).sort();
-assert.equal(reportsN.length, 1, "exactly one report for the done sweep");
-const reportN = readFileSync(join(reportsDir(rootN), reportsN[0]), "utf8");
+// the finding's open questions queue one waiting alert beside the done report
+const boardN = reportsN.filter((f) => readFileSync(join(reportsDir(rootN), f), "utf8").startsWith("# Board report"));
+assert.equal(boardN.length, 1, "exactly one board report for the done sweep");
+const reportN = readFileSync(join(reportsDir(rootN), boardN[0]), "utf8");
 assert.match(reportN, /^# Board report\n/);
 assert.ok(reportN.includes(doneN1.file) && reportN.includes(doneN2.file), "the Done section covers both finished tasks");
 assert.ok(reportN.includes(`- ${schedN.name} (${schedN.file}): to-do`), "the Scheduled section lists the promoted task with its new state");
@@ -42,7 +44,11 @@ assert.ok(reportN.includes("## Instructions for the Project manager"), "the repo
 assert.ok(reportN.includes("kanban_mark_processed"), "the PM instructions teach the mark flow");
 // a second sweep: already-seen done tasks do not re-report
 rescan(rootN, loadConfig(rootN));
-assert.equal(readdirSync(reportsDir(rootN)).filter((f) => f.endsWith(".md")).length, 1, "already-seen done tasks do not re-report");
+const againN = readdirSync(reportsDir(rootN))
+	.filter((f) => f.endsWith(".md"))
+	.map((f) => readFileSync(join(reportsDir(rootN), f), "utf8"))
+	.filter((text) => text.startsWith("# Board report"));
+assert.equal(againN.length, 1, "already-seen done tasks do not re-report");
 // the sweep prunes stale reports and stale claims by mtime, fresh ones survive
 const staleReportN = join(reportsDir(rootN), "2020-01-01T00-00-00-000Z.md");
 writeFileSync(staleReportN, "# Board report\nstale\n");
@@ -433,3 +439,26 @@ rescan(rootUH2, cfgUH2);
 assert.equal(parseTask(rootUH2, heldUH2.file).state, "live-testing", "the released task spawned the live-tester");
 assert.ok(existsSync(pidPath(rootUH2, taskSlug(heldUH2.file))), "the released task's live-tester pid file exists");
 console.log("orchestrator.test.ts: ... + user hold skips the live-tester spawn smoke passed");
+
+// --- part BQ: the question hold alert fires once. The sweep that adds the token queues one
+// report for every task that gained it in that pass, and the next pass writes nothing ---
+const rootBQs = fixture();
+cleaned.push(rootBQs);
+mkdirSync(kanbanDir(rootBQs), { recursive: true });
+const cfgBQs = Object.assign(loadConfig(rootBQs), { agent: deadStub(rootBQs), backlogIdleMinutes: 0 });
+const askedBQs = createTask(rootBQs, { name: "feat: asked one", summary: "Question hold smoke", specs: "n/a", openQuestions: "- [user] which API?" });
+const askedBQs2 = createTask(rootBQs, { name: "feat: asked two", summary: "Question hold smoke", specs: "n/a", openQuestions: "- [user] which flag?" });
+rescan(rootBQs, cfgBQs);
+const alertsBQs = () => readdirSync(reportsDir(rootBQs)).filter((f) => f.endsWith(".md"));
+assert.equal(alertsBQs().length, 1, "one alert for the tasks that gained the token in the pass");
+const alertBQs = readFileSync(join(reportsDir(rootBQs), alertsBQs()[0]), "utf8");
+assert.match(alertBQs, /^# Board alert\n\n## Waiting on an answer\n/, "the alert opens the waiting section");
+assert.ok(alertBQs.includes(askedBQs.file) && alertBQs.includes(askedBQs2.file), "both tasks ride the one alert");
+assert.ok(alertBQs.includes("which API?") && alertBQs.includes("which flag?"), "the questions ride the alert");
+assert.ok(alertBQs.includes("`specs`") && alertBQs.includes('openQuestions: ""'), "the instruction names the Specs and the clear");
+// the second pass: the tokens are already there, so nothing is written and no report is queued
+const tokensBQs = [parseTask(rootBQs, askedBQs.file).blockedBy, parseTask(rootBQs, askedBQs2.file).blockedBy];
+rescan(rootBQs, cfgBQs);
+assert.equal(alertsBQs().length, 1, "the second pass queues no report");
+assert.deepEqual([parseTask(rootBQs, askedBQs.file).blockedBy, parseTask(rootBQs, askedBQs2.file).blockedBy], tokensBQs, "the second pass adds no token twice");
+console.log("orchestrator.test.ts: ... + question hold alert fires once smoke passed");

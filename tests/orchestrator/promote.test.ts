@@ -905,3 +905,28 @@ assert.ok(existsSync(pidPath(rootBN, taskSlug(chainedBN.file))), "the released d
 assert.equal(parseTask(rootBN, heldBN.file).state, "to-do", "the user hold still holds after the sweep");
 cleanupAll(rootBN);
 console.log("orchestrator.test.ts: ... + to-do blocker gate smoke passed");
+
+// --- part BQ: the sweep reconciles the open questions with the daemon's question token. A
+// task that gains a question stops at the next pass, a backlog task keeps its state, and the
+// answered task drops the token without a state move ---
+const rootBQp = fixture();
+cleaned.push(rootBQp);
+mkdirSync(kanbanDir(rootBQp), { recursive: true });
+const cfgBQp = Object.assign(loadConfig(rootBQp), { agent: deadStub(rootBQp), backlogIdleMinutes: 0 });
+// the user token holds the reviewer spawn, so the to-review lane cannot race this pass
+const reviewBQp = createTask(rootBQp, { name: "feat: question in review", summary: "Reconcile smoke", specs: "n/a", blockedBy: "user" });
+setState(rootBQp, reviewBQp, "to-review");
+const backlogBQp = createTask(rootBQp, { name: "feat: question in backlog", summary: "Reconcile smoke", specs: "n/a", openQuestions: "- [user] keep it?" });
+updateTask(rootBQp, reviewBQp, { openQuestions: "- [user] which way?" });
+rescan(rootBQp, cfgBQp);
+assert.equal(parseTask(rootBQp, reviewBQp.file).state, "to-do", "a to-review task that gains a question goes to to-do");
+assert.equal(parseTask(rootBQp, reviewBQp.file).blockedBy, "user, question", "the question token joins the list");
+assert.equal(parseTask(rootBQp, backlogBQp.file).state, "backlog", "a backlog task keeps its state");
+assert.equal(parseTask(rootBQp, backlogBQp.file).blockedBy, "question", "the backlog task gains the token too");
+// the answer folded into the Specs drops the token only: the to-do task continues by itself
+updateTask(rootBQp, reviewBQp, { openQuestions: "", specs: "The answer: the first way." });
+rescan(rootBQp, cfgBQp);
+assert.equal(parseTask(rootBQp, reviewBQp.file).blockedBy, "user", "the question token is gone and the user token stays");
+assert.equal(parseTask(rootBQp, reviewBQp.file).state, "to-do", "the token drop moves no state");
+cleanupAll(rootBQp);
+console.log("orchestrator.test.ts: ... + question reconcile smoke passed");

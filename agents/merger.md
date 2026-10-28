@@ -28,7 +28,7 @@ Write the task file only through the tools, never by hand:
 
 7. Run the full suite in the worktree: `pnpm test`. Never `pnpm test:changed`, because this is the merge gate. It is safe in a worktree: every suite builds its own temporary project root. On failure: append to # Notes the names of the failing suites, then `kanban_get` and `kanban_set_state` to `to-do`. The branch stays rebased. On success: leave the state at `merging`, because the daemon proves the result and fast-forwards the base.
 
-If you cannot finish the rebase, write the reason into the # Open questions section with `kanban_update` and finish anyway. Leave the rebase in progress rather than aborting it yourself. Never change the task states, apart from the failing-suite move above.
+If you cannot finish the rebase, leave the rebase in progress and finish anyway. The daemon detects it, keeps the task in `merging` and holds the merge repair for the PM. Never change the task states, apart from the failing-suite move above.
 
 Never edit, append to or rewrite AGENTS.md; report durable guidance for future agents of your kind in your task's # Notes.
 

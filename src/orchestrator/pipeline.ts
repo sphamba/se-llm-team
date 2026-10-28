@@ -1,12 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { isSelfWrite, kanbanDir, getTask, hasUserHold, listAll, PRIORITY_RANK, setState, setWorktree, taskFiles, taskSlug, updateAttrs, updateTask, ROLE_NOTES_RE, type Task } from "../kanban.ts";
+import { isSelfWrite, kanbanDir, getTask, hasHold, heldToken, listAll, PRIORITY_RANK, setState, setWorktree, taskFiles, taskSlug, updateAttrs, ROLE_NOTES_RE, type Task } from "../kanban.ts";
 import { agentAlive, agentPid, clearPid, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP, REVIEWER_RUN_CAP, type Config } from "./config.ts";
 import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, newestRunRole, readCounter } from "./log.ts";
 import { clearContextSymlinks, clearMergerSlug, readExitCode, spawnAgent, spawnRunAnalysis, writeMergerSlug } from "./spawn.ts";
 import { boardStatus, commitKanban, ensureWorktree, git, reconcileBoard } from "./board.ts";
-import { reportDone } from "./report.ts";
+import { queueAlert, reportDone } from "./report.ts";
 
 // consumes the armed marker at the state the armed reviewer wrote itself (back to to-review,
 // or forward to to-merge on approval): a pid match counts one landed reviewer run, and a
@@ -162,7 +162,7 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	if (existsSync(mergerAttemptPath(root, slug)) && Date.now() - statSync(join(kanbanDir(root), task.file)).mtimeMs < cfg.retryIdleMinutes * 60_000) return;
 	// a held task returns before the worktree, the rebase and the merger slug, so it never leaves
 	// a stopped rebase or a fast-forwarded base behind
-	if (hasUserHold(task.blockedBy)) return;
+	if (hasHold(task.blockedBy)) return;
 	const wt = task.worktree;
 	if (!wt || (git(root, ["branch", "--list", wt], true) === "" && !existsSync(join(root, ".worktrees", wt)))) {
 		// nothing to merge: no worktree and no branch
@@ -177,7 +177,11 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	// deletes. Leave the task in to-merge for the PM, retries wait out the idle cooldown
 	const base = git(root, ["branch", "--show-current"], true);
 	if (base === "") {
+		// the alert rides the first attempt only: the retry keeps the marker, so the PM is not
+		// told the same thing every idle window
+		const first = !existsSync(mergerAttemptPath(root, slug));
 		markMergerAttempt(root, slug);
+		if (first) queueAlert(root, { kind: "detached-root", task });
 		log(root, `${task.file}: root checkout is detached, left in to-merge (PM resolves manually)`);
 		return;
 	}
@@ -199,26 +203,31 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 
 // the merger's success target: the merger rebased the branch and ran the full suite itself, so
 // the daemon only proves that result, fast-forwards the root checkout to the branch and hands
-// the worktree to the live tester. A rebase left in progress, or a branch that does not sit on
-// the base, means the merger gave up: park the task with the reason and let the cooldown hold it
+// the worktree to the live tester
+// an open question outranks the merge result: the answer comes before the root moves
 export function finishMerge(root: string, task: Task): void {
+	if (heldToken(task.blockedBy) === "question") {
+		setState(root, task, "to-do");
+		log(root, `${task.file}: open question, merging -> to-do`);
+		return;
+	}
 	const wt = task.worktree;
 	const wtDir = wt ? join(root, ".worktrees", wt) : "";
 	const rebaseDir = wtDir ? git(wtDir, ["rev-parse", "--git-path", "rebase-merge"], true) : null;
 	// REBASE_HEAD is not the check: it lingers after a completed rebase (git 2.43)
 	const rebasing = typeof rebaseDir === "string" && existsSync(isAbsolute(rebaseDir) ? rebaseDir : join(wtDir, rebaseDir));
-	if (!wt || !wtDir || !existsSync(wtDir) || rebasing) {
-		parkFailedMerge(root, task, "the merger exited without finishing the rebase");
-		return;
-	}
 	// the base is resolved here, not at spawn time, because an earlier merge moved it
 	const base = git(root, ["branch", "--show-current"], true);
-	if (base === "" || git(wtDir, ["merge-base", "--is-ancestor", base, "HEAD"], true) === null) {
-		parkFailedMerge(root, task, "the branch does not sit on the base branch");
+	if (!wt || !wtDir || !existsSync(wtDir) || rebasing) {
+		parkStuckMerge(root, task, "the merger exited without finishing the rebase", base ?? "");
+		return;
+	}
+	if (!base || git(wtDir, ["merge-base", "--is-ancestor", base, "HEAD"], true) === null) {
+		parkStuckMerge(root, task, "the branch does not sit on the base branch", base ?? "");
 		return;
 	}
 	if (!fastForward(root, base, wt)) {
-		parkFailedMerge(root, task, `the fast-forward to ${wt} failed`);
+		parkStuckMerge(root, task, `the fast-forward to ${wt} failed`, base);
 		return;
 	}
 	stripContextSymlinks(root);
@@ -226,17 +235,32 @@ export function finishMerge(root: string, task: Task): void {
 	log(root, `${task.file}: fast-forwarded ${base} to ${wt}, set to-live-test`);
 }
 
-// the merger's give-up path: the reason lands in the open questions so the PM sees it, and the
-// attempt marker holds the retry for retryIdleMinutes. The marker alone is the ceiling of this
-// design: a given-up merge retries after the idle window rather than waiting for the base to
-// move. Upgrade path: stamp the base tip into the marker file and retry only when it changed
-function parkFailedMerge(root: string, task: Task, reason: string): void {
-	markMergerAttempt(root, taskSlug(task.file));
-	const fresh = getTask(root, task.file) ?? task;
-	const open = fresh.openQuestions.trim();
-	updateTask(root, fresh, { openQuestions: open ? `${open}\n- ${reason}` : `- ${reason}` });
-	setState(root, fresh, "to-merge");
-	log(root, `${task.file}: ${reason}, left in to-merge for the retry`);
+// the stuck marker: one file per task in the daemon's own log dir. The marker is the lane state,
+// so a merger that gave up leaves the task in merging and the whole Merge column waits (the
+// to-merge gate blocks while any task is merging) until the PM repairs the root by hand
+export const stuckPath = (root: string, slug: string) => join(kanbanDir(root), ".logs", `${slug}.merge-stuck`);
+
+// the marker of a task whose merge gave up: the poll must not bounce it back to to-merge
+export function mergeStuck(root: string, slug: string): boolean {
+	return existsSync(stuckPath(root, slug));
+}
+
+// the merge repair the PM runs by hand: the root's own uncommitted work must survive the
+// fast-forward, and the board and the worktrees are daemon state, never stashed with it
+const mergeRepairRecipe = (root: string, branch: string) => [
+	`git -C ${root} stash push --include-untracked -m "orchestrator: merge repair" -- . ':(exclude).kanban' ':(exclude).worktrees'`,
+	`git -C ${root} merge --ff-only ${branch}`,
+	`git -C ${root} stash pop`,
+];
+
+// the merger's three give-ups land here: the marker names the reason, the branch and the base,
+// the alert carries the repair recipe, and the state stays merging
+function parkStuckMerge(root: string, task: Task, reason: string, base: string): void {
+	const branch = task.worktree || "(none)";
+	mkdirSync(join(kanbanDir(root), ".logs"), { recursive: true });
+	writeFileSync(stuckPath(root, taskSlug(task.file)), `${reason}\n${branch}\n${base}\n`);
+	queueAlert(root, { kind: "merge-stuck", task, reason, branch, recipe: mergeRepairRecipe(root, branch) });
+	log(root, `${task.file}: ${reason}, left in merging for the merge repair`);
 }
 
 // stash, fast-forward, pop: the root checkout's own uncommitted work must survive the merge, so a
@@ -366,6 +390,57 @@ function janitorPids(root: string, tasks: Task[]): void {
 }
 
 
+// the question reconcile: one pass, no memory, the board is the whole state. An open question
+// adds the daemon's hold token and the task stops at the next gate; an answered task drops the
+// token and continues by itself. The state move skips a live agent, because its exit path moves
+// the task, and it never touches backlog or done
+function reconcileQuestions(root: string): void {
+	const asked: Task[] = [];
+	for (const task of listAll(root)) {
+		if (task.conflicted) continue;
+		const parts = task.blockedBy.split(",").map((part) => part.trim()).filter(Boolean);
+		const held = parts.some((part) => part.toLowerCase() === "question");
+		if (task.openQuestions && !held) {
+			updateAttrs(root, task, { blockedBy: [...parts, "question"].join(", ") });
+			asked.push(task);
+			// the merger is the lane's agent, every other state maps to the task's own agent
+			const alive = task.state === "merging" ? agentAlive(root, "merger") : agentAlive(root, taskSlug(task.file));
+			if (!alive && task.state !== "backlog" && task.state !== "done") {
+				setState(root, task, "to-do");
+				log(root, `${task.file}: open question, ${task.state} -> to-do`);
+			}
+		} else if (!task.openQuestions && held) {
+			updateAttrs(root, task, { blockedBy: parts.filter((part) => part.toLowerCase() !== "question").join(", ") });
+			log(root, `${task.file}: open questions cleared, dropped the question hold`);
+		}
+	}
+	// one report for the pass, not one per task
+	if (asked.length) queueAlert(root, { kind: "waiting", tasks: asked });
+}
+
+// the stuck merge release: the PM repaired the root by hand, so once the branch sits on the base
+// the task continues by itself; a task that left merging drops its marker
+function releaseStuckMerge(root: string, task: Task): void {
+	if (task.conflicted) return;
+	const path = stuckPath(root, taskSlug(task.file));
+	if (!existsSync(path)) return;
+	if (task.state !== "merging") {
+		rmSync(path, { force: true });
+		log(root, `${task.file}: left merging, dropped the stuck marker`);
+		return;
+	}
+	if (agentAlive(root, "merger")) return;
+	const wtDir = task.worktree ? join(root, ".worktrees", task.worktree) : "";
+	const base = git(root, ["branch", "--show-current"], true);
+	if (!wtDir || !existsSync(wtDir) || !base || git(wtDir, ["merge-base", "--is-ancestor", base, "HEAD"], true) === null) return;
+	// re-read + state-match: a task that moved on underneath (PM or user) wins
+	const fresh = getTask(root, task.file);
+	if (!fresh || fresh.state !== "merging") return;
+	rmSync(path, { force: true });
+	setState(root, fresh, "to-live-test");
+	log(root, `${task.file}: merge repair landed, merging -> to-live-test`);
+}
+
 export function rescan(root: string, cfg: Config, force = false): void {
 	// root-cause fix ordering: a snapshot commit must never be built from a tree that lacks
 	// branch-only files, so an external mirror-head move is materialized before boardStatus
@@ -376,6 +451,9 @@ export function rescan(root: string, cfg: Config, force = false): void {
 	const files = taskFiles(root);
 	const status = boardStatus(root, files);
 	const tasks = listAll(root);
+	// a stuck merge waits for the PM, and the repair shows up as a base that contains the branch.
+	// The release runs before the lanes, so a repaired merge frees the Merge column in this sweep
+	for (const task of tasks) releaseStuckMerge(root, task);
 	const created = new Set<string>();
 	// sole commit points: board files not on the mirror yet are new, finished tasks fold in
 	// their whole life; everything else stays unmirrored until done. Creates run first:
@@ -420,7 +498,7 @@ export function rescan(root: string, cfg: Config, force = false): void {
 			} else if (task.state === "to-review" && !deadCooldownActive(root, cfg, task)) {
 				// reviews off: the task skips the reviewer lane and goes straight to the merge
 				if (!cfg.reviews) {
-					if (hasUserHold(task.blockedBy)) continue;
+					if (hasHold(task.blockedBy)) continue;
 					setState(root, task, "to-merge");
 					log(root, `${task.file}: reviews are off, moving to to-merge`);
 					continue;
@@ -430,7 +508,7 @@ export function rescan(root: string, cfg: Config, force = false): void {
 				if (!ensured) log(root, `${task.file}: worktree could not be created, reviewer not spawned (state unchanged)`);
 				else {
 					// a held task keeps to-review and arms no reviewer run
-					if (hasUserHold(task.blockedBy)) continue;
+					if (hasHold(task.blockedBy)) continue;
 					const slug = taskSlug(task.file);
 					consumeReviewerRun(root, slug);
 					const cap = cfg.reviewerCap[task.complexity] ?? REVIEWER_RUN_CAP;
@@ -457,7 +535,7 @@ export function rescan(root: string, cfg: Config, force = false): void {
 			} else if (task.state === "to-live-test" && !deadCooldownActive(root, cfg, task)) {
 				// a held task keeps to-live-test and starts no run: the check sits before the
 				// merged-branch test, so a hold never requeues the task either
-				if (hasUserHold(task.blockedBy)) continue;
+				if (hasHold(task.blockedBy)) continue;
 				const slug = taskSlug(task.file);
 				consumeReviewerRun(root, slug);
 				// the live test runs on the merged commit: after the rebase + fast-forward the
@@ -519,6 +597,9 @@ export function rescan(root: string, cfg: Config, force = false): void {
 	// drops satisfied refs first (board hygiene), then promoteBacklog promotes every schedulable
 	// backlog task; a blocker in done or the live test does not hold promotion, and
 	// promoteBacklog re-checks its gates on a fresh board read before setState
+	// the question reconcile runs before the promotion, so a task that just gained the token never
+	// promotes in the same sweep
+	reconcileQuestions(root);
 	const current = listAll(root);
 	dropDoneBlockers(root, current);
 	const promoted = promoteBacklog(root, current, cfg.backlogIdleMinutes, force);
@@ -542,8 +623,8 @@ const sortNum = (file: string) => {
 const BLOCKER_SATISFIED = new Set(["done", "to-live-test", "live-testing"]);
 
 function blockedByUndone(tasks: Task[], task: Task): boolean {
-	// the user hold token is a blocker no state satisfies: only the PM removes it
-	if (hasUserHold(task.blockedBy)) return true;
+	// the hold tokens are blockers no state satisfies: only the PM removes them
+	if (hasHold(task.blockedBy)) return true;
 	if (!task.blockedBy) return false;
 	const states = new Map(tasks.map((t) => [sortNum(t.file), t.state]));
 	return task.blockedBy.split(",").some((ref) => {
@@ -651,7 +732,8 @@ export function promoteBacklog(root: string, tasks: Task[], backlogIdleMinutes =
 	for (const task of [...tasks].sort(boardOrder)) {
 		// conflicted files parse bogus state values: never promotable
 		if (task.conflicted || task.state !== "backlog") continue;
-		// unanswered open questions mean the task waits for the user: never promote it
+		// unanswered open questions mean the task waits for the user: never promote it, even when
+		// a hand edit cleared the question token on the task
 		if (task.openQuestions) continue;
 		// unfinished blockers hold the task
 		if (blockedByUndone(tasks, task)) continue;

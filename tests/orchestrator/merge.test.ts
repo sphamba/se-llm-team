@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskNum, taskSlug, updateTask } from "../../src/kanban.ts";
 import { loadConfig, poll } from "../../src/orchestrator.ts";
-import { rescan } from "../../src/orchestrator/pipeline.ts";
+import { rescan, stuckPath } from "../../src/orchestrator/pipeline.ts";
+import { reportsDir } from "../../src/orchestrator/report.ts";
 import { agentAlive, pidAlive, pidPath } from "../../src/pid.ts";
 import { exitFilePath, readMergerSlug, renderPrompt, readExitCode } from "../../src/orchestrator/spawn.ts";
 import { cleanupAll, cleaned, fixture, mirrorSubjects, roleStub, runDaemon, waitFor } from "../helpers.ts";
@@ -265,9 +266,9 @@ assert.ok(subjects(rootD, "-1 feat/failing-suite").includes("suite-branch"), "th
 assert.ok(!orchLog(rootD).includes("fast-forwarded"), "the daemon logs no fast-forward");
 console.log("merge.test.ts: + failing suite smoke passed");
 
-// --- part E: the give-up path. A merger that exits 0 with a branch off the base parks the
-// task in to-merge, names the reason in the open questions, writes the attempt marker and the
-// cooldown holds any second spawn ---
+// --- part E: the give-up path. A merger that exits 0 with a branch off the base keeps the
+// task in merging with the stuck marker, so the whole Merge column waits; the poll does not
+// bounce it, and the sweep releases the task once the PM repairs the base by hand ---
 const rootE = mergeRoot();
 execSync("git checkout -qb feat/off-base && git commit -q --allow-empty -m branch && git checkout -q main && git commit -q --allow-empty -m moved", { cwd: rootE, shell: "/bin/bash" });
 const taskE = createTask(rootE, { name: "feat: off base", summary: "Give-up smoke", specs: "n/a" });
@@ -276,15 +277,51 @@ setState(rootE, taskE, "to-merge");
 const cfgE = cfgFor(rootE, caseStub(rootE, "abort"));
 await drive(rootE, cfgE);
 const slugE = taskSlug(taskE.file);
-assert.equal(parseTask(rootE, taskE.file).state, "to-merge", "a branch off the base parks in to-merge");
-assert.match(parseTask(rootE, taskE.file).openQuestions, /does not sit on the base branch/, "the give-up reason lands in the open questions");
-assert.ok(existsSync(join(kanbanDir(rootE), ".pids", `${slugE}.merge-attempted`)), "the attempt marker is written");
-assert.ok(orchLog(rootE).includes("does not sit on the base branch, left in to-merge for the retry"), "the give-up is logged");
+const stuckE = stuckPath(rootE, slugE);
+assert.equal(parseTask(rootE, taskE.file).state, "merging", "a branch off the base keeps the task in merging");
+assert.ok(existsSync(stuckE), "the stuck marker is written");
+assert.deepEqual(readFileSync(stuckE, "utf8").trim().split("\n"), ["the branch does not sit on the base branch", "feat/off-base", "main"], "the marker names the reason, the branch and the base");
+assert.equal(parseTask(rootE, taskE.file).openQuestions, "", "the give-up writes no open question");
+const reportsE = () => readdirSync(reportsDir(rootE)).filter((f) => f.endsWith(".md"));
+assert.equal(reportsE().length, 1, "one merge-stuck alert");
+const alertE = readFileSync(join(reportsDir(rootE), reportsE()[0]), "utf8");
+assert.match(alertE, /## Merge stuck/, "the alert names the stuck merge");
+assert.ok(alertE.includes(`git -C ${rootE} merge --ff-only feat/off-base`), "the recipe names the root and the branch");
+assert.ok(alertE.includes(`git -C ${rootE} stash push --include-untracked`), "the recipe stashes the root work first");
+// the poll leaves it alone, and the Merge column stays shut for the next to-merge task
+poll(rootE, 5);
+assert.equal(parseTask(rootE, taskE.file).state, "merging", "the poll does not bounce a stuck merge");
+const nextE = createTask(rootE, { name: "feat: waits behind the stuck merge", summary: "Give-up smoke", specs: "n/a" });
+setWorktree(rootE, nextE, "feat/off-base");
+setState(rootE, nextE, "to-merge");
 rescan(rootE, cfgE);
-rescan(rootE, cfgE);
-assert.equal(orchLog(rootE).split("spawned merger").length - 1, 1, "the cooldown holds any second spawn");
+assert.equal(parseTask(rootE, nextE.file).state, "to-merge", "the stuck merge blocks the whole Merge column");
+assert.equal(orchLog(rootE).split("spawned merger").length - 1, 1, "no second merger spawn");
 assert.deepEqual(subjects(rootE, "-1 main"), ["moved"], "the base never took the off-base branch");
+// the PM repairs by hand: rebase the branch onto the base, then fast-forward the base
+execSync("git rebase main", { cwd: join(rootE, ".worktrees", "feat/off-base"), shell: "/bin/bash" });
+execSync("git merge -q --ff-only feat/off-base", { cwd: rootE, shell: "/bin/bash" });
+rescan(rootE, cfgE);
+assert.equal(parseTask(rootE, taskE.file).state, "to-live-test", "the release sends the repaired task to its live test");
+assert.equal(existsSync(stuckE), false, "the release deletes the marker");
+assert.ok(subjects(rootE, "-1 main").includes("branch"), "the repaired base took the branch");
 console.log("merge.test.ts: + give-up smoke passed");
+
+// --- part E2: a merger whose task holds the question token lands in to-do, and the root is
+// never fast-forwarded under a stopped task ---
+const rootE2 = mergeRoot();
+execSync("git checkout -qb feat/asked-merge && git commit -q --allow-empty -m asked-change && git checkout -q main", { cwd: rootE2, shell: "/bin/bash" });
+const taskE2 = createTask(rootE2, { name: "feat: asked merge", summary: "Merger question smoke", specs: "n/a" });
+setWorktree(rootE2, taskE2, "feat/asked-merge");
+setState(rootE2, taskE2, "to-merge");
+const cfgE2 = cfgFor(rootE2, caseStub(rootE2, ""));
+rescan(rootE2, cfgE2);
+await waitFor(() => !agentAlive(rootE2, "merger") && readExitCode(rootE2, "merger") !== null, 30000, "the merger exited and recorded its code", () => "");
+updateTask(rootE2, taskE2, { blockedBy: "question" });
+poll(rootE2, 5);
+assert.equal(parseTask(rootE2, taskE2.file).state, "to-do", "a merger question lands in to-do");
+assert.deepEqual(subjects(rootE2, "-1 main"), ["init"], "the root never fast-forwarded under the question");
+console.log("merge.test.ts: + merger question smoke passed");
 
 // --- part F: a dirty root checkout. Uncommitted and untracked files survive the fast-forward,
 // the merge succeeds and the stash list is empty afterwards ---
@@ -346,7 +383,7 @@ for (const [role, prompt] of [["developer", renderPrompt(rootAL, "developer", 60
 	assert.ok(!prompt.includes(".kanban/AGENTS"), `the ${role} prompt names no role-notes path`);
 }
 console.log("merge.test.ts: + merger prompt smoke passed");
-cleanupAll(rootA, rootB, rootC, rootD, rootE, rootF, rootK5, rootAL);
+cleanupAll(rootA, rootB, rootC, rootD, rootE, rootE2, rootF, rootK5, rootAL);
 
 // --- part K2: at most one merger runs at a time, even with several tasks in to-merge ---
 const rootK2 = mergeRoot();
@@ -403,7 +440,8 @@ console.log("merge.test.ts: + one merger at a time smoke passed");
 
 // --- part K3: the base moves between the rebase and the fast-forward: the post-rewrite hook
 // in the shared hooks dir fires after the merger's rebase and advances main, so the ancestor
-// proof fails, the task parks, and the retry rebases onto the moved base and lands ---
+// proof fails and the merger gives up. The task waits in merging with the stuck marker, and the
+// PM's hand repair (rebase onto the moved base, then fast-forward) releases it to its live test ---
 const rootK3 = mergeRoot();
 execSync("git checkout -qb feat/race", { cwd: rootK3, shell: "/bin/bash" });
 writeFileSync(join(rootK3, "other.txt"), "other\n");
@@ -456,13 +494,21 @@ setState(rootK3, taskK3, "to-merge");
 
 const k3 = await runDaemon(rootK3);
 const wtK3 = join(rootK3, ".worktrees", "feat/race");
+const stuckK3 = stuckPath(rootK3, taskSlug(taskK3.file));
+// the hook moved the base inside the merger's own rebase, so the merger gives up and no retry
+// follows: the task waits in merging for the PM
+await waitFor(() => parseTask(rootK3, taskK3.file).state === "merging" && existsSync(stuckK3), 120000, "the moved base parks the merge", k3.output);
+assert.ok(existsSync(join(rootK3, ".git", "race-hook-fired")), "the post-rewrite hook fired for the rebase");
+// the PM repair: rebase the branch onto the moved base, then fast-forward the base by hand
+execSync("git rebase main", { cwd: wtK3, shell: "/bin/bash" });
+execSync("git merge -q --ff-only feat/race", { cwd: rootK3, shell: "/bin/bash" });
 await waitFor(
 	() => parseTask(rootK3, taskK3.file).state === "done" && !existsSync(wtK3) && mirrorSubjects(rootK3).includes(`kanban: done ${taskK3.file}`),
 	150000,
-	"task done through the moving base",
+	"task done through the moving base after the repair",
 	k3.output,
 );
-assert.ok(existsSync(join(rootK3, ".git", "race-hook-fired")), "the post-rewrite hook fired for the rebase");
+assert.equal(existsSync(stuckK3), false, "the release dropped the stuck marker");
 const committedK3 = execSync(`git show refs/heads/meta/kanban:.kanban/${taskK3.file}`, { cwd: rootK3, encoding: "utf8", shell: "/bin/bash" });
 assert.match(committedK3, /Live test report: worktree has other\.txt,race\.txt,main-only\.txt\./, "the live test ran the merged commit (all three files present)");
 assert.equal(execSync("git log --format=%s --merges main", { cwd: rootK3, encoding: "utf8" }).trim(), "", "no merge commits on main");
@@ -512,10 +558,14 @@ assert.equal(spawnsAU(), 1, "no second merger over an unconsumed exit");
 assert.equal(readMergerSlug(rootAU), slugAUa, "the shared pair still records the finished run");
 assert.equal(parseTask(rootAU, taskAUb.file).state, "to-merge", "the second task waits in to-merge");
 poll(rootAU, 5);
-assert.equal(parseTask(rootAU, taskAUa.file).state, "to-merge", "the finished run parked on the base proof");
+assert.equal(parseTask(rootAU, taskAUa.file).state, "merging", "the give-up keeps the finished run's task in merging");
 assert.ok(orchLog(rootAU).includes(`${taskAUa.file}: the branch does not sit on the base branch`), "the exit 0 was consumed by its own task");
 assert.ok(!existsSync(pidPath(rootAU, "merger")) && !existsSync(exitFilePath(rootAU, "merger")), "the shared pid/exit pair was consumed");
+// the PM repair frees the Merge column, so the next merger spawns once the exit is consumed
+execSync("git rebase -X theirs main", { cwd: join(rootAU, ".worktrees", "feat/au-one"), shell: "/bin/bash" });
+execSync("git merge -q --ff-only feat/au-one", { cwd: rootAU, shell: "/bin/bash" });
 rescan(rootAU, cfgAU);
+assert.equal(parseTask(rootAU, taskAUa.file).state, "to-live-test", "the repair released the first task");
 assert.equal(spawnsAU(), 2, "the next merger spawns once the exit is consumed");
 assert.equal(readMergerSlug(rootAU), taskSlug(taskAUb.file), "the second task's merger is recorded");
 cleanupAll(rootAU);

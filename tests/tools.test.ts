@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { createTask, listTasks, setState, taskSlug } from "../src/kanban.ts";
+import { createTask, getTask, listTasks, setState, taskSlug } from "../src/kanban.ts";
 import { TOOLS } from "../src/tools.ts";
 import { cleaned, fixture } from "./helpers.ts";
 
@@ -50,5 +50,16 @@ assert.deepEqual(listTasks(root, "done").map((t) => t.file).sort(), [done1.file,
 // idempotent re-mark
 await TOOLS.kanban_mark_processed.run({ files: [done1.file] }, ctx);
 assert.ok(existsSync(marker(done1.file)), "re-marking is idempotent");
+
+// the answer guard on kanban_update: clearing the questions without the answer fails and
+// writes nothing; the same call with the answer in specs passes and lands both
+const guarded = createTask(root, { name: "feat: guarded questions", summary: "s", specs: "n/a", openQuestions: "- [user] which way?" });
+const refused = await TOOLS.kanban_update.run({ file: guarded.file, openQuestions: "" }, ctx);
+assert.match(refused.text, /Specs/, "the refusal names the Specs edit");
+assert.equal(getTask(root, guarded.file)?.openQuestions, "- [user] which way?", "the refused clear changed nothing");
+const cleared = await TOOLS.kanban_update.run({ file: guarded.file, specs: "The answer: the first way.", openQuestions: "" }, ctx);
+assert.ok(cleared.text.includes(guarded.file), "the guarded clear reports the update");
+assert.equal(getTask(root, guarded.file)?.openQuestions, "", "the clear with the answer lands");
+assert.ok(getTask(root, guarded.file)?.specs.includes("the first way"), "the answer reached the Specs");
 
 console.log("tools.test.ts: all assertions passed");

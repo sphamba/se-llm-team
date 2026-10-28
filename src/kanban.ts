@@ -386,11 +386,22 @@ function replaceSections(root: string, task: Task, updates: Record<string, strin
 	writeFileSync(path, (fm ? raw.slice(0, raw.length - body.length) : "") + out.join("\n"));
 }
 
-// the user hold token: a blockedBy part that reads "user" (any case, any spacing) holds the
-// task until the PM removes it. It is not a task ref: blockedNums and assertNoBlockCycle
-// ignore it, and it mixes with task refs ("user, #42" holds for the user AND for #42)
-export function hasUserHold(blockedBy: string): boolean {
-	return blockedBy.split(",").some((part) => part.trim().toLowerCase() === "user");
+// the hold tokens: a blockedBy part that reads "user" or "question" (any case, any spacing)
+// holds the task until the PM removes it. Neither is a task ref: blockedNums and
+// assertNoBlockCycle ignore them, and they mix with task refs ("question, #42" holds for the
+// answer AND for #42). "user" is the PM's hold, "question" the daemon's own while the task's
+// open questions wait for an answer
+export function heldToken(blockedBy: string): string {
+	for (const part of blockedBy.split(",")) {
+		const token = part.trim().toLowerCase();
+		if (token === "user" || token === "question") return token;
+	}
+	return "";
+}
+
+// any hold at all: every lane gate reads this one predicate
+export function hasHold(blockedBy: string): boolean {
+	return heldToken(blockedBy) !== "";
 }
 
 // "#42, #43" -> [42, 43]; parses refs with or without the leading # and ignores malformed
