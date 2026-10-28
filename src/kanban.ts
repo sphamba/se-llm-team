@@ -1,6 +1,21 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, isAbsolute, join, sep } from "node:path";
+import {
+	closeSync,
+	existsSync,
+	fsyncSync,
+	linkSync,
+	mkdirSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	readlinkSync,
+	realpathSync,
+	renameSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { basename, dirname, isAbsolute, join, sep } from "node:path";
 
 export const STATES = [
 	"backlog",
@@ -38,6 +53,7 @@ export interface Task {
 	notes: string;
 	openQuestions: string;
 	conflicted: boolean;
+	malformed: boolean;
 }
 
 export interface TaskRef {
@@ -184,9 +200,29 @@ export function splitFrontmatter(raw: string): { attrs: Record<string, string>; 
 	return { attrs, body: m[2] };
 }
 
+// A task file whose frontmatter no longer parses has lost its attributes: the board would show
+// a husk with default fields in backlog and any rewrite would destroy what is left (000440).
+// Copy it under .logs with a timestamp, then drop it from the board; the copy keeps the bytes
+// for recovery. Returns true when the file was quarantined
+function quarantineTask(root: string, file: string, raw: string): boolean {
+	if (taskNum(file) === 0) return false;
+	const dir = join(kanbanDir(root), ".logs");
+	try {
+		mkdirSync(dir, { recursive: true });
+		const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+		writeFileSync(join(dir, `${taskSlug(file)}.${stamp}.malformed.md`), raw);
+		unlinkSync(join(kanbanDir(root), file));
+		return true;
+	} catch {
+		return false; // unreadable .logs or a vanished file: keep the original, never lose it
+	}
+}
+
 export function parseTask(root: string, file: string): Task {
 	const raw = readFileSync(join(kanbanDir(root), file), "utf8");
 	const fm = splitFrontmatter(raw);
+	// no frontmatter is not a task: quarantined off the board, and listAll drops it
+	const malformed = !fm && quarantineTask(root, file, raw);
 	const attrs = fm?.attrs ?? {};
 	const body = fm?.body ?? raw;
 	const sections: Record<string, string> = {};
@@ -218,6 +254,7 @@ export function parseTask(root: string, file: string): Task {
 		// a conflicted file parses bogus values (duplicate keys resolve last-wins, the
 		// merged-in side wins); callers must not rewrite or act on it
 		conflicted: hasConflictMarkers(raw),
+		malformed,
 	};
 }
 
@@ -231,7 +268,8 @@ export const roleNotesPath = (root: string, role: string) => join(kanbanDir(root
 export function listAll(root: string): Task[] {
 	return taskFiles(root)
 		.filter((f) => !ROLE_NOTES_RE.test(f))
-		.map((f) => parseTask(root, f));
+		.map((f) => parseTask(root, f))
+		.filter((t) => !t.malformed);
 }
 
 export function listTasks(root: string, scope: Scope, priority?: Priority | string): TaskRef[] {
@@ -254,7 +292,9 @@ export function listTasks(root: string, scope: Scope, priority?: Priority | stri
 
 export function getTask(root: string, file: string): Task | undefined {
 	const f = file.endsWith(".md") ? file : `${file}.md`;
-	return taskFiles(root).includes(f) ? parseTask(root, f) : undefined;
+	if (!taskFiles(root).includes(f)) return undefined;
+	const task = parseTask(root, f);
+	return task.malformed ? undefined : task;
 }
 
 // the task behind the cwd's SPECS.md symlink (the orchestrator re-points it in the worktree
@@ -337,20 +377,93 @@ export function isSelfWrite(path: string, mtimeMs: number): boolean {
 	return false;
 }
 
+let tmpSeq = 0;
+
+// Atomic task-file write: a temp file in the same directory, fsync, then rename over the
+// target. POSIX renames within a directory are atomic, so a reader sees the old file or the
+// new one and never a truncate plus a half-written buffer (the 000440 char-per-line corruption).
+// `exclusive` refuses to replace an existing target, where a rename would silently overwrite:
+// createTask's allocation guard needs the same EEXIST its old `wx` write produced
+export function writeTaskFile(path: string, content: string, opts?: { exclusive?: boolean }): void {
+	const tmp = join(dirname(path), `.${basename(path)}.${process.pid}.${tmpSeq++}.tmp`);
+	let fd: number | undefined;
+	try {
+		fd = openSync(tmp, "wx");
+		writeFileSync(fd, content);
+		fsyncSync(fd);
+		closeSync(fd);
+		fd = undefined;
+		if (opts?.exclusive) linkSync(tmp, path);
+		else renameSync(tmp, path);
+	} finally {
+		if (fd !== undefined) {
+			try {
+				closeSync(fd);
+			} catch {}
+		}
+		try {
+			unlinkSync(tmp);
+		} catch {}
+	}
+}
+
+// Cross-process lock around one read-modify-write cycle; same shape as the create allocation
+// lock. A crashed holder's lock is stolen only after LOCK_STALE_MS, so the give-up window must
+// outlive the threshold: shorter, and a dead holder fails every writer for its whole duration
+const LOCK_STALE_MS = 10_000;
+
+function withLock<T>(root: string, name: string, fn: () => T): T {
+	const lock = join(kanbanDir(root), name);
+	const deadline = Date.now() + LOCK_STALE_MS + 5_000;
+	for (;;) {
+		try {
+			writeFileSync(lock, String(process.pid), { flag: "wx" });
+			break;
+		} catch (e) {
+			if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+			try {
+				// steal a lock left behind by a crashed holder
+				if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) unlinkSync(lock);
+			} catch {}
+			if (Date.now() >= deadline) throw new Error(`could not lock "${lock}"`);
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+		}
+	}
+	try {
+		return fn();
+	} finally {
+		try {
+			unlinkSync(lock);
+		} catch {}
+	}
+}
+
+// one lock per task file: writers on one task serialize their read-modify-write cycle, writers
+// on different tasks never wait for each other
+const taskLockName = (file: string) => `.${taskSlug(file)}.write.lock`;
+
+// Every task-file write goes through here: atomic replace plus the daemon self-write tag the
+// backlog promotion gate reads. A write must never drop the tag, or the gate reads it as foreign
+function writeTask(root: string, file: string, content: string): void {
+	const path = join(kanbanDir(root), file);
+	writeTaskFile(path, content);
+	noteSelfWrite(path);
+}
+
 // Attribute-only rewrite; skips unchanged keys and refuses a conflicted file. Exported for
 // the orchestrator's automatic blockedBy maintenance (updateTask would add a needless cycle
 // check and board re-read to a pure ref removal).
 export function updateAttrs(root: string, task: Task, patch: Record<string, string>): void {
-	const path = join(kanbanDir(root), task.file);
-	const raw = readFileSync(path, "utf8");
-	if (hasConflictMarkers(raw)) throw new Error(`unresolved merge conflict markers in ${task.file}; not rewriting`);
-	const fm = splitFrontmatter(raw);
-	if (!fm) throw new Error(`no frontmatter in ${task.file}`);
-	const changed = Object.entries(patch).filter(([k, v]) => fm.attrs[k] !== v);
-	if (!changed.length) return;
-	for (const [k, v] of changed) fm.attrs[k] = v;
-	writeFileSync(path, serializeFrontmatter(fm.attrs) + fm.body);
-	noteSelfWrite(path);
+	withLock(root, taskLockName(task.file), () => {
+		const raw = readFileSync(join(kanbanDir(root), task.file), "utf8");
+		if (hasConflictMarkers(raw)) throw new Error(`unresolved merge conflict markers in ${task.file}; not rewriting`);
+		const fm = splitFrontmatter(raw);
+		if (!fm) throw new Error(`no frontmatter in ${task.file}`);
+		const changed = Object.entries(patch).filter(([k, v]) => fm.attrs[k] !== v);
+		if (!changed.length) return;
+		for (const [k, v] of changed) fm.attrs[k] = v;
+		writeTask(root, task.file, serializeFrontmatter(fm.attrs) + fm.body);
+	});
 }
 
 export function setState(root: string, task: Task, state: TaskState): void {
@@ -359,31 +472,32 @@ export function setState(root: string, task: Task, state: TaskState): void {
 
 // Rewrites only the given body sections; everything else stays byte-for-byte.
 function replaceSections(root: string, task: Task, updates: Record<string, string>): void {
-	const path = join(kanbanDir(root), task.file);
-	const raw = readFileSync(path, "utf8");
-	const fm = splitFrontmatter(raw);
-	const body = fm?.body ?? raw;
-	const lines = body.split("\n");
-	const headers: { index: number; name: string }[] = [];
-	lines.forEach((line, index) => {
-		const name = sectionName(line);
-		if (name) headers.push({ index, name });
-	});
-	const jobs = Object.entries(updates)
-		.map(([name, value]) => ({ name, value, header: headers.findLast((h) => h.name === name) }))
-		.sort((a, b) => (b.header?.index ?? -1) - (a.header?.index ?? -1));
-	const out = [...lines];
-	for (const job of jobs) {
-		if (!job.header) {
-			if (out[out.length - 1] !== "") out.push("");
-			const title = job.name[0].toUpperCase() + job.name.slice(1);
-			out.push(`# ${title}`, ...job.value.split("\n"), "");
-			continue;
+	withLock(root, taskLockName(task.file), () => {
+		const raw = readFileSync(join(kanbanDir(root), task.file), "utf8");
+		const fm = splitFrontmatter(raw);
+		const body = fm?.body ?? raw;
+		const lines = body.split("\n");
+		const headers: { index: number; name: string }[] = [];
+		lines.forEach((line, index) => {
+			const name = sectionName(line);
+			if (name) headers.push({ index, name });
+		});
+		const jobs = Object.entries(updates)
+			.map(([name, value]) => ({ name, value, header: headers.findLast((h) => h.name === name) }))
+			.sort((a, b) => (b.header?.index ?? -1) - (a.header?.index ?? -1));
+		const out = [...lines];
+		for (const job of jobs) {
+			if (!job.header) {
+				if (out[out.length - 1] !== "") out.push("");
+				const title = job.name[0].toUpperCase() + job.name.slice(1);
+				out.push(`# ${title}`, ...job.value.split("\n"), "");
+				continue;
+			}
+			const end = headers.find((h) => h.index > job.header.index)?.index ?? lines.length;
+			out.splice(job.header.index + 1, end - job.header.index - 1, ...job.value.split("\n"), "");
 		}
-		const end = headers.find((h) => h.index > job.header.index)?.index ?? lines.length;
-		out.splice(job.header.index + 1, end - job.header.index - 1, ...job.value.split("\n"), "");
-	}
-	writeFileSync(path, (fm ? raw.slice(0, raw.length - body.length) : "") + out.join("\n"));
+		writeTask(root, task.file, (fm ? raw.slice(0, raw.length - body.length) : "") + out.join("\n"));
+	});
 }
 
 // the hold tokens: a blockedBy part that reads "user" or "question" (any case, any spacing)
@@ -501,28 +615,7 @@ export function createTask(
 	// serialize the allocation: wx guards only one exact path, so two creators scanning
 	// the same max can otherwise write the same number under different slugs; the lock
 	// makes scan+write one critical section. A live holder commits in microseconds.
-	const lock = join(kanbanDir(root), ".create.lock");
-	// a crashed holder's lock is only stolen after LOCK_STALE_MS, so the give-up window
-	// must outlive the threshold: shorter, and a dead holder fails every create for its
-	// whole duration instead of being recovered
-	const LOCK_STALE_MS = 10_000;
-	const lockDeadline = Date.now() + LOCK_STALE_MS + 5_000;
-	let locked = false;
-	while (!locked && Date.now() < lockDeadline) {
-		try {
-			writeFileSync(lock, String(process.pid), { flag: "wx" });
-			locked = true;
-		} catch (e) {
-			if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-			try {
-				// steal a lock left behind by a crashed creator
-				if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) unlinkSync(lock);
-			} catch {}
-			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
-		}
-	}
-	if (!locked) throw new Error(`could not lock "${kanbanDir(root)}" for task creation`);
-	try {
+	return withLock(root, ".create.lock", () => {
 		for (let attempt = 0; attempt < 10; attempt++) {
 			const nums = taskFiles(root).map(taskNum).filter((n) => n > 0);
 			const num = String((nums.length ? Math.max(...nums) : 0) + 1).padStart(6, "0");
@@ -531,7 +624,7 @@ export function createTask(
 			if (input.blockedBy) assertNoBlockCycle(root, parseInt(num, 10), input.blockedBy);
 			const file = `${num}_${shortName ? shortName.replaceAll("-", "_") : slugFile(input.name)}.md`;
 			try {
-				writeFileSync(join(kanbanDir(root), file), content, { flag: "wx" });
+				writeTaskFile(join(kanbanDir(root), file), content, { exclusive: true });
 				// a number claimed under a different basename (hand-written file) between
 				// the scan and the write still succeeds; drop our file and retry
 				if (taskFiles(root).some((f) => f !== file && taskNum(f) === parseInt(num, 10))) {
@@ -544,7 +637,5 @@ export function createTask(
 			}
 		}
 		throw new Error(`could not allocate a task number for "${input.name}" after 10 attempts`);
-	} finally {
-		unlinkSync(lock);
-	}
+	});
 }

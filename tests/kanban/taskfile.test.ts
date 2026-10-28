@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTask, getTask, listAll, listTasks, parseTask, resolveTaskFromCwd, setState, setWorktree, updateTask } from "../../src/kanban.ts";
+import { createTask, getTask, listAll, listTasks, parseTask, resolveTaskFromCwd, setState, setWorktree, updateTask, writeTaskFile } from "../../src/kanban.ts";
 
 const root = mkdtempSync(join(tmpdir(), "kanban-taskfile-"));
 // create + numbering + frontmatter roundtrip
@@ -136,5 +136,38 @@ const rawAfter = readFileSync(join(root, ".kanban", tu.file), "utf8");
 assert.match(rawAfter, /^state: "to-do"$/m);
 assert.match(rawAfter, /^custom-attr: "keep me"$/m);
 assert.match(rawAfter, /# Design\nextra section/);
+// atomic replace: the bytes land through a temp file in the same directory, so the live file
+// is swapped whole and no temp survives; an exclusive write refuses to replace a live task
+const atomicFile = "000900_atomic_probe.md";
+const atomicPath = join(root, ".kanban", atomicFile);
+const temps = () => readdirSync(join(root, ".kanban")).filter((f) => f.endsWith(".tmp"));
+writeTaskFile(atomicPath, '---\nname: "old"\nstate: "backlog"\n---\n# Summary\nold\n');
+writeTaskFile(atomicPath, '---\nname: "new"\nstate: "backlog"\n---\n# Summary\nnew\n');
+assert.equal(parseTask(root, atomicFile).name, "new");
+assert.deepEqual(temps(), []);
+assert.throws(() => writeTaskFile(atomicPath, "clobber", { exclusive: true }), /EEXIST/);
+assert.equal(parseTask(root, atomicFile).name, "new"); // the refused exclusive write left the target alone
+assert.deepEqual(temps(), []);
+// the incident pattern in one process: a reader that already holds the file open keeps the old
+// inode, so an in-place truncate plus write would change what it reads; the atomic replace
+// leaves it on the complete old file and the new content lands on a fresh inode
+const heldFd = openSync(atomicPath, "r");
+writeTaskFile(atomicPath, '---\nname: "newer"\nstate: "backlog"\n---\n# Summary\nnewer\n');
+assert.equal(readFileSync(heldFd, "utf8"), '---\nname: "new"\nstate: "backlog"\n---\n# Summary\nnew\n');
+closeSync(heldFd);
+assert.equal(parseTask(root, atomicFile).name, "newer");
+rmSync(atomicPath);
+
+// a malformed task file is quarantined under .logs with a timestamp and dropped from the
+// board, not reset to default fields and parked in backlog as a husk (the 000440 incident)
+const brokenFile = "000901_broken_task.md";
+const brokenRaw = 'name: "fix: settle the me\ns\nr\ng\n';
+writeFileSync(join(root, ".kanban", brokenFile), brokenRaw);
+assert.equal(getTask(root, brokenFile), undefined);
+assert.equal(existsSync(join(root, ".kanban", brokenFile)), false); // the husk leaves the board
+const quarantined = readdirSync(join(root, ".kanban", ".logs")).filter((f) => f.startsWith("000901_broken_task.") && f.endsWith(".malformed.md"));
+assert.equal(quarantined.length, 1); // one timestamped copy
+assert.equal(readFileSync(join(root, ".kanban", ".logs", quarantined[0]), "utf8"), brokenRaw); // every byte kept
+assert.equal(listAll(root).some((t) => t.file === brokenFile), false); // no husk on the board
 rmSync(root, { recursive: true, force: true });
 console.log("kanban: task file tests passed");

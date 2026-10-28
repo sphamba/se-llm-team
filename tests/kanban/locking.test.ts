@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createTask, taskFiles, taskNum } from "../../src/kanban.ts";
+import { createTask, getTask, taskFiles, taskNum, writeTaskFile } from "../../src/kanban.ts";
 
 // number allocation: repeated creates never share a number
 const raceRoot = mkdtempSync(join(tmpdir(), "kanban-race-"));
@@ -22,12 +22,12 @@ const preload = join(raceRoot, "preload.cjs");
 writeFileSync(
 	preload,
 	`const fs = require("node:fs");
-const orig = fs.writeFileSync;
+const orig = fs.openSync;
 const target = ${JSON.stringify(join(raceRoot, ".kanban", "000006_racer.md"))};
-fs.writeFileSync = function (p, ...args) {
-	if (String(p) === target && !globalThis.__rivalInjected) {
+fs.openSync = function (p, ...args) {
+	if (String(p).includes("000006_racer.md") && !globalThis.__rivalInjected) {
 		globalThis.__rivalInjected = true;
-		orig.call(fs, ${JSON.stringify(rivalFile)}, ${JSON.stringify('---\nname: "other"\n---\n')});
+		fs.writeFileSync(${JSON.stringify(rivalFile)}, ${JSON.stringify('---\nname: "other"\n---\n')});
 	}
 	return orig.call(fs, p, ...args);
 };`,
@@ -105,4 +105,82 @@ utimesSync(heldLock, Date.now() / 1000 - 8, Date.now() / 1000 - 8); // seconds, 
 assert.equal(createTask(heldRoot, { name: "fix: held lock", summary: "s" }).file, "000001_held_lock.md");
 assert.equal(existsSync(heldLock), false); // stolen once it aged past the threshold
 rmSync(heldRoot, { recursive: true, force: true });
+// one task file, four writer processes (state flips plus section rewrites) and a reader
+// process: every read must see a whole, parseable task file, never the char-per-line husk of
+// the 000440 incident, and no temp or lock file may survive
+const run = (source: string) =>
+	new Promise<{ out: string; err: string; code: number }>((resolve) => {
+		let out = "";
+		let err = "";
+		const child = spawn(process.execPath, ["-e", source], { stdio: ["ignore", "pipe", "pipe"] });
+		child.stdout.on("data", (d) => (out += d));
+		child.stderr.on("data", (d) => (err += d));
+		child.on("close", (code) => resolve({ out, err, code: code ?? 1 }));
+	});
+const stressRoot = mkdtempSync(join(tmpdir(), "kanban-atomic-"));
+const stressTask = createTask(stressRoot, { name: "fix: atomic stress", summary: "seed", specs: "seed specs" });
+const stressPath = join(stressRoot, ".kanban", stressTask.file);
+const writer = `import(${mod}).then(({ getTask, setState, updateTask }) => {
+	const task = getTask(${JSON.stringify(stressRoot)}, ${JSON.stringify(stressTask.file)});
+	for (let i = 0; i < 25; i++) {
+		setState(${JSON.stringify(stressRoot)}, task, i % 2 ? "to-do" : "doing");
+		updateTask(${JSON.stringify(stressRoot)}, task, { summary: "w" + process.pid + "i" + i });
+	}
+});`;
+const watcher = `const fs = require("node:fs");
+const stop = Date.now() + 2000;
+let reads = 0;
+while (Date.now() < stop) {
+	reads++;
+	const raw = fs.readFileSync(${JSON.stringify(stressPath)}, "utf8");
+	const whole = raw.startsWith("---\\n") && raw.includes("\\n---\\n") && raw.includes("# Summary\\n") && raw.endsWith("\\n");
+	if (!whole) {
+		process.stderr.write("incomplete task file at read " + reads + ": " + JSON.stringify(raw.slice(0, 80)));
+		process.exit(1);
+	}
+}
+process.stdout.write("reads=" + reads);`;
+const [writers, watched] = await Promise.all([Promise.all(Array.from({ length: 4 }, () => run(writer))), run(watcher)]);
+for (const w of writers) assert.equal(w.code, 0, `writer failed: ${w.err}`);
+assert.equal(watched.code, 0, `reader saw a partial file: ${watched.err}`);
+assert.ok(Number(/reads=(\d+)/.exec(watched.out)?.[1]) > 0);
+assert.ok(getTask(stressRoot, stressTask.file)); // still one readable task after the stress
+const stressLeft = readdirSync(join(stressRoot, ".kanban")).filter((f) => f.endsWith(".tmp") || f.endsWith(".lock"));
+assert.deepEqual(stressLeft, []);
+rmSync(stressRoot, { recursive: true, force: true });
+
+// the incident pattern: a writer alternating a large and a small content through the atomic
+// helper while a reader hammers the file. A truncate interleaved with a buffered write shows a
+// length that is neither content's length; the rename never does
+const reproRoot = mkdtempSync(join(tmpdir(), "kanban-repro-"));
+mkdirSync(join(reproRoot, ".kanban"), { recursive: true });
+const reproPath = join(reproRoot, ".kanban", "000001_repro.md");
+const reproSmall = '---\nname: "repro"\nstate: "backlog"\n---\n# Summary\nsmall\n';
+const reproBig = reproSmall.length + 65536 + 1;
+writeFileSync(reproPath, reproSmall);
+const flip = `import(${mod}).then(({ writeTaskFile }) => {
+	const small = ${JSON.stringify(reproSmall)};
+	const big = small + "x".repeat(65536) + "\\n";
+	for (let i = 0; i < 60; i++) writeTaskFile(${JSON.stringify(reproPath)}, i % 2 ? big : small);
+});`;
+const watchdog = `const fs = require("node:fs");
+const lens = ${JSON.stringify([reproSmall.length, reproBig])};
+const stop = Date.now() + 1500;
+let reads = 0;
+while (Date.now() < stop) {
+	reads++;
+	const raw = fs.readFileSync(${JSON.stringify(reproPath)}, "utf8");
+	if (!lens.includes(raw.length)) {
+		process.stderr.write("partial file at read " + reads + ": length " + raw.length + " is neither " + lens[0] + " nor " + lens[1]);
+		process.exit(1);
+	}
+}
+process.stdout.write("reads=" + reads);`;
+const [flipped, guarded] = await Promise.all([run(flip), run(watchdog)]);
+assert.equal(flipped.code, 0, `writer failed: ${flipped.err}`);
+assert.equal(guarded.code, 0, `reader saw a partial write: ${guarded.err}`);
+assert.ok(Number(/reads=(\d+)/.exec(guarded.out)?.[1]) > 0);
+assert.ok([reproSmall.length, reproBig].includes(readFileSync(reproPath, "utf8").length)); // the last write landed whole
+assert.deepEqual(readdirSync(join(reproRoot, ".kanban")).filter((f) => f.endsWith(".tmp")), []);
+rmSync(reproRoot, { recursive: true, force: true });
 console.log("kanban: locking tests passed");
