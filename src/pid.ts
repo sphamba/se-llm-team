@@ -93,7 +93,7 @@ export function pidEntry(root: string, name: string): { pid: number; disc: strin
 // Splitter runs detached at the project root and keeps its task's slug in the name (000361)
 export function agentPidName(role: string | undefined, slug: string): string {
 	if (role === "splitter") return `${slug}.splitter`;
-	return role === "merger" || role === "integration-tester" ? role : slug;
+	return role === "merger" ? role : slug;
 }
 
 // liveness of the agent a pid file names: the discriminator decides, so a pid recycled by

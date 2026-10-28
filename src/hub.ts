@@ -6,7 +6,6 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getTask, isLinkedWorktree, kanbanDir, PRIORITIES, taskFiles, taskNum, taskSlug, updateAttrs } from "./kanban.ts";
 import type { StageFlags } from "./orchestrator/config.ts";
-import { readMergerSlug } from "./orchestrator/spawn.ts";
 import { agentPidName, clearPid, killTree, pidAlive, pidEntry } from "./pid.ts";
 import * as webui from "./webui.ts";
 
@@ -133,7 +132,7 @@ export function readHubRegistry(): HubEntry[] {
 // a stage flag is on unless the payload says false, so a missing or malformed field cannot fade a column
 function parseStageFlags(value: any): StageFlags | undefined {
 	return value && typeof value === "object"
-		? { reviews: value.reviews !== false, liveTesting: value.liveTesting !== false, integrationTesting: value.integrationTesting !== false }
+		? { reviews: value.reviews !== false, liveTesting: value.liveTesting !== false }
 		: undefined;
 }
 
@@ -197,14 +196,12 @@ const readBody = (req: IncomingMessage): Promise<string> =>
 	});
 
 // The user hold the task dialog toggles. A block backs a working state up to its own queue
-// state and stops that state's agent; every other allowed state keeps its state. The integration
-// lane is project-wide, so only the task its slug file names owns that pid.
+// state and stops that state's agent; every other allowed state keeps its state.
 const USER_HOLD = "user";
 const BLOCK_STATE: Record<string, string> = {
 	doing: "to-do",
 	reviewing: "to-review",
 	"live-testing": "to-live-test",
-	"integration-testing": "to-integration-test",
 };
 const BLOCK_ROLE: Record<string, string> = {
 	"to-do": "splitter",
@@ -309,16 +306,13 @@ async function taskBlock(
 		return json(res, { ok: true });
 	}
 	if (task.state === "done" || task.state === "merging") return fail(409, `cannot block a ${task.state} task`);
-	// one task write: the hold and the queue state land together, before any kill, so the
-	// integration lane's liveness rule cannot advance the task to done in between
+	// one task write: the hold and the queue state land together, before any kill
 	const blockedBy = [...refs, USER_HOLD].join(", ");
 	const next = BLOCK_STATE[task.state];
 	updateAttrs(entry.root, task, next ? { blockedBy, state: next } : { blockedBy });
 	const role = BLOCK_ROLE[task.state];
 	const slug = taskSlug(task.file);
 	if (role) stopAgent(entry.root, agentPidName(role, slug), opts.log);
-	if (task.state === "integration-testing" && readMergerSlug(entry.root, "integration-tester") === slug)
-		stopAgent(entry.root, "integration-tester", opts.log);
 	json(res, { ok: true });
 }
 

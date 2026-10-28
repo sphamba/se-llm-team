@@ -12,8 +12,6 @@ export const STATES = [
 	"merging",
 	"to-live-test",
 	"live-testing",
-	"to-integration-test",
-	"integration-testing",
 	"done",
 ] as const;
 export type TaskState = (typeof STATES)[number];
@@ -65,8 +63,6 @@ const IN_PROGRESS = new Set<TaskState>([
 	"merging",
 	"to-live-test",
 	"live-testing",
-	"to-integration-test",
-	"integration-testing",
 ]);
 
 export function kanbanDir(root: string): string {
@@ -466,7 +462,7 @@ export function createTask(
 		? (input.complexity as string)
 		: "moderate";
 	// issuer is set at creation only and never changed afterwards; "user" is the PM, "auto" the
-	// orchestrator (the integration task), "#<num>" a splitter piece. Anything else falls back to "user"
+	// orchestrator, "#<num>" a splitter piece. Anything else falls back to "user"
 	const issuer = input.issuer !== undefined && (input.issuer === "user" || input.issuer === "auto" || /^#\d+$/.test(input.issuer)) ? input.issuer : "user";
 	// shortName is set at creation only: it names the file and the branch, so it cannot change later;
 	// anything invalid is rejected, unlike issuer which falls back

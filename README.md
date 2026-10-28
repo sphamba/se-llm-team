@@ -5,10 +5,9 @@ One skill turns your coding-agent session into the Project manager. A non-LLM de
 - [Splitter](agents/splitter.md): splits moderate and complex tasks into parallel subtasks before development starts.
 - [Developer](agents/developer.md): implements the Specs in an isolated worktree. It can delegate research or parallel work to subagents.
 - [Reviewer](agents/reviewer.md): reviews the diff against the Specs, fixes small mistakes, and can send the task back to the developer. It can use subagents.
-- [Merger](agents/merger.md): resolves rebase conflicts only. The orchestrator merges clean branches itself.
+- [Merger](agents/merger.md): rebases the task branch onto the base branch, resolves the conflicts, and runs the full project test suite in its worktree.
 - [Live-tester](agents/live-tester.md): runs the merged commit like a user and reports findings.
-- [Integration-tester](agents/integration-tester.md): runs the full project test suite on the merged base branch and reports defects and coverage gaps.
-- [Doctor](agents/doctor.md): after every successful run, writes what it learned into that role's notes file so future runs start faster. There is one for the developer, reviewer, merger, live-tester, and integration-tester.
+- [Doctor](agents/doctor.md): after every successful run, writes what it learned into that role's notes file so future runs start faster. There is one for the developer, reviewer, merger, and live-tester.
 
 ```mermaid
 flowchart TD
@@ -20,7 +19,6 @@ flowchart TD
         Developers --> Reviewers
         Reviewers --> Merger
         Merger --> LiveTester["Live-tester"]
-        Merger --> IntegrationTester["Integration-tester"]
     end
     subgraph Developers
         direction TB
@@ -108,7 +106,6 @@ The config is optional. The global directory is `~/.se-llm-team` and it holds th
   "reviewerCap": { "trivial": 0, "simple": 1, "moderate": 2, "complex": 3 },
   "reviews": true,
   "liveTesting": true,
-  "integrationTesting": true,
   "webUi": { "enabled": true, "host": "localhost", "port": 4242 }
 }
 ```
@@ -118,7 +115,7 @@ The config is optional. The global directory is `~/.se-llm-team` and it holds th
 | `agent` | `pi` | Agent backend the orchestrator spawns: `pi` or `claude`. Any other value names a custom executable. |
 | `pollMinutes` | `1` | Agent liveness poll interval. |
 | `logStallMinutes` | `60` | An agent whose log does not grow for this many minutes is assumed dead. The task bounces back one state. |
-| `maxParallel` | `0` | Maximum tasks in a working state at once. 0 means no limit. When the cap binds, tasks start by priority first, then by pipeline stage with the later stage first (integration-test, live-test, merge, review, to-do), then by creation order. |
+| `maxParallel` | `0` | Maximum tasks in a working state at once. 0 means no limit. When the cap binds, tasks start by priority first, then by pipeline stage with the later stage first (live-test, merge, review, to-do), then by creation order. |
 | `provider` | unset | LLM provider for the pi backend. It requires `model` and claude ignores it. |
 | `model` | unset | LLM model or pattern. |
 | `thinking` | unset | Reasoning level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
@@ -127,14 +124,11 @@ The config is optional. The global directory is `~/.se-llm-team` and it holds th
 | `reviewerCap.<complexity>` | `0`/`1`/`2`/`3` | Successful reviewer runs before a to-review task force-advances to to-merge. Defaults: trivial `0`, simple `1`, moderate `2`, complex `3`. |
 | `reviews` | `true` | Run the Reviewer stage. Off: a to-review task moves straight to to-merge. |
 | `liveTesting` | `true` | Run the Live-tester stage. Off: a merged to-live-test task moves straight to done. |
-| `integrationTesting` | `true` | Run the Integration-tester stage. Off: a merge opens no new integration task, and a task already waiting in `to-integration-test` never starts, so it waits there until the gate is on again. |
 | `webUi.enabled` | off | Serve the web dashboard with the daemon. |
 | `webUi.host` | `localhost` | Dashboard bind host. |
 | `webUi.port` | `4242` | Dashboard port. |
 
-The Web UI fades both columns of a disabled stage. The cards in `to-integration-test` fade too while `integrationTesting` is off, because the gate holds them there. A run already in `integration-testing` keeps full opacity until it finishes.
-
-An auto-created integration task takes the priority of the tasks it covers: trivial `low`, simple `medium`, moderate `high`, complex `critical`. The highest covered priority wins, and appending another task never lowers it while the task waits.
+The Web UI fades the two columns of a disabled stage: the review station while `reviews` is off, and the live-test station while `liveTesting` is off.
 
 ## Documentation
 

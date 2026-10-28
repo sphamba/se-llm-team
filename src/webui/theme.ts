@@ -15,7 +15,7 @@ const DARK_TOKENS = `--canvas: #05080a; --panel: #0b1118; --raised: #111a24; --h
 /* 000129: medium/critical hues widened (yellow / strong red) so the priority chips read apart; -bg tints match their fg */
 --low-bg: rgba(170, 217, 76, .15); --low-fg: #aad94c; --medium-bg: rgba(255, 209, 115, .15); --medium-fg: #ffd173; --high-bg: rgba(255, 143, 64, .15); --high-fg: #ff8f40; --critical-bg: rgba(255, 82, 82, .15); --critical-fg: #ff5252;
 --cx-trivial-bg: rgba(100, 130, 165, .18); --shine-hi: #ffffff; --overlay: rgba(0, 0, 0, .6); --code-bg: #010102;
---accent-backlog: #b3bbc6; --accent-backlog-text: #b3bbc6; --accent-todo: #e6b22d; --accent-todo-text: #e6b22d; --accent-review: #ffa068; --accent-review-text: #ffa068; --accent-merge: #cea5fd; --accent-merge-text: #cea5fd; --accent-live: #68c5ff; --accent-live-text: #68c5ff; --accent-integration: #69ceca; --accent-integration-text: #69ceca; --accent-done: #73d484; --accent-done-text: #73d484; --error: #ff6b63; --error-text: #ff6b63;`;
+--accent-backlog: #b3bbc6; --accent-backlog-text: #b3bbc6; --accent-todo: #e6b22d; --accent-todo-text: #e6b22d; --accent-review: #ffa068; --accent-review-text: #ffa068; --accent-merge: #cea5fd; --accent-merge-text: #cea5fd; --accent-live: #68c5ff; --accent-live-text: #68c5ff; --accent-done: #73d484; --accent-done-text: #73d484; --error: #ff6b63; --error-text: #ff6b63;`;
 const darkBlock = (selector: string) => `${selector} { ${DARK_TOKENS} }`;
 const themeButton = (selector: string) => `${selector} #theme { color: var(--link); border-color: var(--link); }`;
 const DARK_VARS = `
@@ -31,7 +31,7 @@ export const CSS = `* { box-sizing: border-box; }
 --low-bg: rgba(134, 179, 0, .15); --low-fg: #86b300; --medium-bg: rgba(201, 151, 0, .15); --medium-fg: #c99700; --high-bg: rgba(250, 133, 50, .15); --high-fg: #fa8532; --critical-bg: rgba(230, 80, 80, .15); --critical-fg: #e65050;
 --cx-trivial-bg: rgba(100, 130, 165, .18); --shine-hi: #ffffff; --overlay: rgba(15, 23, 42, .45); --code-bg: #ebeef0;
 /* 000353: one accent per pipeline stage and agent role, plus the failed-run red; the -text step is the darker Ayu Light ladder step that keeps a label readable on the light panel */
---accent-backlog: #979faa; --accent-backlog-text: #666c75; --accent-todo: #c79603; --accent-todo-text: #886600; --accent-review: #eb7c33; --accent-review-text: #a84f0a; --accent-merge: #b188df; --accent-merge-text: #7b5a9f; --accent-live: #3fa9e5; --accent-live-text: #1674a4; --accent-integration: #4ab1ae; --accent-integration-text: #227a78; --accent-done: #56b669; --accent-done-text: #2e7f40; --error: #ff645f; --error-text: #b0423d;
+--accent-backlog: #979faa; --accent-backlog-text: #666c75; --accent-todo: #c79603; --accent-todo-text: #886600; --accent-review: #eb7c33; --accent-review-text: #a84f0a; --accent-merge: #b188df; --accent-merge-text: #7b5a9f; --accent-live: #3fa9e5; --accent-live-text: #1674a4; --accent-done: #56b669; --accent-done-text: #2e7f40; --error: #ff645f; --error-text: #b0423d;
 /* 000191: motion knobs, one place to retune the entrances, the chunk fade and the pulse loop; 000194: --exit runs the closes, --shine is the card and console highlight mix; #369: one motion token set, every duration and easing in the sheet reads one of these */
 --t-fast: 120ms; --t-base: 180ms; --t-slow: 240ms; --t-breathe: 2s; --t-wave: 12s; --t-slot: calc(var(--t-wave) / 7); --ease-enter: cubic-bezier(.2, .8, .2, 1); --ease-exit: cubic-bezier(.4, 0, .8, 1); --ease-breathe: ease-in-out; --shine: 45%;
 /* #421 the spine band's white mix: 85% lifts the already bright tint ladder to near white, while --shine stays 45% for the card and console highlights */
@@ -117,14 +117,12 @@ body.panel-open #archive { padding-right: calc(18px + var(--panel-w)); }
 #p-outside { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; border: 1px solid var(--hairline); border-radius: 6px; padding: 4px 8px; color: var(--dim); font-size: 0.8125rem; }
 #p-outside.hidden { display: none; }
 #p-outside .m-action { margin-left: auto; }
-/* #366 the station spine: seven equal tracks. #374 the floor is derived, not a breakpoint: 9.375rem per station, so at any width too narrow for seven 150px tracks plus the separators the board alone scrolls horizontally (000247) and the page never does. #388 the board keeps no side padding, so the seven tracks fill the viewport and a card box starts at 0. The heads share one hairline grid item and each station body scrolls on its own */
-#board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(7, minmax(9.375rem, 1fr)); grid-template-rows: 1px minmax(0, 1fr); gap: 0; padding: var(--sp-3) 0 var(--sp-5); overflow-x: auto; overflow-y: hidden; position: relative; }
+/* #366 the station spine: six equal tracks. #374 the floor is derived, not a breakpoint: 9.375rem per station, so at any width too narrow for six 150px tracks plus the separators the board alone scrolls horizontally (000247) and the page never does. #388 the board keeps no side padding, so the six tracks fill the viewport and a card box starts at 0. The heads share one hairline grid item and each station body scrolls on its own */
+#board { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(6, minmax(9.375rem, 1fr)); grid-template-rows: 1px minmax(0, 1fr); gap: 0; padding: var(--sp-3) 0 var(--sp-5); overflow-x: auto; overflow-y: hidden; position: relative; }
 /* #417 the bar: the spine is one 1px ladder bar, one fixed slot per station with the ends holding the first and last tint, so the line never restarts at a junction. z-index 3 lifts it over the head ticks, so only their 1px crossing hides */
-.spine { grid-column: 1 / -1; grid-row: 1; z-index: 3; position: relative; overflow: hidden; background-image: linear-gradient(90deg, var(--accent-backlog) 0%, var(--accent-backlog) 7.1429%, var(--accent-todo) 21.4286%, var(--accent-review) 35.7143%, var(--accent-merge) 50%, var(--accent-live) 64.2857%, var(--accent-integration) 78.5714%, var(--accent-done) 92.8571%, var(--accent-done) 100%); }
+.spine { grid-column: 1 / -1; grid-row: 1; z-index: 3; position: relative; overflow: hidden; background-image: linear-gradient(90deg, var(--accent-backlog) 0%, var(--accent-backlog) 8.3333%, var(--accent-todo) 25%, var(--accent-review) 41.6667%, var(--accent-merge) 58.3333%, var(--accent-live) 75%, var(--accent-done) 91.6667%, var(--accent-done) 100%); }
 /* the band is 22% of the track and clips at both edges; it starts fully off the left and ends fully off the right, so the loop wraps with no dark beat. It rests at opacity 0, so a sheet with motion off paints the ladder alone */
 .spine::after { content: ""; position: absolute; left: 0; top: 0; width: 22%; height: 100%; opacity: 0; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--shine-hi) var(--beam), transparent), transparent); }
-/* a disabled integration stage narrows its own track to a strip; the other six keep the floor */
-#board.off-integration { grid-template-columns: repeat(5, minmax(9.375rem, 1fr)) 48px minmax(9.375rem, 1fr); }
 /* relation lines: absolute in the relative board, so the overlay scrolls with the content; z-index 1
 paints them above the station bodies and below the z-index-2 task cards, pointer-events none so the
 card clicks pass through. #373 the lines exist only during a reveal: at rest the card marker carries
@@ -151,11 +149,6 @@ stays readable; the active card and its rimmed blockers keep full strength */
 .station .cards::-webkit-scrollbar { width: 0; }
 /* a disabled stage dims its station but keeps the cards reachable */
 .station.dim .cards, .station.dim .count { opacity: .4; }
-/* a disabled integration stage is a narrow labeled strip with no cards and no count */
-.station.strip { border-left: 1px dashed var(--hairline); }
-.station.strip .cards, .station.strip .toggle, .station.strip .count { display: none; }
-.station.strip .st-head { flex-direction: column; align-items: center; }
-.station.strip .st-head h2 { writing-mode: vertical-rl; color: var(--faint); }
 .count { font-size: 2rem; font-weight: 500; font-family: ${MONO}; font-variant-numeric: tabular-nums; color: var(--dim); }
 /* #366 a card is a row, not a box: no border, no radius, no state tint, its group ends with a hairline. 000124: positioned above the z-index-1 relation lines; the semi-transparent background lets a line passing under the card show through faintly (no --card var, --panel is the card's base color in both themes) */
 .card { position: relative; z-index: 2; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 0; border-bottom: 1px solid var(--hairline); border-radius: 0; padding: var(--sp-3) var(--sp-4) var(--sp-4); cursor: pointer; }
@@ -260,7 +253,6 @@ names the reason where the station is wide enough */
 .agent-reviewer { color: var(--accent-review-text); }
 .agent-merger { color: var(--accent-merge-text); }
 .agent-livetest { color: var(--accent-live-text); }
-.agent-integration { color: var(--accent-integration-text); }
 .check { margin-right: 5px; }
 .cross { color: var(--error-text); margin-right: 5px; }
 .run-row > .run-mark { flex: 0 0 11px; display: inline-flex; justify-content: center; }
@@ -394,9 +386,6 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
 /* #386 nothing inside the phone board shrinks: the station, its cards and each card size to their content, so a card never paints over the next one and #board stays the one vertical scroller */
 .station { padding-left: 0; border-left: 1px solid var(--hairline); flex: 0 0 auto; min-height: auto; }
 .station + .station { border-top: 0; border-left: 1px solid var(--hairline); margin-top: 16px; }
-.station.strip { border-left: 1px dashed var(--hairline); }
-.station.strip .st-head { flex-direction: row; align-items: baseline; }
-.station.strip .st-head h2 { writing-mode: horizontal-tb; }
 .station .cards { flex: 0 0 auto; min-height: auto; overflow: visible; }
 .card { flex: 0 0 auto; padding: 10px 12px 12px; }
 .station .cards > .card:last-child { border-bottom: 0; }

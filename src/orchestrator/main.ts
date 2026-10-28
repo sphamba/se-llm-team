@@ -163,6 +163,6 @@ export function main(argv: string[]): void {
 	} else if (webUi.enabled) {
 		// the elected hub daemon serves every registered board on the webUi port; non-hub
 		// daemons register with it and serve nothing (one port, one ui)
-		joinHub({ name: basename(root), root, host: webUi.host, port: webUi.port, stages: { reviews: cfg.reviews, liveTesting: cfg.liveTesting, integrationTesting: cfg.integrationTesting }, log: (message) => log(root, message) });
+		joinHub({ name: basename(root), root, host: webUi.host, port: webUi.port, stages: { reviews: cfg.reviews, liveTesting: cfg.liveTesting }, log: (message) => log(root, message) });
 	}
 }

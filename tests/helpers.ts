@@ -56,8 +56,8 @@ export const showTip = (root: string, file: string): string | null => {
 // stub agent: parses its role out of the prompt and the task from the cwd SPECS.md symlink,
 // then acts per the new contract: the developer commits a code change and finishes (the
 // orchestrator moves the state on the exit 0), the reviewer writes to-merge itself, the
-// live-tester just finishes, and the merger only resolves the conflict the orchestrator's
-// stopped rebase left in its worktree; the blanket git add -A in the worktree proves board
+// live-tester just finishes, and the merger owns the rebase of its worktree branch and keeps
+// its own side on every conflict; the blanket git add -A in the worktree proves board
 // changes cannot be staged
 export const roleStub = (root: string) => {
 	const stub = join(root, "stub-agent.cjs");
@@ -112,10 +112,20 @@ if (prompt.includes("Developer agent")) {
 	execSync("git add -A && git commit -qm work", { stdio: "ignore" });
 }
 if (prompt.includes("Merger agent")) {
-	// the orchestrator left the rebase stopped in the merger's cwd (the task worktree): the
-	// merger resolves with the base branch's side (--ours in a rebase) and continues the
-	// replay, the orchestrator owns the state moves
-	execSync("git checkout --ours README.md && git add -A && GIT_EDITOR=true git rebase --continue", { stdio: "ignore" });
+	// the merger owns the rebase: the daemon spawns no git of its own, so the stub starts the
+	// rebase the prompt names and keeps its own side on every conflict (--theirs in a rebase).
+	// The daemon owns the state moves and the base fast-forward
+	const base = (prompt.match(/git rebase (?!-)([\\w./-]+)/) ?? [])[1] ?? "main";
+	const unresolved = () => {
+		try { return execSync("git diff --diff-filter=U --name-only").toString().trim().split("\\n").filter(Boolean); } catch { return []; }
+	};
+	try { execSync("git rebase " + base, { stdio: "ignore" }); } catch {}
+	for (let round = 0; round < 20 && unresolved().length; round++) {
+		for (const f of unresolved()) {
+			try { execSync("git checkout --theirs -- " + f + " && git add -- " + f, { stdio: "ignore" }); } catch {}
+		}
+		try { execSync("GIT_EDITOR=true git rebase --continue", { stdio: "ignore" }); } catch { break; }
+	}
 	process.exit(0);
 }
 // only the reviewer sets a state itself (to-merge on approval); the developer and the
@@ -128,8 +138,8 @@ if (prompt.includes("Reviewer agent")) writeFileSync(file, readFileSync(file, "u
 };
 
 // stub agent that records every spawn (role, argv, task) and acts per the new contract: the
-// developer commits so the merge is real, the merger resolves the conflict left in its
-// worktree cwd, only the reviewer writes state, the live-tester just finishes
+// developer commits so the merge is real, the merger owns the rebase in its worktree cwd,
+// only the reviewer writes state, the live-tester just finishes
 export const argvStub = (root: string) => {
 	const stub = join(root, "argv-agent.cjs");
 	writeFileSync(
@@ -141,8 +151,7 @@ const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 const role = prompt.includes("Merger agent") ? "merger"
 	: prompt.includes("Developer agent") ? "developer"
 	: prompt.includes("Reviewer agent") ? "reviewer"
-	: prompt.includes("Live-tester") ? "live-tester"
-	: prompt.includes("Integration-tester") ? "integration-tester" : "";
+	: prompt.includes("Live-tester") ? "live-tester" : "";
 // the task comes from the cwd SPECS.md symlink: the prompt carries no absolute paths, so
 // spawns are attributed by the task name read from the task file
 const file = "SPECS.md";
@@ -156,9 +165,19 @@ if (role === "developer") {
 	execSync("git add -A && git commit -qm work", { stdio: "ignore" });
 }
 if (role === "merger") {
-	// the orchestrator left the rebase stopped in the merger's cwd (the task worktree): the
-	// merger resolves with the base branch's side (--ours in a rebase) and continues the replay
-	execSync("git checkout --ours README.md && git add -A && GIT_EDITOR=true git rebase --continue", { stdio: "ignore" });
+	// the merger owns the rebase: the stub starts the rebase the prompt names and keeps its own
+	// side on every conflict (--theirs in a rebase)
+	const base = (prompt.match(/git rebase (?!-)([\\w./-]+)/) ?? [])[1] ?? "main";
+	const unresolved = () => {
+		try { return execSync("git diff --diff-filter=U --name-only").toString().trim().split("\\n").filter(Boolean); } catch { return []; }
+	};
+	try { execSync("git rebase " + base, { stdio: "ignore" }); } catch {}
+	for (let round = 0; round < 20 && unresolved().length; round++) {
+		for (const f of unresolved()) {
+			try { execSync("git checkout --theirs -- " + f + " && git add -- " + f, { stdio: "ignore" }); } catch {}
+		}
+		try { execSync("GIT_EDITOR=true git rebase --continue", { stdio: "ignore" }); } catch { break; }
+	}
 }
 // only the reviewer sets a state itself (to-merge on approval); the developer and the
 // live-tester just finish and the orchestrator moves the task on their exit 0

@@ -856,17 +856,17 @@ assert.deepEqual(promoteBacklog(rootBL, listAll(rootBL)).map((t) => t.file), [hi
 cleanupAll(rootBL);
 console.log("orchestrator.test.ts: ... + promotion order smoke passed");
 
-// --- part BM (362): the pure global order: five high tasks, one per schedulable state, created
-// in reverse stage order, come out integration-test, live-test, merge, review, to-do ---
+// --- part BM (362): the pure global order: four high tasks, one per schedulable state, created
+// in reverse stage order, come out live-test, merge, review, to-do ---
 const rootBM = fixture();
 cleaned.push(rootBM);
 mkdirSync(kanbanDir(rootBM), { recursive: true });
-for (const state of ["to-do", "to-review", "to-merge", "to-live-test", "to-integration-test"] as const) {
+for (const state of ["to-do", "to-review", "to-merge", "to-live-test"] as const) {
 	const task = createTask(rootBM, { name: `feat: ${state.replaceAll("-", " ")}`, priority: "high", summary: "Board order smoke", specs: "n/a" });
 	setState(rootBM, task, state);
 }
 const { boardOrder } = await import("../../src/orchestrator/pipeline.ts");
-assert.deepEqual([...listAll(rootBM)].sort(boardOrder).map((t) => t.state), ["to-integration-test", "to-live-test", "to-merge", "to-review", "to-do"], "the global order runs later stage first");
+assert.deepEqual([...listAll(rootBM)].sort(boardOrder).map((t) => t.state), ["to-live-test", "to-merge", "to-review", "to-do"], "the global order runs later stage first");
 cleanupAll(rootBM);
 console.log("orchestrator.test.ts: ... + board order smoke passed");
 

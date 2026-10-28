@@ -5,32 +5,29 @@ import { clearPid, killTree, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP } from "./config.ts";
 import { armedPath, bumpCounter, classifyRunLog, compactFinishedLogs, counterPath, log, logPath, newestRunLogPath, newestRunRole, nextRunIndex, readCounter } from "./log.ts";
 import { clearContextSymlinks, clearExitFile, readExitCode, readMergerSlug, spawnRunAnalysis } from "./spawn.ts";
-import { dropDoneBlockers, promoteBacklog } from "./pipeline.ts";
+import { dropDoneBlockers, finishMerge, promoteBacklog } from "./pipeline.ts";
 
 // the working states with an agent out: next is the one-state-back bounce target when the
 // agent dies, failure is the bounce target of a run that ended in a terminal error (the same
-// crash path; only the integration lane differs, it retries instead of completing), success is
+// crash path), success is
 // the state the orchestrator moves the task to on a successful finish (exit 0 with a clean run
 // log), role is the agent role whose per-run log (.kanban/.logs/<slug>.<role>.<n>.log) the
-// stall check samples and the terminal-error classifier reads. The reviewer has no success
-// move: it sets the state itself via kanban_set_state, so an exit-0 run that left the task in
-// reviewing never moved it and bounces to next. The integration lane is report-only, so a
-// non-zero exit there is still a completion; only a classified terminal error retries
+// stall check samples and the terminal-error classifier reads. The reviewer and the merger have
+// no success move: the reviewer sets the state itself via kanban_set_state, so an exit-0 run
+// that left the task in reviewing never moved it and bounces to next; the merger's exit 0 runs
+// the daemon's finishMerge, which fast-forwards the base or parks the task
 const WORKING_STATES: Partial<Record<TaskState, { next: TaskState; failure?: TaskState; success: TaskState | null; role: string }>> = {
 	doing: { next: "to-do", success: "to-review", role: "developer" },
 	reviewing: { next: "to-review", success: null, role: "reviewer" },
 	"live-testing": { next: "to-live-test", success: "done", role: "live-tester" },
-	merging: { next: "to-merge", success: "to-merge", role: "merger" },
-	"integration-testing": { next: "done", failure: "to-integration-test", success: "done", role: "integration-tester" },
+	merging: { next: "to-merge", success: null, role: "merger" },
 };
 
 // the project-wide single-lane agents: one run at a time, one global pid/exit/slug trio under
 // the given pid name, instead of the per-task <slug> trio; next is the state a task goes back
-// to when its lane run is gone without serving it, which for a lane task whose run is gone is
-// done, never back to the queue
+// to when its lane run is gone without serving it
 const LANES: Partial<Record<TaskState, { pid: string; next: TaskState }>> = {
 	merging: { pid: "merger", next: "to-merge" },
-	"integration-testing": { pid: "integration-tester", next: "done" },
 };
 
 // a live-but-hung agent passes pidAlive forever: the stall check kills it by its log instead
@@ -89,7 +86,7 @@ function bounceDead(root: string, task: Task, next: TaskState, pidName: string, 
 	const fresh = getTask(root, task.file);
 	// the agent terminated: remove its cwd context symlinks from the task's worktree (the next
 	// spawn re-points them)
-	clearContextSymlinks(root, fresh ?? task, { rootCwd: pidName === "integration-tester" });
+	clearContextSymlinks(root, fresh ?? task);
 	if (!fresh || fresh.state !== task.state) return;
 	// per-run death marker for the webui's cross: the dying run is the newest run log of the
 	// bounced role (the index known at spawn); a fresh respawn (new index) is unaffected and
@@ -145,8 +142,8 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 				}
 				continue;
 			}
-			// a merging or integration-testing task's agent is the project-wide lane agent (the global
-			// pid file); every other state maps to the task's own agent pid. Clear before the
+			// a merging task's agent is the project-wide merger (the global pid file); every other
+			// state maps to the task's own agent pid. Clear before the
 			// transition check: a pidfile for a state with no transition (to-merge, done) would
 			// otherwise linger forever
 			const pidName = lane?.pid ?? slug;
@@ -190,7 +187,7 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 			clearExitFile(root, pidName);
 			clearPid(root, pidName);
 			// the agent terminated (or its pid file is stale): remove its cwd context symlinks
-			clearContextSymlinks(root, task, { rootCwd: pidName === "integration-tester" });
+			clearContextSymlinks(root, task);
 			if (!working) {
 				// a completed run leaves its stale pidfile behind, a bounce clears it first, so a
 				// stale pidfile here means the agent advanced the task out of the mapped state by
@@ -213,7 +210,13 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 				// successful finish: the pid files are cleared before the state move, so an
 				// interleaving sweep cannot spawn the task's next agent and lose its pid file
 				ended = true;
-				if (working.success) {
+				if (task.state === "merging") {
+					// the merger owns the rebase and the suite: the daemon proves the result, then
+					// fast-forwards or parks the task. Re-read + state-match: a merger that parked
+					// the task itself (a failing suite) wins
+					const fresh = getTask(root, task.file);
+					if (fresh && fresh.state === task.state) finishMerge(root, fresh);
+				} else if (working.success) {
 					// the orchestrator owns the state move (developer -> to-review, merger ->
 					// to-merge, live-tester -> done). Re-read + state-match: a task that moved on
 					// underneath (PM or user) wins

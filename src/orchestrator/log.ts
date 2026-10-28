@@ -24,7 +24,7 @@ export function newestRunRole(root: string, slug: string): string | null {
 	try {
 		const logs = join(kanbanDir(root), ".logs");
 		for (const f of readdirSync(logs)) {
-			const m = f.match(/^(.+)\.(developer|reviewer|live-tester|integration-tester)\.\d+\.log(?:\.gz)?$/);
+			const m = f.match(/^(.+)\.(developer|reviewer|live-tester)\.\d+\.log(?:\.gz)?$/);
 			if (!m || m[1] !== slug) continue;
 			const mtime = statSync(join(logs, f)).mtimeMs;
 			if (!best || mtime > best.mtime) best = { role: m[2], mtime };
@@ -219,7 +219,7 @@ export function compactFinishedLogs(root: string): { files: number; before: numb
 	for (const name of names) {
 		// role-log name pattern: <slug>.<role>[.<n>].log, plus the analysis pass logs
 		// <slug>.<analysed role>[.<n>].doctor.log (000250: doctor logs gzip like role logs)
-		const m = name.match(/^(.+)\.(developer|reviewer|live-tester|merger|integration-tester)(\.\d+)?\.log$/) ?? name.match(/^(.+)\.([a-z-]+)\.(\d+)\.doctor\.log$/);
+		const m = name.match(/^(.+)\.(developer|reviewer|live-tester|merger)(\.\d+)?\.log$/) ?? name.match(/^(.+)\.([a-z-]+)\.(\d+)\.doctor\.log$/);
 		if (!m) continue;
 		// the project-wide lane roles write one pid for the whole lane, never a <slug>.pid: their
 		// run log is live while that lane pid is, so it must stay plain and appendable
@@ -227,9 +227,7 @@ export function compactFinishedLogs(root: string): { files: number; before: numb
 			? [`${m[1]}.${m[2]}.${m[3]}.analysis`]
 			: m[2] === "merger"
 				? ["merger", `${m[1]}.merger`]
-				: m[2] === "integration-tester"
-					? ["integration-tester"]
-					: [m[1]];
+				: [m[1]];
 		if (guards.some((g) => agentAlive(root, g))) continue;
 		const path = join(kanbanDir(root), ".logs", name);
 		let before: string;

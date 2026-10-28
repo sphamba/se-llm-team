@@ -30,7 +30,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 // HOME at the temp home keeps the hub registry and lock out of the real global dir
 const task = createTask(root, { name: "feat: webui smoke", summary: "Dashboard smoke", specs: "Render the board" });
 process.env.HOME = home;
-const stages = { reviews: false, liveTesting: true, integrationTesting: false };
+const stages = { reviews: false, liveTesting: true };
 const ui = await startHub({ name: "webui-test", root, host: "localhost", port: 0, stages });
 if (!ui) throw new Error("hub did not start");
 const base = `http://localhost:${ui.port}`;
@@ -384,9 +384,9 @@ syncStatsLine(lone, 999, 1200, docStub);
 assert.equal(lone.children[1].textContent, "999 · 1s", "the span joins the card when stats arrive");
 syncStatsLine(lone, null, null, docStub);
 assert.equal(lone.children.length, 1, "the span drops when the stats vanish");
-// the integration tester's label comes from the shared agentLabel pass (the role capitalized,
+// the live tester's label comes from the shared agentLabel pass (the role capitalized,
 // 1-based when the role has several runs)
-assert.equal(agentLabel({ role: "integration-tester", run: 0 }, { "integration-tester": 1 }), "Integration-tester", "the integration-tester run card reads its role as a label");
+assert.equal(agentLabel({ role: "live-tester", run: 0 }, { "live-tester": 1 }), "Live-tester", "the live-tester run card reads its role as a label");
 
 // 12. 000194 markLiveLine, run against the served source: the pulse lands on the LATEST open
 // thinking/tool block only, and clears on run death or on another run's view
@@ -992,7 +992,7 @@ const desktopSheet = motionCss.slice(0, motionCss.indexOf(`@media (max-width: ${
 const phoneSlice = motionCss.slice(motionCss.indexOf(`@media (max-width: ${MOBILE_MAX}px)`));
 const spineRule = ruleBodies.find((r) => r.sel === ".spine")!;
 const barLadder = spineRule.body.match(/background-image: linear-gradient\(90deg,[^;]*/)?.[0] ?? "";
-assert.deepEqual([...barLadder.matchAll(/var\((--accent-[\w-]+)\)/g)].map((m) => m[1]).filter((v, i, a) => v !== a[i - 1]), ["--accent-backlog", "--accent-todo", "--accent-review", "--accent-merge", "--accent-live", "--accent-integration", "--accent-done"], "the one bar carries the seven station tints in pipeline order, one fixed equal slot each");
+assert.deepEqual([...barLadder.matchAll(/var\((--accent-[\w-]+)\)/g)].map((m) => m[1]).filter((v, i, a) => v !== a[i - 1]), ["--accent-backlog", "--accent-todo", "--accent-review", "--accent-merge", "--accent-live", "--accent-done"], "the one bar carries the six station tints in pipeline order, one fixed equal slot each");
 assert.ok(!/animation/.test(spineRule.body) && spineRule.sel === ".spine", "the ladder paints in every motion mode: the bar rule takes no motion gate and no animation");
 const headZ = Number(motionCss.match(/^\.st-head \{[^}]*z-index: (\d+)/m)?.[1] ?? NaN), spineZ = Number(spineRule.body.match(/z-index: (\d+)/)?.[1] ?? NaN);
 assert.ok(spineZ > headZ, "the bar paints above the head ticks, so the 1px crossing at each junction does not cut the line");
@@ -1090,7 +1090,7 @@ const contrastOnCanvas = (block: string) => {
 	return (hi + 0.05) / (lo + 0.05);
 };
 assert.ok(contrastOnCanvas(tokenBlocks[0]) >= 3 && contrastOnCanvas(tokenBlocks[1]) >= 3, "the doing square clears the 3:1 floor that a mark carrying state needs, in both themes");
-// #410 the ladder: the seven dark accents share one OKLCH lightness, so a later hue change that misses it fails
+// #410 the ladder: the six dark accents share one OKLCH lightness, so a later hue change that misses it fails
 const oklchL = (hex: string) => {
 	const lin = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
 	const [r, g, b] = [1, 3, 5].map((i) => lin(parseInt(hex.slice(i, i + 2), 16) / 255));
@@ -1099,13 +1099,13 @@ const oklchL = (hex: string) => {
 	const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
 	return 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
 };
-const ladder = ["backlog", "todo", "review", "merge", "live", "integration", "done"].map((n) => oklchL(themeTok(tokenBlocks[1], `--accent-${n}`)));
-assert.ok(Math.max(...ladder) - Math.min(...ladder) <= 0.01, `the seven dark accents step one OKLCH lightness within 0.01, so the ladder reads by hue alone: ${ladder.map((v) => v.toFixed(3)).join(" ")}`);
+const ladder = ["backlog", "todo", "review", "merge", "live", "done"].map((n) => oklchL(themeTok(tokenBlocks[1], `--accent-${n}`)));
+assert.ok(Math.max(...ladder) - Math.min(...ladder) <= 0.01, `the six dark accents step one OKLCH lightness within 0.01, so the ladder reads by hue alone: ${ladder.map((v) => v.toFixed(3)).join(" ")}`);
 const contrastOnRaised = (name: string) => {
 	const [hi, lo] = [lumOf(themeTok(tokenBlocks[0], name)), lumOf(themeTok(tokenBlocks[0], "--raised"))].sort((x, y) => y - x);
 	return (hi + 0.05) / (lo + 0.05);
 };
-const lightTexts = [...["backlog", "todo", "review", "merge", "live", "integration", "done"].map((n) => `--accent-${n}-text`), "--error-text"];
+const lightTexts = [...["backlog", "todo", "review", "merge", "live", "done"].map((n) => `--accent-${n}-text`), "--error-text"];
 assert.deepEqual(lightTexts.filter((n) => contrastOnRaised(n) < 4.5), [], "every light -text step clears 4.5:1 on the raised panel, so a tinted label reads");
 // #429 the neutral ladder: --text, --dim and --faint each clear the floor of the step they hold, on the
 // surface they sit on, and --text steps clear of --dim, so the three tones read apart in both themes
@@ -1120,7 +1120,7 @@ assert.deepEqual(dimRaised.filter((r) => r < 4.5), [], `--dim clears 4.5:1 on th
 const textRaised = perTheme("--text", "--raised");
 assert.deepEqual(textRaised.filter((r) => r < 8), [], `--text clears 8:1 on the raised panel in both themes, so the brightest copy reads as the first step: ${textRaised.map((r) => r.toFixed(2)).join(" ")}`);
 const faintPanel = perTheme("--faint", "--panel");
-assert.deepEqual(faintPanel.filter((r) => r < 3), [], `--faint clears 3:1 on the panel in both themes, because the issuer, the stub tag and the strip title are real text: ${faintPanel.map((r) => r.toFixed(2)).join(" ")}`);
+assert.deepEqual(faintPanel.filter((r) => r < 3), [], `--faint clears 3:1 on the panel in both themes, because the issuer and the stub tag are real text: ${faintPanel.map((r) => r.toFixed(2)).join(" ")}`);
 const textStep = perTheme("--text", "--dim");
 assert.deepEqual(textStep.filter((r) => r < 1.6 || r > 2.8), [], `--text steps clear of --dim in both themes, between 1.6 and 2.8, so the grey reads below the darkest step and not as one tone: ${textStep.map((r) => r.toFixed(2)).join(" ")}`);
 
@@ -1143,7 +1143,6 @@ assert.match(themeCss, /#board \{[^}]*flex-direction: column/, "the phone board 
 assert.match(themeCss, /\.station \{[^}]*border-left: 1px solid var\(--hairline\)/, "the hairline becomes the vertical connector on the left edge");
 assert.match(themeCss, /\.station \.cards \{[^}]*overflow: visible/, "the phone stations spill into the one page scroll");
 assert.match(themeCss, /\.count \{[^}]*font-size: 0\.8125rem/, "the phone station count drops to the smaller type step");
-assert.match(themeCss, /\.station\.strip \.st-head \{[^}]*flex-direction: row/, "the integration off strip becomes a one-line row");
 assert.ok(page.includes("relationPaths(activeBoard().tasks, rectOf, verticalSpine())"), "the client tells relationPaths which layout it draws, so the vertical spine draws no cross-column curve");
 // the sheets reuse the same nodes: the panel, the console, the filter bar and the palette
 assert.ok(page.includes('<div id="p-handle"') && page.includes('id="p-close"'), "the panel sheet carries a drag handle and keeps its visible close button");
@@ -1277,14 +1276,12 @@ assert.match(flushRule(".station + .station"), /margin-top: 16px/, "the phone co
 assert.match(flushRule(".station .cards > .card:last-child"), /border-bottom: 0/, "a column's last card drops its line, so the seam paints one hairline and not two touching ones");
 assert.match(flushRule(".card"), /padding: 10px 12px 12px/, "the card's top row gets the same frame as its bottom");
 
-// #425 seven equal station tracks, and the open panel is flush with the done column: no wider last
+// #425 six equal station tracks, and the open panel is flush with the done column: no wider last
 // track and no dead 18px between the board and the panel. The live widths are a browser pass, left to
 // the reviewer
 const boardGrid = spacingRule("#board").match(/grid-template-columns: ([^;]+);/)?.[1] ?? "";
-assert.equal(boardGrid, "repeat(7, minmax(9.375rem, 1fr))", `#425 the base board grid is seven equal tracks, got ${boardGrid}`);
-assert.doesNotMatch(spacingRule("#board"), /1\.15fr|repeat\(6,/, "#425 no wider last track and no six-track base is left on the board");
-const offGrid = spacingRule("#board.off-integration").match(/grid-template-columns: ([^;]+);/)?.[1] ?? "";
-assert.equal(offGrid, "repeat(5, minmax(9.375rem, 1fr)) 48px minmax(9.375rem, 1fr)", `#425 the off-integration grid is five equal tracks, the 48px strip and one more equal track, got ${offGrid}`);
+assert.equal(boardGrid, "repeat(6, minmax(9.375rem, 1fr))", `#425 the base board grid is six equal tracks, got ${boardGrid}`);
+assert.doesNotMatch(spacingRule("#board"), /1\.15fr|repeat\(7,/, "#425 no wider last track and no seven-track base is left on the board");
 const panelBoardPad = spacingRule("body.panel-open #board");
 assert.ok(panelBoardPad.includes("padding-right: var(--panel-w)"), `#425 the open panel sets the board's padding to its own width, so the done column meets the panel edge, got ${panelBoardPad}`);
 assert.doesNotMatch(panelBoardPad, /calc\(|18px/, `#425 the panel-open board padding adds no constant to the panel width, got ${panelBoardPad}`);

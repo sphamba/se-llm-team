@@ -10,7 +10,7 @@ export const LOG_LINES = 100;
 
 // working state -> the agent role the orchestrator spawns for it (spawnAgent, src/orchestrator.ts);
 // a to-do task's stage is the Splitter, so its card reads the splitter run live
-export const AGENT_ROLE = { "to-do": "splitter", doing: "developer", reviewing: "reviewer", "live-testing": "live-tester", "integration-testing": "integration-tester", merging: "merger" };
+export const AGENT_ROLE = { "to-do": "splitter", doing: "developer", reviewing: "reviewer", "live-testing": "live-tester", merging: "merger" };
 // the roles the orchestrator writes per task log: the Splitter (on the to-do task, before the
 // Developer), the state-mapped roles, then the doctor; the set drops the merger's duplicate, the
 // merging state maps to it. The history orders each run by its first in-log record, so this

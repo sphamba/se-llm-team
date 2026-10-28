@@ -116,9 +116,9 @@ class El {
 // the spine (000366): one station per pipeline phase, the two states of a phase in one station,
 // and one hairline element across the heads instead of a border per station
 assert.deepEqual(STATIONS.flatMap((s) => [...s.states]), [...STATES], "the station table covers every state slug exactly once, in pipeline order");
-assert.deepEqual(STATIONS.map((s) => s.id), ["queue", "work", "review", "merge", "test", "integration", "done"], "the station order is the fixed process spine");
+assert.deepEqual(STATIONS.map((s) => s.id), ["queue", "work", "review", "merge", "test", "done"], "the station order is the fixed process spine");
 assert.ok(STATIONS.find((s) => s.id === "queue")?.label === "Backlog" && !STATIONS.some((s) => s.label === "Queue"), "the first station reads Backlog, so no station still says Queue");
-assert.deepEqual(["work", "test", "integration"].map((id) => STATIONS.find((s) => s.id === id)?.label), ["Develop", "Live-test", "Integration-test"], "the three renamed stations read Develop, Live-test and Integration-test");
+assert.deepEqual(["work", "test"].map((id) => STATIONS.find((s) => s.id === id)?.label), ["Develop", "Live-test"], "the renamed stations read Develop and Live-test");
 assert.ok(!STATIONS.some((s) => ["Work", "Test", "Integration"].includes(s.label)), "no station still reads Work, Test or Integration");
 const boardEl = new El("main");
 const stations: Record<string, any> = buildShell(boardEl, { createElement: (tag: string) => new El(tag) });
@@ -133,9 +133,9 @@ assert.ok(page.includes(JSON.stringify(STATIONS)), "the page ships the tested st
 assert.ok(page.includes(String(buildShell)) && page.includes(String(syncBoard)) && page.includes(String(cardBaseHtml)) && page.includes(String(syncCardStats)) && page.includes(String(sortStation)) && page.includes(String(taskStats)), "the page runs the tested shell, card, station-order and in-place live source");
 assert.ok(page.includes(`const PRIORITY_RANK = ${JSON.stringify(PRIORITY_RANK)}`), "the client defines the rank map the station order and the ruler read");
 
-// layout: a seven-track grid, done slightly wider, the station body as the vertical scroller
+// layout: a six-track grid, the station body as the vertical scroller
 assert.match(themeCss, /#board \{[^}]*display: grid/, "the board is a grid, not a column flex row");
-assert.match(themeCss, /#board \{[^}]*grid-template-columns: repeat\(7, minmax\(9\.375rem, 1fr\)\)/, "seven equal station tracks, each with the same rem floor at every width");
+assert.match(themeCss, /#board \{[^}]*grid-template-columns: repeat\(6, minmax\(9\.375rem, 1fr\)\)/, "six equal station tracks, each with the same rem floor at every width");
 assert.ok(!/@media \(max-width: 1099px\)/.test(themeCss), "no hand-picked breakpoint carries the floor: the base template holds it at every width");
 // #374 the body base scales the type with the viewport and stops at 1rem
 assert.match(themeCss, /body \{[^}]*font-size: clamp\(0\.875rem, 0\.35vw \+ 0\.55rem, 1rem\)/, "the body base clamps 14px to 16px, so a wide screen reads one step larger");
@@ -158,19 +158,18 @@ const declared = new Set([...page.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]))
 assert.ok(STATIONS.every((s, i) => page.includes(`.s-${s.id} { --ac: var(--accent-${s.accent}); --ac-t: var(--accent-${s.accent}-text); --ac-prev: var(--accent-${STATIONS[Math.max(0, i - 1)].accent}); }`)), "each station points --ac at its own accent token, --ac-t at that accent's -text step and --ac-prev at the station before it, so the glow walks the ladder");
 assert.ok(STATIONS.every((s) => declared.has(`--accent-${s.accent}`) && declared.has(`--accent-${s.accent}-text`)), "each station accent names a token the theme declares, and so does its -text step");
 
-// stage flags: only the integration station switches off, and it leaves a strip
-const off = (id: string) => stations[id].el.className.split(" ").includes("strip");
-applyStages(stations, { reviews: false, liveTesting: true, integrationTesting: false });
-assert.ok(off("integration") && stations.integration.el.attrs.title === "integration test: off in config" && stations.integration.el.attrs["aria-label"] === "integration test: off in config", "a disabled integration stage is a strip that says so in title and aria-label");
-assert.ok(boardEl.className.split(" ").includes("off-integration") && !off("review"), "the integration strip narrows its own grid track and no other station turns off");
-assert.ok(stations.review.el.className.split(" ").includes("dim"), "a disabled review stage dims but keeps its station");
+// stage flags: a disabled review or live test stage dims its own station and no other
+const dim = (id: string) => stations[id].el.className.split(" ").includes("dim");
+applyStages(stations, { reviews: false, liveTesting: true });
+assert.ok(dim("review") && !dim("test"), "a disabled review stage dims but keeps its station");
+applyStages(stations, { reviews: true, liveTesting: false });
+assert.ok(dim("test") && !dim("review"), "a disabled live test stage dims its own station alone");
 applyStages(stations, DEFAULT_STAGES);
-assert.ok(STATIONS.every((s) => !off(s.id)) && !boardEl.className.split(" ").includes("off-integration"), "all-on stages restore every station");
-assert.ok(!stations.integration.el.attrs.title, "the strip title drops when the stage turns on");
+assert.ok(STATIONS.every((s) => !dim(s.id)), "all-on stages restore every station");
 assert.ok(page.includes(String(applyStages)), "the page ships the tested stage toggle");
 
 // the state picks the animation: only the states the orchestrator works on carry the spinner
-const WORKING = ["doing", "reviewing", "live-testing", "merging", "integration-testing"];
+const WORKING = ["doing", "reviewing", "live-testing", "merging"];
 assert.ok(WORKING.every((st) => spinnerHtml(st).includes('<span class="spin">')), "every working state renders the spinner");
 assert.ok(STATES.filter((st) => !WORKING.includes(st)).every((st) => spinnerHtml(st) === ""), "no waiting or finished state renders one");
 // PAGE interpolates spinnerHtml as source, so the served copy must resolve with no module scope
@@ -578,8 +577,8 @@ assert.equal(toggleEl.textContent, "show less", "an unfolded station offers show
 assert.ok(toggleEl.style.display === "", "and keeps the button while unfolded");
 sync(many.slice(1), new Set(["review"]));
 assert.equal(els.has("000010_x.md"), false, "a card whose task left the board loses its node");
-assert.ok(stations.integration.empty.style.display === "" && shown("integration").length === 0, "an empty station shows its job line and holds no cards");
-assert.equal(stations.integration.count.textContent, "0", "an empty station still shows its count");
+assert.ok(stations.queue.empty.style.display === "" && shown("queue").length === 0, "an empty station shows its job line and holds no cards");
+assert.equal(stations.queue.count.textContent, "0", "an empty station still shows its count");
 
 // 000077/000366 ordering: priority first inside every station, then newest update first, the
 // stable sort keeping the payload's task-number order on equal keys; a held task pins above all.
@@ -696,7 +695,7 @@ assert.deepEqual(
 	[{ id: "/r1", label: "alpha" }, { id: "/r2", label: "beta" }],
 	"unique names keep the plain label",
 );
-const flagged = { reviews: false, liveTesting: true, integrationTesting: false };
+const flagged = { reviews: false, liveTesting: true };
 assert.deepEqual(
 	tabNames([{ name: "alpha", root: "/r1", branch: "main", stages: flagged }, { name: "beta", root: "/r2", branch: "dev" }]),
 	[{ id: "/r1", label: "alpha", stages: flagged }, { id: "/r2", label: "beta" }],

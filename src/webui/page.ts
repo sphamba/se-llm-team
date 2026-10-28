@@ -17,7 +17,7 @@ export interface WebUiConfig {
 	port: number;
 }
 
-export const DEFAULT_STAGES: StageFlags = { reviews: true, liveTesting: true, integrationTesting: true };
+export const DEFAULT_STAGES: StageFlags = { reviews: true, liveTesting: true };
 
 // project root se-llm-team.json overrides ~/.se-llm-team/config.json, nested objects are
 // merged deeply; a missing file, invalid JSON or absent keys mean off
@@ -901,7 +901,7 @@ function setPriority(p) {
 		});
 }
 // payload role to row marker class; a run, its sub rows and a doctor row share the run's role class
-const ROLE_CLS = { splitter: "agent-splitter", developer: "agent-developer", reviewer: "agent-reviewer", merger: "agent-merger", "live-tester": "agent-livetest", "integration-tester": "agent-integration" };
+const ROLE_CLS = { splitter: "agent-splitter", developer: "agent-developer", reviewer: "agent-reviewer", merger: "agent-merger", "live-tester": "agent-livetest" };
 const startText = ms => typeof ms === "number" && Number.isFinite(ms) ? new Date(ms).toLocaleTimeString() : "";
 const runMeta = a => [startText(a.start), fmtTokens(a.tokens), fmtDur(a.duration)].filter(Boolean).join(" · ");
 // one run row: the role label, then the start time, the tokens and the duration at the right; a

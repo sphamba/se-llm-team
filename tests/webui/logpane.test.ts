@@ -462,8 +462,8 @@ escapedPane.appendChild(logRow("| <b>bold</b> | &lt;img&gt; |"));
 logFixups(escapedPane, logDoc);
 assert.equal(escapedTable.tbody.children[0].innerHTML, '<tr><td class="md-pin"><b>bold</b></td><td>&lt;img&gt;</td></tr>', "the cell html goes in as it renders, never escaped a second time");
 
-// the role constants the payload builders read: the integration stage's working state maps to the
-// integration-tester role, and LOG_ROLES (derived from the map's values) enumerates its run logs
-assert.equal(AGENT_ROLE["integration-testing"], "integration-tester", "the integration-testing state maps to the integration-tester role");
-assert.ok(LOG_ROLES.includes("integration-tester"), "the integration-tester's per-task run logs are enumerated");
+// the role constants the payload builders read: a working state maps to its agent role, and
+// LOG_ROLES (derived from the map's values) enumerates the per-task run logs
+assert.equal(AGENT_ROLE["live-testing"], "live-tester", "the live-testing state maps to the live-tester role");
+assert.ok(LOG_ROLES.includes("live-tester"), "the live-tester's per-task run logs are enumerated");
 assert.equal(LOG_ROLES[LOG_ROLES.length - 1], "doctor", "the doctor analysis role stays last");

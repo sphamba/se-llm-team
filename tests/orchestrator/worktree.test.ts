@@ -161,7 +161,17 @@ e.daemon.kill("SIGTERM");
 const rootF = fixture();
 cleaned.push(rootF);
 mkdirSync(kanbanDir(rootF), { recursive: true });
-writeFileSync(join(rootF, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootF), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+// the merger owns the merge now: it exits 0 and the daemon fast-forwards the base. Every other
+// role stays dead, so the live-tester still bounces back as this part expects
+writeFileSync(
+	join(rootF, "merge-only.cjs"),
+	`#!/usr/bin/env node
+const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
+process.exit(prompt.includes("Merger agent") ? 0 : 1);
+`,
+	{ mode: 0o755 },
+);
+writeFileSync(join(rootF, "se-llm-team.json"), JSON.stringify({ agent: join(rootF, "merge-only.cjs"), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskF = createTask(rootF, { name: "fix: unmerged live test", summary: "Unmerged branch smoke", specs: "n/a" });
 execSync("git checkout -qb feat/unmerged-live && git commit -q --allow-empty -m x && git checkout -q main", { cwd: rootF, shell: "/bin/bash" });
 setWorktree(rootF, taskF, "feat/unmerged-live");

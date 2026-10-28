@@ -203,7 +203,6 @@ export const STATIONS: readonly Station[] = [
 	{ id: "review", label: "Review", states: ["to-review", "reviewing"], accent: "review", empty: "nothing waiting for a reviewer" },
 	{ id: "merge", label: "Merge", states: ["to-merge", "merging"], accent: "merge", empty: "nothing waiting to merge" },
 	{ id: "test", label: "Live-test", states: ["to-live-test", "live-testing"], accent: "live", empty: "nothing waiting for a live test" },
-	{ id: "integration", label: "Integration-test", states: ["to-integration-test", "integration-testing"], accent: "integration", empty: "nothing waiting for an integration test" },
 	{ id: "done", label: "Done", states: ["done"], accent: "done", empty: "nothing finished yet" },
 ];
 
@@ -267,7 +266,7 @@ export function sortStation(tasks: Task[], { byRecency = false }: { byRecency?: 
 // prefers-reduced-motion turns the CSS animation off underneath. PAGE interpolates this source, so the state list stays inside the
 // function: a module-scope constant would be undefined in the client
 export function spinnerHtml(st: string) {
-	return ["doing", "reviewing", "live-testing", "merging", "integration-testing"].includes(st) ? '<span class="spin"></span>' : "";
+	return ["doing", "reviewing", "live-testing", "merging"].includes(st) ? '<span class="spin"></span>' : "";
 }
 
 // #366 the four-step priority ruler: the filled steps count down from critical, the colour comes
@@ -416,17 +415,9 @@ export function buildShell(parent, doc) {
 	return stations;
 }
 
-// #366 the config switch: the integration station turns into a narrow labeled strip with no cards
-// and no count, and the board narrows its grid track; a disabled review or live test stage dims its
-// station but keeps the cards reachable
+// #366 the config switch: a disabled review or live test stage dims its station but keeps the cards
+// reachable
 export function applyStages(stations, stages) {
-	const strip = stages?.integrationTesting === false;
-	const part = stations.integration;
-	part.el.classList.toggle("strip", strip);
-	part.el.parentElement?.classList.toggle("off-integration", strip);
-	const label = strip ? "integration test: off in config" : "";
-	part.el.setAttribute("title", label);
-	part.el.setAttribute("aria-label", label);
 	stations.review.el.classList.toggle("dim", stages?.reviews === false);
 	stations.test.el.classList.toggle("dim", stages?.liveTesting === false);
 }

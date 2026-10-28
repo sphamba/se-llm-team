@@ -3,11 +3,11 @@ import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTask, kanbanDir, parseTask, setState, setWorktree, taskSlug, updateAttrs } from "../../src/kanban.ts";
+import { createTask, kanbanDir, parseTask, setState, setWorktree, taskSlug } from "../../src/kanban.ts";
 import { loadConfig, poll } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline.ts";
-import { agentPid, clearPid, pidAlive, pidPath, writePid } from "../../src/pid.ts";
-import { exitFilePath, readExitCode, spawnAgent, writeMergerSlug } from "../../src/orchestrator/spawn.ts";
+import { agentPid, pidAlive, pidPath } from "../../src/pid.ts";
+import { exitFilePath, readExitCode, spawnAgent } from "../../src/orchestrator/spawn.ts";
 import { fixture, roleStub, deadStub, runDaemon, waitFor, cleaned } from "../helpers.ts";
 
 // --- part B: dead agents bounce unconditionally; past the respawn cap the fresh spawn waits for the idle cooldown ---
@@ -60,14 +60,14 @@ await waitFor(() => existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.develop
 // the 7th death bounced again with no second cooldown log
 assert.equal(cooldownB(), 1, "still one cooldown log past the cap");
 // the dead live-tester bounces live-testing -> to-live-test; the branch is unmerged, so the
-// rescan requeues the task to to-merge and the ORCHESTRATOR merges it (no merger agent), after
-// which the dead live-tester respawns and bounces again under the dead counter
+// rescan requeues the task to to-merge, where the merge lane hands it to a Merger agent: the
+// dead stub dies, and the task bounces merging -> to-merge without ever reaching the live test
 await waitFor(() => b.output().includes("live-testing -> to-live-test"), 30000, "poll bounced the dead live-tester to to-live-test", b.output);
-await waitFor(() => b.output().includes("not merged yet, moving to to-merge"), 30000, "unmerged branch requeued for the orchestrator merge", b.output);
-await waitFor(() => b.output().includes("fast-forwarded main to feat/dead-merger, set to-live-test"), 30000, "the orchestrator merged the branch itself", b.output);
-assert.ok(!b.output().includes("spawned merger"), "no merger agent on the orchestrator merge");
+await waitFor(() => b.output().includes("not merged yet, moving to to-merge"), 30000, "unmerged branch requeued for the merge", b.output);
+await waitFor(() => b.output().includes("merger spawned in feat/dead-merger, set merging"), 30000, "the unmerged branch handed to a merger", b.output);
+await waitFor(() => b.output().includes("merging -> to-merge"), 30000, "the dead merger bounced the task back to to-merge", b.output);
 const b2State = parseTask(rootB, taskB2.file).state;
-assert.ok(b2State === "to-live-test" || b2State === "live-testing", `merged task moved on to the live test (${b2State})`);
+assert.ok(b2State === "to-merge" || b2State === "merging", `the dead merger leaves the task in the merge lane (${b2State})`);
 // a completed run re-arms the streak: a stale pidfile on a task outside the mapped states
 // clears the counter, so a second streak past the cap gets its own cooldown log, not silence.
 // done, not backlog: the sweep would promote a backlog task back to to-do mid-check
@@ -401,30 +401,3 @@ poll(rootAT, 5);
 assert.equal(parseTask(rootAT, taskAT.file).state, "to-review", "the second poll in to-review does not bounce again");
 assert.ok(!orchLogAT().includes("agent pid=0 dead without state update"), "no spurious dead-pid bounce for the pid-less to-review task");
 console.log("orchestrator.test.ts: ... + exit-code file smoke passed");
-
-// --- part: the block closes the integration lane's liveness race. The state write lands
-// before the pid clear, so the liveness rule integration-testing -> done never sees a
-// requeued task with a dead integration pid ---
-const rootBL = fixture();
-cleaned.push(rootBL);
-const taskBL = createTask(rootBL, { name: "fix: blocked integration lane", summary: "Block liveness", specs: "n/a" });
-const slugBL = taskSlug(taskBL.file);
-setState(rootBL, taskBL, "integration-testing");
-writeMergerSlug(rootBL, slugBL, "integration-tester");
-// control: the same setup without a block advances to done on a dead integration pid
-poll(rootBL, 5);
-assert.equal(parseTask(rootBL, taskBL.file).state, "done", "the integration lane's liveness rule advances a dead lane run to done");
-
-const rootBL2 = fixture();
-cleaned.push(rootBL2);
-const taskBL2 = createTask(rootBL2, { name: "fix: blocked integration lane 2", summary: "Block liveness", specs: "n/a" });
-const slugBL2 = taskSlug(taskBL2.file);
-setState(rootBL2, taskBL2, "integration-testing");
-writeMergerSlug(rootBL2, slugBL2, "integration-tester");
-writePid(rootBL2, "integration-tester", 999999); // a stale lane pid, killed or not
-// the block's own order: one task write first, the pid clear after
-updateAttrs(rootBL2, parseTask(rootBL2, taskBL2.file), { blockedBy: "user", state: "to-integration-test" });
-clearPid(rootBL2, "integration-tester");
-poll(rootBL2, 5);
-assert.equal(parseTask(rootBL2, taskBL2.file).state, "to-integration-test", "a blocked integration task does not advance to done");
-assert.equal(parseTask(rootBL2, taskBL2.file).blockedBy, "user", "the user hold survives the poll");

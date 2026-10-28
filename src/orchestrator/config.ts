@@ -51,13 +51,12 @@ export interface Config {
 	maxParallel: number;
 	reviews: boolean;
 	liveTesting: boolean;
-	integrationTesting: boolean;
 	llm: LlmConfig;
 	roles: Record<string, RoleLlmConfig>;
 	reviewerCap: Record<string, number>;
 }
 
-export type StageFlags = Pick<Config, "reviews" | "liveTesting" | "integrationTesting">;
+export type StageFlags = Pick<Config, "reviews" | "liveTesting">;
 
 // the provider/model/thinking triple of one config object (global or a roles entry); values
 // of the wrong type and unknown thinking levels are dropped with a warning, never fatal
@@ -140,7 +139,6 @@ export function loadConfig(root: string, defaultAgent?: string): Config {
 		maxParallel?: unknown;
 		reviews?: unknown;
 		liveTesting?: unknown;
-		integrationTesting?: unknown;
 		provider?: unknown;
 		model?: unknown;
 		thinking?: unknown;
@@ -230,7 +228,6 @@ export function loadConfig(root: string, defaultAgent?: string): Config {
 		maxParallel,
 		reviews: flag(root, cfg.reviews, "reviews", true),
 		liveTesting: flag(root, cfg.liveTesting, "liveTesting", true),
-		integrationTesting: flag(root, cfg.integrationTesting, "integrationTesting", true),
 		llm: cleanLlm(root, cfg, " (global)"),
 		roles,
 		reviewerCap,

@@ -6,7 +6,7 @@ import { createTask, kanbanDir, parseTask, setState, taskSlug, type TaskState } 
 import { loadConfig, poll } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline.ts";
 import { armedPath, counterPath, logPath, nextRunIndex, readCounter } from "../../src/orchestrator/log.ts";
-import { exitFilePath, writeMergerSlug } from "../../src/orchestrator/spawn.ts";
+import { exitFilePath } from "../../src/orchestrator/spawn.ts";
 import { writePid } from "../../src/pid.ts";
 import { HERE, cleaned, cleanupAll, deadStub, fixture } from "../helpers.ts";
 
@@ -203,36 +203,6 @@ const orchLog = (root: string) => {
 	assert.equal(parseTask(root, task.file).state, "to-live-test", "a terminal error with exit 0 bounces live-testing -> to-live-test");
 	assert.ok(existsSync(join(logs, `${slug}.live-tester.${n}.dead`)), "the bounced live-tester run carries its .dead marker");
 	assert.ok(!orchLog(root).includes("live-testing -> done"), "the failed live-tester run never reaches done");
-}
-
-// --- the integration lane: a terminal error retries, a success and a crash land at done ---
-{
-	const { root, logs } = caseRoot();
-	const task = startTask(root, "integration-testing");
-	const slug = taskSlug(task.file);
-	writeMergerSlug(root, slug, "integration-tester");
-	const n = endRun(root, slug, "integration-tester", terminalLog(), "0", "integration-tester");
-	poll(root, 5);
-	assert.equal(parseTask(root, task.file).state, "to-integration-test", "a terminal error with exit 0 returns the integration lane to to-integration-test");
-	assert.ok(existsSync(join(logs, `${slug}.integration-tester.${n}.dead`)), "the bounced integration run carries its .dead marker");
-}
-{
-	const { root } = caseRoot();
-	const task = startTask(root, "integration-testing");
-	const slug = taskSlug(task.file);
-	writeMergerSlug(root, slug, "integration-tester");
-	endRun(root, slug, "integration-tester", healthyLog(), "0", "integration-tester");
-	poll(root, 5);
-	assert.equal(parseTask(root, task.file).state, "done", "a successful integration end still lands at done");
-}
-{
-	const { root } = caseRoot();
-	const task = startTask(root, "integration-testing");
-	const slug = taskSlug(task.file);
-	writeMergerSlug(root, slug, "integration-tester");
-	endRun(root, slug, "integration-tester", terminalLog(), "7", "integration-tester");
-	poll(root, 5);
-	assert.equal(parseTask(root, task.file).state, "done", "a non-zero integration exit keeps today's done behavior");
 }
 
 // --- claude's stream-json carries its failure in the result record ---

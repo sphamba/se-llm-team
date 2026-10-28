@@ -545,8 +545,8 @@ assert.equal(agentLabel({ role: "doctor", run: 1 }, { doctor: 3 }), "Doctor", "a
 assert.ok(page.includes(String(agentLabel)), "the page ships the tested agentLabel source");
 
 // 000337: a project-wide lane runs once per project, so its pid file is named after the role and
-// not after the task slug: a live integration-tester or merger must mark its newest run live (the
-// card spins, the log pane holds its open line), and a stale lane pid must leave the run finished
+// not after the task slug: a live merger must mark its newest run live (the card spins, the log
+// pane holds its open line), and a stale lane pid must leave the run finished
 const laneRoot = mkdtempSync(join(tmpdir(), "webui-lane-"));
 const laneTask = createTask(laneRoot, { name: "feat: lane live card", summary: "s", specs: "s" });
 const laneSlug = laneTask.file.replace(/\.md$/, "");
@@ -555,23 +555,6 @@ const laneLogs = join(laneRoot, ".kanban", ".logs");
 const lanePids = join(laneRoot, ".kanban", ".pids");
 mkdirSync(laneLogs, { recursive: true });
 mkdirSync(lanePids, { recursive: true });
-setState(laneRoot, getTask(laneRoot, laneTask.file)!, "integration-testing");
-writeFileSync(join(laneLogs, `${laneSlug}.integration-tester.0.log`), "IT RUN\n");
-writeFileSync(join(lanePids, "integration-tester.pid"), String(process.pid));
-const laneIt = await laneDetail();
-assert.deepEqual(
-	laneIt.agents,
-	[{ role: "integration-tester", run: 0, alive: true, status: "live", handle: `${laneSlug}.integration-tester.0`, tokens: null, duration: null }],
-	"a live integration-tester lane pid marks the newest run live, so its card spins",
-);
-assert.deepEqual(laneIt.agent, { role: "integration-tester", alive: true, log: `${laneSlug}.integration-tester.0` }, "the card's agent handle opens the live integration-tester run");
-writeFileSync(join(lanePids, "integration-tester.pid"), "999999999");
-assert.deepEqual(
-	(await laneDetail()).agents[0],
-	{ role: "integration-tester", run: 0, alive: false, status: "ok", handle: `${laneSlug}.integration-tester.0`, tokens: null, duration: null },
-	"a stale integration-tester lane pid leaves the finished run not live",
-);
-rmSync(join(lanePids, "integration-tester.pid"));
 setState(laneRoot, getTask(laneRoot, laneTask.file)!, "merging");
 writeFileSync(join(laneLogs, `${laneSlug}.merger.0.log`), "MG RUN\n");
 writeFileSync(join(lanePids, "merger.pid"), String(process.pid));
@@ -604,9 +587,8 @@ const holdRead = async (handle: string, offset?: number) => {
 const holdRow = (t: string) => JSON.stringify({ type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: t } }) + "\n";
 const holdHead = holdRow("| a | b |\n| --- | --- |\n| 1 | 2 |\n");
 const holdCut = holdRow("| 3 | 4");
-// the four working-state roles keep their pid names untouched
+// the three working-state roles keep their pid names untouched
 for (const role of ["developer", "reviewer", "live-tester"]) assert.equal(agentPidName(role, holdSlug), holdSlug, `${role} keeps its per-task pid name`);
-assert.equal(agentPidName("integration-tester", holdSlug), "integration-tester", "the integration-tester lane keeps its role name");
 assert.equal(agentPidName("merger", holdSlug), "merger", "the merger lane keeps its role name");
 assert.equal(agentPidName("splitter", holdSlug), `${holdSlug}.splitter`, "the splitter's read-side pid name matches its spawn name");
 // a live splitter run on a to-do task: the live flag spins its card, and the pane keeps polling

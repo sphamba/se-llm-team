@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { isSelfWrite, kanbanDir, createTask, getTask, hasUserHold, listAll, PRIORITY_RANK, setState, setWorktree, taskFiles, taskNum, taskSlug, updateAttrs, updateTask, ROLE_NOTES_RE, type Task } from "../kanban.ts";
+import { isSelfWrite, kanbanDir, getTask, hasUserHold, listAll, PRIORITY_RANK, setState, setWorktree, taskFiles, taskSlug, updateAttrs, updateTask, ROLE_NOTES_RE, type Task } from "../kanban.ts";
 import { agentAlive, agentPid, clearPid, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP, REVIEWER_RUN_CAP, type Config } from "./config.ts";
 import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, newestRunRole, readCounter } from "./log.ts";
@@ -33,7 +33,7 @@ const SPLITTER_COMPLEXITIES = new Set(["moderate", "complex"]);
 // the states the maxParallel cap counts: state-based, so a task whose agent died still holds
 // its slot until the poll requeues it; liveness.ts owns the same set but imports this module,
 // so the literals are repeated here
-const WORKING_CAP_STATES = new Set(["doing", "reviewing", "merging", "live-testing", "integration-testing"]);
+const WORKING_CAP_STATES = new Set(["doing", "reviewing", "merging", "live-testing"]);
 
 function runningCount(root: string): number {
 	return listAll(root).filter((task) => WORKING_CAP_STATES.has(task.state)).length;
@@ -42,116 +42,12 @@ function runningCount(root: string): number {
 // the later pipeline stage first, so a task closer to done never waits behind one that has not
 // started. Every other state shares one fallback rank: none of them spawns from the board order
 // loop, so their relative order does not matter, and a missing rank never yields NaN
-const STAGE_RANK: Record<string, number> = { "to-integration-test": 0, "to-live-test": 1, "to-merge": 2, "to-review": 3, "to-do": 4 };
+const STAGE_RANK: Record<string, number> = { "to-live-test": 0, "to-merge": 1, "to-review": 2, "to-do": 3 };
 
 // one global board order: priority, then stage, then creation order (the name sort from
 // taskFiles, kept by the stable sort because a full tie returns 0)
 export const boardOrder = (a: Task, b: Task) =>
 	(PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) || (STAGE_RANK[a.state] ?? 5) - (STAGE_RANK[b.state] ?? 5);
-
-// the integration-test task's Specs hold only the covered refs and their summaries. The procedure
-// lives in agents/integration-tester.md, so it is not copied into every generated task.
-
-// one covered entry: its ref and name as a level-3 heading, its summary as a blockquote (a blank
-// summary line becomes a lone ">", so the quote never breaks)
-function integrationEntry(task: Task): string {
-	const quote = task.summary
-		.split("\n")
-		.map((line) => (line.trim() ? `> ${line}` : ">"))
-		.join("\n");
-	return `### #${taskNum(task.file)} ${task.name}\n\n${quote}`;
-}
-
-function integrationSpecs(covered: Task[]): string {
-	const entries = covered.map(integrationEntry).join("\n\n");
-	return ["## Covered tasks", "", entries].join("\n");
-}
-
-// a ref whose task left the board has no name or summary to quote: drop it rather than emit an
-// empty entry, so the head sentence and the headings still name the same set
-function coveredOnBoard(root: string, refs: number[], board: Task[]): Task[] {
-	const covered: Task[] = [];
-	for (const ref of refs) {
-		const task = board.find((candidate) => taskNum(candidate.file) === ref);
-		if (task) covered.push(task);
-		else log(root, `integration specs: dropped #${ref}, no such task on the board`);
-	}
-	return covered;
-}
-
-// the refs an integration task covers, from its name ("test: integration of #42, #43")
-function integrationRefs(task: Task): number[] {
-	return [...task.name.matchAll(/#(\d+)/g)].map((m) => parseInt(m[1], 10));
-}
-
-const integrationName = (refs: number[]) => `test: integration of ${refs.map((ref) => `#${ref}`).join(", ")}`;
-const integrationSummary = (refs: number[]) => `Integration test of the merged base branch after ${refs.map((ref) => `#${ref}`).join(", ")}.`;
-
-// the integration task's priority follows the covered refs' complexity, highest wins: a complex
-// covered ref makes the run critical, a trivial one low
-const PRIORITY_BY_COMPLEXITY: Record<string, string> = { trivial: "low", simple: "medium", moderate: "high", complex: "critical" };
-function integrationPriority(covered: Task[]): string {
-	return covered
-		.map((task) => PRIORITY_BY_COMPLEXITY[task.complexity] ?? "medium")
-		.reduce((highest, priority) => ((PRIORITY_RANK[priority] ?? 4) < (PRIORITY_RANK[highest] ?? 4) ? priority : highest), "low");
-}
-
-// a waiting task's queue position only improves: a ref that leaves the board, or a
-// lower-complexity append, must not lower a priority an earlier append already raised
-function higherPriority(stored: string, next: string): string {
-	return (PRIORITY_RANK[stored] ?? 4) <= (PRIORITY_RANK[next] ?? 4) ? stored : next;
-}
-
-function createIntegrationTask(root: string, covered: Task): Task {
-	const num = taskNum(covered.file);
-	const task = createTask(root, {
-		name: integrationName([num]),
-		shortName: `integration-of-${num}`,
-		priority: integrationPriority([covered]),
-		complexity: "simple",
-		summary: integrationSummary([num]),
-		specs: integrationSpecs([covered]),
-		notes: `Generated by the orchestrator when #${num} was merged to the base branch.`,
-		issuer: "auto",
-	});
-	setState(root, task, "to-integration-test");
-	return task;
-}
-
-// the merge hook: open or extend the ONE integration-test task that waits in to-integration-test,
-// called right after the base fast-forward so the run overlaps the covered task's live test. Reads
-// the board at hook time (never an earlier snapshot); a ref a waiting or running integration task
-// already names is skipped, because a ref can merge again while its entry still waits or runs
-export function ensureIntegrationTask(root: string, covered: Task): void {
-	const num = taskNum(covered.file);
-	const board = listAll(root);
-	const lane = board.filter((task) => task.state === "to-integration-test" || task.state === "integration-testing");
-	if (lane.some((task) => integrationRefs(task).includes(num))) {
-		log(root, `integration test of #${num} already queued or running, nothing to append`);
-		return;
-	}
-	const waiting = lane.filter((task) => task.state === "to-integration-test").sort((a, b) => taskNum(a.file) - taskNum(b.file));
-	if (waiting.length > 1) log(root, `${waiting.length} tasks wait in to-integration-test (${waiting.map((task) => `#${taskNum(task.file)}`).join(", ")}), appending to #${taskNum(waiting[0].file)}`);
-	const target = waiting[0];
-	// a target that left to-integration-test between the read and the write (a rescan spawned it)
-	// must never gain a ref mid-run: create a fresh waiting task instead
-	const fresh = target ? getTask(root, target.file) : undefined;
-	if (!fresh || fresh.state !== "to-integration-test") {
-		log(root, `${createIntegrationTask(root, covered).file}: created for ${covered.file} (to-integration-test)`);
-		return;
-	}
-	const refs = [...new Set([...integrationRefs(fresh), num])].sort((a, b) => a - b);
-	// the whole body is rebuilt from the board: the old body is never parsed for names or summaries
-	const kept = coveredOnBoard(root, refs, board);
-	const survivors = kept.map((task) => taskNum(task.file));
-	updateTask(root, fresh, {
-		name: integrationName(survivors),
-		priority: higherPriority(fresh.priority, integrationPriority(kept)),
-		summary: integrationSummary(survivors),
-		specs: integrationSpecs(kept),
-	});
-	log(root, `${fresh.file}: appended #${num}, now ${survivors.map((ref) => `#${ref}`).join(", ")}`);
-}
 
 function startTodo(root: string, cfg: Config, task: Task, tasks: Task[]): void {
 	const slug = taskSlug(task.file);
@@ -193,7 +89,15 @@ function startTodo(root: string, cfg: Config, task: Task, tasks: Task[]): void {
 // merger requeueing the task and daemon restarts. A to-merge task whose marker exists re-runs
 // only after it sat idle in to-merge for the idle interval, and the per-task file keeps the
 // cooldown of a failed task intact while another task's merger spawns
-const mergerAttemptPath = (root: string, slug: string) => join(kanbanDir(root), ".pids", `${slug}.merge-attempted`);
+function mergerAttemptPath(root: string, slug: string) {
+	return join(kanbanDir(root), ".pids", `${slug}.merge-attempted`);
+}
+
+// the marker holds the retry behind retryIdleMinutes; a fresh board has no .pids dir yet
+function markMergerAttempt(root: string, slug: string): void {
+	mkdirSync(join(kanbanDir(root), ".pids"), { recursive: true });
+	writeFileSync(mergerAttemptPath(root, slug), "");
+}
 
 function clearMergerAttempt(root: string, slug: string): void {
 	try {
@@ -202,19 +106,6 @@ function clearMergerAttempt(root: string, slug: string): void {
 		/* already gone */
 	}
 }
-// merge-lane hygiene before every rebase attempt (each retry after a Merger conflict round
-// included): the two context paths must never block the rebase with unstaged noise. A context
-// symlink committed by a developer sits as an unstaged deletion once clearContextSymlinks
-// removed it (#234), and a rebase refuses on unstaged changes. Unset any skip-worktree bit
-// first (a restore refuses a skip-worktree path), then restore each path to HEAD. Untracked
-// paths fail both steps and are ignored
-function cleanContextPaths(wtDir: string): void {
-	for (const name of ["AGENTS.md", "SPECS.md"]) {
-		git(wtDir, ["update-index", "--no-skip-worktree", name], true);
-		git(wtDir, ["restore", "--staged", "--worktree", "--", name], true);
-	}
-}
-
 // after the fast-forward: a context path tracked as a symlink (git mode 120000) came from a
 // worktree commit and never belongs on the merged branch. Remove the symlink-mode entries only
 // (a project's own tracked real file is mode 100644 and untouched) with one follow-up commit
@@ -233,15 +124,11 @@ function stripContextSymlinks(root: string): void {
 	}
 }
 
-// the to-merge sweep: a task the reviewer passed sits in to-merge until the orchestrator
-// rebases the branch onto the base in the worktree, then fast-forwards the base to the
-// branch at the project root and sets to-live-test; main history stays linear with no merge
-// commits. No merger agent runs on this clean path. On a rebase conflict the rebase stays in
-// progress in the worktree and a Merger (cwd = the worktree, pidName merger) resolves only
-// the conflicts and concludes the replayed commit with git rebase --continue; its successful
-// exit requeues the task to to-merge through the poll, and the retry waits for the idle
-// cooldown. A rebase can stop once per replayed commit, so the Merger is spawned per conflict
-// round until the rebase completes
+// the to-merge sweep: a task the reviewer passed sits in to-merge until a Merger (cwd = the
+// worktree, pidName merger) takes it. The merger owns the whole merge: the stale-rebase abort,
+// the rebase onto the base, the conflict resolution, the full suite and the notes. The daemon
+// only spawns it here and, on its clean exit, proves the result and fast-forwards the root
+// checkout to the branch (finishMerge), so main history stays linear with no merge commits
 function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	const slug = taskSlug(task.file);
 	// a reviewer approval is a successful run too: consume the armed marker here, since the
@@ -259,8 +146,10 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 		const role = newestRunRole(root, slug);
 		if (role) spawnRunAnalysis(root, slug, role);
 	}
-	// at most one merger at a time, project-wide
-	if (agentAlive(root, "merger")) return;
+	// at most one merger at a time, project-wide: a task still in merging means its merger
+	// exited and the poll has not consumed the exit yet, so a second spawn would overwrite the
+	// merged run's pid/exit pair and lose the finished merge
+	if (agentAlive(root, "merger") || listAll(root).some((t) => t.state === "merging")) return;
 	// at the maxParallel cap the merge waits: the task stays to-merge for the next rescan, and
 	// this return writes nothing, so the idle-clock checks below keep their reads first
 	if (cfg.maxParallel > 0 && runningCount(root) >= cfg.maxParallel) return;
@@ -288,7 +177,7 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	// deletes. Leave the task in to-merge for the PM, retries wait out the idle cooldown
 	const base = git(root, ["branch", "--show-current"], true);
 	if (base === "") {
-		writeFileSync(mergerAttemptPath(root, slug), "");
+		markMergerAttempt(root, slug);
 		log(root, `${task.file}: root checkout is detached, left in to-merge (PM resolves manually)`);
 		return;
 	}
@@ -298,82 +187,79 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 		log(root, `${task.file}: worktree could not be created, merge not started (state unchanged)`);
 		return;
 	}
-	// step 1: rebase the branch onto the base, in the worktree. The rebase and the fast-forward
-	// below run back-to-back in this serialized lane, so a branch rebased here is merged before
-	// the next merger operation rebases another branch onto a moved base. A rebase already in
-	// progress (a conflict round from an earlier run) makes a fresh rebase fail without
-	// touching state, which lands in the conflict path below and respawns the Merger
-	cleanContextPaths(ensured.wtDir);
-	if (git(ensured.wtDir, ["rebase", base]) === null) {
-		mkdirSync(join(kanbanDir(root), ".pids"), { recursive: true });
-		writeFileSync(mergerAttemptPath(root, slug), "");
-		// a stopped rebase leaves the rebase-merge directory in the worktree's git dir: that is
-		// a conflict, so leave the rebase in progress (no abort) and let the merger resolve only
-		// the conflicts and continue the replay. REBASE_HEAD is not the check: it lingers after a
-		// completed rebase (git 2.43). Any other failure (dirty worktree, missing ref) requeues
-		// for a later sweep with no merger
-		const rebaseDir = git(ensured.wtDir, ["rev-parse", "--git-path", "rebase-merge"], true);
-		const stopped = typeof rebaseDir === "string"
-			&& existsSync(isAbsolute(rebaseDir) ? rebaseDir : join(ensured.wtDir, rebaseDir));
-		if (stopped) {
-			log(root, `${task.file}: rebase conflicts, merger spawned to resolve them`);
-			writeMergerSlug(root, slug);
-			spawnAgent(root, cfg, "merger", { ...task, worktree: ensured.wt }, ensured.wtDir, "merger");
-			setState(root, task, "merging");
-		} else {
-			log(root, `${task.file}: rebase failed, left in to-merge for the retry`);
-		}
+	// the merger owns the whole merge: it aborts a stale rebase, rebases onto the base, resolves
+	// the conflicts, runs the full suite and writes the notes. The sweep only hands it the
+	// worktree and moves the state; the base fast-forward happens on the merger's exit 0
+	// (finishMerge), so the to-live-test move waits for the real result
+	writeMergerSlug(root, slug);
+	spawnAgent(root, cfg, "merger", { ...task, worktree: ensured.wt }, ensured.wtDir, "merger");
+	setState(root, task, "merging");
+	log(root, `${task.file}: merger spawned in ${ensured.wt}, set merging`);
+}
+
+// the merger's success target: the merger rebased the branch and ran the full suite itself, so
+// the daemon only proves that result, fast-forwards the root checkout to the branch and hands
+// the worktree to the live tester. A rebase left in progress, or a branch that does not sit on
+// the base, means the merger gave up: park the task with the reason and let the cooldown hold it
+export function finishMerge(root: string, task: Task): void {
+	const wt = task.worktree;
+	const wtDir = wt ? join(root, ".worktrees", wt) : "";
+	const rebaseDir = wtDir ? git(wtDir, ["rev-parse", "--git-path", "rebase-merge"], true) : null;
+	// REBASE_HEAD is not the check: it lingers after a completed rebase (git 2.43)
+	const rebasing = typeof rebaseDir === "string" && existsSync(isAbsolute(rebaseDir) ? rebaseDir : join(wtDir, rebaseDir));
+	if (!wt || !wtDir || !existsSync(wtDir) || rebasing) {
+		parkFailedMerge(root, task, "the merger exited without finishing the rebase");
 		return;
 	}
-	// step 2: fast-forward the base to the branch, at the project root, so no merge commit is
-	// created and main history stays linear. After the rebase the worktree branch head already
-	// is the merged commit, so no worktree sync step follows. Nothing is in progress on a
-	// failure (the rebase completed before this ran): no abort, just requeue for the retry,
-	// which re-runs a fresh rebase onto the moved base followed by the fast-forward
-	if (git(root, ["merge", "--ff-only", ensured.wt]) === null) {
-		writeFileSync(mergerAttemptPath(root, slug), "");
-		log(root, `${task.file}: fast-forward to ${base} failed, left in to-merge for the retry`);
+	// the base is resolved here, not at spawn time, because an earlier merge moved it
+	const base = git(root, ["branch", "--show-current"], true);
+	if (base === "" || git(wtDir, ["merge-base", "--is-ancestor", base, "HEAD"], true) === null) {
+		parkFailedMerge(root, task, "the branch does not sit on the base branch");
+		return;
+	}
+	if (!fastForward(root, base, wt)) {
+		parkFailedMerge(root, task, `the fast-forward to ${wt} failed`);
 		return;
 	}
 	stripContextSymlinks(root);
 	setState(root, task, "to-live-test");
-	log(root, `${task.file}: fast-forwarded ${base} to ${ensured.wt}, set to-live-test`);
-	// the base is already fast-forwarded, so the integration run starts here and overlaps the
-	// covered task's live test. Never fatal: a hook failure must not fail the merge, undo the state
-	// move, or send the task back to to-merge
-	if (!cfg.integrationTesting) {
-		log(root, `${task.file}: integration testing is off, no integration task queued`);
-		return;
-	}
-	const fresh = getTask(root, task.file) ?? task;
-	try {
-		ensureIntegrationTask(root, fresh);
-	} catch (err) {
-		log(root, `integration task for ${slug} failed: ${err instanceof Error ? err.message : err}`);
-	}
+	log(root, `${task.file}: fast-forwarded ${base} to ${wt}, set to-live-test`);
 }
 
-// the integration-test sweep: one project-wide run at a time, on the merged base branch, in the
-// root checkout (the tree the merger merges into) and with no worktree. The global
-// integration-tester pid is the single slot; the poll requeues a lane task whose run was
-// superseded. The loop snapshot is already in board order (priority, then stage), so the highest
-// priority waiting task takes the free slot
-function sweepToIntegrationTest(root: string, cfg: Config, task: Task): void {
-	// a held task keeps to-integration-test and leaves the single slot to the next waiting task
-	if (hasUserHold(task.blockedBy)) return;
-	// a task already running when the flag turns off finishes its run, so the gate acts at
-	// stage start only: the waiting task holds here, silently, on every rescan
-	if (!cfg.integrationTesting) return;
-	// at most one integration-tester at a time, project-wide
-	if (agentAlive(root, "integration-tester")) return;
-	// at the maxParallel cap the start waits: the task stays to-integration-test
-	if (cfg.maxParallel > 0 && runningCount(root) >= cfg.maxParallel) return;
-	// a task bounced here past the respawn cap waits for the idle cooldown first
-	if (deadCooldownActive(root, cfg, task)) return;
-	// state before spawn, like the live-tester spawn: the poll owns the lane from here
-	setState(root, task, "integration-testing");
-	writeMergerSlug(root, taskSlug(task.file), "integration-tester");
-	spawnAgent(root, cfg, "integration-tester", task, root, "integration-tester");
+// the merger's give-up path: the reason lands in the open questions so the PM sees it, and the
+// attempt marker holds the retry for retryIdleMinutes. The marker alone is the ceiling of this
+// design: a given-up merge retries after the idle window rather than waiting for the base to
+// move. Upgrade path: stamp the base tip into the marker file and retry only when it changed
+function parkFailedMerge(root: string, task: Task, reason: string): void {
+	markMergerAttempt(root, taskSlug(task.file));
+	const fresh = getTask(root, task.file) ?? task;
+	const open = fresh.openQuestions.trim();
+	updateTask(root, fresh, { openQuestions: open ? `${open}\n- ${reason}` : `- ${reason}` });
+	setState(root, fresh, "to-merge");
+	log(root, `${task.file}: ${reason}, left in to-merge for the retry`);
+}
+
+// stash, fast-forward, pop: the root checkout's own uncommitted work must survive the merge, so a
+// failed fast-forward puts the stash back. A bare `git stash` leaves untracked files that still
+// block the merge, hence --include-untracked
+// the board and the worktree dirs are the daemon's own state: excluded from the dirt check and
+// from the stash, or the stash pulls the whole board and every worktree off disk for the length
+// of the merge, and a log write into .kanban during that window breaks the stash pop for good
+const MANAGED_PATHS = [".", ":(exclude).kanban", ":(exclude).worktrees"];
+
+function fastForward(root: string, base: string, wt: string): boolean {
+	if (git(root, ["status", "--porcelain", "--", ...MANAGED_PATHS], true) === "") return git(root, ["merge", "--ff-only", wt], true) !== null;
+	if (git(root, ["stash", "push", "--include-untracked", "-m", `orchestrator: fast-forward to ${wt}`, "--", ...MANAGED_PATHS], true) === null) return false;
+	if (git(root, ["merge", "--ff-only", wt], true) === null) {
+		git(root, ["stash", "pop"], true);
+		return false;
+	}
+	if (git(root, ["stash", "pop"], true) === null) {
+		// the merged commit wins the conflict, and the entry stays for the owner to recover by hand
+		git(root, ["reset", "--hard", "HEAD"], true);
+		log(root, `stash pop after the fast-forward to ${base} conflicted, reset to the merged commit, the entry is stash@{0} in git stash list`);
+	}
+	return true;
 }
 
 // a done task's worktree and branch: the orchestrator fast-forwarded the base to the
@@ -419,7 +305,7 @@ function deadCooldownActive(root: string, cfg: Config, task: Task): boolean {
 // orphaned names are swept here. Stale per-task merger pid leftovers (the old per-task merger
 // scheme, e.g. 000038.merger.pid) drop once dead while their task is not merging. The generic
 // pid files drop once their reader is done with them (see the branch below). The project-wide
-// lane pids (merger, integration-tester) are live state for the poll: never swept
+// merger pid is live state for the poll: never swept
 function janitorPids(root: string, tasks: Task[]): void {
 	const merging = new Set(tasks.filter((t) => t.state === "merging").map((t) => taskSlug(t.file)));
 	const slugs = new Set(tasks.map((t) => taskSlug(t.file)));
@@ -433,11 +319,11 @@ function janitorPids(root: string, tasks: Task[]): void {
 	for (const f of files) {
 		if (f.endsWith(".exit")) {
 			const name = f.slice(0, -".exit".length);
-			// "merger.exit" and "integration-tester.exit" are lane state the poll consumes; a task
+			// "merger.exit" is lane state the poll consumes; a task
 			// slug with no board task is an orphan. Per-run analysis exit files
 			// (<slug>.<role>.<n>.analysis) key the one-failed-attempt guard (#229): keep them while
 			// their task exists, sweep with the task
-			if (name === "merger" || name === "integration-tester" || slugs.has(name) || slugs.has(name.split(".")[0])) continue;
+			if (name === "merger" || slugs.has(name) || slugs.has(name.split(".")[0])) continue;
 			try {
 				rmSync(join(kanbanDir(root), ".pids", f));
 			} catch {
@@ -445,9 +331,8 @@ function janitorPids(root: string, tasks: Task[]): void {
 			}
 			continue;
 		}
-		// the project-wide lane pids are live state for the poll's merging and integration lanes:
-		// never swept
-		if (f === "merger.pid" || f === "integration-tester.pid") continue;
+		// the project-wide merger pid is live state for the poll's merging lane: never swept
+		if (f === "merger.pid") continue;
 		if (f.endsWith(".merger.pid")) {
 			const name = f.slice(0, -".pid".length); // "<slug>.merger"
 			if (merging.has(name.slice(0, -".merger".length))) continue;
@@ -599,8 +484,6 @@ export function rescan(root: string, cfg: Config, force = false): void {
 						spawnAgent(root, cfg, "live-tester", { ...task, worktree: ensured.wt }, ensured.wtDir);
 					}
 				}
-			} else if (task.state === "to-integration-test") {
-				sweepToIntegrationTest(root, cfg, task);
 			} else if (task.state === "to-merge") {
 				sweepToMerge(root, cfg, task);
 			} else if (task.state === "merging") {
@@ -624,12 +507,6 @@ export function rescan(root: string, cfg: Config, force = false): void {
 	if (!tasks.some((t) => t.state === "merging") && !agentAlive(root, "merger")) {
 		clearPid(root, "merger");
 		clearMergerSlug(root);
-	}
-	// the same bookkeeping for the integration lane: the project-wide pid and slug drop once no
-	// task waits in or runs the lane and the integration-tester is gone
-	if (!tasks.some((t) => t.state === "to-integration-test" || t.state === "integration-testing") && !agentAlive(root, "integration-tester")) {
-		clearPid(root, "integration-tester");
-		clearMergerSlug(root, "integration-tester");
 	}
 	for (const task of tasks) {
 		if (task.state !== "to-merge" && task.state !== "merging") clearMergerAttempt(root, taskSlug(task.file));

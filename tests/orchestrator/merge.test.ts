@@ -1,38 +1,121 @@
 import assert from "node:assert/strict";
-import { spawn, execSync } from "node:child_process";
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskNum, taskSlug, updateTask } from "../../src/kanban.ts";
 import { loadConfig, poll } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline.ts";
 import { agentAlive, pidAlive, pidPath } from "../../src/pid.ts";
 import { exitFilePath, readMergerSlug, renderPrompt, readExitCode } from "../../src/orchestrator/spawn.ts";
-import { fixture, mirrorSubjects, roleStub, deadStub, runDaemon, waitFor, runIdx, cleanupAll, cleaned } from "../helpers.ts";
+import { cleanupAll, cleaned, fixture, mirrorSubjects, roleStub, runDaemon, waitFor } from "../helpers.ts";
+
+const mergeRoot = () => {
+	const root = fixture();
+	cleaned.push(root);
+	mkdirSync(kanbanDir(root), { recursive: true });
+	return root;
+};
+
+// the direct-drive harness: the sweep spawns the merger, the test waits for its exit and then
+// lets one poll apply the result, so no daemon timing sits between the two steps
+const cfgFor = (root: string, agent: string, patch: Record<string, unknown> = {}) =>
+	Object.assign(loadConfig(root), { agent, backlogIdleMinutes: 0, ...patch });
+
+const drive = async (root: string, cfg: ReturnType<typeof loadConfig>) => {
+	rescan(root, cfg);
+	// the exit file is written by the spawn wrapper after the agent dies, so wait for both
+	await waitFor(
+		() => !agentAlive(root, "merger") && readExitCode(root, "merger") !== null,
+		30000,
+		"the merger exited and recorded its code",
+		() => "",
+	);
+	poll(root, 5);
+};
+
+const rebasing = (wt: string) => {
+	const path = execSync("git rev-parse --git-path rebase-merge", { cwd: wt, encoding: "utf8" }).trim();
+	return existsSync(isAbsolute(path) ? path : join(wt, path));
+};
+
+const orchLog = (root: string) => {
+	try {
+		return readFileSync(join(kanbanDir(root), ".logs", "orchestrator.log"), "utf8");
+	} catch {
+		return "";
+	}
+};
+
+const subjects = (root: string, rev: string) => execSync(`git log --format=%s ${rev}`, { cwd: root, encoding: "utf8" }).trim().split("\n");
+
+// the merger stub for the direct-drive cases: it starts the rebase the prompt names, keeps its
+// own side on every conflict (--theirs in a rebase) and finishes with exit 0. The mode decides
+// what else it does, per the case
+const caseStub = (root: string, mode: string, other = "") => {
+	const stub = join(root, "case-merger.cjs");
+	writeFileSync(
+		stub,
+		`#!/usr/bin/env node
+const { readFileSync, writeFileSync, appendFileSync } = require("node:fs");
+const { execSync } = require("node:child_process");
+const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
+if (!prompt.includes("Merger agent")) process.exit(0);
+const cmd = ${JSON.stringify(mode)};
+const other = ${JSON.stringify(other)};
+const sh = (c) => { try { return execSync(c).toString(); } catch { return ""; } };
+const trySh = (c) => { try { execSync(c, { stdio: "ignore" }); return true; } catch { return false; } };
+const base = (prompt.match(/git rebase (?!-)([\\w./-]+)/) ?? [])[1] ?? "main";
+// the give-up mode exits without touching the branch; the agent really did run
+if (cmd === "abort") process.exit(0);
+trySh("git rebase " + base);
+for (let i = 0; i < 9; i++) {
+	const files = sh("git diff --diff-filter=U --name-only").trim().split("\\n").filter(Boolean);
+	if (!files.length) break;
+	for (const f of files) { trySh("git checkout --theirs -- " + f); trySh("git add -- " + f); }
+	if (!trySh("GIT_EDITOR=true git rebase --continue")) break;
+}
+if (cmd === "note") appendFileSync("SPECS.md", "- merge: README.md hunk one, kept both sides\\n- merge: README.md hunk two, kept both sides\\n");
+if (cmd === "drop") appendFileSync("SPECS.md", "\\n# Open questions\\n\\n- the other task changed README.md too, see " + other + "\\n");
+if (cmd === "fail") writeFileSync("SPECS.md", readFileSync("SPECS.md", "utf8").replace(/^state: .*/m, 'state: "to-do"'));
+process.exit(0);
+`,
+		{ mode: 0o755 },
+	);
+	return stub;
+};
+
+// a branch that really conflicts with main: both sides edit README.md, so the rebase stops
+const conflicting = (root: string, branch: string, mine: string, theirs: string) => {
+	execSync(`git checkout -qb ${branch}`, { cwd: root, shell: "/bin/bash" });
+	writeFileSync(join(root, "README.md"), `${mine}\n`);
+	execSync("git commit -qam branch", { cwd: root, shell: "/bin/bash" });
+	execSync("git checkout -q main", { cwd: root, shell: "/bin/bash" });
+	writeFileSync(join(root, "README.md"), `${theirs}\n`);
+	execSync("git commit -qam main", { cwd: root, shell: "/bin/bash" });
+};
 
 // --- part G: the to-merge sweep waits for the task's registered agent to die, and the live
 // test runs on the merged commit in the worktree ---
 const rootG = fixture();
-cleaned.push(rootG);
+const taskG = createTask(rootG, { name: "fix: defer merge while alive", summary: "Deferred merge smoke", specs: "n/a" });
+setState(rootG, taskG, "to-review");
 mkdirSync(kanbanDir(rootG), { recursive: true });
+const wtG = join(rootG, ".worktrees", "fix/1-defer-merge-while");
 // reviewer stub that waits for the armed marker, re-affirms to-review (a fixes run), then
-// lingers alive before exiting: the per-complexity cap advance lands while it lingers, so
-// the to-merge sweep must wait for its pid. The orchestrator merges once the reviewer
-// exits; the live-tester appends its report in the worktree and finishes
-const lingerStub = join(rootG, "linger-agent.cjs");
+// lingers alive before exiting: the to-merge advance lands while it lingers, so the to-merge
+// sweep must wait for its pid before it spawns the merger
 writeFileSync(
-	lingerStub,
+	join(rootG, "linger-agent.cjs"),
 	`#!/usr/bin/env node
 const { readFileSync, writeFileSync, appendFileSync, existsSync, readlinkSync } = require("node:fs");
 const { basename, dirname, join } = require("node:path");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
-// the task comes from the cwd SPECS.md symlink, which the orchestrator re-points at spawn
 const file = "SPECS.md";
 let front = "";
 let taskFile = "";
 try {
 	front = readFileSync(file, "utf8");
-	taskFile = readlinkSync(file); // ".kanban/<taskFile>", the real task file through the board
+	taskFile = readlinkSync(file);
 } catch {}
 if (!front.match(/^state: /m)) process.exit(0);
 const armed = () => join(dirname(taskFile), ".logs", basename(taskFile, ".md") + ".reviewer-armed");
@@ -48,29 +131,24 @@ if (prompt.includes("Reviewer agent")) {
 } else if (prompt.includes("Live-tester")) {
 	appendFileSync(file, "\\nLive test report: merge deferred until the reviewer finished.\\n");
 	process.exit(0);
+} else if (prompt.includes("Merger agent")) {
+	try {
+		require("node:child_process").execSync("git rebase main", { stdio: "ignore" });
+	} catch (e) {}
+	process.exit(0);
 }
 `,
 	{ mode: 0o755 },
 );
-writeFileSync(join(rootG, "se-llm-team.json"), JSON.stringify({ agent: lingerStub, pollMinutes: 0.01, reviewerCap: { moderate: 1 }, backlogIdleMinutes: 0 }));
-const taskG = createTask(rootG, { name: "fix: defer merge while alive", summary: "Deferred merge smoke", specs: "n/a" });
-setState(rootG, taskG, "to-review");
+writeFileSync(join(rootG, "se-llm-team.json"), JSON.stringify({ agent: join(rootG, "linger-agent.cjs"), pollMinutes: 0.01, reviewerCap: { moderate: 1 }, backlogIdleMinutes: 0 }));
 
 const g = await runDaemon(rootG);
-// "fix: defer merge while alive" caps at 4 words then drops the type word: defer-merge-while
-const wtG = join(rootG, ".worktrees", "fix/1-defer-merge-while");
-// cap 1: the first successful reviewer run advances the task to to-merge while the reviewer
-// still lingers; the merge must wait for its pid
 await waitFor(() => parseTask(rootG, taskG.file).state === "to-merge", 30000, "cap advance to to-merge", g.output);
-// the stub lingers 3s before exiting, but its node startup eats into that window, so a fixed
-// sleep can land after the stub's death and the whole merger chain on a loaded machine. Poll
-// until the registered pid is actually dead instead, asserting the defer continuously while
-// it lives: every sweep in the window must defer
 const livePidG = () => {
 	try {
 		return parseInt(readFileSync(join(kanbanDir(rootG), ".pids", `${taskG.file.replace(/\.md$/, "")}.pid`), "utf8").trim(), 10);
 	} catch {
-		return 0; // pid file cleared once the poll saw the agent dead: the defer window is over
+		return 0;
 	}
 };
 await waitFor(
@@ -85,9 +163,7 @@ await waitFor(
 	"reviewer pid death",
 	g.output,
 );
-// once the reviewer exits, the orchestrator merges, the rescan spawns the live-tester in the
-// task worktree, and the done mirror commit folds in the live test report
-await waitFor(() => g.output().includes("fast-forwarded main to fix/1-defer-merge-while, set to-live-test"), 30000, "the orchestrator merged after the reviewer died", g.output);
+await waitFor(() => g.output().includes("fast-forwarded main to fix/1-defer-merge-while, set to-live-test"), 30000, "the merger finished after the reviewer died", g.output);
 await waitFor(() => g.output().includes("spawned live-tester") && g.output().includes(`(cwd=${wtG})`), 30000, "live-tester runs in the task worktree", g.output);
 await waitFor(() => !existsSync(wtG), 30000, "worktree removed at done", g.output);
 await waitFor(() => mirrorSubjects(rootG).includes(`kanban: done ${taskG.file}`), 30000, "deferred done mirror commit", g.output);
@@ -97,13 +173,10 @@ g.daemon.kill("SIGTERM");
 
 // --- part J: a conflict-marked task file is left untouched until the merger resolves it ---
 const rootJ = fixture();
-cleaned.push(rootJ);
 mkdirSync(kanbanDir(rootJ), { recursive: true });
 writeFileSync(join(rootJ, "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootJ), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
 const taskJ = createTask(rootJ, { name: "fix: conflicted task", summary: "Mid-merge conflict", specs: "n/a" });
 setState(rootJ, taskJ, "to-do");
-// simulate a mid-merge conflict on the task file itself: git leaves both markers in the
-// working-tree file, and the merged-in side's state line sits last in the frontmatter
 const taskFileJ = join(kanbanDir(rootJ), taskJ.file);
 writeFileSync(
 	taskFileJ,
@@ -115,98 +188,169 @@ writeFileSync(
 const rawJ = readFileSync(taskFileJ, "utf8");
 
 const j = await runDaemon(rootJ);
-await new Promise((r) => setTimeout(r, 2000)); // a few sweeps and liveness polls
+await new Promise((r) => setTimeout(r, 2000));
 assert.ok(!j.output().includes("spawned developer"), "no agent spawned from a conflicted task file");
 assert.ok(j.output().includes("unresolved merge conflict markers"), "daemon logs the skipped conflicted file");
 assert.equal(readFileSync(taskFileJ, "utf8"), rawJ, "conflicted task file untouched by the daemon");
 j.daemon.kill("SIGTERM");
+cleanupAll(rootG, rootJ);
 
-console.log("orchestrator.test.ts: pipeline + liveness + lock lifecycle + shared board + ensured worktree + symlinked spawn + failed-spawn pid guard + conflict skip smoke passed");
+console.log("merge.test.ts: reviewer-defer and conflict-skip smoke passed");
 
-// --- part K: a conflicting merge spawns the merger in the worktree; its exit requeues to
-// to-merge and the retry waits for the idle cooldown ---
-const rootK = fixture();
-cleaned.push(rootK);
-mkdirSync(kanbanDir(rootK), { recursive: true });
-// a branch that conflicts with main: both edit README.md
-execSync("git checkout -qb fix/conflict", { cwd: rootK, shell: "/bin/bash" });
-writeFileSync(join(rootK, "README.md"), "branch\n");
-execSync("git commit -qam branch", { cwd: rootK, shell: "/bin/bash" });
-execSync("git checkout -q main", { cwd: rootK, shell: "/bin/bash" });
-writeFileSync(join(rootK, "README.md"), "main\n");
-execSync("git commit -qam main", { cwd: rootK, shell: "/bin/bash" });
-// merger stub that reads its orders from merger-cmd.txt in its cwd (the task worktree):
-// absent -> sleep 1s then exit 0 without resolving, "crash" -> exit 1, "resolve" -> resolve
-// with the base branch's side (--ours in a rebase) and continue the replay
-writeFileSync(
-	join(rootK, "cmd-merger.cjs"),
-	`#!/usr/bin/env node
-const { readFileSync, existsSync } = require("node:fs");
-const { execSync } = require("node:child_process");
-const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
-let front = "";
-try { front = readFileSync("SPECS.md", "utf8"); } catch {}
-if (!front.match(/^state: /m) || !prompt.includes("Merger agent")) process.exit(0);
-const cmd = existsSync("merger-cmd.txt") ? readFileSync("merger-cmd.txt", "utf8").trim() : "";
-if (cmd === "crash") process.exit(1);
-if (cmd !== "resolve") {
-	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
-	process.exit(0);
+// --- part A: a clean rebase. The sweep spawns the merger in the worktree and runs no git of
+// its own: main stays where it is until the merger's clean exit, and the poll then proves the
+// result, fast-forwards the base and moves the task to its live test ---
+const rootA = mergeRoot();
+execSync("git checkout -qb feat/clean-merge && git commit -q --allow-empty -m clean-change && git checkout -q main", { cwd: rootA, shell: "/bin/bash" });
+const taskA = createTask(rootA, { name: "feat: clean merge", summary: "Clean rebase smoke", specs: "n/a" });
+setWorktree(rootA, taskA, "feat/clean-merge");
+setState(rootA, taskA, "to-merge");
+const wtA = join(rootA, ".worktrees", "feat/clean-merge");
+const cfgA = cfgFor(rootA, caseStub(rootA, ""));
+rescan(rootA, cfgA);
+assert.equal(parseTask(rootA, taskA.file).state, "merging", "the sweep moved the task to merging");
+assert.equal(readMergerSlug(rootA), taskSlug(taskA.file), "the merger slug records the task");
+assert.ok(orchLog(rootA).includes(`spawned merger pid=`) && orchLog(rootA).includes(`(cwd=${wtA})`), "the merger spawned in the task worktree");
+assert.deepEqual(subjects(rootA, "-1 main"), ["init"], "the sweep itself moved no base commit");
+assert.ok(!orchLog(rootA).includes("fast-forwarded"), "nothing was fast-forwarded before the merger finished");
+await waitFor(() => !agentAlive(rootA, "merger"), 30000, "the merger exited", () => "");
+poll(rootA, 5);
+assert.equal(parseTask(rootA, taskA.file).state, "to-live-test", "the clean exit set to-live-test");
+assert.ok(subjects(rootA, "-1 main").includes("clean-change"), "the base took the rebased branch commit");
+assert.equal(execSync("git log --format=%s --merges main", { cwd: rootA, encoding: "utf8" }).trim(), "", "no merge commit on the base");
+assert.equal(rebasing(wtA), false, "the merger left no rebase behind");
+console.log("merge.test.ts: + clean rebase smoke passed");
+
+// --- part B: a conflicted rebase. The swap leaves the conflict to the merger, which keeps
+// both sides and writes one merge bullet per resolved hunk in the notes ---
+const rootB = mergeRoot();
+conflicting(rootB, "feat/conflicted", "branch", "main");
+const taskB = createTask(rootB, { name: "feat: conflicted merge", summary: "Conflict smoke", specs: "n/a" });
+setWorktree(rootB, taskB, "feat/conflicted");
+setState(rootB, taskB, "to-merge");
+await drive(rootB, cfgFor(rootB, caseStub(rootB, "note")));
+const notesB = parseTask(rootB, taskB.file).notes.split("\n").filter((l) => l.startsWith("- merge:"));
+assert.equal(notesB.length, 2, `the notes carry one bullet per resolved hunk: ${notesB.join(" | ")}`);
+assert.ok(notesB.every((l) => l.includes("both sides")), "each bullet says whether both sides survived");
+assert.equal(readFileSync(join(rootB, "README.md"), "utf8"), "branch\n", "the resolved side reached the base");
+assert.equal(parseTask(rootB, taskB.file).state, "to-live-test", "a resolved conflict still reaches the live test");
+console.log("merge.test.ts: + conflicted rebase smoke passed");
+
+// --- part C: a dropped side. The other change does not fit, so the merger keeps its own side
+// and records one open question naming the other task; the merge still completes ---
+const rootC = mergeRoot();
+const otherC = createTask(rootC, { name: "feat: other side", summary: "Dropped side smoke", specs: "n/a" });
+conflicting(rootC, "feat/dropped", "branch", "main");
+const taskC = createTask(rootC, { name: "feat: dropped side", summary: "Dropped side smoke", specs: "n/a" });
+setWorktree(rootC, taskC, "feat/dropped");
+setState(rootC, taskC, "to-merge");
+await drive(rootC, cfgFor(rootC, caseStub(rootC, "drop", `#${taskNum(otherC.file)}`)));
+const openC = parseTask(rootC, taskC.file).openQuestions;
+assert.ok(openC.includes(`#${taskNum(otherC.file)}`), `the open question names the other task: ${openC}`);
+assert.equal(readFileSync(join(rootC, "README.md"), "utf8"), "branch\n", "the own side was kept");
+assert.equal(parseTask(rootC, taskC.file).state, "to-live-test", "a dropped side still reaches the live test");
+console.log("merge.test.ts: + dropped side smoke passed");
+
+// --- part D: a failing suite. The merger sets to-do itself, the poll leaves that move alone,
+// the branch stays rebased and the base is never fast-forwarded ---
+const rootD = mergeRoot();
+execSync("git checkout -qb feat/failing-suite && git commit -q --allow-empty -m suite-branch && git checkout -q main", { cwd: rootD, shell: "/bin/bash" });
+const taskD = createTask(rootD, { name: "feat: failing suite", summary: "Suite gate smoke", specs: "n/a" });
+setWorktree(rootD, taskD, "feat/failing-suite");
+setState(rootD, taskD, "to-merge");
+await drive(rootD, cfgFor(rootD, caseStub(rootD, "fail")));
+assert.equal(parseTask(rootD, taskD.file).state, "to-do", "the merger's failing-suite move to to-do survives the poll");
+assert.deepEqual(subjects(rootD, "-1 main"), ["init"], "no fast-forward for a failing suite");
+assert.ok(subjects(rootD, "-1 feat/failing-suite").includes("suite-branch"), "the branch stays rebased");
+assert.ok(!orchLog(rootD).includes("fast-forwarded"), "the daemon logs no fast-forward");
+console.log("merge.test.ts: + failing suite smoke passed");
+
+// --- part E: the give-up path. A merger that exits 0 with a branch off the base parks the
+// task in to-merge, names the reason in the open questions, writes the attempt marker and the
+// cooldown holds any second spawn ---
+const rootE = mergeRoot();
+execSync("git checkout -qb feat/off-base && git commit -q --allow-empty -m branch && git checkout -q main && git commit -q --allow-empty -m moved", { cwd: rootE, shell: "/bin/bash" });
+const taskE = createTask(rootE, { name: "feat: off base", summary: "Give-up smoke", specs: "n/a" });
+setWorktree(rootE, taskE, "feat/off-base");
+setState(rootE, taskE, "to-merge");
+const cfgE = cfgFor(rootE, caseStub(rootE, "abort"));
+await drive(rootE, cfgE);
+const slugE = taskSlug(taskE.file);
+assert.equal(parseTask(rootE, taskE.file).state, "to-merge", "a branch off the base parks in to-merge");
+assert.match(parseTask(rootE, taskE.file).openQuestions, /does not sit on the base branch/, "the give-up reason lands in the open questions");
+assert.ok(existsSync(join(kanbanDir(rootE), ".pids", `${slugE}.merge-attempted`)), "the attempt marker is written");
+assert.ok(orchLog(rootE).includes("does not sit on the base branch, left in to-merge for the retry"), "the give-up is logged");
+rescan(rootE, cfgE);
+rescan(rootE, cfgE);
+assert.equal(orchLog(rootE).split("spawned merger").length - 1, 1, "the cooldown holds any second spawn");
+assert.deepEqual(subjects(rootE, "-1 main"), ["moved"], "the base never took the off-base branch");
+console.log("merge.test.ts: + give-up smoke passed");
+
+// --- part F: a dirty root checkout. Uncommitted and untracked files survive the fast-forward,
+// the merge succeeds and the stash list is empty afterwards ---
+const rootF = mergeRoot();
+writeFileSync(join(rootF, "dirty.txt"), "clean\n");
+execSync("git add dirty.txt && git commit -qm dirty-base", { cwd: rootF, shell: "/bin/bash" });
+execSync("git checkout -qb feat/dirty-root && git commit -q --allow-empty -m dirty-branch && git checkout -q main", { cwd: rootF, shell: "/bin/bash" });
+const taskF = createTask(rootF, { name: "feat: dirty root", summary: "Dirty root smoke", specs: "n/a" });
+setWorktree(rootF, taskF, "feat/dirty-root");
+setState(rootF, taskF, "to-merge");
+writeFileSync(join(rootF, "dirty.txt"), "uncommitted\n");
+writeFileSync(join(rootF, "untracked.txt"), "untracked\n");
+await drive(rootF, cfgFor(rootF, caseStub(rootF, "")));
+assert.equal(parseTask(rootF, taskF.file).state, "to-live-test", "the merge succeeds over a dirty root");
+assert.equal(readFileSync(join(rootF, "dirty.txt"), "utf8"), "uncommitted\n", "the uncommitted change survives");
+assert.equal(readFileSync(join(rootF, "untracked.txt"), "utf8"), "untracked\n", "the untracked file survives");
+assert.equal(execSync("git stash list", { cwd: rootF, encoding: "utf8" }).trim(), "", "the stash list is empty");
+assert.ok(subjects(rootF, "-1 main").includes("dirty-branch"), "the fast-forward landed");
+console.log("merge.test.ts: + dirty root smoke passed");
+
+// --- part K5: a detached root checkout has no branch to merge into: the sweep refuses before
+// it spawns a merger, the task waits in to-merge for the PM, and the base is untouched ---
+const rootK5 = mergeRoot();
+execSync("git checkout -qb fix/detached-root && git commit -q --allow-empty -m branch && git checkout -q main && git checkout -q --detach", { cwd: rootK5, shell: "/bin/bash" });
+const taskK5 = createTask(rootK5, { name: "fix: detached root", summary: "Detached root smoke", specs: "n/a" });
+setWorktree(rootK5, taskK5, "fix/detached-root");
+setState(rootK5, taskK5, "to-merge");
+rescan(rootK5, cfgFor(rootK5, caseStub(rootK5, "abort")));
+assert.ok(orchLog(rootK5).includes("root checkout is detached, left in to-merge"), "the detached root refused the merge");
+assert.equal(parseTask(rootK5, taskK5.file).state, "to-merge", "the task waits in to-merge for the PM");
+assert.ok(!orchLog(rootK5).includes("spawned merger"), "no merger agent for a detached root");
+console.log("merge.test.ts: + detached root smoke passed");
+
+// --- part AL: the merger prompt carries the literal base branch, the conflict recipe, the
+// notes contract and the full-suite gate, and no absolute path or placeholder survives ---
+const rootAL = fixture();
+const taskAL = createTask(rootAL, { name: "fix: merger prompt", summary: "Prompt smoke", specs: "n/a" });
+const promptAL = renderPrompt(rootAL, "merger", 60, taskAL.file);
+assert.ok(promptAL.includes("Merger agent"), "prompt is the merger's");
+assert.ok(promptAL.includes("git rebase --abort"), "the merger aborts a stale rebase first");
+assert.ok(promptAL.includes("git rebase main"), "the prompt names the literal base branch");
+assert.ok(promptAL.includes("git checkout --theirs"), "the merger keeps its own side per hunk");
+assert.ok(promptAL.includes("git blame -L") && promptAL.includes("git log --oneline -1"), "the merger reads the other side from both");
+assert.ok(promptAL.includes("(#NNN)") && promptAL.includes("0000NN_"), "the prompt maps the subject suffix to the task file");
+assert.ok(promptAL.includes("prefixed `merge:`"), "the notes contract names the merge bullet prefix");
+assert.ok(promptAL.includes("pnpm test") && promptAL.includes("Never `pnpm test:changed`"), "the merger runs the full suite only");
+assert.ok(promptAL.includes("kanban_set_state") && promptAL.includes("openQuestions"), "the kanban write contract is stated");
+assert.ok(promptAL.includes("Keep every tool call's timeout under 60 minutes"), "the prompt carries the configured stall window");
+assert.ok(!promptAL.includes(rootAL) && !promptAL.includes("{{"), "no absolute path or placeholder survives rendering");
+assert.ok(!promptAL.includes("You run no test suite"), "the merger no longer skips the suite");
+const promptRev = renderPrompt(rootAL, "reviewer", 60);
+assert.ok(promptRev.includes(`git -C ${rootAL} branch --show-current`), "the reviewer resolves the base branch from the project root checkout");
+assert.ok(!promptRev.includes("git diff main"), "the reviewer diffs no hardcoded main");
+assert.ok(!promptRev.includes(join(rootAL, ".kanban")) && !promptRev.includes(".worktrees"), "no absolute task-file or worktree path survives rendering");
+assert.ok(!promptRev.includes("{{"), "no placeholder survives rendering");
+for (const [role, prompt] of [["developer", renderPrompt(rootAL, "developer", 60)], ["merger", promptAL], ["live-tester", renderPrompt(rootAL, "live-tester", 60)]] as const) {
+	assert.ok(prompt.toLowerCase().includes("never change the task states"), `the ${role} prompt bans changing the task states`);
+	assert.ok(!prompt.includes("doctor maintains"), `the ${role} prompt carries no doctor-maintains sentence`);
+	assert.ok(!prompt.includes(".kanban/AGENTS"), `the ${role} prompt names no role-notes path`);
 }
-execSync("git checkout --ours README.md && git add -A && GIT_EDITOR=true git rebase --continue", { stdio: "ignore" });
-`,
-	{ mode: 0o755 },
-);
-// 0.08min = 4.8s idle cooldown; each merger exit only requeues the task, so the retry fits in the run
-writeFileSync(join(rootK, "se-llm-team.json"), JSON.stringify({ agent: join(rootK, "cmd-merger.cjs"), pollMinutes: 0.01, retryIdleMinutes: 0.08, backlogIdleMinutes: 0 }));
-const taskK = createTask(rootK, { name: "fix: stuck conflict", summary: "Merge cooldown smoke", specs: "n/a" });
-setState(rootK, taskK, "to-merge");
-setWorktree(rootK, taskK, "fix/conflict");
-
-const k = await runDaemon(rootK);
-const slugK = taskK.file.replace(/\.md$/, "");
-const wtK = join(rootK, ".worktrees", "fix/conflict");
-const spawnedK = () => k.output().split("spawned merger").length - 1;
-// the merger pid file clears only after the poll processed its dead pid
-const mergerGoneK = () => {
-	try {
-		return readFileSync(join(kanbanDir(rootK), ".pids", "merger.pid"), "utf8").trim() === "";
-	} catch {
-		return true;
-	}
-};
-// run 1: no command -> the merger sleeps 1s and exits 0 without resolving; the orchestrator
-// left the merge in progress in the worktree and requeues the task on the exit 0
-await waitFor(() => spawnedK() === 1, 30000, "first merger spawned", k.output);
-assert.ok(k.output().includes(`(cwd=${wtK})`), "the merger spawns in the task worktree");
-await waitFor(() => parseTask(rootK, taskK.file).state === "merging", 30000, "task set to merging at spawn", k.output);
-assert.match(readFileSync(join(wtK, "README.md"), "utf8"), /^<<<<<<< /m, "the conflicting rebase is left in progress in the worktree");
-await waitFor(() => mergerGoneK() && parseTask(rootK, taskK.file).state === "to-merge", 30000, "unresolved merger exit requeued to to-merge", k.output);
-assert.ok(k.output().includes("agent exited 0, merging -> to-merge"), "the merger's exit 0 requeued the task");
-// run 2: the retry's rebase fails on the in-progress rebase (no fresh rebase while one is
-// stopped) and re-takes the merger path; "crash" makes the merger exit 1 and the poll bounces merging -> to-merge
-writeFileSync(join(wtK, "merger-cmd.txt"), "crash\n");
-await waitFor(() => spawnedK() >= 2, 30000, "merger respawned after the cooldown", k.output);
-await waitFor(() => k.output().includes("exited 1 without success, merging -> to-merge"), 30000, "crash bounced the merging task", k.output);
-assert.ok(existsSync(join(kanbanDir(rootK), ".pids", `${slugK}.merge-attempted`)), "the merge-attempted marker is written");
-// run 3: "resolve" concludes the merge; the retry then merges cleanly and the task reaches done
-writeFileSync(join(wtK, "merger-cmd.txt"), "resolve\n");
-await waitFor(() => spawnedK() >= 3, 30000, "merger spawned for the resolution", k.output);
-await waitFor(
-	() => parseTask(rootK, taskK.file).state === "done" && !existsSync(wtK),
-	90000,
-	"resolved merge reaches done and the worktree is cleaned",
-	k.output,
-);
-// per-run merger logs: the three merger runs got their own indexed files
-assert.deepEqual(runIdx(rootK, `${slugK}.merger`), ["0", "1", "2"], "merger runs got indexed log files");
-k.daemon.kill("SIGTERM");
+console.log("merge.test.ts: + merger prompt smoke passed");
+cleanupAll(rootA, rootB, rootC, rootD, rootE, rootF, rootK5, rootAL);
 
 // --- part K2: at most one merger runs at a time, even with several tasks in to-merge ---
-const rootK2 = fixture();
-cleaned.push(rootK2);
-mkdirSync(kanbanDir(rootK2), { recursive: true });
-// merger stub that sleeps 2.5s before resolving, so an unserialized orchestrator would overlap spawns
+const rootK2 = mergeRoot();
+// merger stub that rebases, then sleeps 2.5s before resolving, so an unserialized sweep would overlap spawns
 writeFileSync(
 	join(rootK2, "slow-merger.cjs"),
 	`#!/usr/bin/env node
@@ -216,29 +360,18 @@ const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 let front = "";
 try { front = readFileSync("SPECS.md", "utf8"); } catch {}
 if (!front.match(/^state: /m) || !prompt.includes("Merger agent")) process.exit(0);
-setTimeout(() => {
-	try {
-		execSync("git checkout --ours README.md && git add -A && GIT_EDITOR=true git rebase --continue", { stdio: "ignore" });
-	} catch (e) {}
-}, 2500);
+const trySh = (c) => { try { execSync(c, { stdio: "ignore" }); } catch (e) {} };
+trySh("git rebase main");
+setTimeout(() => trySh("git checkout --theirs README.md && git add -A && GIT_EDITOR=true git rebase --continue"), 2500);
 `,
 	{ mode: 0o755 },
 );
-// 0.08min = 4.8s idle cooldown: each merger exit only requeues the task, so the retries (and
-// the done paths) still fit in the run
 writeFileSync(join(rootK2, "se-llm-team.json"), JSON.stringify({ agent: join(rootK2, "slow-merger.cjs"), pollMinutes: 0.01, retryIdleMinutes: 0.08, backlogIdleMinutes: 0 }));
-// two branches that each conflict with main (each edits README.md), main advanced so the
-// worktree merges genuinely conflict, and two to-merge tasks
-execSync("git checkout -qb feat/merger-one", { cwd: rootK2, shell: "/bin/bash" });
-writeFileSync(join(rootK2, "README.md"), "one\n");
-execSync("git commit -qam one", { cwd: rootK2, shell: "/bin/bash" });
-execSync("git checkout -q main", { cwd: rootK2, shell: "/bin/bash" });
-execSync("git checkout -qb feat/merger-two", { cwd: rootK2, shell: "/bin/bash" });
+conflicting(rootK2, "feat/merger-one", "one", "main");
+// the second branch also stems from init, so both conflicts stop a rebase onto main
+execSync("git branch feat/merger-two main~1 && git checkout -q feat/merger-two", { cwd: rootK2, shell: "/bin/bash" });
 writeFileSync(join(rootK2, "README.md"), "two\n");
-execSync("git commit -qam two", { cwd: rootK2, shell: "/bin/bash" });
-execSync("git checkout -q main", { cwd: rootK2, shell: "/bin/bash" });
-writeFileSync(join(rootK2, "README.md"), "main\n");
-execSync("git commit -qam main", { cwd: rootK2, shell: "/bin/bash" });
+execSync("git commit -qam two && git checkout -q main", { cwd: rootK2, shell: "/bin/bash" });
 const taskK2a = createTask(rootK2, { name: "feat: merger one", summary: "Single merger smoke", specs: "n/a" });
 const taskK2b = createTask(rootK2, { name: "feat: merger two", summary: "Single merger smoke", specs: "n/a" });
 setWorktree(rootK2, taskK2a, "feat/merger-one");
@@ -246,40 +379,52 @@ setWorktree(rootK2, taskK2b, "feat/merger-two");
 setState(rootK2, taskK2a, "to-merge");
 setState(rootK2, taskK2b, "to-merge");
 
+const stateOf = (file: string) => {
+	try { return parseTask(rootK2, file).state; } catch { return "gone"; }
+};
 const k2 = await runDaemon(rootK2);
 const spawnedK2 = () => k2.output().split("spawned merger").length - 1;
 await waitFor(() => spawnedK2() === 1, 30000, "first merger spawned", k2.output);
 await new Promise((r) => setTimeout(r, 1200));
 assert.equal(spawnedK2(), 1, "no second merger while the first runs");
 await waitFor(
-	() => parseTask(rootK2, taskK2a.file).state === "done"
-		&& parseTask(rootK2, taskK2b.file).state === "done"
+	() => stateOf(taskK2a.file) === "done"
+		&& stateOf(taskK2b.file) === "done"
 		&& !existsSync(join(rootK2, ".worktrees", "feat/merger-one"))
 		&& !existsSync(join(rootK2, ".worktrees", "feat/merger-two")),
-	90000,
-	"mergers serialized; both tasks reach done and both worktrees are cleaned",
+	150000,
+	`mergers serialized; both tasks reach done and both worktrees are cleaned (${stateOf(taskK2a.file)}/${stateOf(taskK2b.file)})`,
 	k2.output,
 );
 assert.equal(execSync("git log --format=%s --merges main", { cwd: rootK2, encoding: "utf8" }).trim(), "", "no merge commits on main");
 k2.daemon.kill("SIGTERM");
+cleanupAll(rootK2);
+console.log("merge.test.ts: + one merger at a time smoke passed");
 
-// --- part K3: main moves between the rebase and the fast-forward: the post-rewrite hook in
-// the shared hooks dir fires after the rebase and advances main, so the fast-forward fails;
-// the retry re-runs a fresh rebase onto the moved base and the fast-forward lands before the
-// live test runs ---
-const rootK3 = fixture();
-cleaned.push(rootK3);
-mkdirSync(kanbanDir(rootK3), { recursive: true });
-// live-tester stub that records which files exist in its cwd (the worktree) and just finishes
+// --- part K3: the base moves between the rebase and the fast-forward: the post-rewrite hook
+// in the shared hooks dir fires after the merger's rebase and advances main, so the ancestor
+// proof fails, the task parks, and the retry rebases onto the moved base and lands ---
+const rootK3 = mergeRoot();
+execSync("git checkout -qb feat/race", { cwd: rootK3, shell: "/bin/bash" });
+writeFileSync(join(rootK3, "other.txt"), "other\n");
+execSync("git add -A && git commit -qm other && git checkout -q main", { cwd: rootK3, shell: "/bin/bash" });
+writeFileSync(join(rootK3, "main-only.txt"), "main-only\n");
+execSync("git add -A && git commit -qm main-only", { cwd: rootK3, shell: "/bin/bash" });
+// written after the history setup: a stub committed on the branch would vanish on the main checkout
 writeFileSync(
 	join(rootK3, "probe-live.cjs"),
 	`#!/usr/bin/env node
 const { readFileSync, appendFileSync, existsSync } = require("node:fs");
+const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 const file = "SPECS.md";
 let front = "";
 try { front = readFileSync(file, "utf8"); } catch {}
 if (!front.match(/^state: /m)) process.exit(0);
+if (prompt.includes("Merger agent")) {
+	try { execSync("git rebase main", { stdio: "ignore" }); } catch (e) {}
+	process.exit(0);
+}
 if (prompt.includes("Live-tester")) {
 	const files = ["other.txt", "race.txt", "main-only.txt"].filter((f) => existsSync(f)).join(",");
 	appendFileSync(file, "\\nLive test report: worktree has " + files + ".\\n");
@@ -287,16 +432,6 @@ if (prompt.includes("Live-tester")) {
 `,
 	{ mode: 0o755 },
 );
-// branch feat/race adds other.txt; main gains main-only.txt before the daemon runs, so the
-// rebase genuinely replays the branch commit and fires the post-rewrite hook. The hook
-// advances main by committing race.txt at the project root, once and only from a linked
-// worktree (git-dir differs from git-common-dir), so the retry's rebase does not re-advance
-execSync("git checkout -qb feat/race", { cwd: rootK3, shell: "/bin/bash" });
-writeFileSync(join(rootK3, "other.txt"), "other\n");
-execSync("git add -A && git commit -qm other", { cwd: rootK3, shell: "/bin/bash" });
-execSync("git checkout -q main", { cwd: rootK3, shell: "/bin/bash" });
-writeFileSync(join(rootK3, "main-only.txt"), "main-only\n");
-execSync("git add -A && git commit -qm main-only", { cwd: rootK3, shell: "/bin/bash" });
 writeFileSync(
 	join(rootK3, ".git", "hooks", "post-rewrite"),
 	`#!/bin/sh
@@ -323,7 +458,7 @@ const k3 = await runDaemon(rootK3);
 const wtK3 = join(rootK3, ".worktrees", "feat/race");
 await waitFor(
 	() => parseTask(rootK3, taskK3.file).state === "done" && !existsSync(wtK3) && mirrorSubjects(rootK3).includes(`kanban: done ${taskK3.file}`),
-	60000,
+	150000,
 	"task done through the moving base",
 	k3.output,
 );
@@ -331,182 +466,32 @@ assert.ok(existsSync(join(rootK3, ".git", "race-hook-fired")), "the post-rewrite
 const committedK3 = execSync(`git show refs/heads/meta/kanban:.kanban/${taskK3.file}`, { cwd: rootK3, encoding: "utf8", shell: "/bin/bash" });
 assert.match(committedK3, /Live test report: worktree has other\.txt,race\.txt,main-only\.txt\./, "the live test ran the merged commit (all three files present)");
 assert.equal(execSync("git log --format=%s --merges main", { cwd: rootK3, encoding: "utf8" }).trim(), "", "no merge commits on main");
-assert.deepEqual(
-	execSync("git log --format=%s main", { cwd: rootK3, encoding: "utf8" }).trim().split("\n"),
-	["other", "race", "main-only", "init"],
-	"main history stays linear with the branch commits replayed on top",
-);
+assert.deepEqual(subjects(rootK3, "main"), ["other", "race", "main-only", "init"], "main history stays linear with the branch commits replayed on top");
 k3.daemon.kill("SIGTERM");
+cleanupAll(rootK3);
+console.log("merge.test.ts: + base moved between rebase and fast-forward smoke passed");
 
-// --- part K4: a dirty root checkout refuses the fast-forward before it starts: no rebase
-// state is left in progress, the task requeues to to-merge with the attempt marker, no merger
-// agent spawns for a refused fast-forward ---
-const rootK4 = fixture();
-cleaned.push(rootK4);
-mkdirSync(kanbanDir(rootK4), { recursive: true });
-execSync("git checkout -qb fix/dirty-root", { cwd: rootK4, shell: "/bin/bash" });
-writeFileSync(join(rootK4, "README.md"), "branch\n");
-execSync("git commit -qam branch", { cwd: rootK4, shell: "/bin/bash" });
-execSync("git checkout -q main", { cwd: rootK4, shell: "/bin/bash" });
-// an uncommitted change to the file the branch also edits: the root merge refuses before starting
-writeFileSync(join(rootK4, "README.md"), "dirty\n");
-writeFileSync(join(rootK4, "noop.cjs"), `#!/usr/bin/env node\n`);
-chmodSync(join(rootK4, "noop.cjs"), 0o755);
-writeFileSync(join(rootK4, "se-llm-team.json"), JSON.stringify({ agent: join(rootK4, "noop.cjs"), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
-const taskK4 = createTask(rootK4, { name: "fix: dirty root", summary: "Root merge refusal smoke", specs: "n/a" });
-setWorktree(rootK4, taskK4, "fix/dirty-root");
-setState(rootK4, taskK4, "to-merge");
-
-const k4 = await runDaemon(rootK4);
-const slugK4 = taskK4.file.replace(/\.md$/, "");
-await waitFor(() => k4.output().includes("fast-forward to main failed, left in to-merge for the retry"), 30000, "the root fast-forward refused and requeued", k4.output);
-assert.equal(parseTask(rootK4, taskK4.file).state, "to-merge", "the task stays in to-merge for the retry");
-assert.ok(existsSync(join(kanbanDir(rootK4), ".pids", `${slugK4}.merge-attempted`)), "the merge-attempted marker is written");
-assert.ok(!existsSync(join(rootK4, ".git", "MERGE_HEAD")), "nothing in progress at the root (the fast-forward never started)");
-assert.ok(!existsSync(join(rootK4, ".git", "worktrees", "fix/dirty-root", "rebase-merge")), "no rebase in progress in the worktree");
-assert.ok(!k4.output().includes("spawned merger"), "no merger agent for a refused fast-forward");
-k4.daemon.kill("SIGTERM");
-
-// --- part K5: a detached root checkout has no branch to merge into: the merge is refused
-// before it starts, the task waits in to-merge for the PM, and the worktree is untouched ---
-const rootK5 = fixture();
-cleaned.push(rootK5);
-mkdirSync(kanbanDir(rootK5), { recursive: true });
-execSync("git checkout -qb fix/detached-root", { cwd: rootK5, shell: "/bin/bash" });
-writeFileSync(join(rootK5, "README.md"), "branch\n");
-execSync("git commit -qam branch", { cwd: rootK5, shell: "/bin/bash" });
-execSync("git checkout -q main", { cwd: rootK5, shell: "/bin/bash" });
-execSync("git checkout -q --detach", { cwd: rootK5, shell: "/bin/bash" });
-writeFileSync(join(rootK5, "noop.cjs"), `#!/usr/bin/env node\n`);
-chmodSync(join(rootK5, "noop.cjs"), 0o755);
-writeFileSync(join(rootK5, "se-llm-team.json"), JSON.stringify({ agent: join(rootK5, "noop.cjs"), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
-const taskK5 = createTask(rootK5, { name: "fix: detached root", summary: "Detached root smoke", specs: "n/a" });
-setWorktree(rootK5, taskK5, "fix/detached-root");
-setState(rootK5, taskK5, "to-merge");
-
-const k5 = await runDaemon(rootK5);
-await waitFor(() => k5.output().includes("root checkout is detached, left in to-merge"), 30000, "the detached root refused the merge", k5.output);
-assert.equal(parseTask(rootK5, taskK5.file).state, "to-merge", "the task waits in to-merge for the PM");
-assert.ok(!k5.output().includes("fast-forwarded") && !k5.output().includes("merged into main"), "nothing was merged");
-assert.ok(!k5.output().includes("spawned merger"), "no merger agent for a detached root");
-k5.daemon.kill("SIGTERM");
-
-// --- part AL: the merger prompt is rendered for the worktree cwd with the conflict-only contract ---
-const rootAL = fixture();
-cleaned.push(rootAL);
-mkdirSync(kanbanDir(rootAL), { recursive: true });
-// the recorder agent writes the rendered prompt into its cwd (the task worktree) and exits
-// without resolving: the orchestrator requeues the task and the merge-attempted cooldown
-// holds any second spawn (default 1 min), so the recorded prompt is the only merger's
-const recorderAL = join(rootAL, "recorder-agent.cjs");
-writeFileSync(
-	recorderAL,
-	`#!/usr/bin/env node
-const { writeFileSync } = require("node:fs");
-const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
-writeFileSync(process.cwd() + "/merger-prompt.txt", prompt);
-`,
-);
-chmodSync(recorderAL, 0o755);
-writeFileSync(join(rootAL, "se-llm-team.json"), JSON.stringify({ agent: recorderAL, pollMinutes: 0.01, backlogIdleMinutes: 0 }));
-// a branch that really conflicts with main: both edit README.md, so the rebase stops
-// and it is the merger (cwd = the task worktree) that gets the prompt
-execSync("git checkout -qb feat/merger-prompt", { cwd: rootAL, shell: "/bin/bash" });
-writeFileSync(join(rootAL, "README.md"), "branch\n");
-execSync("git commit -qam branch", { cwd: rootAL, shell: "/bin/bash" });
-execSync("git checkout -q main", { cwd: rootAL, shell: "/bin/bash" });
-writeFileSync(join(rootAL, "README.md"), "main\n");
-execSync("git commit -qam main", { cwd: rootAL, shell: "/bin/bash" });
-const taskAL = createTask(rootAL, { name: "fix: merger prompt", summary: "Prompt smoke", specs: "n/a" });
-setWorktree(rootAL, taskAL, "feat/merger-prompt");
-setState(rootAL, taskAL, "to-merge");
-
-const al = await runDaemon(rootAL);
-const wtAL = join(rootAL, ".worktrees", "feat/merger-prompt");
-await waitFor(() => existsSync(join(wtAL, "merger-prompt.txt")), 30000, "merger prompt recorded", al.output);
-al.daemon.kill("SIGTERM");
-const promptAL = readFileSync(join(wtAL, "merger-prompt.txt"), "utf8");
-assert.ok(promptAL.includes("Merger agent"), "prompt is the merger's");
-assert.ok(promptAL.includes("resolve the conflicts"), "the merger only resolves conflicts");
-assert.ok(promptAL.includes("conclude the replayed commit with git rebase --continue"), "the merger concludes with git rebase --continue");
-assert.ok(promptAL.includes("never start a rebase or merge yourself"), "the merger starts no merge");
-assert.ok(promptAL.includes("never change the task states"), "the merger never changes the task states");
-assert.ok(promptAL.includes("You run no test suite"), "the merger runs no test suite");
-assert.ok(!promptAL.includes("run the full test suite"), "the merger prompt names no full suite run");
-assert.ok(!promptAL.includes(rootAL) && !promptAL.includes(wtAL), "no absolute path survives rendering");
-assert.ok(!promptAL.includes("{{"), "no placeholder survives rendering");
-assert.ok(promptAL.includes("take the base sha from `onto`"), "the merger takes the base sha from the rebase state, so no branch command survives");
-assert.ok(promptAL.includes("SPECS.md"), "the prompt names the cwd task file symlink");
-// the reviewer prompt: step 2 resolves the base branch from the project root checkout (the
-// one remaining {{ROOT}} use), no hardcoded main, and no absolute task-file or worktree path
-const promptRev = renderPrompt(rootAL, "reviewer", 60);
-assert.ok(promptRev.includes(`git -C ${rootAL} branch --show-current`), "the reviewer resolves the base branch from the project root checkout");
-assert.ok(!promptRev.includes("git diff main"), "the reviewer diffs no hardcoded main");
-assert.ok(!promptRev.includes(join(rootAL, ".kanban")) && !promptRev.includes(".worktrees"), "no absolute task-file or worktree path survives rendering");
-assert.ok(!promptRev.includes("{{"), "no placeholder survives rendering");
-assert.ok(promptRev.includes("under 60 minutes"), "the reviewer prompt carries the configured stall window");
-assert.ok(promptRev.includes("SPECS.md"), "the prompt names the cwd task file symlink");
-assert.ok(promptRev.includes("For research or parallel sub-work, use subagents."), "the reviewer prompt carries the developer's subagent line");
-// the stripped prompts: only the state setters (splitter, reviewer) keep state knowledge,
-// developer/merger/live-tester carry only the ban; no doctor narrative, no AGENTS.md loading
-// explanation and no role-notes path anywhere
-for (const [role, prompt] of [["developer", renderPrompt(rootAL, "developer", 60)], ["merger", promptAL], ["live-tester", renderPrompt(rootAL, "live-tester", 60)]] as const) {
-	assert.ok(prompt.toLowerCase().includes("never change the task states"), `the ${role} prompt bans changing the task states`);
-	assert.ok(!prompt.includes("doctor maintains"), `the ${role} prompt carries no doctor-maintains sentence`);
-	assert.ok(!prompt.includes("loads into your context"), `the ${role} prompt carries no AGENTS.md loading explanation`);
-	assert.ok(!prompt.includes(".kanban/AGENTS"), `the ${role} prompt names no role-notes path`);
-}
-assert.ok(promptRev.includes("does not fulfill the Specs") && promptRev.includes("move the task back to to-do"), "the reviewer prompt carries the to-do outcome");
-assert.ok(!promptRev.includes("doctor maintains"), "the reviewer prompt carries no doctor-maintains sentence");
-assert.ok(!promptRev.includes("loads into your context") && !promptRev.includes(".kanban/AGENTS"), "the reviewer prompt carries no loading explanation or role-notes path");
-const promptSplitAL = renderPrompt(rootAL, "splitter", 60);
-assert.ok(promptSplitAL.includes("Leave every AGENTS.md file untouched"), "the splitter AGENTS.md paragraph is the shortened form");
-assert.ok(!promptSplitAL.includes("loads from your cwd") && !promptSplitAL.includes("no per-role notes file"), "the splitter drops the guidance-loading explanation");
-assert.ok(!promptSplitAL.includes("symlink"), "the splitter prompt explains no symlink");
-console.log("orchestrator.test.ts: ... + merger prompt conflict-only smoke passed");
-
-// --- part AU: 000189 two conflicted to-merge tasks, one merger at a time. The second
-// merger's spawn supersedes the first task's unconsumed merger exit (it clears the shared
-// exit file), so the poll must requeue the superseded task instead of false-bouncing it: no
-// dead marker, no dead-count bump, and the recorded task consumes its own exit 0 ---
-const rootAU = fixture();
-cleaned.push(rootAU);
-const homeAU = mkdtempSync(join(tmpdir(), "orch-home-"));
-cleaned.push(homeAU);
-mkdirSync(kanbanDir(rootAU), { recursive: true });
-const savedHomeAU = process.env.HOME;
-process.env.HOME = homeAU;
-let cfgAU: ReturnType<typeof loadConfig>;
-try {
-	cfgAU = loadConfig(rootAU);
-} finally {
-	process.env.HOME = savedHomeAU;
-}
-// merger stub: no command file in its cwd -> sleeps 1s, exits 0 without resolving, so each
-// merger stays alive while the same sweep defers the other task (one merger at a time)
+// --- part AU: two conflicted to-merge tasks, one merger at a time. The second merger's spawn
+// supersedes the first task's unconsumed exit (it clears the shared exit file), so the poll
+// must requeue the superseded task instead of false-bouncing it ---
+const rootAU = mergeRoot();
 writeFileSync(
 	join(rootAU, "au-merger.cjs"),
 	`#!/usr/bin/env node
 const { readFileSync } = require("node:fs");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
-const file = (prompt.match(/\\S*\\.kanban\\/\\S*\\.md/) ?? [])[0];
-if (!file || !readFileSync(file, "utf8").match(/^state: /m) || !prompt.includes("Merger agent")) process.exit(0);
+if (!prompt.includes("Merger agent")) process.exit(0);
+let front = "";
+try { front = readFileSync("SPECS.md", "utf8"); } catch (e) {}
+if (!front.match(/^state: /m)) process.exit(0);
 Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
 `,
 	{ mode: 0o755 },
 );
-cfgAU.agent = join(rootAU, "au-merger.cjs");
-// two branches that each conflict with main (both edit README.md), main advanced after both
-execSync("git checkout -qb feat/au-one", { cwd: rootAU, shell: "/bin/bash" });
-writeFileSync(join(rootAU, "README.md"), "one\n");
-execSync("git commit -qam one", { cwd: rootAU, shell: "/bin/bash" });
-execSync("git checkout -q main", { cwd: rootAU, shell: "/bin/bash" });
+conflicting(rootAU, "feat/au-one", "one", "main");
 execSync("git checkout -qb feat/au-two", { cwd: rootAU, shell: "/bin/bash" });
 writeFileSync(join(rootAU, "README.md"), "two\n");
-execSync("git commit -qam two", { cwd: rootAU, shell: "/bin/bash" });
-execSync("git checkout -q main", { cwd: rootAU, shell: "/bin/bash" });
-writeFileSync(join(rootAU, "README.md"), "main\n");
-execSync("git commit -qam main", { cwd: rootAU, shell: "/bin/bash" });
+execSync("git commit -qam two && git checkout -q main && git commit -q --allow-empty -m moved", { cwd: rootAU, shell: "/bin/bash" });
 const taskAUa = createTask(rootAU, { name: "fix: merger one", summary: "Misattribution smoke", specs: "n/a" });
 const taskAUb = createTask(rootAU, { name: "fix: merger two", summary: "Misattribution smoke", specs: "n/a" });
 setWorktree(rootAU, taskAUa, "feat/au-one");
@@ -514,58 +499,35 @@ setWorktree(rootAU, taskAUb, "feat/au-two");
 setState(rootAU, taskAUa, "to-merge");
 setState(rootAU, taskAUb, "to-merge");
 const slugAUa = taskSlug(taskAUa.file);
-const slugAUb = taskSlug(taskAUb.file);
-const orchLogAU = () => readFileSync(join(kanbanDir(rootAU), ".logs", "orchestrator.log"), "utf8");
-// sweep 1: the first task's merger takes the global pid/exit pair; the second task defers
+const cfgAU = cfgFor(rootAU, join(rootAU, "au-merger.cjs"));
+const spawnsAU = () => orchLog(rootAU).split("spawned merger").length - 1;
 rescan(rootAU, cfgAU);
 assert.equal(parseTask(rootAU, taskAUa.file).state, "merging", "the first task sits in merging");
 await waitFor(() => readExitCode(rootAU, "merger") === 0 && !agentAlive(rootAU, "merger"), 15000, "the first merger exited 0", () => "");
-// sweep 2, before any poll consumed the first exit: the second task's merger spawns and
-// clobbers the shared pair (clearExitFile + writePid), superseding the first task
+assert.equal(spawnsAU(), 1, "the first merger spawned");
+// the exit is still unconsumed: the sweep must wait for the poll, or a second spawn clears the
+// shared exit file and the finished merge is lost
 rescan(rootAU, cfgAU);
-assert.equal(readMergerSlug(rootAU), slugAUb, "the second merger's spawn recorded its own slug");
-await waitFor(() => readExitCode(rootAU, "merger") === 0 && !agentAlive(rootAU, "merger"), 15000, "the second merger exited 0", () => "");
-assert.equal(parseTask(rootAU, taskAUa.file).state, "merging", "the first task still sits in merging, superseded");
-// one poll pass: the superseded task requeues (no death record), the recorded task reads its own exit 0
+assert.equal(spawnsAU(), 1, "no second merger over an unconsumed exit");
+assert.equal(readMergerSlug(rootAU), slugAUa, "the shared pair still records the finished run");
+assert.equal(parseTask(rootAU, taskAUb.file).state, "to-merge", "the second task waits in to-merge");
 poll(rootAU, 5);
-assert.equal(parseTask(rootAU, taskAUa.file).state, "to-merge", "the superseded task requeued merging -> to-merge");
-assert.equal(parseTask(rootAU, taskAUb.file).state, "to-merge", "the recorded task requeued on its own exit 0");
-assert.ok(
-	!existsSync(join(kanbanDir(rootAU), ".logs", `${slugAUa}.merger.0.dead`)) && !existsSync(join(kanbanDir(rootAU), ".logs", `${slugAUb}.merger.0.dead`)),
-	"no per-run death marker for either task",
-);
-assert.ok(
-	!existsSync(join(kanbanDir(rootAU), ".logs", `${slugAUa}.dead.count`)) && !existsSync(join(kanbanDir(rootAU), ".logs", `${slugAUb}.dead.count`)),
-	"no dead-count bump for either task",
-);
-assert.ok(!orchLogAU().includes("dead without state update"), "no false dead line in the poll log");
-assert.ok(orchLogAU().includes(`${slugAUb}: agent exited 0, merging -> to-merge`), "the recorded task consumed its own exit 0");
-assert.ok(orchLogAU().includes(`${slugAUa}: its merger run is over (superseded or unrecorded), merging -> to-merge`), "the superseded task's requeue is logged");
-assert.ok(!existsSync(pidPath(rootAU, "merger")) && !existsSync(exitFilePath(rootAU, "merger")), "the recorded task consumed the shared pid/exit pair");
-cleanupAll(rootAU, homeAU);
-console.log("orchestrator.test.ts: ... + superseded merger requeue smoke passed");
+assert.equal(parseTask(rootAU, taskAUa.file).state, "to-merge", "the finished run parked on the base proof");
+assert.ok(orchLog(rootAU).includes(`${taskAUa.file}: the branch does not sit on the base branch`), "the exit 0 was consumed by its own task");
+assert.ok(!existsSync(pidPath(rootAU, "merger")) && !existsSync(exitFilePath(rootAU, "merger")), "the shared pid/exit pair was consumed");
+rescan(rootAU, cfgAU);
+assert.equal(spawnsAU(), 2, "the next merger spawns once the exit is consumed");
+assert.equal(readMergerSlug(rootAU), taskSlug(taskAUb.file), "the second task's merger is recorded");
+cleanupAll(rootAU);
+console.log("merge.test.ts: + unconsumed exit serialization smoke passed");
 
-// --- part AV: maxParallel gates the merge lane: at the cap a to-merge task waits (no rebase,
-// no fast-forward), below the cap the clean merge lands. Direct-drive rescan (part AW
-// harness), poll is not driven; the clean path spawns no merger ---
-const rootAV = fixture();
-cleaned.push(rootAV);
-const homeAV = mkdtempSync(join(tmpdir(), "orch-home-"));
-cleaned.push(homeAV);
-mkdirSync(kanbanDir(rootAV), { recursive: true });
-const savedHomeAV = process.env.HOME;
-process.env.HOME = homeAV;
-let cfgAV: ReturnType<typeof loadConfig>;
-try {
-	cfgAV = loadConfig(rootAV);
-} finally {
-	process.env.HOME = savedHomeAV;
-}
-cfgAV.backlogIdleMinutes = 0;
+// --- part AV: maxParallel gates the merge lane: at the cap a to-merge task waits, below the
+// cap the merger spawns and the clean exit fast-forwards the base ---
+const rootAV = mergeRoot();
+const cfgAV = cfgFor(rootAV, roleStub(rootAV));
 cfgAV.maxParallel = 1;
 const holderAV = createTask(rootAV, { name: "fix: working slot", summary: "MaxParallel smoke", specs: "n/a" });
 setState(rootAV, holderAV, "doing");
-// a branch one commit ahead of main: below the cap the clean rebase+fast-forward lands
 execSync("git checkout -qb feat/cap-merge && git commit -q --allow-empty -m capped && git checkout -q main", { cwd: rootAV, shell: "/bin/bash" });
 const taskAV = createTask(rootAV, { name: "feat: capped merge", summary: "MaxParallel smoke", specs: "n/a" });
 setWorktree(rootAV, taskAV, "feat/cap-merge");
@@ -574,32 +536,17 @@ rescan(rootAV, cfgAV);
 assert.equal(parseTask(rootAV, taskAV.file).state, "to-merge", "at the cap the merge waits in to-merge");
 assert.equal(execSync("git log --format=%s -1 main", { cwd: rootAV, encoding: "utf8" }).trim(), "init", "main unmoved at the cap");
 setState(rootAV, holderAV, "done");
-rescan(rootAV, cfgAV);
-assert.equal(parseTask(rootAV, taskAV.file).state, "to-live-test", "below the cap the merge fast-forwarded and set to-live-test");
-const laneAV = listAll(rootAV).filter((task) => task.state === "to-integration-test");
-assert.equal(laneAV.length, 1, "the fast-forward opened exactly one integration task");
-assert.equal(laneAV[0].name, `test: integration of #${taskNum(taskAV.file)}`, "the integration task names the merged ref");
-assert.ok(execSync("git log --format=%s main", { cwd: rootAV, encoding: "utf8" }).includes("capped"), "main took the branch commit below the cap");
-console.log("orchestrator.test.ts: ... + maxParallel merge cap smoke passed");
+await drive(rootAV, cfgAV);
+assert.equal(parseTask(rootAV, taskAV.file).state, "to-live-test", "below the cap the merger ran and set to-live-test");
+assert.ok(subjects(rootAV, "-1 main").includes("capped"), "main took the branch commit below the cap");
+assert.equal(listAll(rootAV).filter((t) => t.issuer === "auto").length, 0, "the merge step opens no follow-up task");
+cleanupAll(rootAV);
+console.log("merge.test.ts: + maxParallel merge cap smoke passed");
 
-// --- part UH3: a user hold skips the merge lane before any side effect: no rebase, no
-// fast-forward, no failed-merge marker and no merger slug, and the next eligible task merges ---
-const rootUH3 = fixture();
-cleaned.push(rootUH3);
-const homeUH3 = mkdtempSync(join(tmpdir(), "orch-home-"));
-cleaned.push(homeUH3);
-mkdirSync(kanbanDir(rootUH3), { recursive: true });
-const savedHomeUH3 = process.env.HOME;
-process.env.HOME = homeUH3;
-let cfgUH3: ReturnType<typeof loadConfig>;
-try {
-	cfgUH3 = loadConfig(rootUH3);
-} finally {
-	process.env.HOME = savedHomeUH3;
-}
-cfgUH3.backlogIdleMinutes = 0;
-cfgUH3.agent = deadStub(rootUH3);
-// a branch one commit ahead of main, for the held task and for the eligible one after it
+// --- part UH3: a user hold skips the merge lane before any side effect: no merger spawn, no
+// fast-forward and no attempt marker, and the next eligible task still merges ---
+const rootUH3 = mergeRoot();
+const cfgUH3 = cfgFor(rootUH3, roleStub(rootUH3));
 execSync("git checkout -qb feat/held-merge && git commit -q --allow-empty -m held-change && git checkout -q main", { cwd: rootUH3, shell: "/bin/bash" });
 execSync("git checkout -qb feat/next-merge && git commit -q --allow-empty -m next-change && git checkout -q main", { cwd: rootUH3, shell: "/bin/bash" });
 const heldUH3 = createTask(rootUH3, { name: "feat: held merge", priority: "critical", summary: "User hold smoke", specs: "n/a", blockedBy: "user" });
@@ -610,13 +557,16 @@ setWorktree(rootUH3, nextUH3, "feat/next-merge");
 setState(rootUH3, nextUH3, "to-merge");
 rescan(rootUH3, cfgUH3);
 assert.equal(parseTask(rootUH3, heldUH3.file).state, "to-merge", "the held task stays in to-merge");
-assert.equal(execSync("git log --format=%s main", { cwd: rootUH3, encoding: "utf8" }).includes("held-change"), false, "the held branch was never rebased into the base");
-assert.equal(existsSync(join(kanbanDir(rootUH3), ".pids", `${taskSlug(heldUH3.file)}.merge-attempted`)), false, "no failed-merge marker for a held task");
-assert.equal(readMergerSlug(rootUH3), null, "no merger slug file written for a held task");
+assert.equal(readMergerSlug(rootUH3), taskSlug(nextUH3.file), "the merger serves the eligible task, not the held one");
+assert.equal(existsSync(join(kanbanDir(rootUH3), ".pids", `${taskSlug(heldUH3.file)}.merge-attempted`)), false, "no attempt marker for a held task");
+await waitFor(() => !agentAlive(rootUH3, "merger"), 30000, "the merger exited", () => "");
+poll(rootUH3, 5);
 assert.equal(parseTask(rootUH3, nextUH3.file).state, "to-live-test", "the next eligible task still merged");
-assert.ok(execSync("git log --format=%s main", { cwd: rootUH3, encoding: "utf8" }).includes("next-change"), "the base took the eligible branch");
+assert.ok(subjects(rootUH3, "main").includes("next-change"), "the base took the eligible branch");
+assert.ok(!subjects(rootUH3, "main").includes("held-change"), "the held branch never reached the base");
 updateTask(rootUH3, heldUH3, { blockedBy: "" });
-rescan(rootUH3, cfgUH3);
-assert.ok(execSync("git log --format=%s main", { cwd: rootUH3, encoding: "utf8" }).includes("held-change"), "the released branch rebased onto the moved base and fast-forwarded into it");
+await drive(rootUH3, cfgUH3);
+assert.ok(subjects(rootUH3, "main").includes("held-change"), "the released branch rebased onto the moved base and fast-forwarded into it");
 assert.equal(parseTask(rootUH3, heldUH3.file).state, "to-live-test", "the released task left to-merge for its live test");
-console.log("orchestrator.test.ts: ... + user hold skips the merge lane smoke passed");
+cleanupAll(rootUH3);
+console.log("merge.test.ts: + user hold skips the merge lane smoke passed");
