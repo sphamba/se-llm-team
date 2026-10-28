@@ -4,3 +4,4 @@ SPECS.md
 node_modules/
 pnpm-lock.yaml
 .kanban/
+se-llm-team.json
