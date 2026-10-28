@@ -3,7 +3,7 @@ import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTask, kanbanDir, parseTask, setState, setWorktree, taskSlug } from "../../src/kanban.ts";
+import { createTask, kanbanDir, parseTask, setState, setWorktree, taskSlug, updateTask } from "../../src/kanban.ts";
 import { loadConfig, poll } from "../../src/orchestrator.ts";
 import { rescan, stuckPath } from "../../src/orchestrator/pipeline.ts";
 import { agentPid, pidAlive, pidPath } from "../../src/pid.ts";
@@ -381,6 +381,16 @@ assert.ok(orchLogAT().includes(`${slugAT}: agent exited 0, doing -> to-review`),
 assert.equal(parseTask(rootAT, taskAT.file).state, "to-review");
 assert.ok(!existsSync(pidPath(rootAT, slugAT)) && !existsSync(exitFilePath(rootAT, slugAT)), "the success clears the pid and exit files");
 assert.equal(deadCountAT(), "0", "a completed run clears the dead-agent counter");
+
+// an open question outranks the lane's success: a developer that writes its question as its
+// last act exits into to-do, before the reconcile stamps the token on the next sweep
+setState(rootAT, taskAT, "doing");
+updateTask(rootAT, taskAT, { openQuestions: "- [user] which way?" });
+await runAgentAT(0);
+poll(rootAT, 5);
+assert.ok(orchLogAT().includes(`${slugAT}: agent exited 0, doing -> to-do`), "a question at exit lands in to-do, not to-review");
+assert.equal(parseTask(rootAT, taskAT.file).state, "to-do", "the unanswered question stops the task for the user");
+updateTask(rootAT, taskAT, { openQuestions: "", specs: "The answer: the first way." });
 
 // a reviewer that exits 0 without moving the task is a failed run: the poll bounces it to
 // to-review under the crash rules, so reviewing never holds a slot with no live agent. The

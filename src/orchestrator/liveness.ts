@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { getTask, heldToken, kanbanDir, listAll, setState, taskSlug, type Task, type TaskState } from "../kanban.ts";
+import { getTask, kanbanDir, listAll, questionOpen, setState, taskSlug, type Task, type TaskState } from "../kanban.ts";
 import { clearPid, killTree, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP } from "./config.ts";
 import { armedPath, bumpCounter, classifyRunLog, compactFinishedLogs, counterPath, log, logPath, newestRunLogPath, newestRunRole, nextRunIndex, readCounter } from "./log.ts";
@@ -229,7 +229,7 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 					const fresh = getTask(root, task.file);
 					if (fresh && fresh.state === task.state) {
 						// an open question outranks the lane's success: the answer comes first
-						const next = heldToken(fresh.blockedBy) === "question" ? "to-do" : working.success;
+						const next = questionOpen(fresh) ? "to-do" : working.success;
 						setState(root, fresh, next);
 						log(root, `${slug}: agent exited 0, ${task.state} -> ${next}`);
 					}
@@ -260,7 +260,7 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 			}
 			// an open question outranks the crash bounce too: the task waits for the answer
 			const fresh = getTask(root, task.file);
-			const target = fresh && heldToken(fresh.blockedBy) === "question" ? "to-do" : failedRun ? (working.failure ?? working.next) : working.next;
+			const target = fresh && questionOpen(fresh) ? "to-do" : failedRun ? (working.failure ?? working.next) : working.next;
 			log(
 				root,
 				failedRun

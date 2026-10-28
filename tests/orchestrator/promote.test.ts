@@ -928,5 +928,14 @@ updateTask(rootBQp, reviewBQp, { openQuestions: "", specs: "The answer: the firs
 rescan(rootBQp, cfgBQp);
 assert.equal(parseTask(rootBQp, reviewBQp.file).blockedBy, "user", "the question token is gone and the user token stays");
 assert.equal(parseTask(rootBQp, reviewBQp.file).state, "to-do", "the token drop moves no state");
+// a bare question with no hold token: the to-review lane reads the section, not only the token
+// the reconcile stamps at the end of the same sweep, so no reviewer is spawned ahead of it
+const bareBQp = createTask(rootBQp, { name: "feat: bare question in review", summary: "Reconcile smoke", specs: "n/a" });
+setState(rootBQp, bareBQp, "to-review");
+updateTask(rootBQp, bareBQp, { openQuestions: "- [user] which way?" });
+rescan(rootBQp, cfgBQp);
+assert.equal(parseTask(rootBQp, bareBQp.file).state, "to-do", "a to-review task that gains a bare question goes to to-do");
+assert.equal(parseTask(rootBQp, bareBQp.file).blockedBy, "question", "the bare question gains the token too");
+assert.ok(!existsSync(pidPath(rootBQp, taskSlug(bareBQp.file))), "no reviewer spawned ahead of the reconcile");
 cleanupAll(rootBQp);
 console.log("orchestrator.test.ts: ... + question reconcile smoke passed");

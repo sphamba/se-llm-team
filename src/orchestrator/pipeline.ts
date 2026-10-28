@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { isSelfWrite, kanbanDir, getTask, hasHold, heldToken, listAll, PRIORITY_RANK, setState, setWorktree, taskFiles, taskSlug, updateAttrs, ROLE_NOTES_RE, type Task } from "../kanban.ts";
+import { isSelfWrite, kanbanDir, getTask, hasHold, heldToken, listAll, PRIORITY_RANK, questionOpen, setState, setWorktree, taskFiles, taskSlug, updateAttrs, ROLE_NOTES_RE, type Task } from "../kanban.ts";
 import { agentAlive, agentPid, clearPid, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP, REVIEWER_RUN_CAP, type Config } from "./config.ts";
 import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, newestRunRole, readCounter } from "./log.ts";
@@ -162,7 +162,7 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 	if (existsSync(mergerAttemptPath(root, slug)) && Date.now() - statSync(join(kanbanDir(root), task.file)).mtimeMs < cfg.retryIdleMinutes * 60_000) return;
 	// a held task returns before the worktree, the rebase and the merger slug, so it never leaves
 	// a stopped rebase or a fast-forwarded base behind
-	if (hasHold(task.blockedBy)) return;
+	if (hasHold(task.blockedBy) || questionOpen(task)) return;
 	const wt = task.worktree;
 	if (!wt || (git(root, ["branch", "--list", wt], true) === "" && !existsSync(join(root, ".worktrees", wt)))) {
 		// nothing to merge: no worktree and no branch
@@ -206,6 +206,8 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 // the worktree to the live tester
 // an open question outranks the merge result: the answer comes before the root moves
 export function finishMerge(root: string, task: Task): void {
+	// the token decides, not the section: a drop-side question names another task and the merge
+	// still completes, so the section alone must not stop the fast-forward
 	if (heldToken(task.blockedBy) === "question") {
 		setState(root, task, "to-do");
 		log(root, `${task.file}: open question, merging -> to-do`);
@@ -498,7 +500,7 @@ export function rescan(root: string, cfg: Config, force = false): void {
 			} else if (task.state === "to-review" && !deadCooldownActive(root, cfg, task)) {
 				// reviews off: the task skips the reviewer lane and goes straight to the merge
 				if (!cfg.reviews) {
-					if (hasHold(task.blockedBy)) continue;
+					if (hasHold(task.blockedBy) || questionOpen(task)) continue;
 					setState(root, task, "to-merge");
 					log(root, `${task.file}: reviews are off, moving to to-merge`);
 					continue;
@@ -507,8 +509,9 @@ export function rescan(root: string, cfg: Config, force = false): void {
 				// a failed spawn would bounce or strand the task; leave the state for the next rescan to retry
 				if (!ensured) log(root, `${task.file}: worktree could not be created, reviewer not spawned (state unchanged)`);
 				else {
-					// a held task keeps to-review and arms no reviewer run
-					if (hasHold(task.blockedBy)) continue;
+					// a held task keeps to-review and arms no reviewer run; a question the developer just
+					// wrote stops it here too, before the reconcile can move it
+					if (hasHold(task.blockedBy) || questionOpen(task)) continue;
 					const slug = taskSlug(task.file);
 					consumeReviewerRun(root, slug);
 					const cap = cfg.reviewerCap[task.complexity] ?? REVIEWER_RUN_CAP;
@@ -535,7 +538,7 @@ export function rescan(root: string, cfg: Config, force = false): void {
 			} else if (task.state === "to-live-test" && !deadCooldownActive(root, cfg, task)) {
 				// a held task keeps to-live-test and starts no run: the check sits before the
 				// merged-branch test, so a hold never requeues the task either
-				if (hasHold(task.blockedBy)) continue;
+				if (hasHold(task.blockedBy) || questionOpen(task)) continue;
 				const slug = taskSlug(task.file);
 				consumeReviewerRun(root, slug);
 				// the live test runs on the merged commit: after the rebase + fast-forward the

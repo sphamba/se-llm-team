@@ -404,6 +404,12 @@ export function hasHold(blockedBy: string): boolean {
 	return heldToken(blockedBy) !== "";
 }
 
+// an unanswered question holds the task before its token lands: the reconcile stamps `question`
+// at the end of the sweep, while the lanes and the exit paths read the sweep-start board
+export function questionOpen(task: Pick<Task, "blockedBy" | "openQuestions">): boolean {
+	return heldToken(task.blockedBy) === "question" || task.openQuestions.trim() !== "";
+}
+
 // "#42, #43" -> [42, 43]; parses refs with or without the leading # and ignores malformed
 // parts, matching the orchestrator's promotion gate (blockedByUndone) so the guard checks
 // every ref the gate honors
