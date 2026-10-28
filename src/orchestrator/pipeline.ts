@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { isSelfWrite, kanbanDir, getTask, hasHold, heldToken, listAll, PRIORITY_RANK, questionOpen, setState, setWorktree, taskFiles, taskSlug, updateAttrs, ROLE_NOTES_RE, type Task } from "../kanban.ts";
+import { isSelfWrite, kanbanDir, getTask, hasHold, listAll, PRIORITY_RANK, questionOpen, setState, setWorktree, taskFiles, taskSlug, updateAttrs, ROLE_NOTES_RE, type Task } from "../kanban.ts";
 import { agentAlive, agentPid, clearPid, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP, REVIEWER_RUN_CAP, type Config } from "./config.ts";
 import { armedPath, bumpCounter, compactFinishedLogs, counterPath, log, newestRunRole, readCounter } from "./log.ts";
@@ -205,10 +205,10 @@ function sweepToMerge(root: string, cfg: Config, task: Task): void {
 // the daemon only proves that result, fast-forwards the root checkout to the branch and hands
 // the worktree to the live tester
 // an open question outranks the merge result: the answer comes before the root moves
+// the question section alone stops the fast-forward, with or without the token, because a
+// merger's drop-side question names work the user must settle before the base moves
 export function finishMerge(root: string, task: Task): void {
-	// the token decides, not the section: a drop-side question names another task and the merge
-	// still completes, so the section alone must not stop the fast-forward
-	if (heldToken(task.blockedBy) === "question") {
+	if (questionOpen(task)) {
 		setState(root, task, "to-do");
 		log(root, `${task.file}: open question, merging -> to-do`);
 		return;

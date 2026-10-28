@@ -238,7 +238,8 @@ assert.equal(parseTask(rootB, taskB.file).state, "to-live-test", "a resolved con
 console.log("merge.test.ts: + conflicted rebase smoke passed");
 
 // --- part C: a dropped side. The other change does not fit, so the merger keeps its own side
-// and records one open question naming the other task; the merge still completes ---
+// and records one open question naming the other task, with no token in blockedBy; the section
+// alone stops the merge, so the task lands in to-do and the root never fast-forwards ---
 const rootC = mergeRoot();
 const otherC = createTask(rootC, { name: "feat: other side", summary: "Dropped side smoke", specs: "n/a" });
 conflicting(rootC, "feat/dropped", "branch", "main");
@@ -248,8 +249,11 @@ setState(rootC, taskC, "to-merge");
 await drive(rootC, cfgFor(rootC, caseStub(rootC, "drop", `#${taskNum(otherC.file)}`)));
 const openC = parseTask(rootC, taskC.file).openQuestions;
 assert.ok(openC.includes(`#${taskNum(otherC.file)}`), `the open question names the other task: ${openC}`);
-assert.equal(readFileSync(join(rootC, "README.md"), "utf8"), "branch\n", "the own side was kept");
-assert.equal(parseTask(rootC, taskC.file).state, "to-live-test", "a dropped side still reaches the live test");
+assert.equal(parseTask(rootC, taskC.file).blockedBy.includes("question"), false, "the section-only question carries no token");
+assert.equal(readFileSync(join(rootC, ".worktrees", "feat/dropped", "README.md"), "utf8"), "branch\n", "the own side was kept on the branch");
+assert.equal(readFileSync(join(rootC, "README.md"), "utf8"), "main\n", "the root kept its side, no fast-forward");
+assert.equal(parseTask(rootC, taskC.file).state, "to-do", "a section-only merger question lands in to-do");
+assert.deepEqual(subjects(rootC, "-1 main"), ["main"], "the root never fast-forwarded under the question");
 console.log("merge.test.ts: + dropped side smoke passed");
 
 // --- part D: a failing suite. The merger sets to-do itself, the poll leaves that move alone,
