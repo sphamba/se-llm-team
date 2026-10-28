@@ -392,11 +392,11 @@ function replaceSections(root: string, task: Task, updates: Record<string, strin
 // answer AND for #42). "user" is the PM's hold, "question" the daemon's own while the task's
 // open questions wait for an answer
 export function heldToken(blockedBy: string): string {
-	for (const part of blockedBy.split(",")) {
-		const token = part.trim().toLowerCase();
-		if (token === "user" || token === "question") return token;
-	}
-	return "";
+	const tokens = blockedBy.split(",").map((part) => part.trim().toLowerCase());
+	// a question outranks the user hold whatever the order: the exit paths must never move the
+	// root or the lane under an unanswered question
+	if (tokens.includes("question")) return "question";
+	return tokens.includes("user") ? "user" : "";
 }
 
 // any hold at all: every lane gate reads this one predicate
