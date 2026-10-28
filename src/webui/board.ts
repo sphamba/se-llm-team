@@ -263,7 +263,7 @@ export function agentLive(t: Task) {
 // agent, so the live key stays out of that order. #433 only `user` pins: a question waits in place
 export function sortStation(tasks: Task[], { byRecency = false }: { byRecency?: boolean } = {}): Task[] {
 	if (byRecency) return tasks.sort((a, b) => b.updated - a.updated);
-	return tasks.sort((a, b) => (agentLive(b) ? 1 : 0) - (agentLive(a) ? 1 : 0) || (heldToken(b) === "user" ? 1 : 0) - (heldToken(a) === "user" ? 1 : 0) || (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) || b.updated - a.updated);
+	return tasks.sort((a, b) => (agentLive(b) ? 1 : 0) - (agentLive(a) ? 1 : 0) || (holdsToken(b, "user") ? 1 : 0) - (holdsToken(a, "user") ? 1 : 0) || (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4) || b.updated - a.updated);
 }
 
 // the liveness mark (#389 a pulsing square) marks a task the orchestrator is working on; a task that

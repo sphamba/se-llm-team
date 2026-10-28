@@ -638,6 +638,11 @@ const questionOrders = [
 	{ file: "000014_n.md", name: "n", priority: "critical", state: "backlog", updated: 9 },
 ];
 assert.deepEqual(sortStation([...questionOrders]).map((t) => t.file), ["000014_n.md", "000013_m.md"], "a question task does not pin to the top of its station");
+const mixedOrders = [
+	{ file: "000015_o.md", name: "o", priority: "low", state: "backlog", updated: 1, blockedBy: "question, user" },
+	{ file: "000016_p.md", name: "p", priority: "critical", state: "backlog", updated: 9 },
+];
+assert.deepEqual(sortStation([...mixedOrders]).map((t) => t.file), ["000015_o.md", "000016_p.md"], "a user hold beside a question still pins above the rest of its station");
 // #408 a task with a running agent pins above the rest of its station, the hold and the priority included
 const liveOn = [{ role: "developer", run: 0, alive: true, status: "live", handle: "h" }];
 const liveOrders = [

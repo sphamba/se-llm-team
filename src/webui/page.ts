@@ -2,7 +2,7 @@ import { PRIORITY_RANK } from "../kanban.ts";
 import { readConfigFiles, type StageFlags } from "../orchestrator/config.ts";
 export type { StageFlags };
 import { esc, inline, logFixups, md } from "./logpane.ts";
-import { agentLabel, agentStatsText, agentLive, applyCardStats, applyStages, archRowHtml, archStatsText, blockerTasks, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, groupRuns, heldToken, holdsToken, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, PROGRESS_HALF_S, progressOf, relationPaths, sortStation, spinnerHtml, stationFor, statsKey, STATIONS, syncBoard, syncCardStats, taskStats, waitsOnText } from "./board.ts";
+import { agentLabel, agentStatsText, agentLive, applyCardStats, applyStages, archRowHtml, archStatsText, blockerTasks, buildShell, cardBaseHtml, curve, flipDiff, fmtDur, fmtTokens, groupRuns, heldToken, holdsToken, isHeld, makeStatsQueue, mergeCardStats, numLinkHtml, priorityRuler, PROGRESS_HALF_S, progressOf, relationPaths, sortStation, spinnerHtml, stationFor, statsKey, STATIONS, syncBoard, syncCardStats, taskStats, waitsOnText } from "./board.ts";
 import { ARCHIVE_PAGE, archivePage, archiveTasks, decodeFilters, emptyFilters, encodeFilters, FILTER_COMPLEXITIES, FILTER_DEBOUNCE, FILTER_PRIORITIES, FILTERS_KEY, filterReason, filterTasks, filtersActive, filtersCount, matchesFilters, PALETTE_MAX, paletteResults } from "./filters.ts";
 import { CSS, MOBILE_MAX } from "./theme.ts";
 
@@ -182,6 +182,7 @@ const PRIORITY_RANK = ${JSON.stringify(PRIORITY_RANK)};
 ${spinnerHtml}
 ${numLinkHtml}
 ${priorityRuler}
+${isHeld}
 ${agentLive}
 ${cardBaseHtml}
 ${buildShell}

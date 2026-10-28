@@ -724,6 +724,7 @@ assert.equal(actionsOf({ state: "merging", file }), "", "a merging task before a
 assert.ok(!actionsOf({ state: "doing", file, worktree: ".worktrees/x" }).includes("data-copy"), "a doing task offers no copy button");
 assert.ok(!page.includes("copyText") && !page.includes("data-copy"), "the page has no copy helper and no copy button");
 assert.ok(page.includes("writeGated(actions, actionsHtml(t))"), "the panel redraws the actions from the task through the html gate");
+assert.ok(page.includes("function isHeld(") && page.includes("function holdsToken("), "the served client defines every hold test its actions row calls");
 assert.ok(page.includes('"/api/task-block?num=" + numOf(panelFile) + projectParam()') && page.includes("body: JSON.stringify({ action })"), "the toggle posts the open task number and the action as JSON");
 assert.ok(page.includes("btn.disabled = false"), "a failed toggle re-enables the button");
 // the issuer row: a task-issued issuer links to its card when that task is on the active board;
