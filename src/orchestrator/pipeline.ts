@@ -247,9 +247,12 @@ export function mergeStuck(root: string, slug: string): boolean {
 	return existsSync(stuckPath(root, slug));
 }
 
-// the merge repair the PM runs by hand: the root's own uncommitted work must survive the
-// fast-forward, and the board and the worktrees are daemon state, never stashed with it
-const mergeRepairRecipe = (root: string, branch: string) => [
+// the merge repair the PM runs by hand: an off-base branch is rebased onto the base in its
+// worktree first, because the fast-forward cannot move a base that is not an ancestor; the
+// root's own uncommitted work must then survive the fast-forward, and the board and the
+// worktrees are daemon state, never stashed with it
+const mergeRepairRecipe = (root: string, branch: string, base: string) => [
+	...(branch !== "(none)" && base ? [`git -C ${join(root, ".worktrees", branch)} rebase ${base}`] : []),
 	`git -C ${root} stash push --include-untracked -m "orchestrator: merge repair" -- . ':(exclude).kanban' ':(exclude).worktrees'`,
 	`git -C ${root} merge --ff-only ${branch}`,
 	`git -C ${root} stash pop`,
@@ -261,7 +264,7 @@ function parkStuckMerge(root: string, task: Task, reason: string, base: string):
 	const branch = task.worktree || "(none)";
 	mkdirSync(join(kanbanDir(root), ".logs"), { recursive: true });
 	writeFileSync(stuckPath(root, taskSlug(task.file)), `${reason}\n${branch}\n${base}\n`);
-	queueAlert(root, { kind: "merge-stuck", task, reason, branch, recipe: mergeRepairRecipe(root, branch) });
+	queueAlert(root, { kind: "merge-stuck", task, reason, branch, recipe: mergeRepairRecipe(root, branch, base) });
 	log(root, `${task.file}: ${reason}, left in merging for the merge repair`);
 }
 
