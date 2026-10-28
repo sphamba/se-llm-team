@@ -293,13 +293,16 @@ export function cardBaseHtml(t: Task, st: string, all: Task[] = []) {
 	const live = agentLive(t);
 	const refs = String(t.blockedBy || "").split(",").map((r) => r.trim()).filter(Boolean);
 	const hold = heldToken(t);
-	const text = waitsOnText(t, all);
-	const rest = text.slice(hold.length).trim();
+	// #436 heldToken stays the single primary token the pin and the filters read, so the second
+	// hold is tested here: a card that carries both names both relations
+	const holds = [hold, ...(hold === "user" ? ["question"] : hold === "question" ? ["user"] : [])].filter((h) => h && holdsToken(t, h));
+	const wait = waitsOnText(t, all).slice(hold.length).trim();
+	const text = [holds.join(" + "), wait].filter(Boolean).join(" ");
 	// #433 the stuck merge marker is a row flag the hub attaches: while the root fast-forward is
 	// pending, the merging card says so instead of reading as quiet work in progress
 	const stuck = st === "merging" && (t as Task & { mergeStuck?: boolean }).mergeStuck === true;
-	// the visible marker names the hold; the accessible name spells the relation out, never `user: user`
-	const name = [hold ? (hold === "question" ? "waiting on an answer" : "blocked by " + hold) : "", rest ? rest + ": " + refs.filter((r) => r.toLowerCase() !== "user" && r.toLowerCase() !== "question").join(", ") : ""].filter(Boolean).join(", ");
+	// the visible marker names the holds; the accessible name spells each relation out, never `user: user`
+	const name = [holds.map((h) => (h === "question" ? "waiting on an answer" : "blocked by " + h)).join(", "), wait ? wait + ": " + refs.filter((r) => r.toLowerCase() !== "user" && r.toLowerCase() !== "question").join(", ") : ""].filter(Boolean).join(", ");
 	return (
 		'<div class="c-top">' +
 		spinnerHtml(st) +

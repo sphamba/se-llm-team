@@ -234,6 +234,10 @@ assert.equal(markerOf("question")?.[1], "question", "#433 a question gets its ow
 assert.equal(markerOf("question, #4")?.[1], "question waits on 1", "#433 a question that also waits shows the question first, then the wait");
 assert.ok((markerOf("question")?.[0] ?? "").includes('aria-label="waiting on an answer"'), "#433 the question marker's accessible name reads as a wait for an answer");
 assert.ok((markerOf("question")?.[0] ?? "").includes('class="c-wait held"'), "#433 the question marker keeps the hold paint, so a hold reads as a hold");
+// #436 a card that waits on a question and also carries the manual hold names both relations
+assert.equal(markerOf("question, user")?.[1], "question + user", "#436 a question and a manual hold on one card show both marker labels");
+assert.ok((markerOf("question, user")?.[0] ?? "").includes('aria-label="waiting on an answer, blocked by user"'), "#436 the accessible name lists both relations");
+assert.equal(markerOf("user, question")?.[1], "user + question", "#436 the stored order keeps the primary hold first, then the other hold");
 assert.ok((markerOf("user")?.[0] ?? "").includes('aria-label="blocked by user"'), "the hold's accessible name spells the relation out instead of reading the token twice");
 assert.ok((markerOf("user, #4")?.[0] ?? "").includes('aria-label="blocked by user, waits on 1: #4"'), "a hold that also waits names both relations and the refs");
 assert.equal(markerOf("#9, junk"), null, "a ref no task resolves leaves no marker");
