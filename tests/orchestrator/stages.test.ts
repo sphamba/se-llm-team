@@ -76,4 +76,29 @@ assert.equal(existsSync(pidPath(root3, taskSlug(task3.file))), false, "live test
 assert.ok(orchLog(root3).includes(`${task3.file}: live testing is off, set done`), "the skip is logged");
 console.log("stages.test.ts: ... + live testing off skips the live-tester passed");
 
+// --- part 4: autoMerge defaults on, a string value warns and keeps the default, and a project
+// false overrides a global true ---
+const root4 = fixture();
+cleaned.push(root4);
+const default4 = cfgFor(root4, {});
+assert.equal(default4.autoMerge, true, "autoMerge defaults on");
+const invalid4 = cfgFor(root4, { autoMerge: "false" });
+assert.equal(invalid4.autoMerge, true, "a string autoMerge keeps the default on");
+assert.ok(orchLog(root4).includes('autoMerge "false" ignored: must be a boolean'), "a string autoMerge warned about");
+const home4 = mkdtempSync(join(tmpdir(), "orch-home-automerge-"));
+cleaned.push(home4);
+mkdirSync(join(home4, ".se-llm-team"), { recursive: true });
+writeFileSync(join(home4, ".se-llm-team", "config.json"), JSON.stringify({ autoMerge: true }));
+mkdirSync(kanbanDir(root4), { recursive: true });
+writeFileSync(join(root4, "se-llm-team.json"), JSON.stringify({ agent: deadStub(root4), autoMerge: false }));
+const saved4 = process.env.HOME;
+process.env.HOME = home4;
+try {
+	assert.equal(loadConfig(root4).autoMerge, false, "a project autoMerge false overrides a global true");
+} finally {
+	if (saved4 === undefined) delete process.env.HOME;
+	else process.env.HOME = saved4;
+}
+console.log("stages.test.ts: ... + autoMerge flag config passed");
+
 console.log("stages.test.ts: stage toggle smoke passed (defaults, reviews off, live testing off)");

@@ -89,10 +89,11 @@ export function composeReport(root: string, finished: Task[], scheduled: Task[])
 
 export type Alert =
 	| { kind: "waiting"; tasks: Task[] }
+	| { kind: "merge-waiting"; tasks: Task[] }
 	| { kind: "merge-stuck"; task: Task; reason: string; branch: string; recipe: string[] }
 	| { kind: "detached-root"; task: Task };
 
-// one composer for the three PM alerts: the title names the repair the PM owns
+// one composer for the PM alerts: the title names the repair the PM owns
 // the waiting report is the daemon's own channel for the question hold, so the done report no
 // longer sends the PM hunting questions on done tasks
 export function composeAlert(alert: Alert): string {
@@ -106,6 +107,18 @@ export function composeAlert(alert: Alert): string {
 		];
 		for (const t of alert.tasks) parts.push("", `### ${t.name} (${t.file})`, "", t.openQuestions);
 		return `${parts.join("\n")}\n`;
+	}
+	if (alert.kind === "merge-waiting") {
+		return [
+			"# Board alert",
+			"",
+			"## Waiting for your merge trigger",
+			"",
+			...alert.tasks.map((t) => `- ${t.name} (${t.file}): remove the \`user\` hold with kanban_update to merge it.`),
+			"",
+			"Removing the `user` hold with `kanban_update` starts the merger. Keep every `#<num>` ref in the same `blockedBy` string.",
+			"",
+		].join("\n");
 	}
 	if (alert.kind === "merge-stuck") {
 		return [

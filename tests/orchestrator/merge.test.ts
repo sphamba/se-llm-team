@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskNum, taskSlug, updateTask } from "../../src/kanban.ts";
 import { loadConfig, poll } from "../../src/orchestrator.ts";
-import { rescan, stuckPath } from "../../src/orchestrator/pipeline.ts";
+import { mergeAskPath, rescan, stuckPath } from "../../src/orchestrator/pipeline.ts";
 import { reportsDir } from "../../src/orchestrator/report.ts";
 import { agentAlive, pidAlive, pidPath } from "../../src/pid.ts";
 import { exitFilePath, readMergerSlug, renderPrompt, readExitCode } from "../../src/orchestrator/spawn.ts";
@@ -620,3 +620,115 @@ assert.ok(subjects(rootUH3, "main").includes("held-change"), "the released branc
 assert.equal(parseTask(rootUH3, heldUH3.file).state, "to-live-test", "the released task left to-merge for its live test");
 cleanupAll(rootUH3);
 console.log("merge.test.ts: + user hold skips the merge lane smoke passed");
+
+// --- part AM1: autoMerge false holds a to-merge arrival with the `user` token and asks the PM
+// once. A second sweep writes nothing, and the PM's hold removal starts the merger ---
+const rootAM1 = mergeRoot();
+const cfgAM1 = cfgFor(rootAM1, caseStub(rootAM1, ""), { autoMerge: false });
+execSync("git checkout -qb feat/pm-trigger && git commit -q --allow-empty -m pm-change && git checkout -q main", { cwd: rootAM1, shell: "/bin/bash" });
+const taskAM1 = createTask(rootAM1, { name: "feat: pm triggers the merge", summary: "Auto merge gate smoke", specs: "n/a" });
+setWorktree(rootAM1, taskAM1, "feat/pm-trigger");
+setState(rootAM1, taskAM1, "to-merge");
+const askAM1 = mergeAskPath(rootAM1, taskSlug(taskAM1.file));
+const alertsAM1 = () => readdirSync(reportsDir(rootAM1)).filter((f) => f.endsWith(".md"));
+rescan(rootAM1, cfgAM1);
+assert.equal(parseTask(rootAM1, taskAM1.file).blockedBy, "user", "the arrival gains the user hold");
+assert.equal(parseTask(rootAM1, taskAM1.file).state, "to-merge", "the held task waits in to-merge");
+assert.equal(readFileSync(askAM1, "utf8").trim(), "main", "the ask marker names the base branch");
+assert.equal(alertsAM1().length, 1, "one ask alert for the arrival");
+const alertAM1 = readFileSync(join(reportsDir(rootAM1), alertsAM1()[0]), "utf8");
+assert.ok(alertAM1.includes("## Waiting for your merge trigger"), "the alert names the merge trigger");
+assert.ok(
+	alertAM1.includes(`- ${taskAM1.name} (${taskAM1.file}): remove the \`user\` hold with kanban_update to merge it.`),
+	"the alert names the task, the file and the hold removal",
+);
+assert.ok(alertAM1.includes("starts the merger") && alertAM1.includes("blockedBy"), "the alert keeps the refs instruction");
+assert.ok(!orchLog(rootAM1).includes("spawned merger"), "the holding pass spawns no merger");
+// the second sweep: same hold, same marker, same one alert, and no write at all
+const rawAM1 = readFileSync(join(kanbanDir(rootAM1), taskAM1.file), "utf8");
+const oldAM1 = new Date("2020-01-01T00:00:00Z");
+utimesSync(askAM1, oldAM1, oldAM1);
+rescan(rootAM1, cfgAM1);
+assert.equal(parseTask(rootAM1, taskAM1.file).blockedBy, "user", "the second pass adds no second hold");
+assert.equal(alertsAM1().length, 1, "the second pass queues no second alert");
+assert.equal(readFileSync(join(kanbanDir(rootAM1), taskAM1.file), "utf8"), rawAM1, "the second pass rewrites no task file");
+assert.equal(statSync(askAM1).mtimeMs, oldAM1.getTime(), "the second pass rewrites no marker");
+assert.ok(!orchLog(rootAM1).includes("spawned merger"), "the second pass spawns no merger");
+// the PM removes the hold: the marker stays and the merge starts on the next sweep
+updateTask(rootAM1, taskAM1, { blockedBy: "" });
+rescan(rootAM1, cfgAM1);
+assert.equal(parseTask(rootAM1, taskAM1.file).state, "merging", "the approval starts the merger");
+assert.ok(existsSync(askAM1), "the marker stays through the merge");
+await waitFor(() => !agentAlive(rootAM1, "merger") && readExitCode(rootAM1, "merger") !== null, 30000, "the approved merger exited", () => "");
+poll(rootAM1, 5);
+assert.equal(parseTask(rootAM1, taskAM1.file).state, "to-live-test", "the approved merge reaches the live test");
+assert.equal(orchLog(rootAM1).split("spawned merger").length - 1, 1, "one merger for the approved merge");
+assert.equal(alertsAM1().length, 1, "the approval queues no new alert");
+cleanupAll(rootAM1);
+console.log("merge.test.ts: + auto merge gate smoke passed");
+
+// --- part AM2: one alert covers a batch, a bounce back to to-merge retries with no new ask,
+// and a task that leaves the merge lane drops its marker ---
+const rootAM2 = mergeRoot();
+const cfgAM2 = cfgFor(rootAM2, caseStub(rootAM2, ""), { autoMerge: false });
+execSync("git checkout -qb feat/pm-batch-one && git commit -q --allow-empty -m batch-one && git checkout -q main", { cwd: rootAM2, shell: "/bin/bash" });
+execSync("git checkout -qb feat/pm-batch-two && git commit -q --allow-empty -m batch-two && git checkout -q main", { cwd: rootAM2, shell: "/bin/bash" });
+const taskAM2a = createTask(rootAM2, { name: "feat: pm batch one", summary: "Auto merge batch smoke", specs: "n/a", priority: "critical" });
+const taskAM2b = createTask(rootAM2, { name: "feat: pm batch two", summary: "Auto merge batch smoke", specs: "n/a" });
+setWorktree(rootAM2, taskAM2a, "feat/pm-batch-one");
+setWorktree(rootAM2, taskAM2b, "feat/pm-batch-two");
+setState(rootAM2, taskAM2a, "to-merge");
+setState(rootAM2, taskAM2b, "to-merge");
+const askAM2a = mergeAskPath(rootAM2, taskSlug(taskAM2a.file));
+const askAM2b = mergeAskPath(rootAM2, taskSlug(taskAM2b.file));
+const alertsAM2 = () => readdirSync(reportsDir(rootAM2)).filter((f) => f.endsWith(".md"));
+rescan(rootAM2, cfgAM2);
+assert.equal(alertsAM2().length, 1, "one alert covers both arrivals");
+const alertAM2 = readFileSync(join(reportsDir(rootAM2), alertsAM2()[0]), "utf8");
+assert.ok(alertAM2.includes(taskAM2a.file) && alertAM2.includes(taskAM2b.file), "the batched alert lists both tasks");
+assert.ok(existsSync(askAM2a) && existsSync(askAM2b), "both tasks carry the ask marker");
+// a task moved back to to-do loses its marker; the other task keeps its own
+setState(rootAM2, taskAM2b, "to-do");
+rescan(rootAM2, cfgAM2);
+assert.equal(existsSync(askAM2b), false, "a task moved back to to-do loses the marker");
+assert.ok(existsSync(askAM2a), "the other task keeps its marker");
+assert.equal(alertsAM2().length, 1, "the cleanup queues no alert");
+// the live test bounced the task back: the marker present means the merger retries with no ask
+updateTask(rootAM2, taskAM2a, { blockedBy: "" });
+setState(rootAM2, taskAM2a, "to-live-test");
+rescan(rootAM2, cfgAM2);
+assert.equal(parseTask(rootAM2, taskAM2a.file).state, "to-merge", "the unmerged branch sends the task back to to-merge");
+rescan(rootAM2, cfgAM2);
+assert.equal(parseTask(rootAM2, taskAM2a.file).state, "merging", "the bounced task merges without a second ask");
+assert.equal(parseTask(rootAM2, taskAM2a.file).blockedBy, "", "the bounce re-adds no hold");
+assert.equal(alertsAM2().length, 1, "the bounce queues no new alert");
+assert.equal(orchLog(rootAM2).split("spawned merger").length - 1, 1, "one merger for the bounced task");
+await waitFor(() => !agentAlive(rootAM2, "merger") && readExitCode(rootAM2, "merger") !== null, 30000, "the bounced merger exited", () => "");
+poll(rootAM2, 5);
+assert.equal(parseTask(rootAM2, taskAM2a.file).state, "to-live-test", "the bounced merge finishes");
+// a task that reaches done leaves no marker
+setState(rootAM2, taskAM2a, "done");
+rescan(rootAM2, cfgAM2);
+assert.equal(existsSync(askAM2a), false, "a done task leaves no marker");
+cleanupAll(rootAM2);
+console.log("merge.test.ts: + auto merge batch and retry smoke passed");
+
+// --- part AM3: with autoMerge on (the default) the lane is unchanged: no hold, no marker, no
+// alert, and the merger spawns as today ---
+const rootAM3 = mergeRoot();
+const cfgAM3 = cfgFor(rootAM3, caseStub(rootAM3, ""), { autoMerge: true });
+execSync("git checkout -qb feat/auto-on && git commit -q --allow-empty -m auto-change && git checkout -q main", { cwd: rootAM3, shell: "/bin/bash" });
+const taskAM3 = createTask(rootAM3, { name: "feat: auto merge on", summary: "Auto merge on smoke", specs: "n/a" });
+setWorktree(rootAM3, taskAM3, "feat/auto-on");
+setState(rootAM3, taskAM3, "to-merge");
+rescan(rootAM3, cfgAM3);
+assert.equal(parseTask(rootAM3, taskAM3.file).blockedBy, "", "autoMerge on adds no hold");
+assert.equal(existsSync(mergeAskPath(rootAM3, taskSlug(taskAM3.file))), false, "autoMerge on writes no marker");
+assert.deepEqual(existsSync(reportsDir(rootAM3)) ? readdirSync(reportsDir(rootAM3)) : [], [], "autoMerge on queues no alert");
+assert.equal(parseTask(rootAM3, taskAM3.file).state, "merging", "the merger spawns as today");
+await waitFor(() => !agentAlive(rootAM3, "merger") && readExitCode(rootAM3, "merger") !== null, 30000, "the merger exited", () => "");
+poll(rootAM3, 5);
+assert.equal(parseTask(rootAM3, taskAM3.file).state, "to-live-test", "the merge runs as today");
+assert.equal(existsSync(mergeAskPath(rootAM3, taskSlug(taskAM3.file))), false, "no marker after the merge");
+cleanupAll(rootAM3);
+console.log("merge.test.ts: + auto merge on smoke passed");

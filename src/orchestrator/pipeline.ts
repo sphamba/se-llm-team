@@ -395,6 +395,58 @@ function janitorPids(root: string, tasks: Task[]): void {
 }
 
 
+// the PM's merge gate: one marker per task the sweep already put to the PM, next to the stuck
+// and attempt markers. It outlives a crash and a bounce back to to-merge, so an approved merge
+// retries by itself while the file exists and the PM is asked once per task
+// a fresh board has no .logs dir yet
+export const mergeAskPath = (root: string, slug: string) => join(kanbanDir(root), ".logs", `${slug}.merge-asked`);
+
+// the content is the base branch at the time of the ask, a dash when the root is detached
+function markMergeAsk(root: string, slug: string): void {
+	mkdirSync(join(kanbanDir(root), ".logs"), { recursive: true });
+	writeFileSync(mergeAskPath(root, slug), `${git(root, ["branch", "--show-current"], true) || "-"}\n`);
+}
+
+// the states that still own a merge decision: anywhere else the marker drops, so a task moved
+// back to to-do (or a task file that is gone) asks the PM again on its next to-merge arrival
+const MERGE_ASK_KEEP = new Set(["to-merge", "merging", "to-live-test", "live-testing"]);
+
+// the autoMerge: false gate, one pass, no memory beyond the marker file: a waiting to-merge task
+// gains the `user` hold, then the marker, then one alert for the whole pass. The hold goes first:
+// a crash between the two repeats the alert, which is harmless, while the other order leaves an
+// unheld task with a marker and the daemon would merge a task the PM never approved
+function reconcileMergeAsks(root: string, cfg: Config, tasks: Task[]): void {
+	const asked: Task[] = [];
+	const keep = new Set<string>();
+	for (const task of tasks) {
+		const slug = taskSlug(task.file);
+		// the marker of a conflicted task stays put: the pass leaves a conflicted file alone
+		if (MERGE_ASK_KEEP.has(task.state)) keep.add(slug);
+		if (task.conflicted) continue;
+		if (cfg.autoMerge || task.state !== "to-merge" || existsSync(mergeAskPath(root, slug))) continue;
+		const parts = task.blockedBy.split(",").map((part) => part.trim()).filter(Boolean);
+		const held = [...parts, "user"].join(", ");
+		if (!parts.some((part) => part.toLowerCase() === "user")) updateAttrs(root, task, { blockedBy: held });
+		// the state loop reads this same snapshot object, so the hold must land in memory too or
+		// sweepToMerge would merge the task in the pass that holds it
+		task.blockedBy = held;
+		markMergeAsk(root, slug);
+		asked.push(task);
+	}
+	// a marker with no task behind it, or a task outside the merge lane, is stale state
+	let names: string[] = [];
+	try {
+		names = readdirSync(join(kanbanDir(root), ".logs"));
+	} catch {
+		/* no .logs dir yet */
+	}
+	for (const name of names) {
+		if (name.endsWith(".merge-asked") && !keep.has(name.slice(0, -".merge-asked".length))) rmSync(join(kanbanDir(root), ".logs", name), { force: true });
+	}
+	// one alert for the pass, not one per task
+	if (asked.length) queueAlert(root, { kind: "merge-waiting", tasks: asked });
+}
+
 // the question reconcile: one pass, no memory, the board is the whole state. An open question
 // adds the daemon's hold token and the task stops at the next gate; an answered task drops the
 // token and continues by itself. The state move skips a live agent, because its exit path moves
@@ -473,6 +525,8 @@ export function rescan(root: string, cfg: Config, force = false): void {
 			log(root, `error handling ${task.file} (create): ${err instanceof Error ? err.message : err}`);
 		}
 	}
+	// the PM merge gate runs before the state loop, so the pass that holds a task never merges it
+	reconcileMergeAsks(root, cfg, tasks);
 	// priority-first state pass: priority, then the later pipeline stage, then creation order
 	const ordered = [...tasks].sort(boardOrder);
 	for (const task of ordered) {
