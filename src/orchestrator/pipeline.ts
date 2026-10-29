@@ -64,8 +64,8 @@ function startTodo(root: string, cfg: Config, task: Task, tasks: Task[]): void {
 	// splitter marker was written
 	if (blockedByUndone(tasks, fresh)) return;
 	if (SPLITTER_COMPLEXITIES.has(fresh.complexity ?? "")) {
-		// splitters off: the task skips the decomposition and starts its Developer directly
-		if (!cfg.splitters) log(root, `${fresh.file}: splitters are off, moving to the developer`);
+		// splitting off: the task skips the decomposition and starts its Developer directly
+		if (!cfg.splitting) log(root, `${fresh.file}: splitting is off, moving to the developer`);
 		else {
 			const entry = pidEntry(root, `${slug}.splitter`);
 			if (pidAlive(entry.pid, entry.disc)) return;
@@ -389,7 +389,7 @@ function janitorPids(root: string, tasks: Task[]): void {
 			const { pid, disc } = pidEntry(root, name);
 			if (pidAlive(pid, disc)) continue; // never remove a running process's pid file
 		} else if (f.endsWith(".pid")) {
-			// generic pid files: per-task agents (<slug>.pid), splitters (<slug>.splitter.pid)
+			// generic pid files: per-task agents (<slug>.pid), Splitter agents (<slug>.splitter.pid)
 			// and per-run analyses (<slug>.<role>.<n>.analysis.pid). Every live process keeps its
 			// file. A dead one goes once its reader is done with it: the poll consumes a board
 			// task's per-task pid in every state (exit code, armed reviewer marker, dead-streak

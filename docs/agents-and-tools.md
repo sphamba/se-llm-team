@@ -4,7 +4,7 @@
 
 The orchestrator runs each agent as a headless CLI process. The flags depend on the `pi` or `claude` backend. See [`src/orchestrator/backends.ts`](../src/orchestrator/backends.ts). The prompt comes from [`agents/`](../agents/) and carries no task path.
 
-Before each spawn, the orchestrator puts two symlinks in the worktree cwd. `SPECS.md` points at the task file through the linked board. `AGENTS.md` points at the role's notes file, `.kanban/AGENTS.<role>.md`. The agent reads the task and the role guidance from its cwd at startup. The Splitter runs at the project root and gets only the `SPECS.md` link. It never runs on a held task, and it never runs when the `splitters` config is off.
+Before each spawn, the orchestrator puts two symlinks in the worktree cwd. `SPECS.md` points at the task file through the linked board. `AGENTS.md` points at the role's notes file, `.kanban/AGENTS.<role>.md`. The agent reads the task and the role guidance from its cwd at startup. The Splitter runs at the project root and gets only the `SPECS.md` link. It never runs on a held task, and it never runs when the `splitting` config is off.
 
 The orchestrator also reads the project root's `AGENTS.md`. When it exists and is not empty, the orchestrator injects it as an appended system prompt. The exception is the Splitter under pi, where the cwd chain loads the file directly. The target project's instructions thus reach the agent even though the cwd `AGENTS.md` is the role-notes symlink.
 
