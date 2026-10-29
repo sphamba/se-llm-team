@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -183,4 +183,42 @@ assert.ok(Number(/reads=(\d+)/.exec(guarded.out)?.[1]) > 0);
 assert.ok([reproSmall.length, reproBig].includes(readFileSync(reproPath, "utf8").length)); // the last write landed whole
 assert.deepEqual(readdirSync(join(reproRoot, ".kanban")).filter((f) => f.endsWith(".tmp")), []);
 rmSync(reproRoot, { recursive: true, force: true });
+
+// a locked read-modify-write never clobbers a concurrent change that lands before its rename:
+// the writer re-reads the file inside the lock, so an edit made while it waits for the lock
+// survives the rewrite. The waiter child parks on the held task lock; the parent's raw edit
+// (an agent-style write) lands during that wait, strictly before the lock is released
+const rmwRoot = mkdtempSync(join(tmpdir(), "kanban-rmw-"));
+const rmwTask = createTask(rmwRoot, { name: "fix: locked rmw", summary: "seed", specs: "seed" });
+const rmwPath = join(rmwRoot, ".kanban", rmwTask.file);
+const rmwLock = join(rmwRoot, ".kanban", `.${rmwTask.file.replace(/\.md$/, "")}.write.lock`);
+const rmwStarted = join(rmwRoot, ".started");
+const rmwDone = join(rmwRoot, ".done");
+writeFileSync(rmwLock, "424242"); // a fresh lock: another writer holds the critical section
+const waiter = run(`import(${mod}).then(({ getTask, updateAttrs }) => {
+	const fs = require("node:fs");
+	const task = getTask(${JSON.stringify(rmwRoot)}, ${JSON.stringify(rmwTask.file)}); // read BEFORE the edit: a stale in-memory Task
+	fs.writeFileSync(${JSON.stringify(rmwStarted)}, "1");
+	updateAttrs(${JSON.stringify(rmwRoot)}, task, { priority: "critical" });
+	fs.writeFileSync(${JSON.stringify(rmwDone)}, "1");
+})`);
+const rmwWaitFor = (path: string, what: string): void => {
+	const limit = Date.now() + 30000;
+	while (!existsSync(path)) {
+		if (Date.now() > limit) throw new Error(`timeout waiting for ${what}`);
+		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+	}
+};
+rmwWaitFor(rmwStarted, "the waiter child to reach the lock");
+// the concurrent raw edit lands while the child still waits: strictly before the lock release
+writeFileSync(rmwPath, readFileSync(rmwPath, "utf8").replace(/^# Notes$/m, "# Notes\n- concurrent raw edit"));
+unlinkSync(rmwLock); // release: the child takes the lock and re-reads inside it
+rmwWaitFor(rmwDone, "the waiter child to finish its write");
+const waiterResult = await waiter;
+assert.equal(waiterResult.code, 0, `waiter failed: ${waiterResult.err}`);
+const rmwRaw = readFileSync(rmwPath, "utf8");
+assert.match(rmwRaw, /^priority: "critical"$/m); // the child's patch landed
+assert.match(rmwRaw, /^- concurrent raw edit$/m); // and did not clobber the edit that landed first
+rmSync(rmwRoot, { recursive: true, force: true });
+
 console.log("kanban: locking tests passed");

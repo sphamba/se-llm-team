@@ -202,27 +202,10 @@ export function splitFrontmatter(raw: string): { attrs: Record<string, string>; 
 
 const sleepSync = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
-// A task file whose frontmatter no longer parses has lost its attributes: the board would show
-// a husk with default fields in backlog and any rewrite would destroy what is left (000440).
-// Rename it under .logs with a timestamp: one atomic step, so the bytes survive and a concurrent
-// scanner sees the name either in .logs or on the board, never a vanished path.
-// Returns true when the file was quarantined
-function quarantineTask(root: string, file: string): boolean {
-	if (taskNum(file) === 0) return false;
-	const dir = join(kanbanDir(root), ".logs");
-	try {
-		mkdirSync(dir, { recursive: true });
-		const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-		renameSync(join(kanbanDir(root), file), join(dir, `${taskSlug(file)}.${stamp}.malformed.md`));
-		return true;
-	} catch {
-		return false; // unreadable .logs or a vanished file: keep the original, never lose it
-	}
-}
-
 // a 0-byte read is a lost race, not corruption: a non-atomic writer (agent edit tool, shell
 // append, git checkout) holds the file truncated for a moment. Every repo writer is atomic
-// since #444, so an empty task file is always a mid-write casualty and must keep its name
+// since #444, so an empty task file is almost always a mid-write casualty: re-read before
+// calling it malformed, and the writer that won the race finds its file untouched on disk
 const REREAD_MS = 100;
 const REREAD_TRIES = 2;
 
@@ -234,9 +217,11 @@ export function parseTask(root: string, file: string): Task {
 		raw = readFileSync(path, "utf8");
 	}
 	const fm = splitFrontmatter(raw);
-	// no frontmatter is not a task: quarantined off the board, and listAll drops it. an empty
-	// read is still no task, but it stays on disk for the writer that won the race
-	const malformed = raw.length === 0 ? true : !fm && quarantineTask(root, file);
+	// no frontmatter is not a task: flagged malformed so listAll/getTask drop it from the board
+	// view, while the file itself is never moved, renamed or deleted — parseTask is read-only,
+	// the bytes stay exactly as they are on disk for their writer or for hand recovery. an
+	// empty read is still no task, and it stays on disk for the writer that won the race
+	const malformed = raw.length === 0 || !fm;
 	const attrs = fm?.attrs ?? {};
 	const body = fm?.body ?? raw;
 	const sections: Record<string, string> = {};
@@ -501,6 +486,9 @@ export function setState(root: string, task: Task, state: TaskState): void {
 function replaceSections(root: string, task: Task, updates: Record<string, string>): void {
 	withLock(root, taskLockName(task.file), () => {
 		const raw = readFileSync(join(kanbanDir(root), task.file), "utf8");
+		// the same guard updateAttrs applies to its fresh read: the write decision is made on
+		// what the lock protected, not on the earlier read updateTask validated outside it
+		if (hasConflictMarkers(raw)) throw new Error(`unresolved merge conflict markers in ${task.file}; not rewriting`);
 		const fm = splitFrontmatter(raw);
 		const body = fm?.body ?? raw;
 		const lines = body.split("\n");

@@ -158,34 +158,39 @@ closeSync(heldFd);
 assert.equal(parseTask(root, atomicFile).name, "newer");
 rmSync(atomicPath);
 
-// a malformed task file is quarantined under .logs with a timestamp and dropped from the
-// board, not reset to default fields and parked in backlog as a husk (the 000440 incident)
+// a malformed task file is dropped from the board view but never touched on disk: parseTask
+// is read-only, so the bytes stay exactly as they are for their writer or for hand recovery
+// (no quarantine, no .logs artifacts — a reader never moves, renames or deletes a task file)
 const brokenFile = "000901_broken_task.md";
 const brokenRaw = 'name: "fix: settle the me\ns\nr\ng\n';
 writeFileSync(join(root, ".kanban", brokenFile), brokenRaw);
 assert.equal(getTask(root, brokenFile), undefined);
-assert.equal(existsSync(join(root, ".kanban", brokenFile)), false); // the husk leaves the board
-const quarantined = readdirSync(join(root, ".kanban", ".logs")).filter((f) => f.startsWith("000901_broken_task.") && f.endsWith(".malformed.md"));
-assert.equal(quarantined.length, 1); // one timestamped copy
-assert.equal(readFileSync(join(root, ".kanban", ".logs", quarantined[0]), "utf8"), brokenRaw); // every byte kept
 assert.equal(listAll(root).some((t) => t.file === brokenFile), false); // no husk on the board
+assert.equal(existsSync(join(root, ".kanban", brokenFile)), true); // still present on disk
+assert.equal(readFileSync(join(root, ".kanban", brokenFile), "utf8"), brokenRaw); // byte-identical
+assert.equal(existsSync(join(root, ".kanban", ".logs")), false); // no quarantine artifacts
 
 // a 0-byte read is a lost race with a non-atomic writer, never corruption: the file keeps its
-// name and its bytes, and quarantine never fires (000445)
+// name and its (empty) bytes on disk, nothing is moved or deleted, and the finished write that
+// follows parses normally
 const truncatedFile = "000902_truncated_task.md";
 const truncatedPath = join(root, ".kanban", truncatedFile);
 writeFileSync(truncatedPath, "");
 assert.equal(listAll(root).some((t) => t.file === truncatedFile), false); // no husk while empty
 assert.equal(existsSync(truncatedPath), true); // the name survives the empty read
-assert.equal(readdirSync(join(root, ".kanban", ".logs")).some((f) => f.startsWith("000902_")), false); // nothing quarantined
+assert.equal(readFileSync(truncatedPath, "utf8"), ""); // the empty file stays as it is
+assert.equal(existsSync(join(root, ".kanban", ".logs")), false); // no artifacts for the empty read either
 writeFileSync(truncatedPath, '---\nname: "fix: intact"\nstate: "doing"\n---\n# Summary\nintact\n');
 assert.equal(parseTask(root, truncatedFile).name, "fix: intact"); // the finished write parses
 rmSync(truncatedPath);
 
 // a file that vanishes between the readdir and the read (a dangling symlink here) is skipped,
 // never thrown: the scan runs inside a watcher callback, where an ENOENT kills the session
+// (kanban_delete legitimately removes files, so readers must tolerate the gap). parseTask
+// itself still throws — the tolerance lives in the scan (safeParseTask)
 const vanishedFile = "000903_vanished_task.md";
 symlinkSync(join(root, ".kanban", "gone.md"), join(root, ".kanban", vanishedFile));
+assert.throws(() => parseTask(root, vanishedFile), /ENOENT/);
 assert.equal(listAll(root).some((t) => t.file === vanishedFile), false);
 assert.equal(getTask(root, vanishedFile), undefined);
 rmSync(join(root, ".kanban", vanishedFile));

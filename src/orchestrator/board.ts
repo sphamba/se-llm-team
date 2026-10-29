@@ -300,18 +300,21 @@ export function reconcileBoard(root: string): boolean {
 	let kept = 0;
 	for (const [name, blob] of tip) {
 		// an existing local file is either equal to the tip or a newer in-flight write:
-		// keep it, or a daemon restart reverts the state and notes written since the mirror
+		// keep it, or a daemon restart reverts the state and notes written since the mirror.
+		// The exclusive write extends that rule over the snapshot race: a task file created
+		// after taskFiles() was read is refused with EEXIST and kept, never clobbered by the
+		// tip's stale copy (the write is a create here, so exclusive costs nothing)
 		if (local.has(name)) {
 			if (local.get(name) !== blob) kept++;
 			continue;
 		}
 		try {
 			const path = join(kanbanDir(root), name);
-			writeTaskFile(path, execFileSync("git", ["cat-file", "blob", blob], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+			writeTaskFile(path, execFileSync("git", ["cat-file", "blob", blob], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), { exclusive: true });
 			noteSelfWrite(path);
 			updated++;
 		} catch {
-			/* unreadable entry, skip */
+			/* unreadable entry, or the file appeared after the snapshot: keep it, skip */
 		}
 	}
 	let deleted = 0;
