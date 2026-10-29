@@ -106,6 +106,7 @@ The config is optional. The global directory is `~/.se-llm-team` and it holds th
   "reviewerCap": { "trivial": 0, "simple": 1, "moderate": 2, "complex": 3 },
   "reviews": true,
   "liveTesting": true,
+  "splitters": true,
   "autoMerge": true,
   "webUi": { "enabled": true, "host": "localhost", "port": 4242 }
 }
@@ -125,6 +126,7 @@ The config is optional. The global directory is `~/.se-llm-team` and it holds th
 | `reviewerCap.<complexity>` | `0`/`1`/`2`/`3` | Successful reviewer runs before a to-review task force-advances to to-merge. Defaults: trivial `0`, simple `1`, moderate `2`, complex `3`. |
 | `reviews` | `true` | Run the Reviewer stage. Off: a to-review task moves straight to to-merge. |
 | `liveTesting` | `true` | Run the Live-tester stage. Off: a merged to-live-test task moves straight to done. |
+| `splitters` | `true` | Run the Splitter stage. Off: a moderate or complex to-do task skips the decomposition and starts its Developer directly. |
 | `autoMerge` | `true` | Let the daemon merge a to-merge task by itself. Off: the task gains the `user` hold and the PM gets one alert. Remove the hold with `kanban_update` to start the merger. |
 | `webUi.enabled` | off | Serve the web dashboard with the daemon. |
 | `webUi.host` | `localhost` | Dashboard bind host. |

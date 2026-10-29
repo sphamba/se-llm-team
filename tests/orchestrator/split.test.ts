@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask, kanbanDir, parseTask, setState, taskNum, taskSlug, updateTask } from "../../src/kanban.ts";
@@ -176,3 +176,31 @@ rescan(rootBG, cfgBG);
 assert.equal(parseTask(rootBG, heldSplitBG.file).state, "to-do", "the released task stays to-do while the splitter runs");
 assert.ok(existsSync(pidPath(rootBG, `${taskSlug(heldSplitBG.file)}.splitter`)), "the released task restarted with the splitter");
 console.log("orchestrator.test.ts: ... + user hold skips the to-do lane smoke passed");
+
+// --- part BH: splitters off. A moderate to-do task skips the Splitter and starts its
+// Developer directly, with one log line for the skip ---
+const rootBH = fixture();
+cleaned.push(rootBH);
+const homeBH = mkdtempSync(join(tmpdir(), "orch-home-"));
+cleaned.push(homeBH);
+mkdirSync(kanbanDir(rootBH), { recursive: true });
+const savedHomeBH = process.env.HOME;
+process.env.HOME = homeBH;
+let cfgBH: ReturnType<typeof loadConfig>;
+try {
+	cfgBH = loadConfig(rootBH);
+} finally {
+	process.env.HOME = savedHomeBH;
+}
+cfgBH.backlogIdleMinutes = 0;
+cfgBH.agent = deadStub(rootBH);
+cfgBH.splitters = false;
+const taskBH = createTask(rootBH, { name: "feat: no splitter", summary: "Splitters off smoke", specs: "n/a" });
+setState(rootBH, taskBH, "to-do");
+rescan(rootBH, cfgBH);
+assert.equal(parseTask(rootBH, taskBH.file).state, "doing", "splitters off starts the developer");
+assert.equal(existsSync(pidPath(rootBH, `${taskSlug(taskBH.file)}.splitter`)), false, "splitters off spawns no splitter");
+assert.ok(existsSync(pidPath(rootBH, taskSlug(taskBH.file))), "splitters off spawns the developer");
+const bhLog = readFileSync(join(kanbanDir(rootBH), ".logs", "orchestrator.log"), "utf8");
+assert.ok(bhLog.includes(`${taskBH.file}: splitters are off, moving to the developer`), "the skip is logged");
+console.log("orchestrator.test.ts: ... + splitters off skips the splitter smoke passed");

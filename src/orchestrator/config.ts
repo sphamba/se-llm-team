@@ -51,6 +51,7 @@ export interface Config {
 	maxParallel: number;
 	reviews: boolean;
 	liveTesting: boolean;
+	splitters: boolean;
 	autoMerge: boolean;
 	llm: LlmConfig;
 	roles: Record<string, RoleLlmConfig>;
@@ -140,6 +141,7 @@ export function loadConfig(root: string, defaultAgent?: string): Config {
 		maxParallel?: unknown;
 		reviews?: unknown;
 		liveTesting?: unknown;
+		splitters?: unknown;
 		autoMerge?: unknown;
 		provider?: unknown;
 		model?: unknown;
@@ -230,6 +232,7 @@ export function loadConfig(root: string, defaultAgent?: string): Config {
 		maxParallel,
 		reviews: flag(root, cfg.reviews, "reviews", true),
 		liveTesting: flag(root, cfg.liveTesting, "liveTesting", true),
+		splitters: flag(root, cfg.splitters, "splitters", true),
 		autoMerge: flag(root, cfg.autoMerge, "autoMerge", true),
 		llm: cleanLlm(root, cfg, " (global)"),
 		roles,

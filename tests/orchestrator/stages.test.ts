@@ -32,19 +32,23 @@ const cfgFor = (root: string, extra: Record<string, unknown>) => {
 };
 const orchLog = (root: string) => readFileSync(join(kanbanDir(root), ".logs", "orchestrator.log"), "utf8");
 
-// --- part 1: both stages are on by default, an explicit false turns one off, and a
-// non-boolean value warns and keeps the default ---
+// --- part 1: both stages and the splitters toggle are on by default, an explicit false turns
+// one off, and a non-boolean value warns and keeps the default ---
 const root1 = fixture();
 cleaned.push(root1);
 const default1 = cfgFor(root1, {});
 assert.equal(default1.reviews, true, "reviews default on");
 assert.equal(default1.liveTesting, true, "liveTesting default on");
-const off1 = cfgFor(root1, { reviews: false, liveTesting: false });
+assert.equal(default1.splitters, true, "splitters default on");
+const off1 = cfgFor(root1, { reviews: false, liveTesting: false, splitters: false });
 assert.equal(off1.reviews, false, "a configured reviews false applies");
 assert.equal(off1.liveTesting, false, "a configured liveTesting false applies");
-const invalid1 = cfgFor(root1, { reviews: "no" });
+assert.equal(off1.splitters, false, "a configured splitters false applies");
+const invalid1 = cfgFor(root1, { reviews: "no", splitters: 0 });
 assert.equal(invalid1.reviews, true, "a non-boolean reviews keeps the default on");
 assert.ok(orchLog(root1).includes('reviews "no" ignored: must be a boolean'), "a non-boolean reviews warned about");
+assert.equal(invalid1.splitters, true, "a non-boolean splitters keeps the default on");
+assert.ok(orchLog(root1).includes('splitters 0 ignored: must be a boolean'), "a non-boolean splitters warned about");
 console.log("stages.test.ts: ... + stage flag config passed");
 
 // --- part 2: reviews off sends a to-review task straight to to-merge, with no reviewer spawn

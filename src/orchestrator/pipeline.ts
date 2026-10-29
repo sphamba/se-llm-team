@@ -64,18 +64,22 @@ function startTodo(root: string, cfg: Config, task: Task, tasks: Task[]): void {
 	// splitter marker was written
 	if (blockedByUndone(tasks, fresh)) return;
 	if (SPLITTER_COMPLEXITIES.has(fresh.complexity ?? "")) {
-		const entry = pidEntry(root, `${slug}.splitter`);
-		if (pidAlive(entry.pid, entry.disc)) return;
-		// no splitter pid file yet: the Splitter runs detached at the project root (it works the
-		// board through the kanban tools and needs no worktree), the task stays to-do
-		if (entry.pid === 0) {
-			spawnAgent(root, cfg, "splitter", fresh, root, `${slug}.splitter`);
-			return;
+		// splitters off: the task skips the decomposition and starts its Developer directly
+		if (!cfg.splitters) log(root, `${fresh.file}: splitters are off, moving to the developer`);
+		else {
+			const entry = pidEntry(root, `${slug}.splitter`);
+			if (pidAlive(entry.pid, entry.disc)) return;
+			// no splitter pid file yet: the Splitter runs detached at the project root (it works the
+			// board through the kanban tools and needs no worktree), the task stays to-do
+			if (entry.pid === 0) {
+				spawnAgent(root, cfg, "splitter", fresh, root, `${slug}.splitter`);
+				return;
+			}
+			// a dead splitter pid file means the Splitter ran and left the task in to-do (a decline
+			// or a crash): clear its root run link, then fall through to the Developer, no second
+			// splitter pass. liveness never sees the pid, so the cleanup happens here instead
+			clearContextSymlinks(root, fresh, { rootCwd: true });
 		}
-		// a dead splitter pid file means the Splitter ran and left the task in to-do (a decline
-		// or a crash): clear its root run link, then fall through to the Developer, no second
-		// splitter pass. liveness never sees the pid, so the cleanup happens here instead
-		clearContextSymlinks(root, fresh, { rootCwd: true });
 	}
 	const ensured = ensureWorktree(root, fresh);
 	if (!ensured) return;
