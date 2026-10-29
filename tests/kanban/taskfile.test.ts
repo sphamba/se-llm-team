@@ -169,5 +169,25 @@ const quarantined = readdirSync(join(root, ".kanban", ".logs")).filter((f) => f.
 assert.equal(quarantined.length, 1); // one timestamped copy
 assert.equal(readFileSync(join(root, ".kanban", ".logs", quarantined[0]), "utf8"), brokenRaw); // every byte kept
 assert.equal(listAll(root).some((t) => t.file === brokenFile), false); // no husk on the board
+
+// a 0-byte read is a lost race with a non-atomic writer, never corruption: the file keeps its
+// name and its bytes, and quarantine never fires (000445)
+const truncatedFile = "000902_truncated_task.md";
+const truncatedPath = join(root, ".kanban", truncatedFile);
+writeFileSync(truncatedPath, "");
+assert.equal(listAll(root).some((t) => t.file === truncatedFile), false); // no husk while empty
+assert.equal(existsSync(truncatedPath), true); // the name survives the empty read
+assert.equal(readdirSync(join(root, ".kanban", ".logs")).some((f) => f.startsWith("000902_")), false); // nothing quarantined
+writeFileSync(truncatedPath, '---\nname: "fix: intact"\nstate: "doing"\n---\n# Summary\nintact\n');
+assert.equal(parseTask(root, truncatedFile).name, "fix: intact"); // the finished write parses
+rmSync(truncatedPath);
+
+// a file that vanishes between the readdir and the read (a dangling symlink here) is skipped,
+// never thrown: the scan runs inside a watcher callback, where an ENOENT kills the session
+const vanishedFile = "000903_vanished_task.md";
+symlinkSync(join(root, ".kanban", "gone.md"), join(root, ".kanban", vanishedFile));
+assert.equal(listAll(root).some((t) => t.file === vanishedFile), false);
+assert.equal(getTask(root, vanishedFile), undefined);
+rmSync(join(root, ".kanban", vanishedFile));
 rmSync(root, { recursive: true, force: true });
 console.log("kanban: task file tests passed");

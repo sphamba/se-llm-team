@@ -200,29 +200,43 @@ export function splitFrontmatter(raw: string): { attrs: Record<string, string>; 
 	return { attrs, body: m[2] };
 }
 
+const sleepSync = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
 // A task file whose frontmatter no longer parses has lost its attributes: the board would show
 // a husk with default fields in backlog and any rewrite would destroy what is left (000440).
-// Copy it under .logs with a timestamp, then drop it from the board; the copy keeps the bytes
-// for recovery. Returns true when the file was quarantined
-function quarantineTask(root: string, file: string, raw: string): boolean {
+// Rename it under .logs with a timestamp: one atomic step, so the bytes survive and a concurrent
+// scanner sees the name either in .logs or on the board, never a vanished path.
+// Returns true when the file was quarantined
+function quarantineTask(root: string, file: string): boolean {
 	if (taskNum(file) === 0) return false;
 	const dir = join(kanbanDir(root), ".logs");
 	try {
 		mkdirSync(dir, { recursive: true });
 		const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-		writeFileSync(join(dir, `${taskSlug(file)}.${stamp}.malformed.md`), raw);
-		unlinkSync(join(kanbanDir(root), file));
+		renameSync(join(kanbanDir(root), file), join(dir, `${taskSlug(file)}.${stamp}.malformed.md`));
 		return true;
 	} catch {
 		return false; // unreadable .logs or a vanished file: keep the original, never lose it
 	}
 }
 
+// a 0-byte read is a lost race, not corruption: a non-atomic writer (agent edit tool, shell
+// append, git checkout) holds the file truncated for a moment. Every repo writer is atomic
+// since #444, so an empty task file is always a mid-write casualty and must keep its name
+const REREAD_MS = 100;
+const REREAD_TRIES = 2;
+
 export function parseTask(root: string, file: string): Task {
-	const raw = readFileSync(join(kanbanDir(root), file), "utf8");
+	const path = join(kanbanDir(root), file);
+	let raw = readFileSync(path, "utf8");
+	for (let i = 0; i < REREAD_TRIES && raw.length === 0; i++) {
+		sleepSync(REREAD_MS);
+		raw = readFileSync(path, "utf8");
+	}
 	const fm = splitFrontmatter(raw);
-	// no frontmatter is not a task: quarantined off the board, and listAll drops it
-	const malformed = !fm && quarantineTask(root, file, raw);
+	// no frontmatter is not a task: quarantined off the board, and listAll drops it. an empty
+	// read is still no task, but it stays on disk for the writer that won the race
+	const malformed = raw.length === 0 ? true : !fm && quarantineTask(root, file);
 	const attrs = fm?.attrs ?? {};
 	const body = fm?.body ?? raw;
 	const sections: Record<string, string> = {};
@@ -265,11 +279,24 @@ export function parseTask(root: string, file: string): Task {
 export const ROLE_NOTES_RE = /^AGENTS(\..+)?\.md$/;
 export const roleNotesPath = (root: string, role: string) => join(kanbanDir(root), `AGENTS.${role}.md`);
 
+// a file can vanish between the readdir and the read; the scan runs inside watcher callbacks,
+// where an uncaught ENOENT kills the session that holds the watcher (000445)
+function safeParseTask(root: string, file: string): Task | null {
+	try {
+		return parseTask(root, file);
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+		throw e;
+	}
+}
+
 export function listAll(root: string): Task[] {
 	return taskFiles(root)
 		.filter((f) => !ROLE_NOTES_RE.test(f))
-		.map((f) => parseTask(root, f))
-		.filter((t) => !t.malformed);
+		.flatMap((f) => {
+			const task = safeParseTask(root, f);
+			return task && !task.malformed ? [task] : [];
+		});
 }
 
 export function listTasks(root: string, scope: Scope, priority?: Priority | string): TaskRef[] {
@@ -293,8 +320,8 @@ export function listTasks(root: string, scope: Scope, priority?: Priority | stri
 export function getTask(root: string, file: string): Task | undefined {
 	const f = file.endsWith(".md") ? file : `${file}.md`;
 	if (!taskFiles(root).includes(f)) return undefined;
-	const task = parseTask(root, f);
-	return task.malformed ? undefined : task;
+	const task = safeParseTask(root, f);
+	return !task || task.malformed ? undefined : task;
 }
 
 // the task behind the cwd's SPECS.md symlink (the orchestrator re-points it in the worktree
@@ -426,7 +453,7 @@ function withLock<T>(root: string, name: string, fn: () => T): T {
 				if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) unlinkSync(lock);
 			} catch {}
 			if (Date.now() >= deadline) throw new Error(`could not lock "${lock}"`);
-			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+			sleepSync(10);
 		}
 	}
 	try {

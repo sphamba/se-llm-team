@@ -27,7 +27,7 @@ registerHooks({
 	},
 });
 
-const { default: extension } = await import("./index.ts");
+const { default: extension, debounce } = await import("./index.ts");
 const { resolveRoot } = await import("./src/tools.ts");
 
 type Call = { cmd: string; args: string[]; opts: Record<string, unknown> };
@@ -230,6 +230,28 @@ rmSync(ownerPath(rrepo), { force: true });
 assert.deepEqual(await drain(A), ["r4"], "a live session takes an orphan when no owner is registered");
 assert.deepEqual(pending(), []);
 rmSync(rrepo, { recursive: true, force: true });
+
+// a burst of watch events costs one scan, not one per event (000445)
+let fires = 0;
+const burst = debounce(() => fires++, 30);
+burst();
+burst();
+burst();
+assert.equal(fires, 0, "a burst waits for the debounce timer");
+await new Promise((r) => setTimeout(r, 150));
+assert.equal(fires, 1, "a burst of watcher events costs one scan");
+
+// a board watcher must never kill the session holding it: the scan here throws EISDIR and the
+// process must still reach the next assertion (000445)
+const wrepo = realpathSync(mkdtempSync(join(tmpdir(), "index-watch-")));
+const wdir = join(wrepo, ".kanban");
+mkdirSync(wdir);
+sessionStart({ type: "session_start" }, ctx(wrepo));
+mkdirSync(join(wdir, "000998_dir.md"));
+await new Promise((r) => setTimeout(r, 300));
+assert.ok(true, "the session survives a throwing scan");
+await sessionShutdown();
+rmSync(wrepo, { recursive: true, force: true });
 
 rmSync(repo, { recursive: true, force: true });
 rmSync(plain, { recursive: true, force: true });

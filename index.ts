@@ -5,6 +5,22 @@ import { isLinkedWorktree, kanbanDir, listAll } from "./src/kanban.ts";
 import { canTake, REPORT_MAX_AGE_MS, reportsDir } from "./src/orchestrator/report.ts";
 import { TOOLS, type ToolCtx, type ToolResult } from "./src/tools.ts";
 
+const SCAN_DEBOUNCE_MS = 100;
+
+// one write fires several fs events, so a burst costs one scan. unref'd, so a pending timer
+// never keeps the process alive
+export function debounce(fn: () => void, ms = SCAN_DEBOUNCE_MS): () => void {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	return () => {
+		if (timer) clearTimeout(timer);
+		timer = setTimeout(() => {
+			timer = undefined;
+			fn();
+		}, ms);
+		(timer as { unref?: () => void }).unref?.();
+	};
+}
+
 const LABELS: Record<string, string> = {
 	kanban_list: "Kanban list",
 	kanban_get: "Kanban get",
@@ -54,17 +70,23 @@ export default function (pi: ExtensionAPI) {
 	// Attached lazily (the board may only be created later in the session) and seeded with
 	// tasks already done, so only done-transitions after the attach notify.
 	let boardWatcher: FSWatcher | undefined;
+	// a board watcher must never kill the session that holds it
+	const scanBoard = (ctx: ExtensionContext) => {
+		try {
+			for (const t of listAll(ctx.cwd)) {
+				if (t.state !== "done" || notified.has(t.file)) continue;
+				notified.add(t.file);
+				if (ctx.hasUI) ctx.ui.notify(`Kanban: ${t.name} is done`, "info");
+			}
+		} catch {
+			/* a failed scan is not a failed session */
+		}
+	};
 	const ensureBoardWatcher = (ctx: ExtensionContext) => {
 		if (boardWatcher || !existsSync(board(ctx))) return;
 		try {
 			for (const t of listAll(ctx.cwd)) if (t.state === "done") notified.add(t.file);
-			boardWatcher = watch(board(ctx), () => {
-				for (const t of listAll(ctx.cwd)) {
-					if (t.state !== "done" || notified.has(t.file)) continue;
-					notified.add(t.file);
-					if (ctx.hasUI) ctx.ui.notify(`Kanban: ${t.name} is done`, "info");
-				}
-			});
+			boardWatcher = watch(board(ctx), debounce(() => scanBoard(ctx)));
 		} catch {
 			/* no board watching in this session */
 		}
@@ -141,7 +163,16 @@ export default function (pi: ExtensionAPI) {
 			// the dir is created lazily by the first report: create it here, so a session that
 			// starts before the first report still watches the queue
 			mkdirSync(reportsDir(ctx.cwd), { recursive: true });
-			reportsWatcher = watch(reportsDir(ctx.cwd), () => consumeReports(ctx));
+			reportsWatcher = watch(
+				reportsDir(ctx.cwd),
+				debounce(() => {
+					try {
+						consumeReports(ctx);
+					} catch {
+						/* a failed scan is not a failed session */
+					}
+				}),
+			);
 		} catch {
 			/* no report watching in this session */
 		}
