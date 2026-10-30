@@ -4,7 +4,7 @@ One skill turns your coding-agent session into the Project manager. A non-LLM de
 
 - [Splitter](agents/splitter.md): splits moderate and complex tasks into parallel subtasks before development starts.
 - [Developer](agents/developer.md): implements the Specs in an isolated worktree. It can delegate research or parallel work to subagents.
-- [Reviewer](agents/reviewer.md): reviews the diff against the Specs, fixes small mistakes, and can send the task back to the developer. It can use subagents.
+- [Reviewer](agents/reviewer.md): reviews the diff against the Specs, fixes small mistakes, and sends the task back to to-do on a Specs violation. It can use subagents.
 - [Merger](agents/merger.md): rebases the task branch onto the base branch, resolves the conflicts, and runs the full project test suite in its worktree.
 - [Live-tester](agents/live-tester.md): runs the merged commit like a user and reports findings.
 - [Doctor](agents/doctor.md): after every successful run, writes what it learned into that role's notes file so future runs start faster. There is one for the developer, reviewer, merger, and live-tester.
@@ -108,6 +108,7 @@ The config is optional. The global directory is `~/.se-llm-team` and it holds th
   "liveTesting": true,
   "splitting": true,
   "autoMerge": true,
+  "testCommand": "npm test",
   "webUi": { "enabled": true, "host": "localhost", "port": 4242 }
 }
 ```
@@ -123,11 +124,12 @@ The config is optional. The global directory is `~/.se-llm-team` and it holds th
 | `thinking` | unset | Reasoning level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
 | `roles.<type>.<key>` | unset | Override `provider`, `model`, or `thinking` for one agent type. Unset fields keep the global value. |
 | `roles.<type>.<complexity>.<key>` | unset | Same fields for one complexity: `trivial`, `simple`, `moderate`, or `complex`. Unset fields keep the role value. |
-| `reviewerCap.<complexity>` | `0`/`1`/`2`/`3` | Successful reviewer runs before a to-review task force-advances to to-merge. Defaults: trivial `0`, simple `1`, moderate `2`, complex `3`. |
+| `reviewerCap.<complexity>` | `0`/`1`/`2`/`3` | Reviewer passes a task gets before it force-advances to to-merge. Defaults: trivial `0`, simple `1`, moderate `2`, complex `3`. |
 | `reviews` | `true` | Run the Reviewer stage. Off: a to-review task moves straight to to-merge. |
 | `liveTesting` | `true` | Run the Live-tester stage. Off: a merged to-live-test task moves straight to done. |
 | `splitting` | `true` | Run the Splitter stage. Off: a moderate or complex to-do task skips the decomposition and starts its Developer directly. |
 | `autoMerge` | `true` | Let the daemon merge a to-merge task by itself. Off: the task gains the `user` hold and the PM gets one alert. Remove the hold with `kanban_update` to start the merger. |
+| `testCommand` | `npm test` | Shell command the agents run to verify their work. The Merger runs it as the merge gate; the Developer and the Reviewer run their scoped tests with it. |
 | `webUi.enabled` | off | Serve the web dashboard with the daemon. |
 | `webUi.host` | `localhost` | Dashboard bind host. |
 | `webUi.port` | `4242` | Dashboard port. |
