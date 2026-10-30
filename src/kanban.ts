@@ -87,8 +87,8 @@ export function kanbanDir(root: string): string {
 
 // the PM-processed marker of a task: the empty .logs side-file <taskSlug>.pm-processed,
 // shared by the kanban_mark_processed tool and the catch-up report. Lives here (not
-// orchestrator/log.ts, where armedPath is the .logs side-file precedent) because log.ts
-// imports kanbanDir back, so a helper there would cycle
+// orchestrator/log.ts, where the .logs side-file markers live) because log.ts imports
+// kanbanDir back, so a helper there would cycle
 export function pmProcessedPath(root: string, file: string): string {
 	return join(kanbanDir(root), ".logs", taskSlug(file) + ".pm-processed");
 }
@@ -522,10 +522,10 @@ function replaceSections(root: string, task: Task, updates: Record<string, strin
 // open questions wait for an answer
 export function heldToken(blockedBy: string): string {
 	const tokens = blockedBy.split(",").map((part) => part.trim().toLowerCase());
-	// a question outranks the user hold whatever the order: the exit paths must never move the
-	// root or the lane under an unanswered question
-	if (tokens.includes("question")) return "question";
-	return tokens.includes("user") ? "user" : "";
+	// the user hold outranks the question whatever the order: while the PM holds the task, the
+	// question neither alerts nor reports, and the PM releases both by dropping the hold
+	if (tokens.includes("user")) return "user";
+	return tokens.includes("question") ? "question" : "";
 }
 
 // any hold at all: every lane gate reads this one predicate
@@ -534,9 +534,12 @@ export function hasHold(blockedBy: string): boolean {
 }
 
 // an unanswered question holds the task before its token lands: the reconcile stamps `question`
-// at the end of the sweep, while the lanes and the exit paths read the sweep-start board
+// at the end of the sweep, while the lanes and the exit paths read the sweep-start board. A user
+// hold does not mask the question here: the exit paths still stop the task at their gates (the
+// reconcile is what stays silent while the user hold lasts)
 export function questionOpen(task: Pick<Task, "blockedBy" | "openQuestions">): boolean {
-	return heldToken(task.blockedBy) === "question" || task.openQuestions.trim() !== "";
+	const tokens = task.blockedBy.split(",").map((part) => part.trim().toLowerCase());
+	return tokens.includes("question") || task.openQuestions.trim() !== "";
 }
 
 // "#42, #43" -> [42, 43]; parses refs with or without the leading # and ignores malformed

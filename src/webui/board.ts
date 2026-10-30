@@ -213,7 +213,11 @@ export function holdsToken(t: Task, token: string) {
 }
 
 export function heldToken(t: Task) {
-	return String(t.blockedBy || "").split(",").map((r) => r.trim().toLowerCase()).find((r) => r === "user" || r === "question") ?? "";
+	// the user hold outranks the question, whatever the order on the task: while the PM holds
+	// the task, the question waits silently under it
+	const tokens = String(t.blockedBy || "").split(",").map((r) => r.trim().toLowerCase());
+	if (tokens.includes("user")) return "user";
+	return tokens.includes("question") ? "question" : "";
 }
 
 export function isHeld(t: Task) {

@@ -99,8 +99,8 @@ assert.equal(parseTask(hRoot, tq.file).blockedBy, "question", "the question toke
 const tqm = createTask(hRoot, { name: "feat: question with a ref", summary: "s", blockedBy: "question, #42" });
 assert.equal(parseTask(hRoot, tqm.file).blockedBy, "question, #42", "the question token mixes with task refs");
 // the shared predicate: any comma part that trims and lowercases to a hold token is a hold,
-// and heldToken names the token that matched, with a question outranking the user hold
-for (const [refs, token] of [["user", "user"], ["USER", "user"], [" user ", "user"], ["user, #42", "user"], ["#42, User", "user"], ["question", "question"], [" Question , #42", "question"], ["#42, QUESTION", "question"], ["user, question", "question"], ["question, user", "question"]] as const) {
+// and heldToken names the token that matched, with the user hold outranking the question
+for (const [refs, token] of [["user", "user"], ["USER", "user"], [" user ", "user"], ["user, #42", "user"], ["#42, User", "user"], ["question", "question"], [" Question , #42", "question"], ["#42, QUESTION", "question"], ["user, question", "user"], ["question, user", "user"]] as const) {
 	assert.equal(heldToken(refs), token, `heldToken(${JSON.stringify(refs)}) is ${token}`);
 	assert.equal(hasHold(refs), true, `hasHold(${JSON.stringify(refs)}) is true`);
 }
