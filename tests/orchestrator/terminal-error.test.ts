@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-import { createTask, kanbanDir, parseTask, setState, taskSlug, type TaskState } from "../../src/kanban.ts";
+import { createTask, kanbanDir, parseTask, setState, setWorktree, taskSlug, type TaskState } from "../../src/kanban.ts";
 import { loadConfig, poll } from "../../src/orchestrator.ts";
-import { rescan } from "../../src/orchestrator/pipeline.ts";
-import { armedPath, counterPath, logPath, nextRunIndex, readCounter } from "../../src/orchestrator/log.ts";
+import { rescan, reviewBasePath } from "../../src/orchestrator/pipeline/index.ts";
+import { counterPath, logPath, nextRunIndex, readCounter } from "../../src/orchestrator/log.ts";
 import { exitFilePath } from "../../src/orchestrator/spawn.ts";
 import { writePid } from "../../src/pid.ts";
 import { HERE, cleaned, cleanupAll, deadStub, fixture } from "../helpers.ts";
@@ -105,80 +106,80 @@ const orchLog = (root: string) => {
 	const task = startTask(root, "reviewing", "simple");
 	const slug = taskSlug(task.file);
 	const n = endRun(root, slug, "reviewer", terminalLog());
-	writeFileSync(armedPath(root, slug), "999999");
 	poll(root, 5);
 	assert.equal(parseTask(root, task.file).state, "to-review", "a terminal error with exit 0 bounces reviewing -> to-review");
 	assert.ok(existsSync(join(logs, `${slug}.reviewer.${n}.dead`)), "the bounced reviewer run carries its .dead marker");
 	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 0, "a failed reviewer run never bumps .reviewer-runs");
-	// the cap cannot force-advance through consumeReviewerRun either: a failed run that never
-	// moved the task leaves it in reviewing, so the poll bounces it and the marker is consumed
-	// without a count; the to-review sweep then finds no marker and respawns instead
+	// the cap cannot force-advance through failed runs either: a crash never reads or consumes
+	// the base marker, so no pass is counted and the counter stays under the cap; the to-review
+	// sweep then respawns instead (the deadStub dies again, which is fine and expected here)
 	setState(root, task, "reviewing");
 	endRun(root, slug, "reviewer", terminalLog());
-	writeFileSync(armedPath(root, slug), "999999");
 	poll(root, 5);
 	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 0, "a failed reviewer run never bumps .reviewer-runs");
 	rescan(root, loadConfig(root));
 	assert.notEqual(parseTask(root, task.file).state, "to-merge", "a reached cap of failed runs never force-advances the task");
-	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 0, "consumeReviewerRun counts no failed reviewer run");
+	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 0, "the sweep counts no failed reviewer run");
 }
 
-// --- a reviewer that exits 0 without moving the task is a failed run: it bounces to to-review ---
-{
-	const { root, logs } = caseRoot();
-	const task = startTask(root, "reviewing", "simple");
-	const slug = taskSlug(task.file);
-	const n = endRun(root, slug, "reviewer", healthyLog());
-	writeFileSync(armedPath(root, slug), "999999");
-	poll(root, 5);
-	assert.equal(parseTask(root, task.file).state, "to-review", "a reviewer exit 0 with the task still in reviewing bounces to to-review");
-	assert.ok(existsSync(join(logs, `${slug}.reviewer.${n}.dead`)), "the no-move reviewer run carries its .dead marker");
-	assert.equal(readFileSync(join(logs, `${slug}.dead.count`), "utf8").trim(), "1", "the no-move bounce bumps the dead counter");
-	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 0, "a run that never left reviewing counts no pass");
-	assert.ok(!existsSync(exitFilePath(root, slug)), "every end clears the exit file");
-	assert.ok(
-		orchLog(root).includes(`${slug}: reviewer exited 0 with the task still in reviewing, reviewing -> to-review`),
-		"the no-move bounce logs the exit code and the unchanged state",
-	);
-	poll(root, 5);
-	assert.equal(parseTask(root, task.file).state, "to-review", "a second poll in to-review does not bounce again");
-	assert.equal(orchLog(root).split("reviewing -> to-review").length - 1, 1, "the bounce is logged once, not again on the next pass");
-	assert.ok(!orchLog(root).includes("agent pid=0 dead without state update"), "no spurious dead-pid bounce for the pid-less to-review task");
-}
-
-// --- a reviewer move that landed counts a pass even when the run then ends in a terminal error ---
-{
-	const { root, logs } = caseRoot();
-	const task = startTask(root, "to-merge", "simple");
-	const slug = taskSlug(task.file);
-	endRun(root, slug, "reviewer", terminalLog());
-	writeFileSync(armedPath(root, slug), "999999");
-	poll(root, 5);
-	assert.equal(parseTask(root, task.file).state, "to-merge", "a landed approval with a terminal error keeps to-merge");
-	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 1, "a landed approval counts one pass despite the terminal error");
-	assert.ok(!existsSync(join(logs, `${slug}.reviewer.0.dead`)), "a landed move writes no .dead marker");
-}
-{
-	const { root, logs } = caseRoot();
-	const task = startTask(root, "to-review", "simple");
-	const slug = taskSlug(task.file);
-	endRun(root, slug, "reviewer", healthyLog());
-	writeFileSync(armedPath(root, slug), "999999");
-	poll(root, 5);
-	assert.equal(parseTask(root, task.file).state, "to-review", "the reviewer's own move back to to-review stands");
-	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 1, "a reviewer move back to to-review counts one pass");
-	assert.ok(!existsSync(join(logs, `${slug}.reviewer.0.dead`)), "a landed self-move writes no .dead marker");
-}
-// the sweep counts the same landed move: the to-review consume raises the count to the cap
+// --- a reviewer that exits 0 with a healthy log is decided by the daemon from the recorded
+// base commit: no base marker (a crash left none, or a worktree-less task) reads as approved ---
 {
 	const { root } = caseRoot();
-	const task = startTask(root, "to-review", "simple");
+	const task = startTask(root, "reviewing", "simple");
 	const slug = taskSlug(task.file);
-	endRun(root, slug, "reviewer", terminalLog());
-	writeFileSync(armedPath(root, slug), "999999");
-	rescan(root, loadConfig(root));
-	assert.equal(parseTask(root, task.file).state, "to-merge", "the sweep counts a landed reviewer move with a terminal error, so the cap advances");
-	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 0, "the forced advance resets the run counter");
+	endRun(root, slug, "reviewer", healthyLog());
+	poll(root, 5);
+	assert.equal(parseTask(root, task.file).state, "to-merge", "a reviewer exit 0 with no base marker decides as approved -> to-merge");
+	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 1, "the decided pass counts one run");
+	assert.ok(!existsSync(exitFilePath(root, slug)), "every end clears the exit file");
+	assert.ok(orchLog(root).includes(`${slug}: reviewer approved, reviewing -> to-merge`), "the daemon's approval is logged as its own kind");
+	assert.ok(!orchLog(root).includes("reviewing -> to-review"), "a decided approval never bounces");
+	poll(root, 5);
+	assert.equal(parseTask(root, task.file).state, "to-merge", "a second poll in to-merge does nothing");
+	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 1, "the counter stays at one pass");
+	assert.equal(orchLog(root).split("reviewer approved").length - 1, 1, "the approval is logged once, not again on the next pass");
+	assert.ok(!orchLog(root).includes("agent pid=0 dead without state update"), "no spurious dead-pid bounce for the pid-less to-merge task");
+}
+
+// --- decideReview, unit-style: the daemon decides from the recorded base commit vs the
+// worktree HEAD, with a hand-made worktree standing in for the spawned reviewer ---
+{
+	const { root } = caseRoot();
+	const task = startTask(root, "reviewing", "moderate"); // DEFAULT cap 2
+	const slug = taskSlug(task.file);
+	const wt = join(root, ".worktrees", "wt1");
+	mkdirSync(wt, { recursive: true });
+	execSync("git init -q && git config user.email t@t && git config user.name t && git config commit.gpgsign false", { cwd: wt, shell: "/bin/bash" });
+	writeFileSync(join(wt, "work.txt"), "x\n");
+	execSync("git add -A && git commit -qm work", { cwd: wt, shell: "/bin/bash" });
+	setWorktree(root, task, "wt1");
+	// (a) the recorded base differs from the worktree HEAD (fixes committed), under the cap:
+	// another pass in to-review, one pass counted
+	writeFileSync(reviewBasePath(root, slug), "oldsha\n");
+	endRun(root, slug, "reviewer", healthyLog());
+	poll(root, 5);
+	assert.equal(parseTask(root, task.file).state, "to-review", "a fix pass under the cap goes back to to-review");
+	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 1, "the fix pass counts one");
+	assert.ok(orchLog(root).includes(`${slug}: reviewer made fixes (pass 1 of 2), reviewing -> to-review`), "the fix pass is logged with its pass number");
+	// (b) a second fix pass reaches the cap: the daemon advances to to-merge itself
+	setState(root, parseTask(root, task.file), "reviewing");
+	writeFileSync(reviewBasePath(root, slug), "oldsha\n");
+	endRun(root, slug, "reviewer", healthyLog());
+	poll(root, 5);
+	assert.equal(parseTask(root, task.file).state, "to-merge", "a fix pass at the cap advances to to-merge");
+	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 2, "the cap pass counts too");
+	assert.ok(orchLog(root).includes(`${slug}: review cap 2 reached with fixes, reviewing -> to-merge`), "the cap advance is logged as its own kind");
+}
+// (c) a worktree-less task decides as approved: no worktree reads head=null, so fixed=false
+{
+	const { root } = caseRoot();
+	const task = startTask(root, "reviewing");
+	const slug = taskSlug(task.file);
+	endRun(root, slug, "reviewer", healthyLog());
+	poll(root, 5);
+	assert.equal(parseTask(root, task.file).state, "to-merge", "no worktree: no head, the pass decides as approved -> to-merge");
+	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 1, "the approval counts one pass");
 }
 
 // --- the cap still force-advances on counted successes (control for the case above) ---
@@ -187,10 +188,10 @@ const orchLog = (root: string) => {
 	const task = startTask(root, "to-review", "simple");
 	const slug = taskSlug(task.file);
 	endRun(root, slug, "reviewer", healthyLog());
-	writeFileSync(armedPath(root, slug), "999999");
 	writeFileSync(counterPath(root, `${slug}.reviewer-runs`), "1");
 	rescan(root, loadConfig(root));
 	assert.equal(parseTask(root, task.file).state, "to-merge", "a healthy reviewer run at the cap still force-advances");
+	assert.equal(readCounter(root, `${slug}.reviewer-runs`), 0, "the forced advance resets the run counter");
 }
 
 // --- a live-tester run that ends in a terminal error never reaches done ---
@@ -304,7 +305,7 @@ for (const [label, result] of [
 }
 
 // --- the classifier itself ---
-const { classifyRunLog } = await import("../../src/orchestrator/log.ts");
+const { classifyRunLog } = await import("../../src/orchestrator/classify.ts");
 {
 	const { root, logs } = caseRoot();
 	const put = (name: string, body: string) => {

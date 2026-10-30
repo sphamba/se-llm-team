@@ -13,9 +13,11 @@ import { join } from "node:path";
 import { agentAlive, pidAlive, pidEntry, writePid } from "../src/pid.ts";
 import { createTask, kanbanDir, parseTask, setState, taskSlug } from "../src/kanban.ts";
 import { loadConfig, poll } from "../src/orchestrator.ts";
-import { rescan } from "../src/orchestrator/pipeline.ts";
+import { rescan } from "../src/orchestrator/pipeline/index.ts";
 import { ensureWorktree } from "../src/orchestrator/board.ts";
-import { clearContextSymlinks, ensureContextSymlinks, exitFilePath, renderPrompt } from "../src/orchestrator/spawn.ts";
+import { exitFilePath } from "../src/orchestrator/spawn.ts";
+import { clearContextSymlinks, ensureContextSymlinks } from "../src/orchestrator/context.ts";
+import { renderPrompt } from "../src/orchestrator/prompt.ts";
 
 
 const cleaned: string[] = [];

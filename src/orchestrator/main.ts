@@ -7,7 +7,7 @@ import { loadWebUiConfig } from "../webui.ts";
 import { loadConfig, parseArgs } from "./config.ts";
 import { bootstrapBoard, killPushes } from "./board.ts";
 import { compactFinishedLogs, log } from "./log.ts";
-import { rescan } from "./pipeline.ts";
+import { rescan } from "./pipeline/index.ts";
 import { poll } from "./liveness.ts";
 
 // the PM's explicit "I am done editing, schedule now": a watch event for this file runs the
@@ -144,9 +144,9 @@ export function main(argv: string[]): void {
 	});
 
 	sweep();
-	poll(root, cfg.logStallMinutes, Date.now(), cfg.backlogIdleMinutes);
+	poll(root, cfg.logStallMinutes, Date.now(), cfg.backlogIdleMinutes, cfg.reviewerCap);
 	const timer = setInterval(sweep, rescanSeconds * 1000);
-	const poller = setInterval(() => poll(root, cfg.logStallMinutes, Date.now(), cfg.backlogIdleMinutes), pollMinutes * 60 * 1000);
+	const poller = setInterval(() => poll(root, cfg.logStallMinutes, Date.now(), cfg.backlogIdleMinutes, cfg.reviewerCap), pollMinutes * 60 * 1000);
 	try {
 		const w = watch(kanbanDir(root), (_event, filename) => scheduleSweep(filename === POKE_FILE));
 		w.on("error", (err) => log(root, `fs.watch error, polling only: ${err instanceof Error ? err.message : err}`));

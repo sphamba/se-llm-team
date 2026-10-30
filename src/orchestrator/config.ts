@@ -22,7 +22,7 @@ export const RESPAWN_CAP = 5;
 export const REVIEWER_RUN_CAP = 3;
 // per-complexity forced-advance caps: successful reviewer runs before to-review moves on to
 // to-merge; each overridable via the top-level reviewerCap config key
-const DEFAULT_REVIEWER_CAP: Record<string, number> = { trivial: 0, simple: 1, moderate: 2, complex: 3 };
+export const DEFAULT_REVIEWER_CAP: Record<string, number> = { trivial: 0, simple: 1, moderate: 2, complex: 3 };
 export interface LlmConfig {
 	provider?: string;
 	model?: string;
@@ -53,6 +53,8 @@ export interface Config {
 	liveTesting: boolean;
 	splitting: boolean;
 	autoMerge: boolean;
+	// the shell command the agents run to verify their work; default "npm test"
+	testCommand: string;
 	llm: LlmConfig;
 	roles: Record<string, RoleLlmConfig>;
 	reviewerCap: Record<string, number>;
@@ -143,6 +145,7 @@ export function loadConfig(root: string, defaultAgent?: string): Config {
 		liveTesting?: unknown;
 		splitting?: unknown;
 		autoMerge?: unknown;
+		testCommand?: unknown;
 		provider?: unknown;
 		model?: unknown;
 		thinking?: unknown;
@@ -234,6 +237,7 @@ export function loadConfig(root: string, defaultAgent?: string): Config {
 		liveTesting: flag(root, cfg.liveTesting, "liveTesting", true),
 		splitting: flag(root, cfg.splitting, "splitting", true),
 		autoMerge: flag(root, cfg.autoMerge, "autoMerge", true),
+		testCommand: typeof cfg.testCommand === "string" && cfg.testCommand.trim() ? cfg.testCommand.trim() : "npm test",
 		llm: cleanLlm(root, cfg, " (global)"),
 		roles,
 		reviewerCap,

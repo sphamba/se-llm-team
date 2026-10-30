@@ -5,10 +5,10 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask, kanbanDir, parseTask, setState, setWorktree, taskNum, taskSlug, updateTask } from "../../src/kanban.ts";
-import { armedPath } from "../../src/orchestrator/log.ts";
+import { reviewBasePath } from "../../src/orchestrator/pipeline/review.ts";
 import { REPORT_MAX_AGE_MS, reportsDir } from "../../src/orchestrator/report.ts";
 import { loadConfig, poll, removeTask } from "../../src/orchestrator.ts";
-import { rescan } from "../../src/orchestrator/pipeline.ts";
+import { rescan } from "../../src/orchestrator/pipeline/index.ts";
 import { pidPath } from "../../src/pid.ts";
 import { fixture, mirrorSubjects, showTip, roleStub, deadStub, runDaemon, waitFor, cleaned } from "../helpers.ts";
 
@@ -375,8 +375,9 @@ assert.equal(parseTask(rootAZ, taskAZ.file).state, "live-testing", "below the ca
 assert.ok(existsSync(pidPath(rootAZ, taskSlug(taskAZ.file))), "below the cap the live-tester pid file exists");
 console.log("orchestrator.test.ts: ... + maxParallel live-test cap smoke passed");
 
-// --- part UH1: a user hold skips the reviewer spawn: the task stays in to-review and no armed
-// marker is written, so releasing the hold starts the review with no stale run on record ---
+// --- part UH1: a user hold skips the reviewer spawn: the task stays in to-review and no
+// review-base marker is recorded, so releasing the hold starts the review with no stale run
+// on record ---
 const rootUH1 = fixture();
 cleaned.push(rootUH1);
 const homeUH1 = mkdtempSync(join(tmpdir(), "orch-home-"));
@@ -393,15 +394,16 @@ try {
 cfgUH1.backlogIdleMinutes = 0;
 cfgUH1.agent = deadStub(rootUH1);
 const heldUH1 = createTask(rootUH1, { name: "feat: held in review", summary: "User hold smoke", specs: "n/a", blockedBy: "user" });
+mkdirSync(join(kanbanDir(rootUH1), ".logs"), { recursive: true });
 setState(rootUH1, heldUH1, "to-review");
 rescan(rootUH1, cfgUH1);
 assert.equal(parseTask(rootUH1, heldUH1.file).state, "to-review", "the held task stays in to-review");
 assert.equal(existsSync(pidPath(rootUH1, taskSlug(heldUH1.file))), false, "no reviewer pid file for a held task");
-assert.equal(existsSync(armedPath(rootUH1, taskSlug(heldUH1.file))), false, "no reviewer armed marker for a held task");
+assert.equal(existsSync(reviewBasePath(rootUH1, taskSlug(heldUH1.file))), false, "no review-base marker for a held task");
 updateTask(rootUH1, heldUH1, { blockedBy: "" });
 rescan(rootUH1, cfgUH1);
 assert.equal(parseTask(rootUH1, heldUH1.file).state, "reviewing", "the released task spawned the reviewer");
-assert.ok(existsSync(armedPath(rootUH1, taskSlug(heldUH1.file))), "the released task armed the reviewer run");
+assert.ok(existsSync(reviewBasePath(rootUH1, taskSlug(heldUH1.file))), "the released task recorded its review base");
 console.log("orchestrator.test.ts: ... + user hold skips the reviewer spawn smoke passed");
 
 // --- part UH2: a user hold skips the live-tester spawn and the scan moves on: the held task

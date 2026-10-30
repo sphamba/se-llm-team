@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { createTask, kanbanDir, parseTask, setState, setWorktree, taskSlug } from "../../src/kanban.ts";
 import { loadConfig, poll } from "../../src/orchestrator.ts";
-import { rescan } from "../../src/orchestrator/pipeline.ts";
+import { rescan } from "../../src/orchestrator/pipeline/index.ts";
 import { pidAlive, pidPath } from "../../src/pid.ts";
 import { exitFilePath, spawnRunAnalysis } from "../../src/orchestrator/spawn.ts";
 import { fixture, waitFor, cleanupAll, cleaned, HERE } from "../helpers.ts";
@@ -57,8 +57,9 @@ const finishedRunAT2 = (slug: string, role: string) => {
 	writeFileSync(join(pidsAT2, `${role === "merger" ? "merger" : slug}.exit`), "0");
 	if (role === "merger") writeFileSync(join(pidsAT2, "merger.slug"), `${slug}\n`);
 };
-// one task per working state: doing (developer), reviewing (reviewer, which sets its own
-// state; a no-move exit 0 bounces to to-review), merging (merger), live-testing (live-tester)
+// one task per working state: doing (developer), reviewing (the reviewer only reports; the
+// daemon decides from the recorded base — no marker reads as approved), merging (merger),
+// live-testing (live-tester)
 const rolesAT2: Array<{ role: string; state: "doing" | "reviewing" | "merging" | "live-testing" }> = [
 	{ role: "developer", state: "doing" },
 	{ role: "reviewer", state: "reviewing" },
@@ -120,9 +121,9 @@ try {
 	}
 	assert.equal(orchLogAT2().split("spawned analysis pid=").length - 1, 4, "one analysis spawned per finished run");
 	// the exit-0 state moves happened before the spawn: the orchestrator's own moves, and the
-	// reviewer's no-move bounce to to-review
+	// reviewer's daemon decision (no base marker reads as approved)
 	assert.equal(parseTask(rootAT2, taskFilesAT2.developer).state, "to-review", "the developer's exit 0 moved doing -> to-review");
-	assert.equal(parseTask(rootAT2, taskFilesAT2.reviewer).state, "to-review", "the reviewer's no-move exit 0 bounced it to to-review");
+	assert.equal(parseTask(rootAT2, taskFilesAT2.reviewer).state, "to-merge", "the reviewer's exit 0 with no base marker decided as approved -> to-merge");
 	assert.ok(!existsSync(join(pidsAT2, `${slugsAT2.reviewer}.exit`)), "every end clears the exit file, the reviewer's included");
 	assert.equal(parseTask(rootAT2, taskFilesAT2.merger).state, "merging", "the merger's give-up keeps it in merging for the repair");
 	assert.equal(parseTask(rootAT2, taskFilesAT2["live-tester"]).state, "done", "the live-tester's exit 0 moved live-testing -> done");
@@ -147,15 +148,16 @@ try {
 		assert.ok(report.includes("## Analysis") && report.includes("S: x"), `the ${role} report carries the doctor answer`);
 	}
 	// exactly once: the finished analysis is never re-fired (no new pid file). One run ends on
-	// this pass, because the reviewer's bounce left no sticky exit file to re-take, and the
-	// sweep gzips the finished analysis's doctor log like any role log, content intact (000250)
+	// this pass (the late developer run), because the reviewer's decided move left no sticky
+	// exit file to re-take, and the sweep gzips the finished analysis's doctor log like any
+	// role log, content intact (000250)
 	const taskLateAT2 = createTask(rootAT2, { name: "feat: auto-run late developer", summary: "Auto-run analysis smoke", specs: "n/a" });
 	setState(rootAT2, taskLateAT2, "doing");
 	finishedRunAT2(taskSlug(taskLateAT2.file), "developer");
 	const reviewerFilesAT2 = analysisFilesAT2(`${slugsAT2.reviewer}.reviewer.0`);
 	const doctorMtimeAT2 = statSync(reviewerFilesAT2.doctor).mtimeMs;
 	poll(rootAT2, 5, Date.now(), 0);
-	assert.equal(parseTask(rootAT2, taskFilesAT2.reviewer).state, "to-review", "the bounced reviewer task stays in to-review on the second poll");
+	assert.equal(parseTask(rootAT2, taskFilesAT2.reviewer).state, "to-merge", "the decided reviewer task stays in to-merge on the second poll");
 	assert.ok(!existsSync(reviewerFilesAT2.pid), "the second poll spawned no new analysis for the reviewer run");
 	assert.ok(existsSync(`${reviewerFilesAT2.doctor}.gz`) && !existsSync(reviewerFilesAT2.doctor), "the second poll's sweep gzipped the finished analysis's doctor log");
 	assert.ok(gunzipSync(readFileSync(`${reviewerFilesAT2.doctor}.gz`)).toString().includes("Struggle: none"), "the gzipped doctor log keeps the stub's output");
@@ -241,9 +243,8 @@ try {
 }
 console.log("orchestrator.test.ts: ... + auto-run analysis smoke passed");
 
-// --- part AT4: the sweep-side recognition of a self-advanced exit (sweepToMerge): the
-// poll's 60 s cadence usually misses the ~10 s window before the next spawn of the slug
-// overwrites the stale pid/exit pair, so the sweep's to-merge pass fires the analysis; and
+// --- part AT4: the poll's recognition of a self-advanced exit: the pass that consumes a
+// non-working task's stale pid/exit pair (exit 0) fires the analysis for the exited run; and
 // newestRunRole never names a merger log (the stale pair is the slug's own, so the exited
 // run is never a merger run) — a crashed merger's log is never analysed instead ---
 const rootAT4 = fixture();
@@ -278,18 +279,18 @@ const analysisTouchedAT4 = (base: string) =>
 const savedHomeAT4 = process.env.HOME;
 try {
 	process.env.HOME = homeAT4;
-	// the clean self-advance: the sweep's to-merge pass fires the analysis inside the window
-	const taskAT4a = createTask(rootAT4, { name: "feat: sweep-side analysis", summary: "Sweep-side recognition smoke", specs: "n/a" });
+	// the clean self-advance: the poll's stale-pair pass fires the analysis on consumption
+	const taskAT4a = createTask(rootAT4, { name: "feat: self-advanced analysis", summary: "Self-advanced recognition smoke", specs: "n/a" });
 	setState(rootAT4, taskAT4a, "to-merge");
 	const slugAT4a = taskSlug(taskAT4a.file);
 	runLogAT4(slugAT4a, "reviewer");
 	stalePairAT4(slugAT4a);
-	rescan(rootAT4, loadConfig(rootAT4));
-	assert.ok(analysisTouchedAT4(`${slugAT4a}.reviewer.0`), "the sweep's to-merge pass spawned the analysis for the self-advanced run");
+	poll(rootAT4, 5, Date.now(), 0);
+	assert.ok(analysisTouchedAT4(`${slugAT4a}.reviewer.0`), "the poll's stale-pair pass spawned the analysis for the self-advanced run");
 	await waitFor(
 		() => existsSync(join(pidsAT4, `${slugAT4a}.reviewer.0.analysis.exit`)) && existsSync(join(logsAT4, `${slugAT4a}.reviewer.0.doctor.log`)),
 		20000,
-		"the sweep-side analysis finished (exit file, doctor log)",
+		"the self-advanced analysis finished (exit file, doctor log)",
 		() => "",
 	);
 	// only a merger log: the stale pair is the slug's own (the merger's exits ride the global
@@ -299,7 +300,6 @@ try {
 	const slugAT4b = taskSlug(taskAT4b.file);
 	runLogAT4(slugAT4b, "merger");
 	stalePairAT4(slugAT4b);
-	rescan(rootAT4, loadConfig(rootAT4));
 	poll(rootAT4, 5, Date.now(), 0);
 	assert.ok(!analysisTouchedAT4(`${slugAT4b}.merger.0`), "a crashed merger's log is never analysed by the stale-pair recognition");
 	// the conflict requeue: a crashed merger's log (newest by mtime) must not shadow the
@@ -317,13 +317,14 @@ try {
 	process.env.HOME = savedHomeAT4;
 }
 cleanupAll(rootAT4);
-console.log("orchestrator.test.ts: ... + sweep-side self-advanced analysis smoke passed");
+console.log("orchestrator.test.ts: ... + self-advanced analysis smoke passed");
 
-// --- part AT5: one failed analysis attempt per run (#229): the to-merge sweep re-fires
-// spawnRunAnalysis on every sweep while the task sits in to-merge, and a failed analysis
-// (an early throw: no report, no doctor log, pid self-removed) used to respawn forever.
-// The wrapper's exit marker caps it to one attempt, the janitor keeps the marker while the
-// task exists, the skip is logged, and a fresh run (new index) keys its own marker ---
+// --- part AT5: one failed analysis attempt per run (#229): the poll's stale-pair pass fires
+// spawnRunAnalysis once per finished run while the task sits in to-merge, and a failed
+// analysis (an early throw: no report, no doctor log, pid self-removed) used to respawn
+// forever when the sweep re-fired it. The wrapper's exit marker caps any re-attempt to one,
+// the janitor keeps the marker while the task exists, the skip is logged, and a fresh run
+// (new index) keys its own marker ---
 const rootAT5 = fixture();
 cleaned.push(rootAT5);
 const homeAT5 = mkdtempSync(join(tmpdir(), "orch-home-"));
@@ -357,20 +358,25 @@ const savedHomeAT5 = process.env.HOME;
 try {
 	process.env.HOME = homeAT5;
 	rescan(rootAT5, loadConfig(rootAT5));
-	// the sweep fired the failing analysis: the runner cannot gunzip the log, so the wrapper
+	// the sweep no longer fires analyses itself: the poll's stale-pair pass does, exactly once
+	poll(rootAT5, 5, Date.now(), 0);
+	// the poll fired the failing analysis: the runner cannot gunzip the log, so the wrapper
 	// records a non-zero exit and the pid file self-removes, leaving only the marker
 	await waitFor(() => existsSync(join(pidsAT5, `${baseAT5}.analysis.exit`)), 20000, "the failing analysis left its exit marker", () => "");
 	assert.ok(!existsSync(join(logsAT5, `${baseAT5}.analysis.md`)), "the failed analysis wrote no report");
 	assert.ok(!existsSync(join(logsAT5, `${baseAT5}.doctor.log`)), "the failed analysis wrote no doctor log");
 	assert.notEqual(readFileSync(join(pidsAT5, `${baseAT5}.analysis.exit`), "utf8").trim(), "0", "the failing analysis exited non-zero");
-	assert.equal(spawnedCountAT5(), 1, "the first sweep spawned the analysis once");
-	// the exit marker caps the hook: later to-merge sweeps skip the respawn, the skip is
-	// logged, and the janitor keeps the marker while the task exists
+	assert.equal(spawnedCountAT5(), 1, "the first poll spawned the analysis once");
+	// the exit marker caps any re-attempt: later sweeps and polls fire none (the stale pair is
+	// consumed), the janitor keeps the marker while the task exists, and a direct re-attempt
+	// into spawnRunAnalysis is skipped with a log line
 	rescan(rootAT5, loadConfig(rootAT5));
-	rescan(rootAT5, loadConfig(rootAT5));
+	poll(rootAT5, 5, Date.now(), 0);
 	assert.ok(existsSync(join(pidsAT5, `${baseAT5}.analysis.exit`)), "the exit marker survives the sweeps (the janitor keeps it)");
-	assert.equal(spawnedCountAT5(), 1, "later to-merge sweeps never respawned the failed analysis");
+	assert.equal(spawnedCountAT5(), 1, "later sweeps and polls never respawned the failed analysis");
+	spawnRunAnalysis(rootAT5, slugAT5, "developer");
 	assert.ok(orchLogAT5().includes("skipping respawn"), "the skip is logged");
+	assert.ok(!existsSync(join(pidsAT5, `${baseAT5}.analysis.pid`)), "the capped re-attempt spawned nothing");
 	assert.equal(parseTask(rootAT5, taskAT5.file).state, "to-merge", "the task stays in to-merge, the pipeline unharmed");
 	// a fresh run (new index) keys its own marker: the stale marker never blocks it
 	const freshBaseAT5 = `${slugAT5}.reviewer.0`;
@@ -378,7 +384,10 @@ try {
 		join(logsAT5, `${freshBaseAT5}.log`),
 		JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "did the work" }] } }) + "\n",
 	);
-	rescan(rootAT5, loadConfig(rootAT5));
+	// a fresh finished run: its own stale pair for the poll's next pass to consume
+	writeFileSync(pidPath(rootAT5, slugAT5), "999999999\n");
+	writeFileSync(exitFilePath(rootAT5, slugAT5), "0\n");
+	poll(rootAT5, 5, Date.now(), 0);
 	assert.ok(existsSync(join(pidsAT5, `${freshBaseAT5}.analysis.pid`)), "the fresh run's analysis fires despite the stale marker");
 	await waitFor(() => existsSync(join(logsAT5, `${freshBaseAT5}.analysis.md`)), 20000, "the fresh run's analysis completed", () => "");
 	assert.equal(spawnedCountAT5(), 2, "exactly two analysis spawns in total");

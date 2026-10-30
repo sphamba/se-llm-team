@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask, kanbanDir, parseTask, setState, taskNum, taskSlug, updateTask } from "../../src/kanban.ts";
 import { loadConfig } from "../../src/orchestrator.ts";
-import { rescan } from "../../src/orchestrator/pipeline.ts";
+import { rescan } from "../../src/orchestrator/pipeline/index.ts";
 import { pidPath } from "../../src/pid.ts";
 import { fixture, roleStub, deadStub, runDaemon, waitFor, cleaned } from "../helpers.ts";
 

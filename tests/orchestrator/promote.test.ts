@@ -6,7 +6,8 @@ import { basename, dirname, join } from "node:path";
 import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskNum, taskSlug, updateTask } from "../../src/kanban.ts";
 import { reportsDir } from "../../src/orchestrator/report.ts";
 import { dropDoneBlockers, loadConfig, poll, promoteBacklog } from "../../src/orchestrator.ts";
-import { rescan } from "../../src/orchestrator/pipeline.ts";
+import { rescan } from "../../src/orchestrator/pipeline/index.ts";
+import { reviewBasePath } from "../../src/orchestrator/pipeline/review.ts";
 import { pidPath } from "../../src/pid.ts";
 import { fixture, roleStub, deadStub, runDaemon, waitFor, runIdx, cleanupAll, cleaned } from "../helpers.ts";
 
@@ -54,43 +55,31 @@ r.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: ... + event-driven promotion smoke passed");
 
-// --- part AA: the reviewer successful-run cap: for the default moderate complexity, 2
-// successful runs, the 3rd spawn is refused ---
-// a reviewer run is successful when it sets the task state itself (back to to-review after
-// changes, or forward to to-merge on approval); died runs go through the dead counter
+// --- part AA: the reviewer pass cap: for the default moderate complexity, 2 counted passes,
+// then the cap moves the task on to to-merge ---
+// the daemon counts each finished reviewer pass at decideReview (the poll), comparing the
+// worktree HEAD against the recorded base: fixes committed under the cap bounce to to-review,
+// fixes at the cap move to to-merge; died runs go through the dead counter
+// the reviewer never moves the task (the orchestrator decides from the commits it leaves):
+// each pass commits one more fix, so every pass counts and the cap gates the next move; the
+// developer and the live-tester just finish and the orchestrator moves the task on their exit 0
 const loopStub = (root: string) => {
 	const stub = join(root, "loop-agent.cjs");
 	writeFileSync(
 		stub,
 		`#!/usr/bin/env node
-const { readFileSync, writeFileSync, existsSync, readlinkSync } = require("node:fs");
-const { basename, dirname, join } = require("node:path");
+const { readFileSync, appendFileSync } = require("node:fs");
+const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 // the task comes from the cwd SPECS.md symlink, which the orchestrator re-points at spawn
-const file = "SPECS.md";
 let front = "";
-let taskFile = "";
-try {
-	front = readFileSync(file, "utf8");
-	taskFile = readlinkSync(file); // ".kanban/<taskFile>", the real task file through the board
-} catch {}
+try { front = readFileSync("SPECS.md", "utf8"); } catch {}
 if (!front.match(/^state: /m)) process.exit(0);
-const isReviewer = prompt.includes("Reviewer agent");
-// a reviewer must not outrun the daemon's bookkeeping: it waits for the post-spawn armed
-// marker (the daemon took over), writes its state, then waits for the next sweep to consume
-// the marker with the pidfile still matching (the run was counted). Exiting earlier lets a
-// poll tick clear the pidfile between the exit and that sweep, so consumeReviewerRun drops
-// the run uncounted and one spawn past the cap happens
-const armed = () => join(dirname(taskFile), ".logs", basename(taskFile, ".md") + ".reviewer-armed");
-const waitUntil = (cond, ms) => {
-	const end = Date.now() + ms;
-	while (!cond() && Date.now() < end) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
-};
-if (isReviewer) waitUntil(() => existsSync(armed()), 10000);
-// only the reviewer sets a state itself (back to to-review for another run); the developer
-// and the live-tester just finish and the orchestrator moves the task on their exit 0
-if (isReviewer) writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: to-review"));
-if (isReviewer) waitUntil(() => !existsSync(armed()), 10000);
+// appended, so every pass's commit differs and moves the worktree HEAD off the recorded base
+if (prompt.includes("Reviewer agent")) {
+	appendFileSync("review-fix.txt", "fix\\n");
+	execSync("git add -A && git commit -qm review-fix", { stdio: "ignore" });
+}
 `,
 	);
 	chmodSync(stub, 0o755);
@@ -113,14 +102,15 @@ const runsAA = () => {
 		return 0;
 	}
 };
-// two successful reviewer runs (each back to to-review), then the 3rd spawn is refused
-await waitFor(() => aa.output().includes(`${taskAA.file}: reviewer succeeded 2+ times, moving to to-merge`), 60000, "reviewer cap refusal logged", aa.output);
-assert.equal(aa.output().split("spawned reviewer").length - 1, 2, "exactly two reviewer spawns before the refusal");
-assert.equal(runsAA(), 0, "the counter cleared on the forced to-merge advance");
+// pass 1 commits fixes and bounces to to-review; pass 2 reaches the cap 2 and moves to to-merge
+await waitFor(() => aa.output().includes(`${slugAA}: review cap 2 reached with fixes, reviewing -> to-merge`), 60000, "review cap advance logged", aa.output);
+assert.equal(aa.output().split("spawned reviewer").length - 1, 2, "exactly two reviewer passes ran");
+assert.equal(runsAA(), 2, "each finished pass counted once at decideReview");
 assert.deepEqual(runIdx(rootAA, `${slugAA}.reviewer`), ["0", "1"], "two indexed reviewer run logs, no third");
-// the pipeline continues from the forced advance: the live-tester runs and the task completes
-await waitFor(() => parseTask(rootAA, taskAA.file).state === "done" && parseTask(rootAA, taskAA.file).worktree === "", 60000, "pipeline after the cap refusal", aa.output);
-assert.equal(runsAA(), 0, "counter still cleared after the pipeline completed");
+assert.ok(aa.output().includes(`${slugAA}: reviewer made fixes (pass 1 of 2), reviewing -> to-review`), "the first pass bounced to to-review for another round");
+// the pipeline continues from the cap advance: the merger runs and the task completes
+await waitFor(() => parseTask(rootAA, taskAA.file).state === "done" && parseTask(rootAA, taskAA.file).worktree === "", 60000, "pipeline after the cap advance", aa.output);
+assert.equal(runsAA(), 2, "the counter survives the done move: only a to-do arrival resets it");
 aa.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + reviewer successful-run cap smoke passed");
 
@@ -279,18 +269,19 @@ const aj = await runDaemon(rootAJ);
 // invalid reviewerCap.complex warns at load; the cap falls back to the default 3
 await waitFor(() => aj.output().includes("invalid reviewerCap.complex -1, ignored (expected an integer >= 0)"), 10000, "invalid reviewerCap warning", aj.output);
 // simple: default cap 1; moderate: the configured override 1; complex: fallback to the default 3
-await waitFor(() => aj.output().includes(`${taskAJSimple.file}: reviewer succeeded 1+ times, moving to to-merge`), 60000, "simple cap 1", aj.output);
-await waitFor(() => aj.output().includes(`${taskAJMod.file}: reviewer succeeded 1+ times, moving to to-merge`), 60000, "configured override cap 1", aj.output);
-await waitFor(() => aj.output().includes(`${taskAJComplex.file}: reviewer succeeded 3+ times, moving to to-merge`), 60000, "invalid value fell back to the default 3", aj.output);
+const slugAJ = (file: string) => file.replace(/\.md$/, "");
+await waitFor(() => aj.output().includes(`${slugAJ(taskAJSimple.file)}: review cap 1 reached with fixes, reviewing -> to-merge`), 60000, "simple cap 1", aj.output);
+await waitFor(() => aj.output().includes(`${slugAJ(taskAJMod.file)}: review cap 1 reached with fixes, reviewing -> to-merge`), 60000, "configured override cap 1", aj.output);
+await waitFor(() => aj.output().includes(`${slugAJ(taskAJComplex.file)}: review cap 3 reached with fixes, reviewing -> to-merge`), 60000, "invalid value fell back to the default 3", aj.output);
 const reviewerSpawns = (file: string) => aj.output().split("\n").filter((l) => l.includes("spawned reviewer") && l.includes(`for ${file}`)).length;
-assert.equal(reviewerSpawns(taskAJSimple.file), 1, "simple task force-advanced after one successful run");
+assert.equal(reviewerSpawns(taskAJSimple.file), 1, "simple task advanced after one counted pass");
 assert.equal(reviewerSpawns(taskAJMod.file), 1, "configured moderate override applied");
 assert.equal(reviewerSpawns(taskAJComplex.file), 3, "invalid configured value fell back to the default 3");
 aj.daemon.kill("SIGTERM");
 console.log("orchestrator.test.ts: ... + per-complexity reviewer cap smoke passed");
 
 // --- part AJ-b: the trivial complexity: cap 0 force-advances to-review -> to-merge on the
-// first sweep with no reviewer spawn (no armed marker, no pid), and reviewerCap accepts 0 while
+// first sweep with no reviewer spawn (no review base, no pid), and reviewerCap accepts 0 while
 // negative and non-integer values warn and keep the default ---
 const rootAJT = fixture();
 cleaned.push(rootAJT);
@@ -315,7 +306,7 @@ assert.ok(!ajt.output().includes("invalid reviewerCap.trivial"), "reviewerCap.tr
 // >= cap 0, so no reviewer spawns
 await waitFor(() => ajt.output().includes(`${taskAJT.file}: reviewer succeeded 0+ times, moving to to-merge`), 60000, "trivial forced advance", ajt.output);
 assert.ok(!ajt.output().split("\n").some((l) => l.includes("spawned reviewer") && l.includes(taskAJT.file)), "no reviewer spawn for a trivial task");
-assert.ok(!existsSync(join(kanbanDir(rootAJT), ".logs", `${slugAJT}.reviewer-armed`)), "no armed marker for a trivial task");
+assert.ok(!existsSync(reviewBasePath(rootAJT, slugAJT)), "no review base recorded for a trivial task");
 assert.ok(!existsSync(join(kanbanDir(rootAJT), ".pids", `${slugAJT}.pid`)), "no agent pid written for a trivial task");
 const runsAJT = () => {
 	try {
@@ -326,7 +317,7 @@ const runsAJT = () => {
 };
 assert.equal(runsAJT(), 0, "the trivial task never ran a reviewer");
 // the warned values keep the default caps: the moderate task advances at the default 2
-await waitFor(() => ajt.output().includes(`${taskAJTMod.file}: reviewer succeeded 2+ times, moving to to-merge`), 90000, "warned moderate keeps the default 2", ajt.output);
+await waitFor(() => ajt.output().includes(`${slugAJ(taskAJTMod.file)}: review cap 2 reached with fixes, reviewing -> to-merge`), 90000, "warned moderate keeps the default 2", ajt.output);
 assert.equal(ajt.output().split("\n").filter((l) => l.includes("spawned reviewer") && l.includes(taskAJTMod.file)).length, 2, "exactly two reviewer spawns for the moderate task");
 // the pipeline continues from the forced advance: the live-tester runs and the trivial task completes
 await waitFor(() => parseTask(rootAJT, taskAJT.file).state === "done" && parseTask(rootAJT, taskAJT.file).worktree === "", 60000, "trivial task completes", ajt.output);
@@ -544,6 +535,8 @@ const holderAX2 = createTask(rootAX, { name: "fix: merging slot", summary: "MaxP
 setState(rootAX, holderAX2, "merging");
 const taskAX = createTask(rootAX, { name: "feat: capped review", summary: "MaxParallel smoke", specs: "n/a" });
 setState(rootAX, taskAX, "to-review");
+// the review-base write lands in .logs before the pid file: a fresh fixture has no .logs yet
+mkdirSync(join(kanbanDir(rootAX), ".logs"), { recursive: true });
 rescan(rootAX, cfgAX);
 assert.equal(parseTask(rootAX, taskAX.file).state, "to-review", "at the cap the to-review task stays in to-review");
 assert.ok(!existsSync(pidPath(rootAX, taskSlug(taskAX.file))), "at the cap no reviewer spawned");
@@ -799,6 +792,9 @@ setState(rootBJ, todoBJ, "to-do");
 const reviewBJ = createTask(rootBJ, { name: "feat: high to review", priority: "high", complexity: "moderate", summary: "Stage order smoke", specs: "n/a" });
 setState(rootBJ, reviewBJ, "to-review");
 assert.ok(todoBJ.file < reviewBJ.file, "precondition: the to-do file sorts first by name");
+// the reviewer spawn writes the review base into .logs before the pid file: a fresh fixture
+// has no .logs yet
+mkdirSync(join(kanbanDir(rootBJ), ".logs"), { recursive: true });
 rescan(rootBJ, cfgBJ);
 assert.equal(parseTask(rootBJ, reviewBJ.file).state, "reviewing", "the high to-review took the only slot");
 assert.ok(existsSync(pidPath(rootBJ, taskSlug(reviewBJ.file))), "the reviewer pid file exists");
@@ -865,7 +861,7 @@ for (const state of ["to-do", "to-review", "to-merge", "to-live-test"] as const)
 	const task = createTask(rootBM, { name: `feat: ${state.replaceAll("-", " ")}`, priority: "high", summary: "Board order smoke", specs: "n/a" });
 	setState(rootBM, task, state);
 }
-const { boardOrder } = await import("../../src/orchestrator/pipeline.ts");
+const { boardOrder } = await import("../../src/orchestrator/pipeline/index.ts");
 assert.deepEqual([...listAll(rootBM)].sort(boardOrder).map((t) => t.state), ["to-live-test", "to-merge", "to-review", "to-do"], "the global order runs later stage first");
 cleanupAll(rootBM);
 console.log("orchestrator.test.ts: ... + board order smoke passed");
@@ -919,15 +915,24 @@ setState(rootBQp, reviewBQp, "to-review");
 const backlogBQp = createTask(rootBQp, { name: "feat: question in backlog", summary: "Reconcile smoke", specs: "n/a", openQuestions: "- [user] keep it?" });
 updateTask(rootBQp, reviewBQp, { openQuestions: "- [user] which way?" });
 rescan(rootBQp, cfgBQp);
-assert.equal(parseTask(rootBQp, reviewBQp.file).state, "to-do", "a to-review task that gains a question goes to to-do");
-assert.equal(parseTask(rootBQp, reviewBQp.file).blockedBy, "user, question", "the question token joins the list");
+// the user hold wins twice: the lane gate skips the spawn and the reconcile stamps no
+// question token (an explicit user hold is not the daemon's question bounce)
+assert.equal(parseTask(rootBQp, reviewBQp.file).state, "to-review", "a user-held to-review task keeps its state when it gains a question");
+assert.equal(parseTask(rootBQp, reviewBQp.file).blockedBy, "user", "the user hold suppresses the question stamp and bounce");
 assert.equal(parseTask(rootBQp, backlogBQp.file).state, "backlog", "a backlog task keeps its state");
 assert.equal(parseTask(rootBQp, backlogBQp.file).blockedBy, "question", "the backlog task gains the token too");
-// the answer folded into the Specs drops the token only: the to-do task continues by itself
+// the answer folded into the Specs changes nothing while the user hold stands
 updateTask(rootBQp, reviewBQp, { openQuestions: "", specs: "The answer: the first way." });
 rescan(rootBQp, cfgBQp);
-assert.equal(parseTask(rootBQp, reviewBQp.file).blockedBy, "user", "the question token is gone and the user token stays");
-assert.equal(parseTask(rootBQp, reviewBQp.file).state, "to-do", "the token drop moves no state");
+assert.equal(parseTask(rootBQp, reviewBQp.file).blockedBy, "user", "the user token stays");
+assert.equal(parseTask(rootBQp, reviewBQp.file).state, "to-review", "the token drop moves no state");
+// releasing the user hold starts the review (the .logs mkdir backs the review-base write on
+// this fresh fixture)
+mkdirSync(join(kanbanDir(rootBQp), ".logs"), { recursive: true });
+updateTask(rootBQp, reviewBQp, { blockedBy: "" });
+rescan(rootBQp, cfgBQp);
+assert.equal(parseTask(rootBQp, reviewBQp.file).state, "reviewing", "the released task spawned the reviewer");
+assert.ok(existsSync(pidPath(rootBQp, taskSlug(reviewBQp.file))), "the released task's reviewer pid file exists");
 // a bare question with no hold token: the to-review lane reads the section, not only the token
 // the reconcile stamps at the end of the same sweep, so no reviewer is spawned ahead of it
 const bareBQp = createTask(rootBQp, { name: "feat: bare question in review", summary: "Reconcile smoke", specs: "n/a" });

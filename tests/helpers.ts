@@ -55,9 +55,10 @@ export const showTip = (root: string, file: string): string | null => {
 
 // stub agent: parses its role out of the prompt and the task from the cwd SPECS.md symlink,
 // then acts per the new contract: the developer commits a code change and finishes (the
-// orchestrator moves the state on the exit 0), the reviewer writes to-merge itself, the
-// live-tester just finishes, and the merger owns the rebase of its worktree branch and keeps
-// its own side on every conflict; the blanket git add -A in the worktree proves board
+// orchestrator moves the state on the exit 0), the reviewer just finishes (the orchestrator
+// reads the commits it leaves; a `reviewer-fix` marker in the task content makes it commit a
+// fix), the live-tester just finishes, and the merger owns the rebase of its worktree branch
+// and keeps its own side on every conflict; the blanket git add -A in the worktree proves board
 // changes cannot be staged
 export const roleStub = (root: string) => {
 	const stub = join(root, "stub-agent.cjs");
@@ -128,9 +129,14 @@ if (prompt.includes("Merger agent")) {
 	}
 	process.exit(0);
 }
-// only the reviewer sets a state itself (to-merge on approval); the developer and the
-// live-tester just finish and the orchestrator moves the task on their exit 0
-if (prompt.includes("Reviewer agent")) writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: to-merge"));
+// the reviewer never moves the task (the orchestrator decides from the commits it leaves);
+// the reviewer-fix marker in the task content makes it commit a fix like the developer
+// The developer and the live-tester just finish and the orchestrator moves the task on their
+// exit 0
+if (prompt.includes("Reviewer agent") && front.includes("reviewer-fix")) {
+	writeFileSync("review-fix.txt", "fix\\n");
+	execSync("git add -A && git commit -qm review fix", { stdio: "ignore" });
+}
 `,
 	);
 	chmodSync(stub, 0o755);
@@ -139,7 +145,8 @@ if (prompt.includes("Reviewer agent")) writeFileSync(file, readFileSync(file, "u
 
 // stub agent that records every spawn (role, argv, task) and acts per the new contract: the
 // developer commits so the merge is real, the merger owns the rebase in its worktree cwd,
-// only the reviewer writes state, the live-tester just finishes
+// the reviewer just finishes (a `reviewer-fix` marker makes it commit a fix), the live-tester
+// just finishes
 export const argvStub = (root: string) => {
 	const stub = join(root, "argv-agent.cjs");
 	writeFileSync(
@@ -179,9 +186,14 @@ if (role === "merger") {
 		try { execSync("GIT_EDITOR=true git rebase --continue", { stdio: "ignore" }); } catch { break; }
 	}
 }
-// only the reviewer sets a state itself (to-merge on approval); the developer and the
-// live-tester just finish and the orchestrator moves the task on their exit 0
-if (role === "reviewer") writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, "state: to-merge"));
+// the reviewer never moves the task (the orchestrator decides from the commits it leaves);
+// the reviewer-fix marker in the task content makes it commit a fix like the developer
+// The developer and the live-tester just finish and the orchestrator moves the task on their
+// exit 0
+if (role === "reviewer" && front.includes("reviewer-fix")) {
+	writeFileSync("review-fix.txt", "fix\\n");
+	execSync("git add -A && git commit -qm review fix", { stdio: "ignore" });
+}
 `,
 	);
 	chmodSync(stub, 0o755);

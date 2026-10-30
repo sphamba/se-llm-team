@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { analyseLog } from "./efficiency-analysis.ts";
 import { loadConfig, resolveLlm } from "./orchestrator/config.ts";
 import { log } from "./orchestrator/log.ts";
-import { ensureRoleNotes } from "./orchestrator/spawn.ts";
+import { ensureRoleNotes } from "./orchestrator/context.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 

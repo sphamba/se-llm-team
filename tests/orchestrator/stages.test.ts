@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask, kanbanDir, parseTask, setState, setWorktree, taskSlug } from "../../src/kanban.ts";
 import { loadConfig } from "../../src/orchestrator.ts";
-import { rescan } from "../../src/orchestrator/pipeline.ts";
-import { armedPath } from "../../src/orchestrator/log.ts";
+import { rescan } from "../../src/orchestrator/pipeline/index.ts";
+import { reviewBasePath } from "../../src/orchestrator/pipeline/review.ts";
 import { pidPath } from "../../src/pid.ts";
 import { cleaned, deadStub, fixture } from "../helpers.ts";
 
@@ -52,7 +52,7 @@ assert.ok(orchLog(root1).includes('splitting 0 ignored: must be a boolean'), "a 
 console.log("stages.test.ts: ... + stage flag config passed");
 
 // --- part 2: reviews off sends a to-review task straight to to-merge, with no reviewer spawn
-// and no armed marker ---
+// and no recorded review base ---
 const root2 = fixture();
 cleaned.push(root2);
 const cfg2 = cfgFor(root2, { reviews: false });
@@ -61,7 +61,7 @@ setState(root2, task2, "to-review");
 rescan(root2, cfg2);
 assert.equal(parseTask(root2, task2.file).state, "to-merge", "reviews off moves to-review straight to to-merge");
 assert.equal(existsSync(pidPath(root2, taskSlug(task2.file))), false, "reviews off spawns no reviewer");
-assert.equal(existsSync(armedPath(root2, taskSlug(task2.file))), false, "reviews off arms no reviewer run");
+assert.equal(existsSync(reviewBasePath(root2, taskSlug(task2.file))), false, "reviews off records no review base");
 assert.ok(orchLog(root2).includes(`${task2.file}: reviews are off, moving to to-merge`), "the skip is logged");
 console.log("stages.test.ts: ... + reviews off skips the reviewer passed");
 

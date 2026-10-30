@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { kanbanDir } from "../../src/kanban.ts";
 import { compactFinishedLogs, compactLogLine, nextRunIndex } from "../../src/orchestrator.ts";
-import { newestRunRole } from "../../src/orchestrator/log.ts";
+import { newestRunRole } from "../../src/orchestrator/classify.ts";
 import { fixture, cleaned } from "../helpers.ts";
 
 // --- part AB: the compactor drops the moderate drop list, keeps the read path byte-for-byte ---

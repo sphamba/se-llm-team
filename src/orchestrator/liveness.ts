@@ -1,21 +1,24 @@
-import { readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getTask, kanbanDir, listAll, questionOpen, setState, taskSlug, type Task, type TaskState } from "../kanban.ts";
 import { clearPid, killTree, pidAlive, pidEntry } from "../pid.ts";
-import { RESPAWN_CAP } from "./config.ts";
-import { armedPath, bumpCounter, classifyRunLog, compactFinishedLogs, counterPath, log, logPath, newestRunLogPath, newestRunRole, nextRunIndex, readCounter } from "./log.ts";
-import { clearContextSymlinks, clearExitFile, readExitCode, readMergerSlug, spawnRunAnalysis } from "./spawn.ts";
-import { dropDoneBlockers, finishMerge, mergeStuck, promoteBacklog } from "./pipeline.ts";
+import { RESPAWN_CAP, DEFAULT_REVIEWER_CAP } from "./config.ts";
+import { bumpCounter, compactFinishedLogs, counterPath, log, logPath, nextRunIndex, readCounter } from "./log.ts";
+import { classifyRunLog, newestRunLogPath, newestRunRole } from "./classify.ts";
+import { clearExitFile, readExitCode, readMergerSlug, spawnRunAnalysis } from "./spawn.ts";
+import { clearContextSymlinks } from "./context.ts";
+import { decideReview, dropDoneBlockers, finishMerge, mergeStuck, promoteBacklog } from "./pipeline/index.ts";
 
 // the working states with an agent out: next is the one-state-back bounce target when the
 // agent dies, failure is the bounce target of a run that ended in a terminal error (the same
 // crash path), success is
 // the state the orchestrator moves the task to on a successful finish (exit 0 with a clean run
 // log), role is the agent role whose per-run log (.kanban/.logs/<slug>.<role>.<n>.log) the
-// stall check samples and the terminal-error classifier reads. The reviewer and the merger have
-// no success move: the reviewer sets the state itself via kanban_set_state, so an exit-0 run
-// that left the task in reviewing never moved it and bounces to next; the merger's exit 0 runs
-// the daemon's finishMerge, which fast-forwards the base or parks the task
+// stall check samples and the terminal-error classifier reads. The reviewer and the merger
+// have no success move of their own: the poll decides their outcome - the reviewer's from the
+// recorded base commit (decideReview, with the Specs-violation to-do already moved by the
+// agent itself), the merger's through finishMerge, which fast-forwards the base or parks the
+// task
 const WORKING_STATES: Partial<Record<TaskState, { next: TaskState; failure?: TaskState; success: TaskState | null; role: string }>> = {
 	doing: { next: "to-do", success: "to-review", role: "developer" },
 	reviewing: { next: "to-review", success: null, role: "reviewer" },
@@ -113,7 +116,7 @@ function clearDeadStreak(root: string, slug: string): void {
 }
 
 // now is injectable so the stall window is testable without waiting out real minutes
-export function poll(root: string, stallMinutes: number, now = Date.now(), backlogIdleMinutes = 0): void {
+export function poll(root: string, stallMinutes: number, now = Date.now(), backlogIdleMinutes = 0, reviewerCap: Record<string, number> = DEFAULT_REVIEWER_CAP): void {
 	// a run ended this pass (a bounced working agent, or the stale pidfile of a completed one):
 	// the ended logs are raw, so the pass ends with their retro-compact
 	let ended = false;
@@ -177,19 +180,6 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 			const hadPid = pid > 0;
 			const code = readExitCode(root, pidName);
 			const failedRun = code === 0 && working !== undefined && classifyRunLog(newestRunLogPath(root, slug, working.role));
-			// an armed reviewer's run just ended (this dead pid is the armed reviewer's): consume
-			// the marker here, so the pid-file clear below cannot lose the count before a sweep's
-			// consume runs (the approval lands the task in to-merge, where the poll is the first
-			// to see the run end). A run counts one pass only when its state move landed: an armed
-			// marker on an exit-0 run that left the task in reviewing never moved it
-			try {
-				if (pid > 0 && parseInt(readFileSync(armedPath(root, slug), "utf8").trim(), 10) === pid) {
-					rmSync(armedPath(root, slug));
-					if (code === 0 && getTask(root, task.file)?.state !== "reviewing") bumpCounter(root, `${slug}.reviewer-runs`);
-				}
-			} catch {
-				/* no armed marker for this task */
-			}
 			// every end clears the exit file: no path leaves a stale exit code for the next pass
 			clearExitFile(root, pidName);
 			clearPid(root, pidName);
@@ -203,9 +193,9 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 				if (hadPid) {
 					ended = true;
 					clearDeadStreak(root, slug);
-					// a self-advanced run (the reviewer sets to-merge itself) gets analysed too:
-					// exit 0 only, a crashed run's log is not analysed, and the role is unknown
-					// here, so the slug's newest run log names it
+					// a self-advanced run (the reviewer sets to-do itself on a Specs violation) gets
+					// analysed too: exit 0 only, a crashed run's log is not analysed, and the role is
+					// unknown here, so the slug's newest run log names it
 					if (code === 0) {
 						const role = newestRunRole(root, slug);
 						if (role) spawnRunAnalysis(root, slug, role);
@@ -233,14 +223,13 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 						setState(root, fresh, next);
 						log(root, `${slug}: agent exited 0, ${task.state} -> ${next}`);
 					}
-				} else if (getTask(root, task.file)?.state === "reviewing") {
-					// the reviewer sets the state itself; exit 0 with the task still in reviewing
-					// means its state move never landed, so the run failed and bounces to to-review
-					// like a crash. Its clean log is still analysed first, like any finished run
-					log(root, `${slug}: reviewer exited 0 with the task still in reviewing, reviewing -> to-review`);
-					spawnRunAnalysis(root, slug, working.role);
-					bounceDead(root, task, "to-review", pidName, pid, false);
-					continue;
+				} else if (task.state === "reviewing") {
+					// the reviewer only reports: the daemon owns the outcome. The recorded base commit
+					// decides: fixes committed and the review cap not reached -> another pass in
+					// to-review, otherwise -> to-merge. The Specs-violation to-do never reaches here:
+					// the task left reviewing before this branch, so it is not a working state
+					const fresh = getTask(root, task.file);
+					if (fresh && fresh.state === task.state) decideReview(root, reviewerCap, fresh);
 				}
 				clearDeadStreak(root, slug);
 				// every successful agent run gets its log analysed (analyst + doctor), detached so

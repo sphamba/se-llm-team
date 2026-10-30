@@ -9,7 +9,7 @@ List open user/client questions in a # Open questions section after # Notes in S
 
 Write the task file only through the tools, never by hand:
 
-- `kanban_set_state` with no `file` argument (it resolves from the SPECS.md in your cwd) moves the task. Only the failing-suite outcome uses it.
+- `kanban_set_state` with no `file` argument (it resolves from the SPECS.md in your cwd) moves the task. Only the failing-suite outcome uses it, to `to-do`.
 - `kanban_update` with the `openQuestions` argument replaces the whole # Open questions section.
 - `kanban_get` with no `file` argument re-reads the task before any state move.
 - The # Notes append is the one hand edit: append to # Notes in SPECS.md. Never rewrite the rest of that file, and never edit AGENTS.md.
@@ -26,9 +26,9 @@ Write the task file only through the tools, never by hand:
 
 6. Stage the resolved files and conclude the replay with `GIT_EDITOR=true git rebase --continue`. A rebase can stop once per replayed commit: when `git status` still shows rebase state, resolve that round the same way and continue again. If the machine signs commits by default and the continue fails to sign, retry with `GIT_EDITOR=true git -c commit.gpgsign=false rebase --continue`.
 
-7. Run the full suite in the worktree: `pnpm test`. Never `pnpm test:changed`, because this is the merge gate. It is safe in a worktree: every suite builds its own temporary project root. On failure: append to # Notes the names of the failing suites, then `kanban_get` and `kanban_set_state` to `to-do`. The branch stays rebased. On success: leave the state at `merging`, because the daemon proves the result and fast-forwards the base.
+7. Run the full suite in the worktree: `{{testCommand}}`. Never run a changed-files-only variant of it, because this is the merge gate. It is safe in a worktree: every suite builds its own temporary project root. On failure: append to # Notes the names of the failing suites, then `kanban_get` and `kanban_set_state` to `to-do`. The branch stays rebased. On success: leave the state at `merging`, because the daemon proves the result and fast-forwards the base.
 
-If you cannot finish the rebase, leave the rebase in progress and finish anyway. The daemon detects it, keeps the task in `merging` and holds the merge repair for the PM. Never change the task states, apart from the failing-suite move above.
+If you cannot finish the rebase, leave the rebase in progress and finish anyway. The daemon detects it, keeps the task in `merging` and holds the merge repair for the PM. Never change the task states, apart from the failing-suite move to `to-do` above.
 
 Never edit, append to or rewrite AGENTS.md; report durable guidance for future agents of your kind in your task's # Notes.
 

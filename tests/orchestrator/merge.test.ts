@@ -4,10 +4,11 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, utimesSync,
 import { isAbsolute, join } from "node:path";
 import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, taskNum, taskSlug, updateTask } from "../../src/kanban.ts";
 import { loadConfig, poll } from "../../src/orchestrator.ts";
-import { mergeAskPath, rescan, stuckPath } from "../../src/orchestrator/pipeline.ts";
+import { mergeAskPath, rescan, stuckPath } from "../../src/orchestrator/pipeline/index.ts";
 import { reportsDir } from "../../src/orchestrator/report.ts";
 import { agentAlive, pidAlive, pidPath } from "../../src/pid.ts";
-import { exitFilePath, readMergerSlug, renderPrompt, readExitCode } from "../../src/orchestrator/spawn.ts";
+import { exitFilePath, readMergerSlug, readExitCode } from "../../src/orchestrator/spawn.ts";
+import { renderPrompt } from "../../src/orchestrator/prompt.ts";
 import { cleanupAll, cleaned, fixture, mirrorSubjects, roleStub, runDaemon, waitFor } from "../helpers.ts";
 
 const mergeRoot = () => {
@@ -102,32 +103,21 @@ const taskG = createTask(rootG, { name: "fix: defer merge while alive", summary:
 setState(rootG, taskG, "to-review");
 mkdirSync(kanbanDir(rootG), { recursive: true });
 const wtG = join(rootG, ".worktrees", "fix/1-defer-merge-while");
-// reviewer stub that waits for the armed marker, re-affirms to-review (a fixes run), then
-// lingers alive before exiting: the to-merge advance lands while it lingers, so the to-merge
-// sweep must wait for its pid before it spawns the merger
+// reviewer stub that commits nothing and never moves the task: it lingers alive before
+// exiting, so the task sits in reviewing while its pid lives, and the poll decideReviews the
+// pass to to-merge (no commits -> approval) only after the pid dies, before the merger spawns
 writeFileSync(
 	join(rootG, "linger-agent.cjs"),
 	`#!/usr/bin/env node
-const { readFileSync, writeFileSync, appendFileSync, existsSync, readlinkSync } = require("node:fs");
-const { basename, dirname, join } = require("node:path");
+const { readFileSync, appendFileSync } = require("node:fs");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 const file = "SPECS.md";
 let front = "";
-let taskFile = "";
 try {
 	front = readFileSync(file, "utf8");
-	taskFile = readlinkSync(file);
 } catch {}
 if (!front.match(/^state: /m)) process.exit(0);
-const armed = () => join(dirname(taskFile), ".logs", basename(taskFile, ".md") + ".reviewer-armed");
-const waitUntil = (cond, ms) => {
-	const end = Date.now() + ms;
-	while (!cond() && Date.now() < end) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
-};
 if (prompt.includes("Reviewer agent")) {
-	waitUntil(() => existsSync(armed()), 10000);
-	writeFileSync(file, readFileSync(file, "utf8").replace(/^state: .*/m, 'state: "to-review"'));
-	waitUntil(() => !existsSync(armed()), 10000);
 	setTimeout(() => process.exit(0), 3000);
 } else if (prompt.includes("Live-tester")) {
 	appendFileSync(file, "\\nLive test report: merge deferred until the reviewer finished.\\n");
@@ -144,7 +134,7 @@ if (prompt.includes("Reviewer agent")) {
 writeFileSync(join(rootG, "se-llm-team.json"), JSON.stringify({ agent: join(rootG, "linger-agent.cjs"), pollMinutes: 0.01, reviewerCap: { moderate: 1 }, backlogIdleMinutes: 0 }));
 
 const g = await runDaemon(rootG);
-await waitFor(() => parseTask(rootG, taskG.file).state === "to-merge", 30000, "cap advance to to-merge", g.output);
+await waitFor(() => parseTask(rootG, taskG.file).state === "to-merge", 30000, "reviewer approval to to-merge", g.output);
 const livePidG = () => {
 	try {
 		return parseInt(readFileSync(join(kanbanDir(rootG), ".pids", `${taskG.file.replace(/\.md$/, "")}.pid`), "utf8").trim(), 10);
@@ -379,7 +369,7 @@ assert.ok(promptAL.includes("git checkout --theirs"), "the merger keeps its own 
 assert.ok(promptAL.includes("git blame -L") && promptAL.includes("git log --oneline -1"), "the merger reads the other side from both");
 assert.ok(promptAL.includes("(#NNN)") && promptAL.includes("0000NN_"), "the prompt maps the subject suffix to the task file");
 assert.ok(promptAL.includes("prefixed `merge:`"), "the notes contract names the merge bullet prefix");
-assert.ok(promptAL.includes("pnpm test") && promptAL.includes("Never `pnpm test:changed`"), "the merger runs the full suite only");
+assert.ok(promptAL.includes("npm test") && promptAL.includes("Never run a changed-files-only variant"), "the merger runs the configured full suite (npm test) only");
 assert.ok(promptAL.includes("kanban_set_state") && promptAL.includes("openQuestions"), "the kanban write contract is stated");
 assert.ok(promptAL.includes("Keep every tool call's timeout under 60 minutes"), "the prompt carries the configured stall window");
 assert.ok(!promptAL.includes(rootAL) && !promptAL.includes("{{"), "no absolute path or placeholder survives rendering");

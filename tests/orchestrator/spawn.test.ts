@@ -6,8 +6,9 @@ import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { createTask, kanbanDir, listAll, parseTask, setState, setWorktree, ROLE_NOTES_RE } from "../../src/kanban.ts";
 import { loadConfig, promoteBacklog } from "../../src/orchestrator.ts";
-import { rescan } from "../../src/orchestrator/pipeline.ts";
-import { ensureContextSymlinks, renderPrompt } from "../../src/orchestrator/spawn.ts";
+import { rescan } from "../../src/orchestrator/pipeline/index.ts";
+import { ensureContextSymlinks } from "../../src/orchestrator/context.ts";
+import { renderPrompt } from "../../src/orchestrator/prompt.ts";
 import { HERE, fixture, mirrorSubjects, showTip, roleStub, argvStub, llmArgs, runDaemon, waitFor, cleanupAll, daemons, cleaned } from "../helpers.ts";
 
 // --- part A: happy pipeline with a working stub ---
@@ -629,4 +630,8 @@ assert.ok(rootPromptPR.includes(`pass \`${rootFilePR}\` as the \`file\` argument
 const wtPromptPR = renderPrompt(rootAZ, "developer", 60, rootFilePR, false);
 assert.ok(!wtPromptPR.includes("shared link"), "the worktree prompt carries no shared-link line");
 assert.equal(wtPromptPR, renderPrompt(rootAZ, "developer", 60), "a worktree run keeps today's prompt");
+// the merger prompt embeds the project's suite command: "npm test" by default (config
+// testCommand), overridden by the optional 6th renderPrompt argument
+assert.ok(renderPrompt(rootAZ, "merger", 60).includes("npm test"), "the merger prompt defaults to the npm test suite command");
+assert.ok(renderPrompt(rootAZ, "merger", 60, undefined, false, "pnpm -r test").includes("pnpm -r test"), "the testCommand argument overrides the suite command");
 console.log("orchestrator.test.ts: ... + root-cwd prompt task path passed");

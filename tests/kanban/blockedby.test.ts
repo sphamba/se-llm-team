@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask, getTask, hasHold, heldToken, listAll, listTasks, parseTask, setState, taskFiles, taskNum, updateTask } from "../../src/kanban.ts";
-import { dropDoneBlockers } from "../../src/orchestrator/pipeline.ts";
+import { dropDoneBlockers } from "../../src/orchestrator/pipeline/index.ts";
 
 const root = mkdtempSync(join(tmpdir(), "kanban-blockedby-"));
 const t1 = createTask(root, { name: "feat: nice thing", summary: "s" });

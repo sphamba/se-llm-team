@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask, kanbanDir, parseTask, setState, setWorktree, taskSlug, updateTask } from "../../src/kanban.ts";
 import { loadConfig, poll } from "../../src/orchestrator.ts";
-import { rescan, stuckPath } from "../../src/orchestrator/pipeline.ts";
+import { rescan, stuckPath } from "../../src/orchestrator/pipeline/index.ts";
 import { agentPid, pidAlive, pidPath } from "../../src/pid.ts";
 import { exitFilePath, readExitCode, spawnAgent, writeMergerSlug } from "../../src/orchestrator/spawn.ts";
 import { fixture, roleStub, deadStub, runDaemon, waitFor, cleaned } from "../helpers.ts";
@@ -392,24 +392,25 @@ assert.ok(orchLogAT().includes(`${slugAT}: agent exited 0, doing -> to-do`), "a 
 assert.equal(parseTask(rootAT, taskAT.file).state, "to-do", "the unanswered question stops the task for the user");
 updateTask(rootAT, taskAT, { openQuestions: "", specs: "The answer: the first way." });
 
-// a reviewer that exits 0 without moving the task is a failed run: the poll bounces it to
-// to-review under the crash rules, so reviewing never holds a slot with no live agent. The
-// exit file clears on every path, so the next pass reads no stale code
+// the reviewer's outcome is the daemon's: an exit 0 with a clean run log and the task still
+// in reviewing runs decideReview, which reads the recorded base commit - with no marker and
+// no worktree the pass decides as approved, so the poll moves the task to to-merge. The exit
+// file clears on every path, so the next pass reads no stale code
 setState(rootAT, taskAT, "reviewing");
 writeFileSync(join(kanbanDir(rootAT), ".logs", `${slugAT}.reviewer.0.log`), JSON.stringify({ type: "message_end", message: { role: "assistant", content: "review done" } }) + "\n");
 writeFileSync(exitFilePath(rootAT, slugAT), "0");
 poll(rootAT, 5);
 assert.ok(
-	orchLogAT().includes(`${slugAT}: reviewer exited 0 with the task still in reviewing, reviewing -> to-review`),
-	"the reviewer's exit 0 with the task still reviewing is a bounce, not a PM hand-off",
+	orchLogAT().includes(`${slugAT}: reviewer approved, reviewing -> to-merge`),
+	"the poll decides the reviewer's outcome from the recorded base, not from a state write",
 );
-assert.equal(parseTask(rootAT, taskAT.file).state, "to-review");
-assert.ok(existsSync(join(kanbanDir(rootAT), ".logs", `${slugAT}.reviewer.0.dead`)), "the no-move run carries its .dead marker");
-assert.equal(deadCountAT(), "1", "the no-move bounce bumps the dead-agent counter");
-assert.ok(!existsSync(exitFilePath(rootAT, slugAT)), "the bounce clears the exit file");
+assert.equal(parseTask(rootAT, taskAT.file).state, "to-merge");
+assert.ok(!existsSync(join(kanbanDir(rootAT), ".logs", `${slugAT}.reviewer.0.dead`)), "the approved run carries no .dead marker");
+assert.equal(deadCountAT(), "0", "the approval does not bump the dead-agent counter");
+assert.ok(!existsSync(exitFilePath(rootAT, slugAT)), "the decision clears the exit file");
 poll(rootAT, 5);
-assert.equal(parseTask(rootAT, taskAT.file).state, "to-review", "the second poll in to-review does not bounce again");
-assert.ok(!orchLogAT().includes("agent pid=0 dead without state update"), "no spurious dead-pid bounce for the pid-less to-review task");
+assert.equal(parseTask(rootAT, taskAT.file).state, "to-merge", "the second poll in to-merge does not move the task again");
+assert.ok(!orchLogAT().includes("agent pid=0 dead without state update"), "no spurious dead-pid bounce for the pid-less to-merge task");
 console.log("orchestrator.test.ts: ... + exit-code file smoke passed");
 
 // --- part AU2: a stuck merge is never bounced. The lane-mismatch pass and the dead-pid pass
