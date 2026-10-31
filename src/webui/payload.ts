@@ -652,13 +652,42 @@ function lightRow(root: string, t: Task) {
 
 const VISIBLE_CARDS = 5; // the cards each station renders before "+N more" (the client's VISIBLE)
 
-// the files the board renders before "+N more": the first five per station, in the same order
-// syncBoard sorts (a held task first, then priority, then newest update; #374 done by newest update)
-function visibleCards(rows: ReturnType<typeof lightRow>[]): Set<string> {
+// #448 the eager pick needs each task's liveness, but a light row carries no agent history: one
+// readdir of the pid dir, through the same reuse-proof check agentHistory runs, answers every row
+// without a log parse per task per poll. A lane names its own file, agentPidName maps it
+function livePidNames(root: string): Set<string> {
+	const live = new Set<string>();
+	let entries: string[] = [];
+	try {
+		entries = readdirSync(join(kanbanDir(root), ".pids"));
+	} catch {
+		return live;
+	}
+	for (const entry of entries) {
+		const name = entry.replace(/\.pid$/, "");
+		if (agentAlive(root, name)) live.add(name);
+	}
+	return live;
+}
+
+function rowLive(r: ReturnType<typeof lightRow>, live: Set<string>): boolean {
+	const role = AGENT_ROLE[r.state];
+	return !!role && live.has(agentPidName(role, taskSlug(r.file)));
+}
+
+// the files the board renders before "+N more": every live task first, then the same order
+// syncBoard sorts (a held task first, then priority, then newest update; #374 done by newest
+// update). #448 a live task ranked past the cap must still show, and the cap stays five
+function visibleCards(rows: ReturnType<typeof lightRow>[], live: Set<string>): Set<string> {
 	const visible = new Set<string>();
 	for (const s of STATIONS) {
-		const inStation = sortStation(rows.filter((r) => s.states.includes(r.state)) as unknown as Task[], { byRecency: s.id === "done" });
-		for (const r of inStation.slice(0, VISIBLE_CARDS)) visible.add(r.file);
+		const inStation = rows.filter((r) => s.states.includes(r.state));
+		const pinned = inStation.filter((r) => rowLive(r, live));
+		const rest = inStation.filter((r) => !rowLive(r, live));
+		const order = s.id === "done"
+			? sortStation(inStation as unknown as Task[], { byRecency: true })
+			: sortStation(pinned as unknown as Task[]).concat(sortStation(rest as unknown as Task[]));
+		for (const r of order.slice(0, VISIBLE_CARDS)) visible.add(r.file);
 	}
 	return visible;
 }
@@ -670,7 +699,7 @@ export async function taskPayload(root: string) {
 	const tasks = listAll(root);
 	const files = logDirFiles(root);
 	const rows = tasks.map((t) => lightRow(root, t));
-	const visible = visibleCards(rows);
+	const visible = visibleCards(rows, livePidNames(root));
 	const served: (ReturnType<typeof lightRow> & { agents?: AgentEntry[] })[] = [];
 	for (let i = 0; i < rows.length; i++) {
 		if (visible.has(rows[i].file)) served.push({ ...rows[i], agents: await cardAgents(root, tasks[i], files) });

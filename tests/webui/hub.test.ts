@@ -263,6 +263,27 @@ assert.deepEqual(Object.keys(batch), [statsTasks[1].file], "the batched stats an
 assert.deepEqual(batch[statsTasks[1].file].agents, loggedRow.agents, "the batched agents match the visible row's agent history");
 assert.deepEqual(await cardStatsPayload(statsRoot, []), {}, "an empty files list answers an empty object");
 
+// #448 the eager five pin live tasks: a station over the cap serves the running agent's card with
+// its agents data even when hold, priority and recency rank it last, a live card behind show more
+// keeps none, and the cap stays five
+const liveRoot = mkdtempSync(join(tmpdir(), "webui-live-"));
+mkdirSync(join(liveRoot, ".kanban", ".logs"), { recursive: true });
+const liveTasks = Array.from({ length: 6 }, (_, i) => createTask(liveRoot, { name: `feat: live ${i}`, summary: "s" }));
+liveTasks.forEach((t) => setState(liveRoot, t, "doing"));
+const liveBase = Date.now() / 1000;
+liveTasks.forEach((t, i) => utimesSync(join(liveRoot, ".kanban", t.file), liveBase + i, liveBase + i));
+const liveSlug = taskSlug(liveTasks[0].file);
+writeFileSync(join(liveRoot, ".kanban", ".logs", `${liveSlug}.developer.log`), JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: { input: 10, output: 5 } }, timestamp: Date.now() }) + "\n");
+writePid(liveRoot, agentPidName("developer", liveSlug), process.pid);
+const liveRows = (await taskPayload(liveRoot)).filter((r: any) => r.name.startsWith("feat: live"));
+assert.equal(liveRows.length, 6);
+const liveRow = liveRows.find((r: any) => r.file === liveTasks[0].file)!;
+assert.ok("agents" in liveRow, "a live card ranked sixth by hold, priority and recency still serves in the eager five");
+assert.deepEqual(liveRow.agents.map((a: any) => [a.role, a.alive]), [["developer", true]], "the pinned card carries its live agent data");
+const behind = liveRows.find((r: any) => r.file === liveTasks[1].file)!;
+assert.ok(!("agents" in behind), "a card behind show more carries none");
+assert.equal(liveRows.filter((r: any) => "agents" in r).length, 5, "the live pin keeps the cap at five");
+
 // the done cache: a done task's stats serve from the cache (a rewritten plain log stays stale) and
 // leaving done invalidates it, so a re-done task re-caches fresh
 const doneRoot = mkdtempSync(join(tmpdir(), "webui-done-"));
