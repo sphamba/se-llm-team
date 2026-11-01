@@ -221,6 +221,28 @@ const handLog = gitIn("log", "main..feat/1-changes", "--format=%h%x1f%s").split(
 assert.deepEqual(live.commits.map((c: any) => [c.hash, c.subject]), handLog, "the commits match git log by hand, newest first");
 assert.ok(live.commits.every((c: any) => /^[0-9a-f]{7,}$/.test(c.hash) && / ago$/.test(c.when)), "each commit carries a hash and git's raw relative date");
 assert.equal(live.snapshot, false, "a live task answers from git, not from a snapshot");
+assert.ok(!("map" in live), "a task file without a map attr carries no map key");
+
+// #455 the map attr rides the unchanged #450 answer plus `since`: the commits that landed after
+// the map head, read off the served list (newest first) with no extra git call
+const mapAttr = {
+	files: [{ path: "a.txt", symbols: [{ name: "first", kind: "fn", ins: 1, del: 1, isNew: true }] }],
+	transfers: [{ from: "e.txt", to: "a.txt", what: "the lines" }],
+	role: "developer",
+	run: 2,
+	model: "gpt-5.1-codex",
+	at: "2026-11-01T10:11:12.000Z",
+	head: live.commits[1].hash,
+};
+const { head: servedHead, ...servedMap } = mapAttr;
+assert.equal(servedHead, live.commits[1].hash, "the head is the older of the two commits, one commit behind the branch head");
+updateAttrs(changesRoot, changesTask, { map: JSON.stringify(mapAttr) });
+const mapped = await (await fetch(changesUrl(parseInt(changesTask.file, 10)))).json();
+assert.deepEqual(mapped.map, { ...servedMap, since: 1 }, "the payload carries the map with since: one commit landed after its head, and head is not served");
+assert.deepEqual([mapped.insertions, mapped.deletions, mapped.files, mapped.commits.length], [live.insertions, live.deletions, live.files, 2], "the map joins the unchanged #450 answer");
+updateAttrs(changesRoot, changesTask, { map: "{not json" });
+assert.ok(!("map" in (await (await fetch(changesUrl(parseInt(changesTask.file, 10)))).json())), "an unparseable map attr is absent, not an error");
+updateAttrs(changesRoot, changesTask, { map: JSON.stringify(mapAttr) });
 
 const plainTask = createTask(changesRoot, { name: "feat: plain", summary: "s" });
 assert.deepEqual(await (await fetch(changesUrl(parseInt(plainTask.file, 10)))).json(), {}, "a task without a worktree and without a snapshot has nothing to show");
@@ -239,6 +261,15 @@ const parsedDone = parseTask(snapRoot, snapTask.file);
 assert.deepEqual(parsedDone.changes, { base: "main", ins: 12, del: 3, files: 2 }, "the snapshot attributes round-trip through the frontmatter escaping");
 assert.deepEqual(parsedDone.commits, [snapCommit], "a quoted, piped, comma-carrying subject survives the frontmatter round-trip");
 assert.deepEqual(await taskChangesPayload(snapRoot, parseInt(snapTask.file, 10)), { base: "main", insertions: 12, deletions: 3, files: 2, commits: [snapCommit], snapshot: true }, "a done task with no worktree answers from the file with snapshot: true");
+
+// the map outlives doneCleanup: the attr is the only record left once the branch is deleted
+const doneMap = { files: [], transfers: [], role: "reviewer", run: 1, model: "gpt-5.1-codex", at: "2026-11-01T10:11:12.000Z", head: snapCommit.hash };
+updateAttrs(snapRoot, snapTask, { map: JSON.stringify(doneMap) });
+const { head: doneHead, ...servedDoneMap } = doneMap;
+assert.equal(doneHead, snapCommit.hash, "the done task's map head is the snapshot commit");
+const doneView = await taskChangesPayload(snapRoot, parseInt(snapTask.file, 10));
+assert.deepEqual(doneView.map, { ...servedDoneMap, since: 0 }, "a done task serves its map from the attr, since 0 at the newest commit");
+assert.deepEqual([doneView.snapshot, doneView.insertions], [true, 12], "the snapshot fields still answer beside the map");
 updateAttrs(snapRoot, snapTask, { changes: "{not json" });
 assert.equal(parseTask(snapRoot, snapTask.file).changes, null, "a malformed snapshot reads as absent, never throws");
 // #449 the post-merge window: finishMerge fast-forwards the base onto the branch before
@@ -251,6 +282,12 @@ const merged = await taskChangesPayload(changesRoot, parseInt(changesTask.file, 
 assert.equal(merged.snapshot, true, "a merged branch with an empty live range answers from the snapshot, not a zero row");
 assert.deepEqual([merged.insertions, merged.deletions, merged.files], [2, 2, 3], "the snapshot keeps the pre-merge numbers after the fast-forward");
 assert.deepEqual(merged.commits, [snapCommit], "the snapshot commit list survives the fast-forward");
+
+// a map with no git data at all: the plain task answers the map alone, never {}
+updateAttrs(changesRoot, plainTask, { map: JSON.stringify({ ...mapAttr, files: [], transfers: [] }) });
+const mapOnly = await taskChangesPayload(changesRoot, parseInt(plainTask.file, 10));
+assert.deepEqual(Object.keys(mapOnly), ["map"], "a map with no live or snapshotted git data answers the map alone, not {}");
+assert.equal(mapOnly.map.since, 0, "no commits list means no commit landed after the map head");
 
 for (const dir of [changesRoot, snapRoot]) rmSync(dir, { recursive: true, force: true });
 

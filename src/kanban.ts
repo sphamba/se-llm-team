@@ -16,6 +16,9 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, sep } from "node:path";
+// type-only: the attribute parser in kanban must not pull the generator's runtime in, and the
+// erased import keeps the two modules free of an import cycle
+import type { TaskMap } from "./changes-map.ts";
 
 export const STATES = [
 	"backlog",
@@ -54,6 +57,7 @@ export interface Task {
 	openQuestions: string;
 	changes: TaskChanges | null;
 	commits: TaskCommit[];
+	map: TaskMap | null;
 	conflicted: boolean;
 	malformed: boolean;
 }
@@ -250,6 +254,15 @@ function parseCommits(raw?: string): TaskCommit[] {
 	});
 }
 
+// the map attr is written by this repo's own map pass, so the read stays thin like parseChanges:
+// an absent, truncated or non-object attr is no map, and the served answer drops the key
+function parseMap(raw?: string): TaskMap | null {
+	const v = jsonAttr(raw);
+	if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+	const o = v as Record<string, unknown>;
+	return Array.isArray(o.files) ? (v as TaskMap) : null;
+}
+
 // a 0-byte read is a lost race, not corruption: a non-atomic writer (agent edit tool, shell
 // append, git checkout) holds the file truncated for a moment. Every repo writer is atomic
 // since #444, so an empty task file is almost always a mid-write casualty: re-read before
@@ -300,6 +313,9 @@ export function parseTask(root: string, file: string): Task {
 		openQuestions: trim(sections["open questions"]),
 		changes: parseChanges(attrs.changes),
 		commits: parseCommits(attrs.commits),
+		// #455 the changes map, written by the detached map pass; a hand-edited attr reads as
+		// absent rather than breaking the board
+		map: parseMap(attrs.map),
 		// a conflicted file parses bogus values (duplicate keys resolve last-wins, the
 		// merged-in side wins); callers must not rewrite or act on it
 		conflicted: hasConflictMarkers(raw),

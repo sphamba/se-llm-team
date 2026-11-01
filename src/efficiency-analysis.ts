@@ -424,7 +424,7 @@ function doctorPrompt(template: string, blocks: AnalysisBlock[], reports: BlockR
 // cwd works, and the log directory keeps the child away from the caller's cwd. logPath
 // appends every stdout chunk there, so the doctor step's stream output persists next to
 // the run log; the analyst pass passes none and keeps its stdout in memory.
-function spawnAnalyst(argv: string[], cwd: string, logPath?: string): Promise<string | null> {
+export function spawnAnalyst(argv: string[], cwd: string, logPath?: string): Promise<string | null> {
 	return new Promise((resolve) => {
 		let settled = false;
 		let spawnFailed = false;

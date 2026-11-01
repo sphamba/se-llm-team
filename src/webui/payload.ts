@@ -1,7 +1,7 @@
 import { closeSync, existsSync, openSync, readFileSync, readdirSync, readSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
-import { getTask, kanbanDir, listAll, splitFrontmatter, taskFiles, taskNum, taskSlug, type Task, type TaskChanges, type TaskCommit } from "../kanban.ts";
+import { getTask, kanbanDir, listAll, splitFrontmatter, taskFiles, taskNum, taskSlug, type Task, type TaskChanges, type TaskCommit, type TaskMap } from "../kanban.ts";
 import { git } from "../orchestrator/board.ts";
 import { agentAlive, agentPidName } from "../pid.ts";
 import { sortStation, STATIONS } from "./board.ts";
@@ -768,18 +768,31 @@ const changesAnswer = (changes: TaskChanges, commits: TaskCommit[], snapshot: bo
 // #450 one task's branch-vs-base changes, on demand and uncached (the client caches per task):
 // live from git while a worktree exists, from the merge-time snapshot after doneCleanup deleted
 // the branch; the window in between (base fast-forwarded onto the branch, branch still present)
-// has an empty live range, so an empty answer falls back to the snapshot instead of a zero row
+// has an empty live range, so an empty answer falls back to the snapshot instead of a zero row.
+// #455 the stored map rides whichever half answers, plus `since`: the commits that landed after
+// the map head, read off the served list with no extra git call
+function mapView(map: TaskMap, commits: TaskCommit[]) {
+	const { head, ...rest } = map;
+	// commits[] is newest first, so the head's index counts the commits after it; a head the
+	// list does not carry (a rewritten branch, a snapshot older than the map) answers 0
+	const at = commits.findIndex((c) => c.hash === head);
+	return { ...rest, since: at < 0 ? 0 : at };
+}
+
 export async function taskChangesPayload(root: string, num: number) {
 	const file = taskFiles(root).find((f) => taskNum(f) === num);
 	const task = file ? getTask(root, file) : undefined;
 	if (!task) return null;
+	const withMap = <T extends object>(answer: T, commits: TaskCommit[]) => (task.map ? { ...answer, map: mapView(task.map, commits) } : answer);
 	if (task.worktree) {
 		// the base is read here, never the hub's cwd; a detached base answers nothing
 		const base = git(root, ["branch", "--show-current"], true);
 		const live = base ? branchChanges(root, base, task.worktree) : null;
-		if (live && (live.changes.files > 0 || live.commits.length > 0)) return changesAnswer(live.changes, live.commits, false);
+		if (live && (live.changes.files > 0 || live.commits.length > 0)) return withMap(changesAnswer(live.changes, live.commits, false), live.commits);
 	}
-	return task.changes ? changesAnswer(task.changes, task.commits, true) : {};
+	if (task.changes) return withMap(changesAnswer(task.changes, task.commits, true), task.commits);
+	// a map without git data still answers: {} stays the answer only when the task has neither
+	return task.map ? { map: mapView(task.map, []) } : {};
 }
 
 // the per-task detail text (000242 light, 000248): the light row plus the body, sections and
