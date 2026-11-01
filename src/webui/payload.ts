@@ -1,7 +1,8 @@
 import { closeSync, existsSync, openSync, readFileSync, readdirSync, readSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
-import { getTask, kanbanDir, listAll, splitFrontmatter, taskFiles, taskNum, taskSlug, type Task } from "../kanban.ts";
+import { getTask, kanbanDir, listAll, splitFrontmatter, taskFiles, taskNum, taskSlug, type Task, type TaskChanges, type TaskCommit } from "../kanban.ts";
+import { git } from "../orchestrator/board.ts";
 import { agentAlive, agentPidName } from "../pid.ts";
 import { sortStation, STATIONS } from "./board.ts";
 import { AGENT_ROLE, LOG_LINES, LOG_ROLES, openRun, renderLogChunk, runText } from "./logpane.ts";
@@ -725,6 +726,59 @@ export async function cardStatsPayload(root: string, files: string[]) {
 		if (t) out[file] = { agents: await cardAgents(root, t, logs) };
 	}
 	return out;
+}
+
+// #450 the diffstat and commit list of one branch against its base, computed at the project root
+// so neither the hub's cwd nor the worktree decides which repo answers; null when git fails
+// (the merge lane uses it before the fast-forward, when the range is still non-empty)
+export function branchChanges(root: string, base: string, branch: string): { changes: TaskChanges; commits: TaskCommit[] } | null {
+	const stat = git(root, ["diff", "--numstat", `${base}...${branch}`], true);
+	const log = git(root, ["log", `${base}..${branch}`, "--abbrev=7", "--format=%h%x1f%s%x1f%ar"], true);
+	if (stat === null || log === null) return null;
+	const changes: TaskChanges = { base, ins: 0, del: 0, files: 0 };
+	for (const row of stat.split("\n")) {
+		if (!row) continue;
+		const [adds, dels] = row.split("\t");
+		changes.files += 1;
+		// a binary row prints "-" in both columns: a changed file with no line counts
+		if (adds === "-" || dels === "-") continue;
+		changes.ins += Number(adds) || 0;
+		changes.del += Number(dels) || 0;
+	}
+	// %x1f, the unit separator: a subject with a pipe or a comma cannot break the parse
+	const commits: TaskCommit[] = log
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => {
+			const [hash, subject, when] = line.split("\x1f");
+			return { hash, subject, when };
+		});
+	return { changes, commits };
+}
+
+const changesAnswer = (changes: TaskChanges, commits: TaskCommit[], snapshot: boolean) => ({
+	base: changes.base,
+	insertions: changes.ins,
+	deletions: changes.del,
+	files: changes.files,
+	commits,
+	snapshot,
+});
+
+// #450 one task's branch-vs-base changes, on demand and uncached (the client caches per task):
+// live from git while a worktree exists, from the merge-time snapshot after doneCleanup deleted
+// the branch; {} when there is nothing to show, null when the task is unknown (the route 404s)
+export async function taskChangesPayload(root: string, num: number) {
+	const file = taskFiles(root).find((f) => taskNum(f) === num);
+	const task = file ? getTask(root, file) : undefined;
+	if (!task) return null;
+	if (task.worktree) {
+		// the base is read here, never the hub's cwd; a detached base answers nothing
+		const base = git(root, ["branch", "--show-current"], true);
+		const live = base ? branchChanges(root, base, task.worktree) : null;
+		if (live) return changesAnswer(live.changes, live.commits, false);
+	}
+	return task.changes ? changesAnswer(task.changes, task.commits, true) : {};
 }
 
 // the per-task detail text (000242 light, 000248): the light row plus the body, sections and

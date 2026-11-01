@@ -13,7 +13,7 @@ import { agentPidName, pidAlive, pidPath, writePid } from "../../src/pid.ts";
 import { loadWebUiConfig, taskHistory, taskPayload } from "../../src/webui.ts";
 // not re-exported by the webui barrel: import directly from the payload module
 import { logStats, MAX_LOG_CACHES, statsCache, subagentLogs, subsCache } from "../../src/webui/payload.ts";
-import { cardStatsPayload } from "../../src/webui/payload.ts";
+import { cardStatsPayload, taskChangesPayload } from "../../src/webui/payload.ts";
 import { compactFinishedLogs } from "../../src/orchestrator.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -177,6 +177,72 @@ assert.ok(!readdirSync(join(HERE, "..", "..", "src")).some((d) => d.startsWith("
 // a second hub on the taken port reports failure instead of throwing
 assert.equal(await startHub({ name: "webui-test", root, host: "localhost", port: ui.port }), null);
 ui.close();
+
+// #450 the task-changes endpoint: one task's branch-vs-base diffstat and commit list, computed at
+// the project root on demand, and a done task answering from its merge-time snapshot instead
+const changesRoot = mkdtempSync(join(tmpdir(), "webui-changes-"));
+const gitIn = (...args: string[]) => execFileSync("git", args, { cwd: changesRoot, encoding: "utf8" }).trim();
+const commitAs = (...args: string[]) => gitIn("-c", "user.email=t@example.com", "-c", "user.name=t", ...args);
+gitIn("init", "-b", "main");
+writeFileSync(join(changesRoot, "e.txt"), "old\nlines\n");
+gitIn("add", "e.txt");
+commitAs("commit", "-m", "base");
+const changesTask = createTask(changesRoot, { name: "feat: changes", summary: "s" });
+gitIn("checkout", "-b", "feat/1-changes");
+writeFileSync(join(changesRoot, "a.txt"), "1\n2\n3\n");
+rmSync(join(changesRoot, "e.txt"));
+gitIn("add", "-A", "--", "a.txt", "e.txt");
+commitAs("commit", "-m", "feat: first");
+writeFileSync(join(changesRoot, "a.txt"), "1\n4\n");
+writeFileSync(join(changesRoot, "c.bin"), Buffer.from([0, 1, 2, 3]));
+gitIn("add", "a.txt", "c.bin");
+commitAs("commit", "-m", "fix: second");
+gitIn("checkout", "main");
+updateAttrs(changesRoot, changesTask, { worktree: "feat/1-changes" });
+
+process.env.HOME = home;
+const changesHub = await startHub({ name: "changes-test", root: changesRoot, host: "localhost", port: 0 });
+assert.ok(changesHub, "the changes hub starts on port 0");
+const changesBase = `http://localhost:${changesHub.port}`;
+const changesUrl = (num: number, project = changesRoot) => `${changesBase}/api/task-changes?num=${num}&project=${encodeURIComponent(project)}`;
+
+const live = await (await fetch(changesUrl(parseInt(changesTask.file, 10)))).json();
+// the same range run by hand: every numstat row counts as a file, the text rows sum their columns
+const rows = gitIn("diff", "--numstat", "main...feat/1-changes")
+	.split("\n")
+	.filter(Boolean)
+	.map((r) => r.split("\t"));
+let wanted = [0, 0];
+for (const [adds, dels] of rows) if (adds !== "-") wanted = [wanted[0] + Number(adds), wanted[1] + Number(dels)];
+assert.equal(live.base, "main", "the base is the project root's current branch");
+assert.deepEqual([live.insertions, live.deletions, live.files], [wanted[0], wanted[1], rows.length], "the endpoint sums the numstat rows git prints by hand");
+assert.deepEqual([live.insertions, live.deletions, live.files], [2, 2, 3], "two text rows and one binary row: 2 added, 2 removed, 3 changed files");
+const handLog = gitIn("log", "main..feat/1-changes", "--format=%h%x1f%s").split("\n").map((l) => l.split("\x1f"));
+assert.deepEqual(live.commits.map((c: any) => [c.hash, c.subject]), handLog, "the commits match git log by hand, newest first");
+assert.ok(live.commits.every((c: any) => /^[0-9a-f]{7,}$/.test(c.hash) && / ago$/.test(c.when)), "each commit carries a hash and git's raw relative date");
+assert.equal(live.snapshot, false, "a live task answers from git, not from a snapshot");
+
+const plainTask = createTask(changesRoot, { name: "feat: plain", summary: "s" });
+assert.deepEqual(await (await fetch(changesUrl(parseInt(plainTask.file, 10)))).json(), {}, "a task without a worktree and without a snapshot has nothing to show");
+assert.equal((await fetch(changesUrl(999))).status, 404, "a bogus num is rejected like /api/card-stats");
+assert.equal((await fetch(changesUrl(parseInt(changesTask.file, 10), join(changesRoot, "nope")))).status, 404, "an unknown project is rejected like /api/card-stats");
+changesHub.close();
+
+// a done task outlives its branch: it answers from the merge-time snapshot, in a root that is not
+// even a git repo, so the values can only come from the task file
+const snapRoot = mkdtempSync(join(tmpdir(), "webui-snap-"));
+const snapTask = createTask(snapRoot, { name: "fix: done", summary: "s" });
+const snapCommit = { hash: "a1b2c3d", subject: 'feat: "quoted" | piped, comma', when: "2 hours ago" };
+updateAttrs(snapRoot, snapTask, { changes: JSON.stringify({ ins: 12, del: 3, files: 2, base: "main" }), commits: JSON.stringify([snapCommit]) });
+setState(snapRoot, snapTask, "done");
+const parsedDone = parseTask(snapRoot, snapTask.file);
+assert.deepEqual(parsedDone.changes, { base: "main", ins: 12, del: 3, files: 2 }, "the snapshot attributes round-trip through the frontmatter escaping");
+assert.deepEqual(parsedDone.commits, [snapCommit], "a quoted, piped, comma-carrying subject survives the frontmatter round-trip");
+assert.deepEqual(await taskChangesPayload(snapRoot, parseInt(snapTask.file, 10)), { base: "main", insertions: 12, deletions: 3, files: 2, commits: [snapCommit], snapshot: true }, "a done task with no worktree answers from the file with snapshot: true");
+updateAttrs(snapRoot, snapTask, { changes: "{not json" });
+assert.equal(parseTask(snapRoot, snapTask.file).changes, null, "a malformed snapshot reads as absent, never throws");
+for (const dir of [changesRoot, snapRoot]) rmSync(dir, { recursive: true, force: true });
+
 process.env.HOME = realHome;
 
 // daemon wiring: HOME at a config with webUi enabled and port 0 -> OS picks, URL logged

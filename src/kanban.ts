@@ -52,8 +52,26 @@ export interface Task {
 	specs: string;
 	notes: string;
 	openQuestions: string;
+	changes: TaskChanges | null;
+	commits: TaskCommit[];
 	conflicted: boolean;
 	malformed: boolean;
+}
+
+// the branch-vs-base diffstat and commit list taken at merge time: doneCleanup runs
+// `git branch -d`, so these attributes are the only record a done task has left
+// (000450)
+export interface TaskChanges {
+	base: string;
+	ins: number;
+	del: number;
+	files: number;
+}
+
+export interface TaskCommit {
+	hash: string;
+	subject: string;
+	when: string;
 }
 
 export interface TaskRef {
@@ -202,6 +220,36 @@ export function splitFrontmatter(raw: string): { attrs: Record<string, string>; 
 
 const sleepSync = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
+function jsonAttr(raw?: string): unknown {
+	if (!raw) return null;
+	try {
+		return JSON.parse(raw);
+	} catch {
+		return null;
+	}
+}
+
+// a hand-edited task file must never break the board: a malformed or partial snapshot attribute
+// reads as absent, and the live endpoint falls back to git
+function parseChanges(raw?: string): TaskChanges | null {
+	const v = jsonAttr(raw);
+	if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+	const o = v as Record<string, unknown>;
+	const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : 0);
+	return { base: typeof o.base === "string" ? o.base : "", ins: num(o.ins), del: num(o.del), files: num(o.files) };
+}
+
+function parseCommits(raw?: string): TaskCommit[] {
+	const v = jsonAttr(raw);
+	if (!Array.isArray(v)) return [];
+	return v.flatMap((c: unknown) => {
+		if (!c || typeof c !== "object") return [];
+		const o = c as Record<string, unknown>;
+		if (typeof o.hash !== "string") return [];
+		return [{ hash: o.hash, subject: String(o.subject ?? ""), when: String(o.when ?? "") }];
+	});
+}
+
 // a 0-byte read is a lost race, not corruption: a non-atomic writer (agent edit tool, shell
 // append, git checkout) holds the file truncated for a moment. Every repo writer is atomic
 // since #444, so an empty task file is almost always a mid-write casualty: re-read before
@@ -250,6 +298,8 @@ export function parseTask(root: string, file: string): Task {
 		specs: trim(sections["specs"]),
 		notes: trim(sections["notes"]),
 		openQuestions: trim(sections["open questions"]),
+		changes: parseChanges(attrs.changes),
+		commits: parseCommits(attrs.commits),
 		// a conflicted file parses bogus values (duplicate keys resolve last-wins, the
 		// merged-in side wins); callers must not rewrite or act on it
 		conflicted: hasConflictMarkers(raw),

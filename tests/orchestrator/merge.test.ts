@@ -207,6 +207,9 @@ assert.ok(!orchLog(rootA).includes("fast-forwarded"), "nothing was fast-forwarde
 await waitFor(() => !agentAlive(rootA, "merger"), 30000, "the merger exited", () => "");
 poll(rootA, 5);
 assert.equal(parseTask(rootA, taskA.file).state, "to-live-test", "the clean exit set to-live-test");
+// #450 the merge-time snapshot: the only record left once doneCleanup runs git branch -d
+assert.equal(parseTask(rootA, taskA.file).changes?.base, "main", "the merge recorded the diffstat base before the fast-forward emptied the range");
+assert.ok(parseTask(rootA, taskA.file).commits.length > 0, "the merge recorded the branch's commit list");
 assert.ok(subjects(rootA, "-1 main").includes("clean-change"), "the base took the rebased branch commit");
 assert.equal(execSync("git log --format=%s --merges main", { cwd: rootA, encoding: "utf8" }).trim(), "", "no merge commit on the base");
 assert.equal(rebasing(wtA), false, "the merger left no rebase behind");

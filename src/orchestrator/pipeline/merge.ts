@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { getTask, hasHold, kanbanDir, listAll, questionOpen, setState, setWorktree, taskSlug, updateAttrs, type Task } from "../../kanban.ts";
+import { branchChanges } from "../../webui/payload.ts";
 import { agentAlive, clearPid } from "../../pid.ts";
 import type { Config } from "../config.ts";
 import { log } from "../log.ts";
@@ -141,10 +142,16 @@ export function finishMerge(root: string, task: Task): void {
 		parkStuckMerge(root, task, "the branch does not sit on the base branch", base ?? "");
 		return;
 	}
+	// the diffstat and commits are read BEFORE the fast-forward: after it the base and the branch
+	// point at the same commit, the range is empty, and the numbers are lost for good
+	const snapshot = branchChanges(root, base, wt);
 	if (!fastForward(root, base, wt)) {
 		parkStuckMerge(root, task, `the fast-forward to ${wt} failed`, base);
 		return;
 	}
+	// persisted only after the fast-forward: a parked merge keeps no stale stats. The task file is
+	// the only record left once doneCleanup runs `git branch -d` (#450)
+	if (snapshot) updateAttrs(root, task, { changes: JSON.stringify(snapshot.changes), commits: JSON.stringify(snapshot.commits) });
 	stripContextSymlinks(root);
 	setState(root, task, "to-live-test");
 	log(root, `${task.file}: fast-forwarded ${base} to ${wt}, set to-live-test`);

@@ -466,6 +466,17 @@ async function route(
 			const files = (url.searchParams.get("files") ?? "").split(",").filter(Boolean);
 			json(res, await webui.cardStatsPayload(entry.root, files));
 		}
+	} else if (req.method === "GET" && path === "/api/task-changes") {
+		// #450 one task's branch-vs-base diffstat and commits, computed on demand at the project
+		// root; the only new git caller, so /api/tasks and /api/task-detail stay spawn-free
+		const entry = resolveEntry(entries, project);
+		const num = Number(url.searchParams.get("num"));
+		const changes = entry && Number.isInteger(num) ? await webui.taskChangesPayload(entry.root, num) : null;
+		if (!changes) {
+			res.writeHead(404).end(); // unknown project or task, like /api/card-stats
+		} else {
+			json(res, changes);
+		}
 	} else if (req.method === "POST" && path === "/api/task-block") {
 		// the task panel's hold toggle: one task write, then the agent stop
 		await taskBlock(opts, entries, url, req, res);
