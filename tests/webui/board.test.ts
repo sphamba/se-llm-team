@@ -816,4 +816,34 @@ const elapsed413 = [0, 60, 300, 600, 1200, 2400, 3600, 4800, 9600];
 assert.ok(elapsed413.every((s) => progressOf(s) < 1), "the line never fills, however long the run");
 assert.deepEqual(elapsed413.map(progressOf), [...elapsed413.map(progressOf)].sort((a, b) => a - b), "a shorter elapsed time never paints more than a longer one");
 
+// #453 a filter hides a ref target while it keeps the holder, so the relation resolves to an
+// off-board entry that carries no path; the overlay must draw only the entries that carry one, or
+// every filtered render writes d="undefined" into the svg
+const relationDraw = (paths: any[]) => {
+	const svg: any = { attrs: {}, setAttribute(k: string, v: unknown) { this.attrs[k] = v; }, innerHTML: "", __html: "" };
+	const src = page.match(/function drawRelations\(\) \{[\s\S]*?\n\}/)![0];
+	const draw = new Function(
+		"document", "stations", "cardEls", "cardBox", "relationPaths", "activeBoard", "verticalSpine", "esc", "drawStubs",
+		`${src}; return drawRelations;`,
+	)(
+		{ getElementById: (id: string) => (id === "relations" ? svg : {}) },
+		{},
+		new Map(),
+		() => ({ x: 0, y: 0, w: 10, h: 10 }),
+		() => paths,
+		() => ({ tasks: [] }),
+		() => false,
+		(s: string) => s,
+		() => {},
+	) as () => void;
+	draw();
+	return svg;
+};
+const drawn453 = relationDraw([
+	{ file: "000904_x.md", blocker: "000001_a.md", d: "M 1 1 C 2 2, 3 3, 4 4" },
+	{ file: "000904_x.md", blocker: "000009_z.md", offBoard: true, station: "to-do" },
+]);
+assert.ok(!drawn453.innerHTML.includes("undefined"), "an off-board relation draws no path, so a filtered-out ref target never emits d=\"undefined\"");
+assert.equal((drawn453.innerHTML.match(/<path /g) || []).length, 1, "the on-board relation still draws its curve beside the off-board stub");
+
 ui.close();

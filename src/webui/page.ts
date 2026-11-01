@@ -585,7 +585,9 @@ function drawRelations() {
 	const paths = relationPaths(activeBoard().tasks, rectOf, verticalSpine());
 	svg.setAttribute("width", w);
 	svg.setAttribute("height", h);
-	const html = paths.map(p => '<path d="' + p.d + '" data-file="' + esc(p.file) + '" data-blocker="' + esc(p.blocker) + '"/>').join("");
+	// #453 a filter hides the ref target while it keeps the holder, so the relation is an off-board
+	// entry with no path: only a drawn curve becomes a path, the stubs below still read every entry
+	const html = paths.filter(p => p.d).map(p => '<path d="' + p.d + '" data-file="' + esc(p.file) + '" data-blocker="' + esc(p.blocker) + '"/>').join("");
 	if (svg.__html !== html) { svg.innerHTML = html; svg.__html = html; }
 	drawStubs(paths);
 }
