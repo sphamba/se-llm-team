@@ -370,7 +370,7 @@ assert.match(cssRule("#waits-pop"), /position: fixed/, "the popover floats over 
 assert.match(themeCss, new RegExp(`@media \\(max-width: ${MOBILE_MAX}px\\) \\{[\\s\\S]*?\\.c-wait`), "the phone layout gives the marker the 44px touch floor");
 // #416 a phone archive row is the number, the name and the token total: the chip, the duration and
 // the date drop, and no phone rule touches the token cell, so it keeps the base rule's right alignment
-const phoneArchive = themeCss.slice(themeCss.lastIndexOf("@media (max-width: " + MOBILE_MAX + "px)"));
+const phoneArchive = themeCss.slice(themeCss.lastIndexOf("@media (max-width: " + MOBILE_MAX + "px)", themeCss.indexOf(".arch-row .arch-cx")));
 assert.ok(phoneArchive.includes(".arch-row .arch-cx, .arch-row .arch-dur, .arch-row .arch-date { display: none; }"), "the phone archive block hides the complexity chip, the duration and the date");
 assert.ok(!phoneArchive.includes(".arch-tok") && /text-align: right/.test(cssRule(".arch-tok, .arch-dur")), "the token cell keeps its place at the row's right edge on a phone");
 
