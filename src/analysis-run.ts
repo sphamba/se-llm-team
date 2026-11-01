@@ -28,6 +28,18 @@ const [root, logArg, role] = process.argv.slice(2);
 if (!root || !logArg || !role) {
 	process.stderr.write("usage: node analysis-run.ts <root> <logPath> <role>\n");
 	process.exitCode = 1;
+} else if (role === "map") {
+	// #458 the map-only run the panel's map trigger spawns: regenerate the changes map and stop,
+	// so the task gets no report, no doctor log and no doctor run row
+	const run = runFromLog(logArg, "map");
+	const task = run ? getTask(root, run.slug) : undefined;
+	try {
+		if (task) await generateChangesMap({ root, cfg: loadConfig(root), task, role, run: run.index });
+		else log(root, `changes map run skipped for ${logArg}: no such task`);
+	} catch (err) {
+		// a failed map leaves the previous attr untouched and never fails the trigger
+		log(root, `changes map for ${logArg} failed: ${err instanceof Error ? err.message : err}`);
+	}
 } else {
 	const cfg = loadConfig(root);
 	// the compactor may gzip the finished log between the spawn and the first read: fall

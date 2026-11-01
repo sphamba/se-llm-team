@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { request as httpRequest } from "node:http";
 import { Readable } from "node:stream";
 import { gzipSync } from "node:zlib";
-import { createTask, parseTask, setState, taskSlug, updateAttrs } from "../../src/kanban.ts";
+import { createTask, getTask, parseTask, setState, taskSlug, updateAttrs } from "../../src/kanban.ts";
 import { readCapped, startHub } from "../../src/hub.ts";
 import { agentPidName, pidAlive, pidPath, writePid } from "../../src/pid.ts";
 import { loadWebUiConfig, taskHistory, taskPayload } from "../../src/webui.ts";
@@ -245,7 +245,7 @@ assert.ok(!("map" in (await (await fetch(changesUrl(parseInt(changesTask.file, 1
 updateAttrs(changesRoot, changesTask, { map: JSON.stringify(mapAttr) });
 
 const plainTask = createTask(changesRoot, { name: "feat: plain", summary: "s" });
-assert.deepEqual(await (await fetch(changesUrl(parseInt(plainTask.file, 10)))).json(), {}, "a task without a worktree and without a snapshot has nothing to show");
+assert.deepEqual(await (await fetch(changesUrl(parseInt(plainTask.file, 10)))).json(), { mapRunning: false }, "a task without a worktree and without a snapshot shows only the idle map flag");
 assert.equal((await fetch(changesUrl(999))).status, 404, "a bogus num is rejected like /api/card-stats");
 assert.equal((await fetch(changesUrl(parseInt(changesTask.file, 10), join(changesRoot, "nope")))).status, 404, "an unknown project is rejected like /api/card-stats");
 changesHub.close();
@@ -260,7 +260,7 @@ setState(snapRoot, snapTask, "done");
 const parsedDone = parseTask(snapRoot, snapTask.file);
 assert.deepEqual(parsedDone.changes, { base: "main", ins: 12, del: 3, files: 2 }, "the snapshot attributes round-trip through the frontmatter escaping");
 assert.deepEqual(parsedDone.commits, [snapCommit], "a quoted, piped, comma-carrying subject survives the frontmatter round-trip");
-assert.deepEqual(await taskChangesPayload(snapRoot, parseInt(snapTask.file, 10)), { base: "main", insertions: 12, deletions: 3, files: 2, commits: [snapCommit], snapshot: true }, "a done task with no worktree answers from the file with snapshot: true");
+assert.deepEqual(await taskChangesPayload(snapRoot, parseInt(snapTask.file, 10)), { base: "main", insertions: 12, deletions: 3, files: 2, commits: [snapCommit], snapshot: true, mapRunning: false }, "a done task with no worktree answers from the file with snapshot: true");
 
 // the map outlives doneCleanup: the attr is the only record left once the branch is deleted
 const doneMap = { files: [], transfers: [], role: "reviewer", run: 1, model: "gpt-5.1-codex", at: "2026-11-01T10:11:12.000Z", head: snapCommit.hash };
@@ -286,7 +286,7 @@ assert.deepEqual(merged.commits, [snapCommit], "the snapshot commit list survive
 // a map with no git data at all: the plain task answers the map alone, never {}
 updateAttrs(changesRoot, plainTask, { map: JSON.stringify({ ...mapAttr, files: [], transfers: [] }) });
 const mapOnly = await taskChangesPayload(changesRoot, parseInt(plainTask.file, 10));
-assert.deepEqual(Object.keys(mapOnly), ["map"], "a map with no live or snapshotted git data answers the map alone, not {}");
+assert.deepEqual(Object.keys(mapOnly), ["map", "mapRunning"], "a map with no live or snapshotted git data answers the map and the run flag, not {}");
 assert.equal(mapOnly.map.since, 0, "no commits list means no commit landed after the map head");
 
 for (const dir of [changesRoot, snapRoot]) rmSync(dir, { recursive: true, force: true });
@@ -721,4 +721,100 @@ process.env.HOME = prioRealHome;
 cleanup();
 rmSync(prioRoot, { recursive: true, force: true });
 rmSync(prioHome, { recursive: true, force: true });
+
+// --- part: #458 POST /api/task-map fires the map-only run: query num/project, the 409 guard
+// while a map-relevant analysis is alive, and the mapRunning flag /api/task-changes serves ---
+const mapRoot = mkdtempSync(join(tmpdir(), "webui-map-"));
+const mapHome = mkdtempSync(join(tmpdir(), "webui-map-home-"));
+const mapRealHome = process.env.HOME;
+const mapGit = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+mapGit(mapRoot, "init", "-b", "main");
+mapGit(mapRoot, "config", "user.email", "t@example.com");
+mapGit(mapRoot, "config", "user.name", "t");
+mapGit(mapRoot, "config", "commit.gpgsign", "false");
+writeFileSync(join(mapRoot, "e.txt"), "base\n");
+mapGit(mapRoot, "add", "e.txt");
+mapGit(mapRoot, "commit", "-m", "base");
+const mapWt = join(mapRoot, ".worktrees", "feat/1-map");
+mapGit(mapRoot, "worktree", "add", ".worktrees/feat/1-map", "-b", "feat/1-map");
+writeFileSync(join(mapWt, "a.ts"), "export const a = 1;\n");
+mapGit(mapWt, "add", "a.ts");
+mapGit(mapWt, "commit", "-m", "feat: a");
+const mapHead = mapGit(mapWt, "rev-parse", "--short=7", "HEAD");
+// the stub answers the map JSON after a pause: the run must never reach a real model, and the
+// pause keeps the in-flight window wide enough to observe the 409 and the true flag
+const mapAnswer = JSON.stringify({ files: [{ path: "a.ts", symbols: [{ name: "a", kind: "fn", ins: 1, del: 0, isNew: true }] }], transfers: [] });
+const mapStub = join(mapRoot, "map-agent.cjs");
+writeFileSync(
+	mapStub,
+	`#!/usr/bin/env node
+setTimeout(() => process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: ${JSON.stringify(mapAnswer)} }] } }) + "\\n"), 400);
+`,
+);
+chmodSync(mapStub, 0o755);
+// the detached run loads the project config itself, so the stub must be on disk before the trigger
+writeFileSync(join(mapRoot, "se-llm-team.json"), JSON.stringify({ agent: mapStub, roles: { map: { model: "stub-map-model" } } }));
+const mapTask = createTask(mapRoot, { name: "feat: map trigger", summary: "s" });
+updateAttrs(mapRoot, mapTask, { worktree: "feat/1-map" });
+const mapSlug = taskSlug(mapTask.file);
+const mapNum = numOf(mapTask.file);
+// a stale map from an earlier run: the map-only run must replace it
+const oldMap = { files: [], transfers: [], role: "developer", run: 1, model: "old-model", at: "2026-01-01T00:00:00.000Z", head: "0000000" };
+updateAttrs(mapRoot, mapTask, { map: JSON.stringify(oldMap) });
+const pidsDir = join(mapRoot, ".kanban", ".pids");
+const mapPids = () => (existsSync(pidsDir) ? readdirSync(pidsDir) : []).filter((f) => new RegExp(`^${mapSlug}\\.map\\.\\d+\\.analysis\\.pid$`).test(f));
+const until = async (ok: () => boolean, what: string) => {
+	for (let i = 0; i < 300; i++) {
+		if (ok()) return;
+		await new Promise((r) => setTimeout(r, 100));
+	}
+	assert.ok(ok(), what);
+};
+process.env.HOME = mapHome;
+const mapUi = await startHub({ name: "map-test", root: mapRoot, host: "localhost", port: 0 });
+assert.ok(mapUi, "the map fixture hub starts on port 0");
+const mapBase = `http://localhost:${mapUi.port}`;
+const mapQuery = `?num=${mapNum}&project=${encodeURIComponent(mapRoot)}`;
+// the client shape: POST with the params in the query and no body
+const mapPost = (query = mapQuery, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) =>
+	fetch(`${mapBase}/api/task-map${query}`, { method: init.method ?? "POST", headers: init.headers, body: init.body });
+const changesNow = async () => await (await fetch(`${mapBase}/api/task-changes${mapQuery}`)).json();
+
+assert.equal((await changesNow()).mapRunning, false, "no analysis is in flight before the trigger");
+assert.equal((await mapPost(mapQuery, { method: "GET" })).status, 405, "a GET on the path answers 405");
+assert.equal((await mapPost("?num=999999")).status, 404, "an unknown task number answers 404");
+assert.equal((await mapPost(`?num=${mapNum}&project=${encodeURIComponent("/no/such/project")}`)).status, 400, "an unknown project answers 400");
+assert.equal((await mapPost(mapQuery, { headers: { "content-type": "text/plain" }, body: "x" })).status, 415, "a non-JSON body is refused");
+assert.equal(mapPids().length, 0, "a refused request spawns nothing");
+
+const mapRes = await mapPost();
+assert.equal(mapRes.status, 200, "the trigger answers 200");
+assert.deepEqual(await mapRes.json(), { ok: true }, "and answers {ok:true}");
+assert.equal(mapPids().length, 1, "the map-only run wrote its <slug>.map.<n>.analysis pid file");
+assert.equal((await changesNow()).mapRunning, true, "/api/task-changes reports mapRunning while the pid is alive");
+const again = await mapPost();
+assert.equal(again.status, 409, "a second trigger while the run is alive answers 409");
+assert.ok((await again.json()).error, "the 409 carries a JSON error body");
+assert.equal(mapPids().length, 1, "the refused trigger spawned nothing");
+
+await until(() => getTask(mapRoot, mapTask.file)?.map?.role === "map", "the map-only run wrote the map attr");
+const runMap = getTask(mapRoot, mapTask.file)!.map!;
+assert.deepEqual([runMap.role, runMap.head, runMap.model], ["map", mapHead, "stub-map-model"], "the map-only run replaced the old attr with the new map at the branch head");
+assert.deepEqual(runMap.files.map((f) => f.path), ["a.ts"], "the stored map carries the stub's answer");
+await until(() => mapPids().length === 0, "the map-only run's pid file self-removed at exit");
+assert.equal((await changesNow()).mapRunning, false, "mapRunning reads false once the run exits");
+assert.equal((await changesNow()).map.files[0].path, "a.ts", "the map lands in the changes payload");
+// no doctor log, no report, no run log: the map-only run leaves no analysis artefacts behind
+const mapLogs = readdirSync(join(mapRoot, ".kanban", ".logs"));
+assert.ok(!mapLogs.some((f) => f.startsWith(`${mapSlug}.map.`)), `a map-only run writes no doctor log, report or run row, got ${JSON.stringify(mapLogs)}`);
+
+// a live developer analysis is map-relevant too: it owns the attr write, so the trigger refuses it
+writeFileSync(join(pidsDir, `${mapSlug}.developer.0.analysis.pid`), String(process.pid));
+assert.equal((await mapPost()).status, 409, "a live developer analysis answers 409 too");
+rmSync(join(pidsDir, `${mapSlug}.developer.0.analysis.pid`)); // our own pid: never leave it for a cleanup kill
+
+mapUi.close();
+process.env.HOME = mapRealHome;
+rmSync(mapRoot, { recursive: true, force: true });
+rmSync(mapHome, { recursive: true, force: true });
 console.log("hub.test.ts: all assertions passed");

@@ -5,7 +5,9 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getTask, isLinkedWorktree, kanbanDir, PRIORITIES, taskFiles, taskNum, taskSlug, updateAttrs } from "./kanban.ts";
+import { mapRunAlive } from "./changes-map.ts";
 import type { StageFlags } from "./orchestrator/config.ts";
+import { spawnMapRun } from "./orchestrator/spawn.ts";
 import { agentPidName, clearPid, killTree, pidAlive, pidEntry } from "./pid.ts";
 import * as webui from "./webui.ts";
 
@@ -370,6 +372,62 @@ async function taskPriority(opts: HubOptions, entries: Map<string, HubEntry>, re
 	json(res, webui.taskDetail(entry.root, num));
 }
 
+// #458 the task panel's map trigger: the map-only run for one task, spawned straight from the
+// hub (it lives in the orchestrator process). num and project ride the query string like
+// /api/task-changes, and a JSON body carrying them is accepted too; a body-less POST is the
+// client shape, so its missing content-type is not an error. The 409 guard is the pid check the
+// `mapRunning` flag reads: a developer, reviewer or map analysis already running would race the
+// attr write, so another one is refused instead of spawned.
+async function taskMap(opts: HubOptions, entries: Map<string, HubEntry>, url: URL, req: IncomingMessage, res: ServerResponse): Promise<void> {
+	const fail = (status: number, error: string): void => json(res, { error }, status);
+	if (req.method !== "POST") {
+		res.setHeader("allow", "POST");
+		return fail(405, "method not allowed, use POST");
+	}
+	// same-origin only: a present Origin must name this host, and the UI's own fetch sends none
+	const origin = req.headers.origin;
+	if (origin) {
+		let host = "";
+		try {
+			host = new URL(origin).host;
+		} catch {
+			/* malformed origin: refused below */
+		}
+		if (host !== req.headers.host) return fail(403, "cross-origin request refused");
+	}
+	const declared = Number(req.headers["content-length"] ?? 0);
+	if (declared > BLOCK_BODY_CAP) return fail(413, "body too large");
+	// a body-less POST (the client shape) sends no content-type, so the check applies only to bytes
+	if (declared > 0 && !PRIORITY_CONTENT_TYPES.has(String(req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase()))
+		return fail(415, "content-type must be application/json");
+	const raw = await readCapped(req);
+	if (raw === null || raw.length > BLOCK_BODY_CAP) return fail(413, "body too large");
+	let body: any = {};
+	if (raw.trim()) {
+		try {
+			body = JSON.parse(raw);
+		} catch {
+			return fail(400, "invalid JSON");
+		}
+	}
+	if (!body || typeof body !== "object" || Array.isArray(body)) return fail(400, "invalid JSON body");
+	const num = Number(url.searchParams.get("num") ?? body.num);
+	if (!Number.isInteger(num)) return fail(400, "num must be an integer");
+	// the project selects an already registered entry: a name or root never becomes a path here
+	const project = url.searchParams.get("project") || (typeof body.project === "string" ? body.project : "") || opts.root;
+	const entry = resolveEntry(entries, project);
+	if (!entry) return fail(400, "unknown project");
+	const file = taskFiles(entry.root).find((f) => taskNum(f) === num);
+	const task = file ? getTask(entry.root, file) : undefined;
+	if (!task) return fail(404, "unknown task");
+	const slug = taskSlug(task.file);
+	if (mapRunAlive(entry.root, slug)) return fail(409, `a map-relevant analysis is already running for ${slug}`);
+	spawnMapRun(entry.root, slug);
+	// the run writes the attr from another process: the poke makes the poll serve the new state
+	pokeDaemon(entry.root);
+	json(res, { ok: true });
+}
+
 // project selects by root (the tab identity); a bare name still finds its entry when unique, so
 // name-only clients keep working. With duplicate names a bare name is ambiguous and answers none
 function resolveEntry(entries: Map<string, HubEntry>, project: string): HubEntry | undefined {
@@ -483,6 +541,9 @@ async function route(
 	} else if (path === "/api/task-priority") {
 		// the task panel's priority control; every verb lands in the handler so a GET answers 405
 		await taskPriority(opts, entries, req, res);
+	} else if (path === "/api/task-map") {
+		// #458 the task panel's map trigger; every verb lands in the handler so a GET answers 405
+		await taskMap(opts, entries, url, req, res);
 	} else if (req.method === "GET" && path === "/api/agent-log") {
 		const entry = resolveEntry(entries, project);
 		const payload = entry ? await webui.agentLogPayload(entry.root, url.searchParams) : null;

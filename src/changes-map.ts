@@ -2,14 +2,15 @@
 // task branch's diff and asks the `map` role for strict JSON, stored in the task's `map` attr.
 // The map is display-only, and the attr is the only record left once doneCleanup drops the
 // branch, so it carries the 7-char branch head the served `since` count needs.
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { buildAnalystCommand, spawnAnalyst } from "./efficiency-analysis.ts";
-import { updateAttrs, type Task } from "./kanban.ts";
+import { kanbanDir, updateAttrs, type Task } from "./kanban.ts";
 import { claudeAnalystArgs, piLlmFlags } from "./orchestrator/backends.ts";
 import { resolveLlm, type Config } from "./orchestrator/config.ts";
 import { git } from "./orchestrator/board.ts";
 import { log } from "./orchestrator/log.ts";
+import { agentAlive } from "./pid.ts";
 
 export type TaskMapKind = "fn" | "class" | "case";
 const KINDS: readonly string[] = ["fn", "class", "case"];
@@ -156,6 +157,25 @@ function changesMapPrompt(diff: string, numstat: string): string {
 		"",
 		`Diff:\n${diff.slice(0, DIFF_CAP)}`,
 	].join("\n");
+}
+
+// #458 the roles whose analysis run writes the map. A live pid file for any of them means the
+// attr write is in flight, so the trigger answers 409 and the served payload flags mapRunning.
+// The name shape keys the check: a doctor run streams under `<slug>.<role>.<n>.analysis` of the
+// analysed run, carries no task map, and is read from the same pid dir.
+const MAP_ROLES = /^(.+)\.(developer|reviewer|map)\.\d+\.analysis\.pid$/;
+
+export function mapRunAlive(root: string, slug: string): boolean {
+	let names: string[];
+	try {
+		names = readdirSync(join(kanbanDir(root), ".pids"));
+	} catch {
+		return false; // no board yet: nothing can be in flight
+	}
+	return names.some((name) => {
+		const m = name.match(MAP_ROLES);
+		return !!m && m[1] === slug && agentAlive(root, name.slice(0, -4));
+	});
 }
 
 // One map pass for one finished run. Best-effort: an absent worktree, a failed git call or an

@@ -1,6 +1,7 @@
 import { closeSync, existsSync, openSync, readFileSync, readdirSync, readSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
+import { mapRunAlive } from "../changes-map.ts";
 import { getTask, kanbanDir, listAll, splitFrontmatter, taskFiles, taskNum, taskSlug, type Task, type TaskChanges, type TaskCommit, type TaskMap } from "../kanban.ts";
 import { git } from "../orchestrator/board.ts";
 import { agentAlive, agentPidName } from "../pid.ts";
@@ -784,15 +785,18 @@ export async function taskChangesPayload(root: string, num: number) {
 	const task = file ? getTask(root, file) : undefined;
 	if (!task) return null;
 	const withMap = <T extends object>(answer: T, commits: TaskCommit[]) => (task.map ? { ...answer, map: mapView(task.map, commits) } : answer);
+	// #458 the trigger's 409 guard and the panel's spinner read one flag: a live developer, reviewer
+	// or map analysis owns the attr write, so the client shows that run instead of offering another
+	const withFlag = <T extends object>(answer: T) => ({ ...answer, mapRunning: mapRunAlive(root, taskSlug(task.file)) });
 	if (task.worktree) {
 		// the base is read here, never the hub's cwd; a detached base answers nothing
 		const base = git(root, ["branch", "--show-current"], true);
 		const live = base ? branchChanges(root, base, task.worktree) : null;
-		if (live && (live.changes.files > 0 || live.commits.length > 0)) return withMap(changesAnswer(live.changes, live.commits, false), live.commits);
+		if (live && (live.changes.files > 0 || live.commits.length > 0)) return withFlag(withMap(changesAnswer(live.changes, live.commits, false), live.commits));
 	}
-	if (task.changes) return withMap(changesAnswer(task.changes, task.commits, true), task.commits);
-	// a map without git data still answers: {} stays the answer only when the task has neither
-	return task.map ? { map: mapView(task.map, []) } : {};
+	if (task.changes) return withFlag(withMap(changesAnswer(task.changes, task.commits, true), task.commits));
+	// a map without git data still answers: the flag alone rides a task with neither
+	return withFlag(task.map ? { map: mapView(task.map, []) } : {});
 }
 
 // the per-task detail text (000242 light, 000248): the light row plus the body, sections and
