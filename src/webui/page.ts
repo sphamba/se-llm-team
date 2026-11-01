@@ -829,6 +829,8 @@ function issuerCell(t) {
 // the changes block: one lazy fetch per panel open, cached per task like the subagent lists, and
 // the later arrival repaints the facts only, so the hold button outside the block is never rebuilt
 const changesCache = Object.create(null);
+const mapRun = Object.create(null);
+const changesFlight = Object.create(null);
 const CHG_UNITS = { second: "s", minute: "m", hour: "h", day: "d", week: "w", month: "mo", year: "y" };
 const CHG_STEPS = [["year", 31536e6], ["month", 2592e6], ["week", 6048e5], ["day", 864e5], ["hour", 36e5], ["minute", 6e4], ["second", 1e3]];
 // one formatter for both time forms the panel receives: git's "N units ago" and the map's ISO stamp
@@ -848,16 +850,20 @@ function mapNum(x) {
 	const n = Math.trunc(Number(x));
 	return Number.isFinite(n) && n > 0 ? n : 0;
 }
-function mapHtml(c) {
+const mapRunning = file => !!mapRun[file] || !!(changesCache[file] && changesCache[file].mapRunning === true);
+function mapHtml(c, t) {
 	const m = c && c.map;
-	if (!m || typeof m !== "object") return "";
-	const files = (Array.isArray(m.files) ? m.files : []).map(f => ({
+	const running = mapRunning(t.file);
+	const files = (m && typeof m === "object" && Array.isArray(m.files) ? m.files : []).map(f => ({
 		path: f && typeof f.path === "string" ? f.path : "",
 		syms: (f && Array.isArray(f.symbols) ? f.symbols : []).filter(s => s && typeof s.name === "string" && s.name)
 	})).filter(f => f.path && f.syms.length);
-	const flows = (Array.isArray(m.transfers) ? m.transfers : []).filter(t => t && t.from && t.to);
+	const flows = (m && typeof m === "object" && Array.isArray(m.transfers) ? m.transfers : []).filter(t => t && t.from && t.to);
 	const count = files.reduce((n, f) => n + f.syms.length, 0);
-	if (!count && !flows.length) return "";
+	if (!count && !flows.length) {
+		if (running) return "<div><span class='k'>map</span><span class='spin'></span>computing\u2026</div>";
+		return "<div><span class='k'>map</span><span class='chg-none'>not computed</span>" + (t.worktree ? " <button class='m-action m-map' onclick='computeMap(this)'>compute</button>" : "") + "</div>";
+	}
 	const prov = [];
 	if (m.role) prov.push("generated after " + esc(m.role) + (mapNum(m.run) ? " run " + mapNum(m.run) : ""));
 	if (m.model) prov.push(esc(m.model));
@@ -877,35 +883,67 @@ function mapHtml(c) {
 		"<div class='chg-flow'><div class='chg-flow-head'><span class='chg-from'>" + esc(f.from) + "</span><span class='chg-arrow' aria-hidden='true'>\u2192</span><span class='chg-to'>" + esc(f.to) + "</span></div>" +
 		(typeof f.what === "string" && f.what ? "<div class='chg-what'>" + esc(f.what) + "</div>" : "") + "</div>"
 	).join("");
-	return "<div><span class='k'>map</span><details class='chg-map'><summary>" + count + " symbols \u00b7 " + flows.length + " transfers<span class='chg-chev' aria-hidden='true'></span></summary>" +
+	return "<div><span class='k'>map</span>" + (running ? "<span class='spin'></span><span class='chg-upd'>updating\u2026</span>" : "") + "<details class='chg-map'><summary>" + count + " symbols \u00b7 " + flows.length + " transfers<span class='chg-chev' aria-hidden='true'></span></summary>" +
 		provHtml + (symsHtml ? "<div class='chg-symbols'>" + symsHtml + "</div>" : "") + (flowsHtml ? "<div class='chg-ledger'>" + flowsHtml + "</div>" : "") + "</details></div>";
 }
-function changesHtml(file) {
+function changesHtml(t) {
+	const file = t.file;
 	const c = changesCache[file];
-	if (!c) return "";
 	let html = "";
-	if (typeof c.insertions === "number" || typeof c.deletions === "number") {
+	if (c && (typeof c.insertions === "number" || typeof c.deletions === "number")) {
 		html += "<div><span class='k'>changes</span><span class='chg-ins'>+" + esc(String(c.insertions || 0)) + "</span> <span class='chg-del'>-" + esc(String(c.deletions || 0)) + "</span><span class='chg-files'> - " + esc(String(c.files || 0)) + " files</span></div>";
 	}
-	if (Array.isArray(c.commits) && c.commits.length) {
+	if (c && Array.isArray(c.commits) && c.commits.length) {
 		html += "<div><span class='k'>commits</span><details class='chg-commits'><summary>" + c.commits.length + " commits<span class='chg-chev' aria-hidden='true'></span></summary>" +
 			c.commits.map(cm => "<div class='chg-commit'><span class='chg-hash'>" + esc(String(cm.hash || "").slice(0, 7)) + "</span><span class='chg-subj'>" + esc(cm.subject) + "</span><span class='chg-when'>" + esc(chgTime(cm.when)) + "</span></div>").join("") +
 			"</details></div>";
 	}
-	return html + mapHtml(c);
+	return html + mapHtml(c, t);
 }
-function loadChanges(file) {
-	if (changesCache[file]) return;
-	changesCache[file] = {};
+function loadChanges(file, force) {
+	if (!force && changesCache[file]) return;
+	if (changesFlight[file]) return;
+	changesFlight[file] = true;
+	if (!changesCache[file]) changesCache[file] = {};
 	fetch("/api/task-changes?num=" + numOf(file) + projectParam())
 		.then(r => r.ok ? r.json() : null)
 		.then(c => {
-			const has = c && (typeof c.insertions === "number" || typeof c.deletions === "number" || (Array.isArray(c.commits) && c.commits.length) || (c.map && typeof c.map === "object"));
-			if (!has) { delete changesCache[file]; return; }
+			delete changesFlight[file];
+			const running = c && c.mapRunning === true;
+			const has = c && (typeof c.insertions === "number" || typeof c.deletions === "number" || (Array.isArray(c.commits) && c.commits.length) || (c.map && typeof c.map === "object") || running);
+			if (!has) {
+				if (!(c && c.mapRunning === true)) delete mapRun[file];
+				delete changesCache[file];
+				if (openDetail && openDetail.file === file && visible()) writeFacts(openDetail);
+				return;
+			}
 			changesCache[file] = c;
+			if (c.map || !running) delete mapRun[file];
 			if (openDetail && openDetail.file === file && visible()) writeFacts(openDetail);
 		})
-		.catch(() => { delete changesCache[file]; });
+		.catch(() => { delete changesFlight[file]; delete changesCache[file]; });
+}
+// #459 the compute trigger: the row pulses at once, a success drops the cached payload so the poll
+// refetches, a 409 is another run in flight, and any other failure restores the idle row silently
+function computeMap() {
+	const t = openDetail;
+	if (!t || mapRunning(t.file)) return;
+	const file = t.file;
+	mapRun[file] = true;
+	writeFacts(t);
+	fetch("/api/task-map?num=" + numOf(file) + projectParam(), { method: "POST" })
+		.then(r => {
+			if (r.ok || r.status === 409) {
+				delete changesCache[file];
+				if (openDetail && openDetail.file === file) writeFacts(openDetail);
+				return;
+			}
+			throw new Error("task-map " + r.status);
+		})
+		.catch(() => {
+			delete mapRun[file];
+			if (openDetail && openDetail.file === file) writeFacts(openDetail);
+		});
 }
 // the panel header's facts: number, state slug, complexity, issuer, blockedBy, worktree, then the
 // changes and commits rows when their one payload has data
@@ -916,7 +954,7 @@ function factsHtml(t) {
 		"<div><span class='k'>issuer</span>" + issuerCell(t) + "</div>" +
 		blockedRow(t) +
 		"<div><span class='k'>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>" +
-		changesHtml(t.file);
+		changesHtml(t);
 }
 function writeFacts(t) {
 	const el = document.getElementById("p-facts");
@@ -1108,6 +1146,7 @@ function hidePanel() {
 	openerFile = null;
 	for (const k in subCache) delete subCache[k];
 	for (const k in changesCache) delete changesCache[k];
+	for (const k in mapRun) delete mapRun[k];
 	clearReveal();
 	document.body.classList.remove("panel-open");
 	if (p.classList.contains("hidden")) return;
@@ -1180,7 +1219,7 @@ function openPanel(t) {
 		for (const k in changesCache) delete changesCache[k];
 	}
 	writePanel(t, fresh);
-	loadChanges(t.file);
+	loadChanges(t.file, mapRunning(t.file));
 	// the loading placeholder: the heavy blocks fill on the detail's arrival
 	if (fresh) writeGated(document.getElementById("p-body"), '<div class="empty"><span class="spin"></span>Loading task details…</div>');
 	showPanel();
@@ -1213,6 +1252,7 @@ function pollDetail() {
 		openDetail = Object.assign({}, openDetail, d);
 		writePanel(openDetail);
 		markLiveLine();
+		if (mapRunning(file)) loadChanges(file, true);
 		return fetch(historyUrl(file)).then(r => r.ok ? r.json() : null).catch(() => null).then(h => {
 			if (!h || panelFile !== d.file || !visible()) return;
 			openDetail = Object.assign({}, openDetail, h);

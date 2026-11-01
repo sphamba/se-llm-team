@@ -740,12 +740,12 @@ const factsSrc = page.slice(page.indexOf("// the changes block"), page.indexOf("
 const changesPayload = { base: "main", insertions: 123, deletions: 456, files: 12, commits: [{ hash: "a1b2c3d", subject: "feat: x", when: "2 hours ago" }, { hash: "d4e5f6a", subject: "fix: y", when: "3 days ago" }], snapshot: false };
 const makeFacts = (fetchStub: (u: string) => any = () => new Promise(() => {})) => {
 	const factsEl: any = { __html: undefined, querySelectorAll: () => [] };
-	const api = new Function("esc", "numOf", "issuerCell", "blockedRow", "document", "fetch", "projectParam", "visible", "openTask",
+	const api = new Function("esc", "numOf", "issuerCell", "blockedRow", "document", "fetch", "projectParam", "visible", "openTask", "writeGated",
 		"let openDetail = null;\n" + factsSrc +
-		"\n; return { factsHtml: factsHtml, changesHtml: changesHtml, chgTime: chgTime, loadChanges: loadChanges, cache: changesCache, set open(v) { openDetail = v; } };")(
+		"\n; return { factsHtml: factsHtml, changesHtml: changesHtml, mapHtml: mapHtml, computeMap: computeMap, chgTime: chgTime, loadChanges: loadChanges, cache: changesCache, mapRun: mapRun, set open(v) { openDetail = v; } };")(
 		esc, (f: string) => parseInt(f.slice(0, 6), 10), () => "user", () => "",
 		{ getElementById: (id: string) => (id === "p-facts" ? factsEl : null) },
-		fetchStub, () => "", () => true, () => {},
+		fetchStub, () => "", () => true, () => {}, () => true,
 	);
 	return { api, factsEl };
 };
@@ -786,7 +786,8 @@ assert.equal(changesLog.filter((u) => u.includes("/api/task-changes")).length, 1
 openApi.openPanel({ file: "000264_other.md" });
 await new Promise((r) => setTimeout(r, 0));
 assert.equal(changesLog.filter((u) => u.includes("/api/task-changes")).length, 2, "a fresh task starts its own changes fetch");
-assert.ok(!page.match(/function pollDetail\(\) \{[\s\S]*?\n\}/)![0].includes("/api/task-changes"), "the 5s poll never touches the changes endpoint, so a closed panel fetches nothing");
+const pollDetailSrc = page.match(/function pollDetail\(\) \{[\s\S]*?\n\}/)![0];
+assert.ok(pollDetailSrc.includes("mapRunning(file)") && pollDetailSrc.includes("loadChanges(file, true)"), "the poll refetches the changes only while a map run is in flight");
 assert.ok(hideSrc.includes("changesCache"), "hidePanel drops the changes cache with the other per-panel caches");
 
 // 16c. #456 the Map row: a third facts row from the same payload, collapsed, a file-grouped symbol
@@ -799,13 +800,27 @@ const mapSection = {
 	role: "developer", run: 2, model: "gpt-5.1-codex", at: mapPast, since: 0,
 };
 const mapFacts = makeFacts();
-mapFacts.api.cache[mapTask.file] = changesPayload;
 const factsNoMap = mapFacts.api.factsHtml(mapTask);
-assert.ok(!factsNoMap.includes("chg-map"), "a payload with no map key renders no Map row");
+assert.match(factsNoMap, /<span class='k'>map<\/span>.*not computed/, "a task with no map shows the not computed row");
+assert.match(factsNoMap, /<button[^>]*>compute<\/button>/, "the idle row offers the compute button when the task has a worktree");
+mapFacts.api.cache[mapTask.file] = changesPayload;
+assert.match(mapFacts.api.factsHtml(mapTask), /not computed/, "a payload without a map still shows the not computed row");
 mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: {} };
-assert.equal(mapFacts.api.factsHtml(mapTask), factsNoMap, "an empty map means nothing to show, so the row stays absent");
+assert.match(mapFacts.api.factsHtml(mapTask), /not computed/, "an empty map is treated as absent");
 mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { files: [{ path: "src/x.ts" }, null], transfers: [{ from: "src/a.ts" }], role: "developer" } };
-assert.equal(mapFacts.api.factsHtml(mapTask), factsNoMap, "a partial or odd map is treated as absent: no row and no error row");
+assert.match(mapFacts.api.factsHtml(mapTask), /not computed/, "a partial or odd map is treated as absent: no details row and no error row");
+const factsNoBranch = mapFacts.api.factsHtml({ ...mapTask, worktree: "" });
+assert.match(factsNoBranch, /not computed/);
+assert.ok(!factsNoBranch.includes("compute</button>"), "a task without a worktree shows not computed alone");
+assert.ok(!mapFacts.api.factsHtml({ ...mapTask, state: "done", worktree: "" }).includes("compute</button>"), "a done task without a branch offers no compute button");
+mapFacts.api.cache[mapTask.file] = { ...changesPayload, mapRunning: true };
+const factsRunning = mapFacts.api.factsHtml(mapTask);
+assert.match(factsRunning, /<span class='spin'><\/span>computing\u2026/, "a run in flight on a task with no map shows the pulse and computing");
+assert.ok(!factsRunning.includes("compute</button>"), "the pulse replaces the button, so a second trigger is impossible");
+mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: mapSection, mapRunning: true };
+const factsUpdating = mapFacts.api.factsHtml(mapTask);
+assert.match(factsUpdating, /<span class='spin'><\/span><span class='chg-upd'>updating\u2026/, "a recompute keeps the row and ledger and adds the pulse and updating");
+assert.ok(factsUpdating.includes("chg-map") && factsUpdating.includes("2 symbols"), "the existing map content survives the updating pulse");
 mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: mapSection };
 const factsMap = mapFacts.api.factsHtml(mapTask);
 assert.match(factsMap, /<details class='chg-map'><summary>2 symbols · 1 transfers<span/, "the Map trigger counts the symbols and the transfers");
@@ -829,8 +844,46 @@ const mapOnly = makeFacts(() => Promise.resolve({ ok: true, json: () => Promise.
 mapOnly.api.loadChanges(mapTask.file);
 await new Promise((r) => setTimeout(r, 0));
 assert.ok(mapOnly.api.cache[mapTask.file], "a map-only payload survives the cache guard, so a task with no commits still shows the Map row");
+// #459 the compute trigger: the click marks the run at once, a success drops the cached payload, a
+// 409 stays running, another failure restores the idle row, and the pulse clears when the map lands
+const tick = () => new Promise((r) => setTimeout(r, 0));
+const makeTrigger = (resp: any) => {
+	const calls: any[] = [];
+	const h = makeFacts((u: string, o: any) => { calls.push({ u, o }); return Promise.resolve(resp); });
+	h.api.open = mapTask;
+	return { h, calls };
+};
+const okTrigger = makeTrigger({ ok: true, status: 200 });
+okTrigger.h.api.cache[mapTask.file] = changesPayload;
+okTrigger.h.api.computeMap({});
+assert.match(okTrigger.h.api.factsHtml(mapTask), /computing\u2026/, "the click shows the pulse at once");
+await tick();
+assert.equal(okTrigger.calls.length, 1);
+assert.match(okTrigger.calls[0].u, /^\/api\/task-map\?num=263/);
+assert.equal(okTrigger.calls[0].o.method, "POST");
+assert.ok(!okTrigger.h.api.cache[mapTask.file], "a successful POST drops the cached changes, so the row refetches");
+assert.match(okTrigger.h.api.factsHtml(mapTask), /computing\u2026/, "the row keeps the pulse until the map lands");
+okTrigger.h.api.computeMap({});
+await tick();
+assert.equal(okTrigger.calls.length, 1, "a second click while the run is in flight does not fire another POST");
+const conflictTrigger = makeTrigger({ ok: false, status: 409 });
+conflictTrigger.h.api.computeMap({});
+await tick();
+assert.match(conflictTrigger.h.api.factsHtml(mapTask), /computing\u2026/, "a 409 is another run in flight, so the pulse stays");
+const failTrigger = makeTrigger({ ok: false, status: 500 });
+failTrigger.h.api.computeMap({});
+await tick();
+assert.match(failTrigger.h.api.factsHtml(mapTask), /not computed/);
+assert.ok(failTrigger.h.api.factsHtml(mapTask).includes("compute</button>"), "another failure restores the idle row and paints no error");
+const refreshFacts = makeFacts(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ ...changesPayload, map: mapSection }) }));
+refreshFacts.api.cache[mapTask.file] = { ...changesPayload, mapRunning: true };
+refreshFacts.api.loadChanges(mapTask.file, true);
+await tick();
+assert.match(refreshFacts.api.factsHtml(mapTask), /chg-map/, "a forced load that brings the map replaces the running row");
+assert.ok(!refreshFacts.api.factsHtml(mapTask).includes("updating\u2026"), "the pulse clears when the map lands, so normal caching resumes");
 assert.match(themeCss, /#p-facts \.chg-kind \{[^}]*background: var\(--code-bg\)/, "the kind chip sits on the code background token");
 assert.match(themeCss, /#p-facts \.chg-arrow \{[^}]*color: var\(--link\)/, "the arrow glyph takes the link token");
+assert.match(themeCss, /#p-facts \.m-map \{[^}]*font-size: 0\.75rem/, "the compute button is quiet at the panel's small size");
 assert.match(themeCss, /#p-facts \.chg-prov \{[^}]*color: var\(--faint\)[^}]*font-size: 0\.75rem/, "the provenance line is faint mono at the 0.75rem floor");
 assert.match(themeCss, /#p-facts \.chg-flow \+ \.chg-flow \{[^}]*border-top: 1px solid var\(--hairline\)/, "a 1px hairline separates the flow entries");
 assert.match(themeCss, /#p-facts \.chg-delta \{[^}]*font-variant-numeric: tabular-nums/, "the per-symbol delta is mono with tabular numerals");
@@ -948,7 +1001,7 @@ assert.deepEqual(nav.notFound, [], "an unknown number shows nothing before the b
 route.served = true;
 route.syncRoute();
 assert.deepEqual(nav.notFound, [999], "once the board has served, an unknown number writes the not-found line");
-const pollGate = new Function("document", "fetch", "detailUrl", "historyUrl", "openDetail", "panelFile", "writePanel", "markLiveLine", "visible",
+const pollGate = new Function("document", "fetch", "detailUrl", "historyUrl", "openDetail", "panelFile", "writePanel", "markLiveLine", "visible", "mapRunning", "loadChanges",
 	page.match(/function pollDetail\(\) \{[\s\S]*?\n\}/)![0] + "; return pollDetail;")(
 	{},
 	() => Promise.resolve({ ok: true, json: () => Promise.resolve({ file: "000999_other.md", body: "x" }) }),
@@ -959,6 +1012,8 @@ const pollGate = new Function("document", "fetch", "detailUrl", "historyUrl", "o
 	() => { throw new Error("a superseded poll response painted into the panel"); },
 	() => {},
 	() => true,
+	() => false,
+	() => {},
 );
 await pollGate();
 

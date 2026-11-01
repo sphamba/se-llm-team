@@ -315,6 +315,9 @@ body.panel-open #board { padding-right: var(--panel-w); }
 #p-facts .chg-from, #p-facts .chg-to { min-width: 0; overflow-wrap: anywhere; }
 #p-facts .chg-arrow { flex: 0 0 auto; color: var(--link); }
 #p-facts .chg-what { color: var(--dim); overflow-wrap: anywhere; }
+/* #459 the idle Map row and its quiet compute trigger, and the updating label beside the pulse */
+#p-facts .chg-none, #p-facts .chg-upd { color: var(--dim); }
+#p-facts .m-map { padding: 1px 8px; font-size: 0.75rem; }
 /* the priority control sits on its label's line, aligned with the facts rows above, and is a
    four-option segmented group: the active option takes its own hue */
 #p-prio-wrap { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-bottom: 6px; }
