@@ -835,6 +835,13 @@ assert.match(factsMap, /class='chg-flow-head'>.*src\/hub\.ts.*→.*src\/webui\/p
 assert.match(factsMap, /class='chg-what'>the task-changes request</, "the payload phrase sits below the flow");
 assert.ok(!/<ol|<li/.test(factsMap), "the flow ledger is unnumbered");
 assert.match(factsMap, /class='chg-prov'>generated after developer run 2 · gpt-5\.1-codex · 5m ago</, "the provenance line names the role, the run, the model and the compacted time");
+mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { ...mapSection, run: 0 } };
+assert.match(mapFacts.api.factsHtml(mapTask), /class='chg-prov'>generated after developer run 0 ·/, "the first run names its zero index");
+mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { ...mapSection, role: "reviewer", run: 1 } };
+assert.match(mapFacts.api.factsHtml(mapTask), /class='chg-prov'>generated after reviewer run 1 ·/, "a later run still names its index");
+mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { ...mapSection, run: null } };
+assert.match(mapFacts.api.factsHtml(mapTask), /class='chg-prov'>generated after developer · gpt-5\.1-codex/, "a missing run index keeps the old form");
+mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: mapSection };
 assert.ok(!factsMap.includes("commits since"), "a current map appends no stale commit count");
 mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { ...mapSection, since: 3 } };
 assert.match(mapFacts.api.factsHtml(mapTask), /class='chg-since'>\+3 commits since</, "a stale map appends the commits that landed after it");

@@ -829,7 +829,7 @@ function issuerCell(t) {
 // the changes block: one lazy fetch per panel open, cached per task like the subagent lists, and
 // the later arrival repaints the facts only, so the hold button outside the block is never rebuilt
 const changesCache = Object.create(null);
-const mapRun = Object.create(null);
+const mapRunBusy = Object.create(null);
 const changesFlight = Object.create(null);
 const CHG_UNITS = { second: "s", minute: "m", hour: "h", day: "d", week: "w", month: "mo", year: "y" };
 const CHG_STEPS = [["year", 31536e6], ["month", 2592e6], ["week", 6048e5], ["day", 864e5], ["hour", 36e5], ["minute", 6e4], ["second", 1e3]];
@@ -850,7 +850,13 @@ function mapNum(x) {
 	const n = Math.trunc(Number(x));
 	return Number.isFinite(n) && n > 0 ? n : 0;
 }
-const mapRunning = file => !!mapRun[file] || !!(changesCache[file] && changesCache[file].mapRunning === true);
+const mapRunning = file => !!mapRunBusy[file] || !!(changesCache[file] && changesCache[file].mapRunning === true);
+// run indexes start at 0, so only a missing or invalid value drops the index
+function mapRun(x) {
+	if (x === null || x === undefined || x === "") return null;
+	const n = Number(x);
+	return Number.isInteger(n) && n >= 0 ? n : null;
+}
 function mapHtml(c, t) {
 	const m = c && c.map;
 	const running = mapRunning(t.file);
@@ -865,7 +871,7 @@ function mapHtml(c, t) {
 		return "<div><span class='k'>map</span><span class='chg-none'>not computed</span>" + (t.worktree ? " <button class='m-action m-map' onclick='computeMap(this)'>compute</button>" : "") + "</div>";
 	}
 	const prov = [];
-	if (m.role) prov.push("generated after " + esc(m.role) + (mapNum(m.run) ? " run " + mapNum(m.run) : ""));
+	if (m.role) prov.push("generated after " + esc(m.role) + (mapRun(m.run) !== null ? " run " + mapRun(m.run) : ""));
 	if (m.model) prov.push(esc(m.model));
 	const when = chgTime(m.at);
 	if (when) prov.push(esc(when));
@@ -912,13 +918,13 @@ function loadChanges(file, force) {
 			const running = c && c.mapRunning === true;
 			const has = c && (typeof c.insertions === "number" || typeof c.deletions === "number" || (Array.isArray(c.commits) && c.commits.length) || (c.map && typeof c.map === "object") || running);
 			if (!has) {
-				if (!(c && c.mapRunning === true)) delete mapRun[file];
+				if (!(c && c.mapRunning === true)) delete mapRunBusy[file];
 				delete changesCache[file];
 				if (openDetail && openDetail.file === file && visible()) writeFacts(openDetail);
 				return;
 			}
 			changesCache[file] = c;
-			if (c.map || !running) delete mapRun[file];
+			if (c.map || !running) delete mapRunBusy[file];
 			if (openDetail && openDetail.file === file && visible()) writeFacts(openDetail);
 		})
 		.catch(() => { delete changesFlight[file]; delete changesCache[file]; });
@@ -929,7 +935,7 @@ function computeMap() {
 	const t = openDetail;
 	if (!t || mapRunning(t.file)) return;
 	const file = t.file;
-	mapRun[file] = true;
+	mapRunBusy[file] = true;
 	writeFacts(t);
 	fetch("/api/task-map?num=" + numOf(file) + projectParam(), { method: "POST" })
 		.then(r => {
@@ -941,7 +947,7 @@ function computeMap() {
 			throw new Error("task-map " + r.status);
 		})
 		.catch(() => {
-			delete mapRun[file];
+			delete mapRunBusy[file];
 			if (openDetail && openDetail.file === file) writeFacts(openDetail);
 		});
 }
@@ -1146,7 +1152,7 @@ function hidePanel() {
 	openerFile = null;
 	for (const k in subCache) delete subCache[k];
 	for (const k in changesCache) delete changesCache[k];
-	for (const k in mapRun) delete mapRun[k];
+	for (const k in mapRunBusy) delete mapRunBusy[k];
 	clearReveal();
 	document.body.classList.remove("panel-open");
 	if (p.classList.contains("hidden")) return;
