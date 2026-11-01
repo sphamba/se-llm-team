@@ -241,6 +241,17 @@ assert.deepEqual(parsedDone.commits, [snapCommit], "a quoted, piped, comma-carry
 assert.deepEqual(await taskChangesPayload(snapRoot, parseInt(snapTask.file, 10)), { base: "main", insertions: 12, deletions: 3, files: 2, commits: [snapCommit], snapshot: true }, "a done task with no worktree answers from the file with snapshot: true");
 updateAttrs(snapRoot, snapTask, { changes: "{not json" });
 assert.equal(parseTask(snapRoot, snapTask.file).changes, null, "a malformed snapshot reads as absent, never throws");
+// #449 the post-merge window: finishMerge fast-forwards the base onto the branch before
+// doneCleanup deletes it, so for that window the live range is empty while the worktree
+// attribute still names a branch. The snapshot must answer, not a zero row
+const mergedSnapshot = { base: "main", ins: 2, del: 2, files: 3 };
+gitIn("merge", "--ff-only", "feat/1-changes");
+updateAttrs(changesRoot, changesTask, { changes: JSON.stringify(mergedSnapshot), commits: JSON.stringify([snapCommit]) });
+const merged = await taskChangesPayload(changesRoot, parseInt(changesTask.file, 10));
+assert.equal(merged.snapshot, true, "a merged branch with an empty live range answers from the snapshot, not a zero row");
+assert.deepEqual([merged.insertions, merged.deletions, merged.files], [2, 2, 3], "the snapshot keeps the pre-merge numbers after the fast-forward");
+assert.deepEqual(merged.commits, [snapCommit], "the snapshot commit list survives the fast-forward");
+
 for (const dir of [changesRoot, snapRoot]) rmSync(dir, { recursive: true, force: true });
 
 process.env.HOME = realHome;

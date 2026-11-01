@@ -767,7 +767,8 @@ const changesAnswer = (changes: TaskChanges, commits: TaskCommit[], snapshot: bo
 
 // #450 one task's branch-vs-base changes, on demand and uncached (the client caches per task):
 // live from git while a worktree exists, from the merge-time snapshot after doneCleanup deleted
-// the branch; {} when there is nothing to show, null when the task is unknown (the route 404s)
+// the branch; the window in between (base fast-forwarded onto the branch, branch still present)
+// has an empty live range, so an empty answer falls back to the snapshot instead of a zero row
 export async function taskChangesPayload(root: string, num: number) {
 	const file = taskFiles(root).find((f) => taskNum(f) === num);
 	const task = file ? getTask(root, file) : undefined;
@@ -776,7 +777,7 @@ export async function taskChangesPayload(root: string, num: number) {
 		// the base is read here, never the hub's cwd; a detached base answers nothing
 		const base = git(root, ["branch", "--show-current"], true);
 		const live = base ? branchChanges(root, base, task.worktree) : null;
-		if (live) return changesAnswer(live.changes, live.commits, false);
+		if (live && (live.changes.files > 0 || live.commits.length > 0)) return changesAnswer(live.changes, live.commits, false);
 	}
 	return task.changes ? changesAnswer(task.changes, task.commits, true) : {};
 }
