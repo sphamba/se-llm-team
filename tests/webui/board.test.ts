@@ -495,7 +495,7 @@ for (const fn of ["openTask", "showPanel", "hidePanel"]) {
 }
 assert.ok(page.includes("const mine = p.dataset.file === file || p.dataset.blocker === file;") && page.includes('p.classList.toggle("relations-hot", on && mine)'), "the hover matches a path that touches the hovered file at either end, so the lines to its blockers and the lines from the cards that wait on it both light, with no quote-unsafe selector interpolation");
 assert.ok(page.includes('" data-blocker="'), "each relation path carries the blocker's file alongside the blocked task's file");
-assert.ok(page.includes('facts.querySelectorAll(".num-link")') && page.includes("openTask(a.dataset.task)"), "the panel binds its id links to openTask through the facts block");
+assert.ok(page.includes('writeFacts(t)') && page.includes('el.querySelectorAll(".num-link")') && page.includes("openTask(a.dataset.task)"), "the panel binds its id links to openTask through the facts block");
 assert.ok(page.includes(">blockedBy</span>"), "the panel builds a blockedBy row");
 // #392 the drawn endpoint lives in board content coordinates: the board's own scroll is added back
 // and a station body's inner scroll never is, because the overlay is absolute in the board. The FLIP
@@ -694,13 +694,14 @@ assert.equal(blockedRowOf({ blockedBy: "user, #42" }), `<div><span class='k'>blo
 
 // #396 the facts block carries the state slug alone and no separate hold row: the hold shows in the
 // blockedBy row that blockedRow builds
-const factsHtmlOf = new Function("esc", "numOf", "STATIONS", "holdsToken", "issuerCell", "blockedRow", page.match(/function factsHtml\(t\) \{[\s\S]*?\n\}/)![0] + "; return factsHtml;")(
+const factsHtmlOf = new Function("esc", "numOf", "STATIONS", "holdsToken", "issuerCell", "blockedRow", "changesHtml", page.match(/function factsHtml\(t\) \{[\s\S]*?\n\}/)![0] + "; return factsHtml;")(
 	esc,
 	(f: string) => parseInt(f.slice(0, 6), 10),
 	STATIONS,
 	holdsToken,
 	() => "user",
 	blockedRowOf,
+	() => "",
 ) as (t: any) => string;
 const facts = factsHtmlOf({ file: "000263_task.md", state: "doing", complexity: "low", issuer: "user", blockedBy: "user", worktree: "feat/x" });
 assert.ok(!facts.includes("<span class='k'>hold</span>") && !facts.includes("sub-state"), "the facts block prints no hold row and no station span beside the state");
