@@ -738,14 +738,14 @@ assert.equal(issuerOf({ issuer: "auto" }), "auto", "an auto issuer stays plain t
 // while the 5s poll never touches the endpoint
 const factsSrc = page.slice(page.indexOf("// the changes block"), page.indexOf("// the actions:"));
 const changesPayload = { base: "main", insertions: 123, deletions: 456, files: 12, commits: [{ hash: "a1b2c3d", subject: "feat: x", when: "2 hours ago" }, { hash: "d4e5f6a", subject: "fix: y", when: "3 days ago" }], snapshot: false };
-const makeFacts = () => {
+const makeFacts = (fetchStub: (u: string) => any = () => new Promise(() => {})) => {
 	const factsEl: any = { __html: undefined, querySelectorAll: () => [] };
 	const api = new Function("esc", "numOf", "issuerCell", "blockedRow", "document", "fetch", "projectParam", "visible", "openTask",
 		"let openDetail = null;\n" + factsSrc +
 		"\n; return { factsHtml: factsHtml, changesHtml: changesHtml, chgTime: chgTime, loadChanges: loadChanges, cache: changesCache, set open(v) { openDetail = v; } };")(
 		esc, (f: string) => parseInt(f.slice(0, 6), 10), () => "user", () => "",
 		{ getElementById: (id: string) => (id === "p-facts" ? factsEl : null) },
-		() => new Promise(() => {}), () => "", () => true, () => {},
+		fetchStub, () => "", () => true, () => {},
 	);
 	return { api, factsEl };
 };
@@ -788,6 +788,59 @@ await new Promise((r) => setTimeout(r, 0));
 assert.equal(changesLog.filter((u) => u.includes("/api/task-changes")).length, 2, "a fresh task starts its own changes fetch");
 assert.ok(!page.match(/function pollDetail\(\) \{[\s\S]*?\n\}/)![0].includes("/api/task-changes"), "the 5s poll never touches the changes endpoint, so a closed panel fetches nothing");
 assert.ok(hideSrc.includes("changesCache"), "hidePanel drops the changes cache with the other per-panel caches");
+
+// 16c. #456 the Map row: a third facts row from the same payload, collapsed, a file-grouped symbol
+// ledger with no counts, the unnumbered flow entries and the provenance line
+const mapTask = factsTask;
+const mapPast = new Date(Date.now() - 5 * 60000).toISOString();
+const mapSection = {
+	files: [{ path: "src/webui/payload.ts", symbols: [{ name: "taskChangesPayload", kind: "fn", ins: 12, del: 3, isNew: false }, { name: "mapPayload", kind: "class", ins: 4, del: 0, isNew: true }] }],
+	transfers: [{ from: "src/hub.ts", to: "src/webui/payload.ts", what: "the task-changes request" }],
+	role: "developer", run: 2, model: "gpt-5.1-codex", at: mapPast, since: 0,
+};
+const mapFacts = makeFacts();
+mapFacts.api.cache[mapTask.file] = changesPayload;
+const factsNoMap = mapFacts.api.factsHtml(mapTask);
+assert.ok(!factsNoMap.includes("chg-map"), "a payload with no map key renders no Map row");
+mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: {} };
+assert.equal(mapFacts.api.factsHtml(mapTask), factsNoMap, "an empty map means nothing to show, so the row stays absent");
+mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { files: [{ path: "src/x.ts" }, null], transfers: [{ from: "src/a.ts" }], role: "developer" } };
+assert.equal(mapFacts.api.factsHtml(mapTask), factsNoMap, "a partial or odd map is treated as absent: no row and no error row");
+mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: mapSection };
+const factsMap = mapFacts.api.factsHtml(mapTask);
+assert.match(factsMap, /<details class='chg-map'><summary>2 symbols · 1 transfers<span/, "the Map trigger counts the symbols and the transfers");
+assert.ok(!/<details[^>]*\bopen\b/.test(factsMap), "the Map row starts collapsed, like the commits row");
+assert.match(factsMap, /class='chg-path'>src\/webui\/payload\.ts</, "the symbols group under a mono file path label with no counts");
+assert.match(factsMap, /class='chg-path'>src\/webui\/payload\.ts<\/div>/, "the file label is the bare path with no count beside it");
+assert.match(factsMap, /class='chg-kind'>fn</, "a symbol carries its kind chip");
+assert.match(factsMap, /class='chg-new'>new</, "an added symbol carries the new chip");
+assert.match(factsMap, /<span class='chg-ins'>\+12</, "the added lines take the done step");
+assert.match(factsMap, /<span class='chg-del'>−3</, "the removed lines take the error step");
+assert.match(factsMap, /class='chg-flow-head'>.*src\/hub\.ts.*→.*src\/webui\/payload\.ts/, "the flow entry reads from → to in one head");
+assert.match(factsMap, /class='chg-what'>the task-changes request</, "the payload phrase sits below the flow");
+assert.ok(!/<ol|<li/.test(factsMap), "the flow ledger is unnumbered");
+assert.match(factsMap, /class='chg-prov'>generated after developer run 2 · gpt-5\.1-codex · 5m ago</, "the provenance line names the role, the run, the model and the compacted time");
+assert.ok(!factsMap.includes("commits since"), "a current map appends no stale commit count");
+mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { ...mapSection, since: 3 } };
+assert.match(mapFacts.api.factsHtml(mapTask), /class='chg-since'>\+3 commits since</, "a stale map appends the commits that landed after it");
+assert.equal(mapFacts.api.chgTime("last tuesday"), "last tuesday", "the one time formatter still passes an unknown form through");
+assert.equal(mapFacts.api.chgTime(mapPast), "5m ago", "an ISO stamp compacts through the same formatter the commits row uses");
+const mapOnly = makeFacts(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ map: mapSection }) }));
+mapOnly.api.loadChanges(mapTask.file);
+await new Promise((r) => setTimeout(r, 0));
+assert.ok(mapOnly.api.cache[mapTask.file], "a map-only payload survives the cache guard, so a task with no commits still shows the Map row");
+assert.match(themeCss, /#p-facts \.chg-kind \{[^}]*background: var\(--code-bg\)/, "the kind chip sits on the code background token");
+assert.match(themeCss, /#p-facts \.chg-arrow \{[^}]*color: var\(--link\)/, "the arrow glyph takes the link token");
+assert.match(themeCss, /#p-facts \.chg-prov \{[^}]*color: var\(--faint\)[^}]*font-size: 0\.75rem/, "the provenance line is faint mono at the 0.75rem floor");
+assert.match(themeCss, /#p-facts \.chg-flow \+ \.chg-flow \{[^}]*border-top: 1px solid var\(--hairline\)/, "a 1px hairline separates the flow entries");
+assert.match(themeCss, /#p-facts \.chg-delta \{[^}]*font-variant-numeric: tabular-nums/, "the per-symbol delta is mono with tabular numerals");
+assert.match(themeCss, /summary:focus-visible/, "the Map trigger takes the shared focus ring");
+const mapRules = themeCss.match(/#p-facts \.chg-[a-z]+[^{}]*\{[^{}]*\}/g) ?? [];
+assert.ok(mapRules.length >= 10, `the map rules reach the sheet: ${mapRules.length}`);
+for (const r of mapRules) assert.doesNotMatch(r, /#[0-9a-fA-F]{3,8}\b|\brgba?\(/, `a map rule uses a theme token, never a colour literal: ${r}`);
+const mapPhoneCss = themeCss.slice(themeCss.indexOf(`@media (max-width: ${MOBILE_MAX}px)`));
+assert.match(mapPhoneCss, /#p-facts \.chg-sym \{[^}]*grid-template-columns: minmax\(0, 1fr\)/, "the symbol rows stack at the 700px breakpoint");
+assert.match(mapPhoneCss, /#p-facts \.chg-flow-head \{[^}]*flex-wrap: wrap/, "the flow entries stack at the 700px breakpoint");
 
 // 17. the open path: the panel un-hides before the detail lands, the light row paints the shell
 // while the heavy detail loads, the detail fetch precedes the history fetch, and a response that

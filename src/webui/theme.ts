@@ -293,6 +293,28 @@ body.panel-open #board { padding-right: var(--panel-w); }
 #p-facts .chg-hash { color: var(--dim); }
 #p-facts .chg-subj { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #p-facts .chg-when { color: var(--faint); text-align: right; }
+/* #456 the map row: the collapsed details shape of the commits list; the open state is a transfer
+   ledger, the symbols grouped by file above the unnumbered flow entries. A file label carries no
+   count, because the Changes row already carries the file count */
+#p-facts .chg-map { flex: 1 1 100%; }
+#p-facts .chg-symbols, #p-facts .chg-ledger { display: block; min-width: 0; padding: 4px 0 0; }
+#p-facts .chg-file, #p-facts .chg-flow, #p-facts .chg-prov { display: block; min-width: 0; padding: 0; }
+#p-facts .chg-file + .chg-file { margin-top: 8px; }
+#p-facts .chg-path { color: var(--dim); font-family: ${MONO}; overflow-wrap: anywhere; }
+#p-facts .chg-sym { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 6px; align-items: baseline; min-width: 0; }
+#p-facts .chg-name { color: var(--text); overflow-wrap: anywhere; }
+#p-facts .chg-kind, #p-facts .chg-new { border-radius: 999px; padding: 0 6px; font-family: ${MONO}; font-size: 0.75rem; white-space: nowrap; }
+#p-facts .chg-kind { background: var(--code-bg); color: var(--dim); }
+#p-facts .chg-new { background: color-mix(in srgb, var(--accent-done) 16%, transparent); color: var(--accent-done-text); }
+#p-facts .chg-delta { justify-self: end; font-family: ${MONO}; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#p-facts .chg-prov { color: var(--faint); font-family: ${MONO}; font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+#p-facts .chg-since { color: var(--dim); }
+#p-facts .chg-flow { padding: 6px 0; }
+#p-facts .chg-flow + .chg-flow { border-top: 1px solid var(--hairline); }
+#p-facts .chg-flow-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; color: var(--text); font-family: ${MONO}; }
+#p-facts .chg-from, #p-facts .chg-to { min-width: 0; overflow-wrap: anywhere; }
+#p-facts .chg-arrow { flex: 0 0 auto; color: var(--link); }
+#p-facts .chg-what { color: var(--dim); overflow-wrap: anywhere; }
 /* the priority control sits on its label's line, aligned with the facts rows above, and is a
    four-option segmented group: the active option takes its own hue */
 #p-prio-wrap { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-bottom: 6px; }
@@ -493,6 +515,13 @@ html.motion-paused .spine::after, html.motion-paused .st-head::after { animation
 .card.running { --p: 0; }
 .card.running::after { content: ""; position: absolute; left: 0; bottom: 0; width: 100%; height: 1px; background-color: var(--ac, var(--link)); transform: scaleX(var(--p)); transform-origin: left center; }
 [data-motion="live"] .card.running::after { --shine-base: var(--ac, var(--link)); background-image: linear-gradient(90deg, var(--shine-base) 0%, var(--shine-base) 33%, color-mix(in srgb, var(--shine-hi) var(--shine), var(--shine-base)) 50%, var(--shine-base) 67%, var(--shine-base) 100%); background-size: 300% 100%; background-repeat: no-repeat; animation: shimmer var(--t-breathe) linear infinite; }
+/* #456 the map row stacks at the one phone breakpoint: the symbol name, then its chips and delta,
+   and the flow head wraps instead of running past the panel edge */
+@media (max-width: ${MOBILE_MAX}px) {
+#p-facts .chg-sym { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+#p-facts .chg-delta { justify-self: start; }
+#p-facts .chg-flow-head { flex-wrap: wrap; }
+}
 /* #369 the floor: none disables every animation and transition, the inlined FLIP travel included,
 and the system ask turns everything off whatever the stored choice says; one block, not five */
 [data-motion="none"] *, [data-motion="none"]::before, [data-motion="none"] *::before, [data-motion="none"] *::after { animation: none !important; transition: none !important; }

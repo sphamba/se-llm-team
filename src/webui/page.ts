@@ -830,9 +830,55 @@ function issuerCell(t) {
 // the later arrival repaints the facts only, so the hold button outside the block is never rebuilt
 const changesCache = Object.create(null);
 const CHG_UNITS = { second: "s", minute: "m", hour: "h", day: "d", week: "w", month: "mo", year: "y" };
+const CHG_STEPS = [["year", 31536e6], ["month", 2592e6], ["week", 6048e5], ["day", 864e5], ["hour", 36e5], ["minute", 6e4], ["second", 1e3]];
+// one formatter for both time forms the panel receives: git's "N units ago" and the map's ISO stamp
 function chgTime(text) {
 	const m = /^(\\d+)\\s+(second|minute|hour|day|week|month|year)s?\\s+ago$/.exec(text || "");
-	return m ? m[1] + CHG_UNITS[m[2]] + " ago" : text;
+	if (m) return m[1] + CHG_UNITS[m[2]] + " ago";
+	const t = /^\\d{4}-\\d{2}-\\d{2}T/.test(text || "") ? Date.parse(text) : NaN;
+	const d = Date.now() - t;
+	if (!Number.isFinite(t) || d < 0) return text;
+	for (const [unit, ms] of CHG_STEPS) if (d >= ms) return Math.floor(d / ms) + CHG_UNITS[unit] + " ago";
+	return "just now";
+}
+// #456 the map row: a third facts row off the same payload, collapsed like the commits list. The
+// producer owns the map, so the client only formats it and treats a partial or odd map as absent
+const MAP_KINDS = { fn: 1, class: 1, case: 1 };
+function mapNum(x) {
+	const n = Math.trunc(Number(x));
+	return Number.isFinite(n) && n > 0 ? n : 0;
+}
+function mapHtml(c) {
+	const m = c && c.map;
+	if (!m || typeof m !== "object") return "";
+	const files = (Array.isArray(m.files) ? m.files : []).map(f => ({
+		path: f && typeof f.path === "string" ? f.path : "",
+		syms: (f && Array.isArray(f.symbols) ? f.symbols : []).filter(s => s && typeof s.name === "string" && s.name)
+	})).filter(f => f.path && f.syms.length);
+	const flows = (Array.isArray(m.transfers) ? m.transfers : []).filter(t => t && t.from && t.to);
+	const count = files.reduce((n, f) => n + f.syms.length, 0);
+	if (!count && !flows.length) return "";
+	const prov = [];
+	if (m.role) prov.push("generated after " + esc(m.role) + (mapNum(m.run) ? " run " + mapNum(m.run) : ""));
+	if (m.model) prov.push(esc(m.model));
+	const when = chgTime(m.at);
+	if (when) prov.push(esc(when));
+	const since = mapNum(m.since);
+	const provHtml = prov.length
+		? "<div class='chg-prov'>" + prov.join(" \u00b7 ") + (since ? " \u00b7 <span class='chg-since'>+" + since + " commits since</span>" : "") + "</div>"
+		: "";
+	const symsHtml = files.map(f => "<div class='chg-file'><div class='chg-path'>" + esc(f.path) + "</div>" + f.syms.map(s =>
+		"<div class='chg-sym'><span class='chg-name'>" + esc(s.name) + "</span>" +
+		(MAP_KINDS[s.kind] ? "<span class='chg-kind'>" + esc(s.kind) + "</span>" : "") +
+		(s.isNew === true ? "<span class='chg-new'>new</span>" : "") +
+		"<span class='chg-delta'><span class='chg-ins'>+" + mapNum(s.ins) + "</span> <span class='chg-del'>\u2212" + mapNum(s.del) + "</span></span></div>"
+	).join("") + "</div>").join("");
+	const flowsHtml = flows.map(f =>
+		"<div class='chg-flow'><div class='chg-flow-head'><span class='chg-from'>" + esc(f.from) + "</span><span class='chg-arrow' aria-hidden='true'>\u2192</span><span class='chg-to'>" + esc(f.to) + "</span></div>" +
+		(typeof f.what === "string" && f.what ? "<div class='chg-what'>" + esc(f.what) + "</div>" : "") + "</div>"
+	).join("");
+	return "<div><span class='k'>map</span><details class='chg-map'><summary>" + count + " symbols \u00b7 " + flows.length + " transfers<span class='chg-chev' aria-hidden='true'></span></summary>" +
+		provHtml + (symsHtml ? "<div class='chg-symbols'>" + symsHtml + "</div>" : "") + (flowsHtml ? "<div class='chg-ledger'>" + flowsHtml + "</div>" : "") + "</details></div>";
 }
 function changesHtml(file) {
 	const c = changesCache[file];
@@ -846,7 +892,7 @@ function changesHtml(file) {
 			c.commits.map(cm => "<div class='chg-commit'><span class='chg-hash'>" + esc(String(cm.hash || "").slice(0, 7)) + "</span><span class='chg-subj'>" + esc(cm.subject) + "</span><span class='chg-when'>" + esc(chgTime(cm.when)) + "</span></div>").join("") +
 			"</details></div>";
 	}
-	return html;
+	return html + mapHtml(c);
 }
 function loadChanges(file) {
 	if (changesCache[file]) return;
@@ -854,7 +900,7 @@ function loadChanges(file) {
 	fetch("/api/task-changes?num=" + numOf(file) + projectParam())
 		.then(r => r.ok ? r.json() : null)
 		.then(c => {
-			const has = c && (typeof c.insertions === "number" || typeof c.deletions === "number" || (Array.isArray(c.commits) && c.commits.length));
+			const has = c && (typeof c.insertions === "number" || typeof c.deletions === "number" || (Array.isArray(c.commits) && c.commits.length) || (c.map && typeof c.map === "object"));
 			if (!has) { delete changesCache[file]; return; }
 			changesCache[file] = c;
 			if (openDetail && openDetail.file === file && visible()) writeFacts(openDetail);
