@@ -280,6 +280,19 @@ body.panel-open #board { padding-right: var(--panel-w); }
 #p-facts { margin-bottom: 10px; }
 #p-facts div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 2px 0; }
 #p-facts .k, #p-prio-wrap .k { min-width: 84px; color: var(--dim); }
+/* the changes row: the insertions take the done step, the deletions the error step, and the file
+   count stays plain dim; the commits are a collapsed details block like the console log ones */
+#p-facts .chg-ins, #p-facts .chg-del, #p-facts .chg-hash, #p-facts .chg-when, #p-facts .chg-commits summary { font-family: ${MONO}; font-variant-numeric: tabular-nums; }
+#p-facts .chg-ins { color: var(--accent-done-text); }
+#p-facts .chg-del { color: var(--error-text); }
+#p-facts .chg-files { color: var(--dim); }
+#p-facts .chg-commits summary { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); cursor: pointer; }
+#p-facts .chg-chev { width: 6px; height: 6px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: rotate(-45deg); transition: transform var(--t-fast) var(--ease-enter); }
+#p-facts details[open] .chg-chev { transform: rotate(45deg); }
+#p-facts .chg-commit { display: grid; grid-template-columns: 7ch minmax(0, 1fr) auto; gap: 8px; align-items: baseline; }
+#p-facts .chg-hash { color: var(--dim); }
+#p-facts .chg-subj { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#p-facts .chg-when { color: var(--faint); text-align: right; }
 /* the priority control sits on its label's line, aligned with the facts rows above, and is a
    four-option segmented group: the active option takes its own hue */
 #p-prio-wrap { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-bottom: 6px; }

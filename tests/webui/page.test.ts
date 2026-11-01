@@ -733,6 +733,62 @@ const issuerOf = new Function("esc", "numLinkHtml", "taskByNum", page.match(/fun
 assert.equal(issuerOf({ issuer: "#42" }), "[000042_x.md]", "a task-issued issuer links to its card");
 assert.equal(issuerOf({ issuer: "auto" }), "auto", "an auto issuer stays plain text, never a task link");
 
+// 16b. #451 the changes and commits facts rows: the payload feeds two rows, the commit list starts
+// collapsed, an empty payload leaves the facts unchanged, and the open path starts one lazy fetch
+// while the 5s poll never touches the endpoint
+const factsSrc = page.slice(page.indexOf("// the changes block"), page.indexOf("// the actions:"));
+const changesPayload = { base: "main", insertions: 123, deletions: 456, files: 12, commits: [{ hash: "a1b2c3d", subject: "feat: x", when: "2 hours ago" }, { hash: "d4e5f6a", subject: "fix: y", when: "3 days ago" }], snapshot: false };
+const makeFacts = () => {
+	const factsEl: any = { __html: undefined, querySelectorAll: () => [] };
+	const api = new Function("esc", "numOf", "issuerCell", "blockedRow", "document", "fetch", "projectParam", "visible", "openTask",
+		"let openDetail = null;\n" + factsSrc +
+		"\n; return { factsHtml: factsHtml, changesHtml: changesHtml, chgTime: chgTime, loadChanges: loadChanges, cache: changesCache, set open(v) { openDetail = v; } };")(
+		esc, (f: string) => parseInt(f.slice(0, 6), 10), () => "user", () => "",
+		{ getElementById: (id: string) => (id === "p-facts" ? factsEl : null) },
+		() => new Promise(() => {}), () => "", () => true, () => {},
+	);
+	return { api, factsEl };
+};
+const factsTask = { file: "000263_task.md", state: "to-review", complexity: "moderate", issuer: "user", worktree: "feat/x" };
+const factsBlank = makeFacts();
+const baseFactsHtml = factsBlank.api.factsHtml(factsTask);
+assert.ok(!/changes|commits/.test(baseFactsHtml), "a missing payload renders neither the changes row nor the commits row");
+factsBlank.api.cache[factsTask.file] = {};
+assert.equal(factsBlank.api.factsHtml(factsTask), baseFactsHtml, "an empty payload leaves the facts block unchanged");
+factsBlank.api.cache[factsTask.file] = changesPayload;
+const factsFull = factsBlank.api.factsHtml(factsTask);
+assert.ok(factsFull.includes("+123") && factsFull.includes("-456") && factsFull.includes("12 files"), "the changes row shows the insertions, the deletions and the file count");
+assert.ok(/class='chg-ins'[^>]*>\+123/.test(factsFull), "the insertions carry the done-green class");
+assert.ok(/class='chg-del'[^>]*>-456/.test(factsFull), "the deletions carry the error class");
+assert.ok(factsFull.includes("2 commits") && factsFull.includes("a1b2c3d") && factsFull.includes("feat: x"), "the commits summary counts the list and the rows carry the hash and subject");
+assert.ok(/<details[^>]*>/.test(factsFull) && !/<details[^>]*\bopen\b/.test(factsFull), "the commit list is a details block that is collapsed by default");
+assert.ok(factsFull.includes("2h ago") && factsFull.includes("3d ago"), "the relative time is compacted from the raw git form");
+assert.equal(factsBlank.api.chgTime("last tuesday"), "last tuesday", "an unrecognized time form shows as it arrived");
+const changesLog: string[] = [];
+const openSrc = page.match(/function openPanel\(t\) \{[\s\S]*?\n\}/)![0];
+const openApi = new Function("esc", "numOf", "issuerCell", "blockedRow", "document", "fetch", "detailUrl", "historyUrl", "writePanel", "markLiveLine", "visible", "showPanel", "writeGated", "subCache", "prioWant", "projectParam", "openTask",
+	"let openDetail = null, panelFile = null;\n" + factsSrc + openSrc +
+	"\n; return { openPanel: openPanel, cache: changesCache };")(
+	esc, (f: string) => parseInt(f.slice(0, 6), 10), () => "user", () => "",
+	{ getElementById: () => ({ __html: undefined, innerHTML: "", querySelectorAll: () => [] }) },
+	(u: string) => {
+		changesLog.push(u);
+		return u.includes("/api/task-changes") ? Promise.resolve({ ok: true, json: () => Promise.resolve(changesPayload) }) : Promise.resolve({ ok: false });
+	},
+	(f: string) => "/api/task-detail?num=" + parseInt(f.slice(0, 6), 10),
+	(f: string) => "/api/task-history?num=" + parseInt(f.slice(0, 6), 10),
+	() => {}, () => {}, () => true, () => {}, () => true, {}, null, () => "", () => {},
+);
+openApi.openPanel({ file: "000263_task.md" });
+openApi.openPanel({ file: "000263_task.md" });
+await new Promise((r) => setTimeout(r, 0));
+assert.equal(changesLog.filter((u) => u.includes("/api/task-changes")).length, 1, "one open starts exactly one changes fetch, and the cache serves the second panel write");
+openApi.openPanel({ file: "000264_other.md" });
+await new Promise((r) => setTimeout(r, 0));
+assert.equal(changesLog.filter((u) => u.includes("/api/task-changes")).length, 2, "a fresh task starts its own changes fetch");
+assert.ok(!page.match(/function pollDetail\(\) \{[\s\S]*?\n\}/)![0].includes("/api/task-changes"), "the 5s poll never touches the changes endpoint, so a closed panel fetches nothing");
+assert.ok(hideSrc.includes("changesCache"), "hidePanel drops the changes cache with the other per-panel caches");
+
 // 17. the open path: the panel un-hides before the detail lands, the light row paints the shell
 // while the heavy detail loads, the detail fetch precedes the history fetch, and a response that
 // lands after another open is discarded

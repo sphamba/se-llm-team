@@ -822,14 +822,55 @@ function issuerCell(t) {
 	const target = t.issuer && t.issuer !== "user" && t.issuer !== "auto" ? taskByNum(t.issuer) : null;
 	return target ? numLinkHtml(target.file) : esc(t.issuer || "user");
 }
-// the panel header's facts: number, state slug, complexity, issuer, blockedBy and worktree
+// the changes block: one lazy fetch per panel open, cached per task like the subagent lists, and
+// the later arrival repaints the facts only, so the hold button outside the block is never rebuilt
+const changesCache = Object.create(null);
+const CHG_UNITS = { second: "s", minute: "m", hour: "h", day: "d", week: "w", month: "mo", year: "y" };
+function chgTime(text) {
+	const m = /^(\\d+)\\s+(second|minute|hour|day|week|month|year)s?\\s+ago$/.exec(text || "");
+	return m ? m[1] + CHG_UNITS[m[2]] + " ago" : text;
+}
+function changesHtml(file) {
+	const c = changesCache[file];
+	if (!c) return "";
+	let html = "";
+	if (typeof c.insertions === "number" || typeof c.deletions === "number") {
+		html += "<div><span class='k'>changes</span><span class='chg-ins'>+" + esc(String(c.insertions || 0)) + "</span> <span class='chg-del'>-" + esc(String(c.deletions || 0)) + "</span><span class='chg-files'> - " + esc(String(c.files || 0)) + " files</span></div>";
+	}
+	if (Array.isArray(c.commits) && c.commits.length) {
+		html += "<div><span class='k'>commits</span><details class='chg-commits'><summary>" + c.commits.length + " commits<span class='chg-chev' aria-hidden='true'></span></summary>" +
+			c.commits.map(cm => "<div class='chg-commit'><span class='chg-hash'>" + esc(String(cm.hash || "").slice(0, 7)) + "</span><span class='chg-subj'>" + esc(cm.subject) + "</span><span class='chg-when'>" + esc(chgTime(cm.when)) + "</span></div>").join("") +
+			"</details></div>";
+	}
+	return html;
+}
+function loadChanges(file) {
+	if (changesCache[file]) return;
+	changesCache[file] = {};
+	fetch("/api/task-changes?num=" + numOf(file) + projectParam())
+		.then(r => r.ok ? r.json() : null)
+		.then(c => {
+			const has = c && (typeof c.insertions === "number" || typeof c.deletions === "number" || (Array.isArray(c.commits) && c.commits.length));
+			if (!has) { delete changesCache[file]; return; }
+			changesCache[file] = c;
+			if (openDetail && openDetail.file === file && visible()) writeFacts(openDetail);
+		})
+		.catch(() => { delete changesCache[file]; });
+}
+// the panel header's facts: number, state slug, complexity, issuer, blockedBy, worktree, then the
+// changes and commits rows when their one payload has data
 function factsHtml(t) {
 	return "<div><span class='k'>number</span>#" + esc(String(numOf(t.file))) + "</div>" +
 		"<div><span class='k'>state</span>" + esc(t.state) + "</div>" +
 		"<div><span class='k'>complexity</span><span class='chip cx cx-" + esc(t.complexity || "moderate") + "'>" + esc(t.complexity || "moderate") + "</span></div>" +
 		"<div><span class='k'>issuer</span>" + issuerCell(t) + "</div>" +
 		blockedRow(t) +
-		"<div><span class='k'>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>";
+		"<div><span class='k'>worktree</span>" + (esc(t.worktree) || "&mdash;") + "</div>" +
+		changesHtml(t.file);
+}
+function writeFacts(t) {
+	const el = document.getElementById("p-facts");
+	if (writeGated(el, factsHtml(t))) for (const a of el.querySelectorAll(".num-link")) a.onclick = () => openTask(a.dataset.task);
 }
 // the actions: hold or unhold the task, except that a question never takes the unhold button,
 // because only the answer clears that hold. The hold toggle stays outside the rebuilt facts block,
@@ -981,8 +1022,7 @@ function writeTitle(t) {
 function writePanel(t, withBody) {
 	writeTitle(t);
 	writeOutside(t);
-	const facts = document.getElementById("p-facts");
-	if (writeGated(facts, factsHtml(t))) for (const a of facts.querySelectorAll(".num-link")) a.onclick = () => openTask(a.dataset.task);
+	writeFacts(t);
 	writePriority(t);
 	const actions = document.getElementById("p-actions");
 	writeGated(actions, actionsHtml(t));
@@ -1017,6 +1057,7 @@ function hidePanel() {
 	notFoundNum = null;
 	openerFile = null;
 	for (const k in subCache) delete subCache[k];
+	for (const k in changesCache) delete changesCache[k];
 	clearReveal();
 	document.body.classList.remove("panel-open");
 	if (p.classList.contains("hidden")) return;
@@ -1086,8 +1127,10 @@ function openPanel(t) {
 		openDetail = null;
 		prioWant = null;
 		for (const k in subCache) delete subCache[k];
+		for (const k in changesCache) delete changesCache[k];
 	}
 	writePanel(t, fresh);
+	loadChanges(t.file);
 	// the loading placeholder: the heavy blocks fill on the detail's arrival
 	if (fresh) writeGated(document.getElementById("p-body"), '<div class="empty"><span class="spin"></span>Loading task details…</div>');
 	showPanel();
