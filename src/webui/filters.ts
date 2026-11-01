@@ -19,16 +19,17 @@ export interface FilterState {
 	held: boolean;
 	question: boolean;
 	live: boolean;
+	notHeld: boolean;
 }
 
 export function emptyFilters(): FilterState {
-	return { q: "", priorities: [], complexities: [], issuer: "", held: false, question: false, live: false };
+	return { q: "", priorities: [], complexities: [], issuer: "", held: false, question: false, live: false, notHeld: false };
 }
 
 // the URL's ?f= value: one compact JSON object, utf-8 safe because a query can carry any character,
 // never a name or a summary, so a link stays short
 export function encodeFilters(f: FilterState): string {
-	const bytes = new TextEncoder().encode(JSON.stringify({ q: f.q, pr: f.priorities, cx: f.complexities, i: f.issuer, h: f.held, qn: f.question, l: f.live }));
+	const bytes = new TextEncoder().encode(JSON.stringify({ q: f.q, pr: f.priorities, cx: f.complexities, i: f.issuer, h: f.held, qn: f.question, l: f.live, nh: f.notHeld }));
 	let bin = "";
 	for (const b of bytes) bin += String.fromCharCode(b);
 	return btoa(bin);
@@ -58,16 +59,17 @@ export function decodeFilters(raw: unknown): FilterState {
 	f.held = obj.h === true;
 	f.question = obj.qn === true;
 	f.live = obj.l === true;
+	f.notHeld = obj.nh === true;
 	return f;
 }
 
 export function filtersActive(f: FilterState): boolean {
-	return !!(f.q || f.priorities.length || f.complexities.length || f.issuer || f.held || f.question || f.live);
+	return !!(f.q || f.priorities.length || f.complexities.length || f.issuer || f.held || f.question || f.live || f.notHeld);
 }
 
 // #370 the phone filter button's badge: one count per active dimension, the empty set at 0
 export function filtersCount(f: FilterState): number {
-	return (f.q ? 1 : 0) + f.priorities.length + f.complexities.length + (f.issuer ? 1 : 0) + (f.held ? 1 : 0) + (f.question ? 1 : 0) + (f.live ? 1 : 0);
+	return (f.q ? 1 : 0) + f.priorities.length + f.complexities.length + (f.issuer ? 1 : 0) + (f.held ? 1 : 0) + (f.question ? 1 : 0) + (f.live ? 1 : 0) + (f.notHeld ? 1 : 0);
 }
 
 // the membership test: the query reads the name, the summary and the number (a leading # is
@@ -78,6 +80,7 @@ export function matchesFilters(t: Task, f: FilterState): boolean {
 	if (f.issuer && (t.issuer || "user") !== f.issuer) return false;
 	if (f.held && !holdsToken(t, "user")) return false;
 	if (f.question && !holdsToken(t, "question")) return false;
+	if (f.notHeld && holdsToken(t, "user")) return false;
 	if (f.live && !(t.agents || []).some((a) => a.alive)) return false;
 	const q = f.q.trim().toLowerCase();
 	if (!q) return true;
@@ -100,6 +103,7 @@ export function filterReason(f: FilterState): string {
 	if (f.held) parts.push("held");
 	if (f.question) parts.push("question");
 	if (f.live) parts.push("live");
+	if (f.notHeld) parts.push("not held");
 	return parts.length ? "no task matches: " + parts.join(", ") : "";
 }
 

@@ -92,7 +92,7 @@ ${CSS}</style>
 <div id="f-prio" class="f-group" role="group" aria-label="Priority"></div>
 <div id="f-cx" class="f-group" role="group" aria-label="Complexity"></div>
 <div class="f-group" role="group" aria-label="Issuer"><span class="f-label" aria-hidden="true">issuer</span><button id="f-user" class="f-chip" aria-pressed="false">user</button></div>
-<div class="f-group" role="group" aria-label="State"><span class="f-label" aria-hidden="true">state</span><button id="f-held" class="f-chip" aria-pressed="false">held</button><button id="f-question" class="f-chip" aria-pressed="false">question</button><button id="f-live" class="f-chip" aria-pressed="false">live</button></div>
+<div class="f-group" role="group" aria-label="State"><span class="f-label" aria-hidden="true">state</span><button id="f-held" class="f-chip" aria-pressed="false">held</button><button id="f-question" class="f-chip" aria-pressed="false">question</button><button id="f-live" class="f-chip" aria-pressed="false">live</button><button id="f-notheld" class="f-chip" aria-pressed="false">not held</button></div>
 <button id="f-clear" class="f-chip" hidden>clear</button>
 <button id="f-apply" class="f-chip" onclick="closeFilters()">apply</button>
 </div>
@@ -264,11 +264,12 @@ function renderFilterBar() {
 	if (q && document.activeElement !== q && q.value !== filters.q) q.value = filters.q;
 	renderChips("f-prio", "priorities");
 	renderChips("f-cx", "complexities");
-	const user = document.getElementById("f-user"), held = document.getElementById("f-held"), question = document.getElementById("f-question"), liveEl = document.getElementById("f-live");
+	const user = document.getElementById("f-user"), held = document.getElementById("f-held"), question = document.getElementById("f-question"), liveEl = document.getElementById("f-live"), notHeld = document.getElementById("f-notheld");
 	if (user) user.setAttribute("aria-pressed", String(filters.issuer === "user"));
 	if (held) held.setAttribute("aria-pressed", String(filters.held));
 	if (question) question.setAttribute("aria-pressed", String(filters.question));
 	if (liveEl) liveEl.setAttribute("aria-pressed", String(filters.live));
+	if (notHeld) notHeld.setAttribute("aria-pressed", String(filters.notHeld));
 	const clear = document.getElementById("f-clear");
 	if (clear) clear.hidden = !filtersActive(filters);
 	syncFilterToggle();
@@ -443,6 +444,7 @@ bind("f-user", "onclick", toggleIssuer);
 bind("f-held", "onclick", () => { filters.held = !filters.held; applyFilters(); });
 bind("f-question", "onclick", () => { filters.question = !filters.question; applyFilters(); });
 bind("f-live", "onclick", () => { filters.live = !filters.live; applyFilters(); });
+bind("f-notheld", "onclick", () => { filters.notHeld = !filters.notHeld; applyFilters(); });
 bind("f-clear", "onclick", () => clearFilters());
 bind("pal-input", "oninput", () => { palSel = 0; renderPalette(); });
 bind("palette", "onkeydown", paletteKeydown);

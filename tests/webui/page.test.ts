@@ -911,10 +911,10 @@ await pollGate();
 
 // 20. #368 the filter bar: the codec round-trips every field, a corrupt value decodes to no filter,
 // and the matcher reads the priority, the complexity, the issuer, the hold and live
-const allFilters = { q: "café 263", priorities: ["high", "low"], complexities: ["moderate", "complex"], issuer: "user", held: true, question: true, live: true };
+const allFilters = { q: "café 263", priorities: ["high", "low"], complexities: ["moderate", "complex"], issuer: "user", held: true, question: true, live: true, notHeld: true };
 assert.deepEqual(decodeFilters(encodeFilters(allFilters)), allFilters, "the filter encoding round-trips every field, a unicode query and two chips per group included");
 // #378 a link that still carries the retired phase key keeps its other keys
-assert.deepEqual(decodeFilters(btoa(JSON.stringify({ q: "x", p: ["work", "done"], pr: ["high"], i: "user" }))), { q: "x", priorities: ["high"], complexities: [], issuer: "user", held: false, question: false, live: false }, "a legacy phase key in an old link is ignored, never the whole filter");
+assert.deepEqual(decodeFilters(btoa(JSON.stringify({ q: "x", p: ["work", "done"], pr: ["high"], i: "user" }))), { q: "x", priorities: ["high"], complexities: [], issuer: "user", held: false, question: false, live: false, notHeld: false }, "a legacy phase key in an old link is ignored, never the whole filter");
 assert.deepEqual([decodeFilters(encodeFilters(emptyFilters())), decodeFilters(""), decodeFilters(null), decodeFilters("!!!!"), decodeFilters("e30=")].map(filtersActive), [false, false, false, false, false], "an empty, absent, unreadable or non-object filter value decodes to no filter");
 // #382 the bar shows one user chip, so a retired issuer value in an old link must not filter the board
 const issuerOfLink = (i: string) => decodeFilters(btoa(JSON.stringify({ i }))).issuer;
@@ -922,7 +922,7 @@ assert.equal(issuerOfLink("auto"), "", "a legacy auto issuer decodes to no issue
 assert.equal(issuerOfLink("#366"), "", "a legacy task-issued issuer decodes to no issuer filter");
 assert.equal(issuerOfLink("user"), "user", "the user issuer survives a decode");
 const hostile = btoa(JSON.stringify({ q: 5, p: ["work", "nope"], pr: "high", cx: ["complex", 7], i: {}, h: "yes", qn: "yes", l: true }));
-assert.deepEqual(decodeFilters(hostile), { q: "", priorities: [], complexities: ["complex"], issuer: "", held: false, question: false, live: true }, "a value of the wrong shape keeps only the well-typed fields and never throws");
+assert.deepEqual(decodeFilters(hostile), { q: "", priorities: [], complexities: ["complex"], issuer: "", held: false, question: false, live: true, notHeld: false }, "a value of the wrong shape keeps only the well-typed fields and never throws");
 const filterRows = [
 	{ file: "000263_docked.md", name: "feat: docked panel", summary: "the console moves", state: "reviewing", priority: "high", complexity: "moderate", issuer: "user", updated: 3, agents: [{ alive: true }] },
 	{ file: "000300_old.md", name: "fix: old thing", summary: "a repair", state: "done", priority: "low", complexity: "simple", issuer: "#263", updated: 9 },
@@ -947,6 +947,12 @@ assert.deepEqual(filesOf(filterTasks(holdRows, { ...emptyFilters(), held: true }
 assert.deepEqual(filesOf(filterTasks(holdRows, { ...emptyFilters(), question: true })), ["000310_q.md", "000312_b.md"], "#433 the question chip matches the question token only, never a manual hold");
 assert.deepEqual(filesOf(filterTasks(holdRows, { ...emptyFilters(), held: true, question: true })), ["000312_b.md"], "#433 the two hold chips narrow together");
 assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), live: true })), ["000263_docked.md"], "has live agent keeps the task with the live run");
+// #452 the not-held chip drops only a manual user hold, so a question-held row and a bare row pass
+assert.deepEqual(filesOf(filterTasks(holdRows, { ...emptyFilters(), notHeld: true })), ["000310_q.md", "000313_n.md"], "#452 the not-held chip drops the manual user hold only, never a question");
+assert.deepEqual(filesOf(filterTasks(filterRows, { ...emptyFilters(), notHeld: true })), ["000263_docked.md", "000300_old.md"], "#452 a row with a missing blockedBy passes the not-held chip");
+assert.equal(filterReason({ ...emptyFilters(), notHeld: true }), "no task matches: not held", "#452 the empty reason names the not-held chip");
+assert.equal(filtersCount({ ...emptyFilters(), notHeld: true }), 1, "#452 the not-held chip counts as its own dimension");
+assert.equal(decodeFilters(btoa(JSON.stringify({ h: true }))).notHeld, false, "#452 an old link without the not-held key decodes with the chip off");
 assert.ok(filterReason({ ...emptyFilters(), q: "x", held: true }).startsWith("no task matches: ") && filterReason(emptyFilters()) === "", "the empty reason names the active filters, and stays empty when nothing filters");
 assert.equal(filterReason({ ...emptyFilters(), question: true }), "no task matches: question", "#433 the empty reason names the question chip");
 assert.deepEqual([emptyFilters(), { ...emptyFilters(), q: "x", held: true }, { ...emptyFilters(), priorities: ["high", "low"], complexities: ["complex"], issuer: "user", live: true }].map(filtersCount), [0, 2, 5], "the phone button's badge counts one step per active filter dimension");
@@ -983,7 +989,7 @@ assert.deepEqual(filesOf(archiveTasks(filterRows, emptyFilters())), ["000300_old
 
 // 23. the served chrome: one filter bar above the spine, the labelled palette dialog over the panel,
 // the archive section, the debounce and the Done overflow that opens the archive
-for (const id of ["filters", "f-q", "f-prio", "f-cx", "f-user", "f-held", "f-question", "f-live", "f-clear", "palette", "pal-input", "pal-list", "pal-empty", "pal-more", "archive", "arch-count", "arch-list", "arch-empty", "arch-page", "arch-more", "arch-newer", "arch-back", "p-outside"])
+for (const id of ["filters", "f-q", "f-prio", "f-cx", "f-user", "f-held", "f-question", "f-live", "f-notheld", "f-clear", "palette", "pal-input", "pal-list", "pal-empty", "pal-more", "archive", "arch-count", "arch-list", "arch-empty", "arch-page", "arch-more", "arch-newer", "arch-back", "p-outside"])
 	assert.ok(page.includes(`id="${id}"`), `the page serves #${id}`);
 // #378 the two chip groups replace the native multi-selects and the phase chips, and one user chip
 // replaces the 61-option issuer select
@@ -993,12 +999,13 @@ assert.ok(page.includes('id="f-prio" class="f-group" role="group" aria-label="Pr
 assert.ok(page.includes('id="f-user" class="f-chip" aria-pressed="false">user<'), "#378 one user chip replaces the issuer select");
 assert.ok(page.indexOf('id="f-q"') < page.indexOf('id="f-prio"') && page.indexOf('id="f-prio"') < page.indexOf('id="f-cx"') && page.indexOf('id="f-cx"') < page.indexOf('id="f-user"') && page.indexOf('id="f-user"') < page.indexOf('id="f-held"') && page.indexOf('id="f-held"') < page.indexOf('id="f-question"') && page.indexOf('id="f-question"') < page.indexOf('id="f-live"'), "#378 the bar reads search, priority, complexity, user, held, question, live left to right");
 assert.ok(page.includes('id="f-question" class="f-chip" aria-pressed="false">question<'), "#433 one question chip sits beside held");
+assert.ok(page.includes('id="f-notheld" class="f-chip" aria-pressed="false">not held<'), "#452 the not-held chip joins the state group in sentence case");
 // #412 every chip sits in a group with a visible label, and the priority order runs lowest to highest
 assert.equal(filtersMod.FILTER_PRIORITIES.join(), "low,medium,high,critical", "#412 the priority chips read low to critical");
 const barGroups = [...page.matchAll(/<div class="f-group" role="group" aria-label="(\w+)">([\s\S]*?)<\/div>/g)].map((m) => ({ name: m[1], inner: m[2] }));
 assert.deepEqual(barGroups.map((g) => g.name), ["Issuer", "State"], "#412 the loose chips sit in two labelled groups");
 assert.deepEqual(barGroups.filter((g) => !g.inner.includes(`<span class="f-label" aria-hidden="true">${g.name.toLowerCase()}</span>`)).map((g) => g.name), [], "#412 each static group leads with its own label, aria-hidden so the group name reads once");
-assert.deepEqual([...barGroups[1].inner.matchAll(/id="(f-[a-z]+)"/g)].map((m) => m[1]), ["f-held", "f-question", "f-live"], "#433 the state group holds held, question and live");
+assert.deepEqual([...barGroups[1].inner.matchAll(/id="(f-[a-z]+)"/g)].map((m) => m[1]), ["f-held", "f-question", "f-live", "f-notheld"], "#433 the state group holds held, question, live and not held");
 const chipsSource = page.match(/function renderChips\(id, field\) \{[\s\S]*?\n\}/);
 assert.ok(chipsSource, "#412 the client ships the chip renderer");
 assert.match(chipsSource![0], /<span class="f-label" aria-hidden="true">' \+ CHIP_LABEL\[field\]/, "#412 the two rendered groups lead with their label too, so all four groups carry one");
