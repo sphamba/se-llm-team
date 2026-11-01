@@ -312,7 +312,7 @@ const killAnalyses = (root: string) => {
 export const cleanupAll = (...roots: string[]) =>
 	roots.forEach((r) => {
 		killAnalyses(r);
-		rmSync(r, { recursive: true, force: true });
+		rmSync(r, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 	});
 
 export const daemons: { daemon: ChildProcess; root: string }[] = [];
