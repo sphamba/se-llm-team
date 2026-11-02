@@ -31,7 +31,7 @@ export interface TaskMapFile {
 	symbols: TaskMapSymbol[];
 }
 
-export interface TaskMapTransfer {
+export interface TaskMapFlow {
 	from: string;
 	to: string;
 	what: string;
@@ -39,7 +39,7 @@ export interface TaskMapTransfer {
 
 export interface TaskMap {
 	files: TaskMapFile[];
-	transfers: TaskMapTransfer[];
+	flows: TaskMapFlow[];
 	role: string;
 	run: number;
 	model: string;
@@ -47,12 +47,12 @@ export interface TaskMap {
 	head: string;
 }
 
-type TaskMapContent = Pick<TaskMap, "files" | "transfers">;
+type TaskMapContent = Pick<TaskMap, "files" | "flows">;
 
 // the stored size caps: a runaway answer must not bloat the task file the daemon rewrites
 const MAX_MAP_FILES = 60;
 const MAX_MAP_SYMBOLS = 20;
-const MAX_MAP_TRANSFERS = 30;
+const MAX_MAP_FLOWS = 30;
 // prompt ceiling for the diff text. A bigger diff keeps every changed file's numstat row and
 // drops its section, so the model still knows what changed; raise the cap, or page the diff
 // through several calls, if a branch outgrows the model's context
@@ -98,14 +98,16 @@ export function parseChangesMap(raw: string | undefined, note?: (msg: string) =>
 		}
 		files.push({ path, symbols });
 	}
-	const transfers: TaskMapTransfer[] = [];
-	for (const t of Array.isArray(o.transfers) ? o.transfers : []) {
+	// maps stored before the rename carry the old `transfers` key, so both are read
+	const flows: TaskMapFlow[] = [];
+	const rawFlows = Array.isArray(o.flows) ? o.flows : Array.isArray(o.transfers) ? o.transfers : [];
+	for (const t of rawFlows) {
 		if (!t || typeof t !== "object") continue;
 		const to = t as Record<string, unknown>;
 		const from = text(to.from);
 		const dest = text(to.to);
 		if (!from || !dest) continue;
-		transfers.push({ from, to: dest, what: text(to.what) });
+		flows.push({ from, to: dest, what: text(to.what) });
 	}
 	// one note per clamp kind: a 60-file answer would otherwise log a line per file
 	const noted = new Set<string>();
@@ -118,7 +120,7 @@ export function parseChangesMap(raw: string | undefined, note?: (msg: string) =>
 		return list.slice(0, max);
 	};
 	const capped = files.map((f) => ({ path: f.path, symbols: cap(f.symbols, MAX_MAP_SYMBOLS, "symbols") }));
-	return { files: cap(capped, MAX_MAP_FILES, "files"), transfers: cap(transfers, MAX_MAP_TRANSFERS, "transfers") };
+	return { files: cap(capped, MAX_MAP_FILES, "files"), flows: cap(flows, MAX_MAP_FLOWS, "flows") };
 }
 
 // the paths whose diff section the cap cut: their numstat row still tells the model the file
@@ -211,6 +213,6 @@ export async function generateChangesMap(opts: { root: string; cfg: Config; task
 	// the daemon writes `changes` and `commits` from another process, so the attr write merges
 	// through updateAttrs instead of a hand-written task file
 	updateAttrs(root, task, { map: JSON.stringify(map) });
-	log(root, `changes map for ${task.file} stored: ${map.files.length} files, ${map.transfers.length} transfers, head ${head} (${role} run ${run})`);
+	log(root, `changes map for ${task.file} stored: ${map.files.length} files, ${map.flows.length} flows, head ${head} (${role} run ${run})`);
 	return map;
 }

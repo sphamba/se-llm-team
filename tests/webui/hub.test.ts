@@ -227,7 +227,7 @@ assert.ok(!("map" in live), "a task file without a map attr carries no map key")
 // the map head, read off the served list (newest first) with no extra git call
 const mapAttr = {
 	files: [{ path: "a.txt", symbols: [{ name: "first", kind: "fn", ins: 1, del: 1, isNew: true }] }],
-	transfers: [{ from: "e.txt", to: "a.txt", what: "the lines" }],
+	flows: [{ from: "e.txt", to: "a.txt", what: "the lines" }],
 	role: "developer",
 	run: 2,
 	model: "gpt-5.1-codex",
@@ -263,7 +263,7 @@ assert.deepEqual(parsedDone.commits, [snapCommit], "a quoted, piped, comma-carry
 assert.deepEqual(await taskChangesPayload(snapRoot, parseInt(snapTask.file, 10)), { base: "main", insertions: 12, deletions: 3, files: 2, commits: [snapCommit], snapshot: true, mapRunning: false }, "a done task with no worktree answers from the file with snapshot: true");
 
 // the map outlives doneCleanup: the attr is the only record left once the branch is deleted
-const doneMap = { files: [], transfers: [], role: "reviewer", run: 1, model: "gpt-5.1-codex", at: "2026-11-01T10:11:12.000Z", head: snapCommit.hash };
+const doneMap = { files: [], flows: [], role: "reviewer", run: 1, model: "gpt-5.1-codex", at: "2026-11-01T10:11:12.000Z", head: snapCommit.hash };
 updateAttrs(snapRoot, snapTask, { map: JSON.stringify(doneMap) });
 const { head: doneHead, ...servedDoneMap } = doneMap;
 assert.equal(doneHead, snapCommit.hash, "the done task's map head is the snapshot commit");
@@ -284,7 +284,7 @@ assert.deepEqual([merged.insertions, merged.deletions, merged.files], [2, 2, 3],
 assert.deepEqual(merged.commits, [snapCommit], "the snapshot commit list survives the fast-forward");
 
 // a map with no git data at all: the plain task answers the map alone, never {}
-updateAttrs(changesRoot, plainTask, { map: JSON.stringify({ ...mapAttr, files: [], transfers: [] }) });
+updateAttrs(changesRoot, plainTask, { map: JSON.stringify({ ...mapAttr, files: [], flows: [] }) });
 const mapOnly = await taskChangesPayload(changesRoot, parseInt(plainTask.file, 10));
 assert.deepEqual(Object.keys(mapOnly), ["map", "mapRunning"], "a map with no live or snapshotted git data answers the map and the run flag, not {}");
 assert.equal(mapOnly.map.since, 0, "no commits list means no commit landed after the map head");
@@ -743,7 +743,7 @@ mapGit(mapWt, "commit", "-m", "feat: a");
 const mapHead = mapGit(mapWt, "rev-parse", "--short=7", "HEAD");
 // the stub answers the map JSON after a pause: the run must never reach a real model, and the
 // pause keeps the in-flight window wide enough to observe the 409 and the true flag
-const mapAnswer = JSON.stringify({ files: [{ path: "a.ts", symbols: [{ name: "a", kind: "fn", ins: 1, del: 0, isNew: true }] }], transfers: [] });
+const mapAnswer = JSON.stringify({ files: [{ path: "a.ts", symbols: [{ name: "a", kind: "fn", ins: 1, del: 0, isNew: true }] }], flows: [] });
 const mapStub = join(mapRoot, "map-agent.cjs");
 writeFileSync(
 	mapStub,
@@ -759,7 +759,7 @@ updateAttrs(mapRoot, mapTask, { worktree: "feat/1-map" });
 const mapSlug = taskSlug(mapTask.file);
 const mapNum = numOf(mapTask.file);
 // a stale map from an earlier run: the map-only run must replace it
-const oldMap = { files: [], transfers: [], role: "developer", run: 1, model: "old-model", at: "2026-01-01T00:00:00.000Z", head: "0000000" };
+const oldMap = { files: [], flows: [], role: "developer", run: 1, model: "old-model", at: "2026-01-01T00:00:00.000Z", head: "0000000" };
 updateAttrs(mapRoot, mapTask, { map: JSON.stringify(oldMap) });
 const pidsDir = join(mapRoot, ".kanban", ".pids");
 const mapPids = () => (existsSync(pidsDir) ? readdirSync(pidsDir) : []).filter((f) => new RegExp(`^${mapSlug}\\.mapper\\.\\d+\\.analysis\\.pid$`).test(f));

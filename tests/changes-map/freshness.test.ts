@@ -50,7 +50,7 @@ const cfg = loadConfig(root);
 const readMapAttr = () => splitFrontmatter(readFileSync(join(root, ".kanban", task.file), "utf8"))!.attrs.map;
 
 const okAnswer = (symbol: string) =>
-	JSON.stringify({ files: [{ path: "src/a.ts", symbols: [{ name: symbol, kind: "fn", ins: 1, del: 0, isNew: true }] }], transfers: [] });
+	JSON.stringify({ files: [{ path: "src/a.ts", symbols: [{ name: symbol, kind: "fn", ins: 1, del: 0, isNew: true }] }], flows: [] });
 
 writeStub(okAnswer("a"));
 const first = await generateChangesMap({ root, cfg, task: getTask(root, task.file)!, role: "developer", run: 2 });

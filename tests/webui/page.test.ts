@@ -796,7 +796,7 @@ const mapTask = factsTask;
 const mapPast = new Date(Date.now() - 5 * 60000).toISOString();
 const mapSection = {
 	files: [{ path: "src/webui/payload.ts", symbols: [{ name: "taskChangesPayload", kind: "fn", ins: 12, del: 3, isNew: false }, { name: "mapPayload", kind: "class", ins: 4, del: 0, isNew: true }] }],
-	transfers: [{ from: "src/hub.ts", to: "src/webui/payload.ts", what: "the task-changes request" }],
+	flows: [{ from: "src/hub.ts", to: "src/webui/payload.ts", what: "the task-changes request" }],
 	role: "developer", run: 2, model: "gpt-5.1-codex", at: mapPast, since: 0,
 };
 const mapFacts = makeFacts();
@@ -807,7 +807,7 @@ mapFacts.api.cache[mapTask.file] = changesPayload;
 assert.match(mapFacts.api.factsHtml(mapTask), /not computed/, "a payload without a map still shows the not computed row");
 mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: {} };
 assert.match(mapFacts.api.factsHtml(mapTask), /not computed/, "an empty map is treated as absent");
-mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { files: [{ path: "src/x.ts" }, null], transfers: [{ from: "src/a.ts" }], role: "developer" } };
+mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { files: [{ path: "src/x.ts" }, null], flows: [{ from: "src/a.ts" }], role: "developer" } };
 assert.match(mapFacts.api.factsHtml(mapTask), /not computed/, "a partial or odd map is treated as absent: no details row and no error row");
 const factsNoBranch = mapFacts.api.factsHtml({ ...mapTask, worktree: "" });
 assert.match(factsNoBranch, /not computed/);
@@ -823,7 +823,9 @@ assert.match(factsUpdating, /<span class='spin'><\/span><span class='chg-upd'>up
 assert.ok(factsUpdating.includes("chg-map") && factsUpdating.includes("2 symbols"), "the existing map content survives the updating pulse");
 mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: mapSection };
 const factsMap = mapFacts.api.factsHtml(mapTask);
-assert.match(factsMap, /<details class='chg-map'><summary>2 symbols · 1 transfers<span/, "the Map trigger counts the symbols and the transfers");
+assert.match(factsMap, /<details class='chg-map'><summary>2 symbols · 1 flows<span/, "the Map trigger counts the symbols and the flows");
+mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { files: mapSection.files, transfers: mapSection.flows, role: "developer" } };
+assert.match(mapFacts.api.factsHtml(mapTask), /<details class='chg-map'><summary>2 symbols · 1 flows<span/, "a map stored before the rename still renders its flows");
 assert.match(factsMap, /class='chg-head'><span class='chg-name'>taskChangesPayload<\/span><span class='chg-kind'>fn<\/span>/, "the kind chip sits beside the symbol name, not the delta");
 assert.match(factsMap, /class='chg-name'>mapPayload<\/span><span class='chg-kind'>class<\/span><span class='chg-new'>new</, "the chips follow the symbol name inside the head");
 assert.ok(!/<details[^>]*\bopen\b/.test(factsMap), "the Map row starts collapsed, like the commits row");

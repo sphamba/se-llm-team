@@ -42,7 +42,7 @@ updateAttrs(root, task, { worktree: "feat/1-map" });
 const slug = taskSlug(task.file);
 
 // the stub answers the map JSON to every call: the analyst and doctor passes accept any text
-const answer = JSON.stringify({ files: [{ path: "src/a.ts", symbols: [{ name: "add", kind: "fn", ins: 3, del: 0, isNew: true }] }], transfers: [] });
+const answer = JSON.stringify({ files: [{ path: "src/a.ts", symbols: [{ name: "add", kind: "fn", ins: 3, del: 0, isNew: true }] }], flows: [] });
 const stub = join(root, "map-agent.cjs");
 writeFileSync(
 	stub,

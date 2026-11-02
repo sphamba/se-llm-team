@@ -859,7 +859,8 @@ function mapHtml(c, t) {
 		path: f && typeof f.path === "string" ? f.path : "",
 		syms: (f && Array.isArray(f.symbols) ? f.symbols : []).filter(s => s && typeof s.name === "string" && s.name)
 	})).filter(f => f.path && f.syms.length);
-	const flows = (m && typeof m === "object" && Array.isArray(m.transfers) ? m.transfers : []).filter(t => t && t.from && t.to);
+	// a map stored before the rename carries the old 'transfers' key, so both are read
+	const flows = (m && typeof m === "object" ? (Array.isArray(m.flows) ? m.flows : Array.isArray(m.transfers) ? m.transfers : []) : []).filter(t => t && t.from && t.to);
 	const count = files.reduce((n, f) => n + f.syms.length, 0);
 	if (!count && !flows.length) {
 		if (running) return "<div><span class='k'>map</span><span class='spin'></span>computing\u2026</div>";
@@ -875,7 +876,7 @@ function mapHtml(c, t) {
 		"<div class='chg-flow'><div class='chg-flow-head'><span class='chg-from'>" + esc(f.from) + "</span><span class='chg-arrow' aria-hidden='true'>\u2192</span><span class='chg-to'>" + esc(f.to) + "</span></div>" +
 		(typeof f.what === "string" && f.what ? "<div class='chg-what'>" + esc(f.what) + "</div>" : "") + "</div>"
 	).join("");
-	return "<div><span class='k'>map</span>" + (running ? "<span class='spin'></span><span class='chg-upd'>updating\u2026</span>" : "") + "<details class='chg-map'><summary>" + count + " symbols \u00b7 " + flows.length + " transfers<span class='chg-chev' aria-hidden='true'></span></summary>" +
+	return "<div><span class='k'>map</span>" + (running ? "<span class='spin'></span><span class='chg-upd'>updating\u2026</span>" : "") + "<details class='chg-map'><summary>" + count + " symbols \u00b7 " + flows.length + " flows<span class='chg-chev' aria-hidden='true'></span></summary>" +
 		(symsHtml ? "<div class='chg-symbols'>" + symsHtml + "</div>" : "") + (flowsHtml ? "<div class='chg-ledger'>" + flowsHtml + "</div>" : "") + "</details></div>";
 }
 function changesHtml(t) {

@@ -21,7 +21,7 @@ const slug = taskSlug(task.file);
 const row = { ...getTask(root, task.file), worktree: "feat/1-map" };
 const mapSection = {
 	files: [{ path: "src/hub.ts", symbols: [{ name: "taskMap", kind: "fn", ins: 3, del: 0, isNew: true }] }],
-	transfers: [{ from: "src/hub.ts", to: "src/webui/payload.ts", what: "the map flag" }],
+	flows: [{ from: "src/hub.ts", to: "src/webui/payload.ts", what: "the map flag" }],
 	role: "developer", run: 2, model: "gpt-5.1-codex", at: new Date().toISOString(), head: "abc1234",
 };
 
