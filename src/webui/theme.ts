@@ -282,7 +282,7 @@ body.panel-open #board { padding-right: var(--panel-w); }
 #p-facts .k, #p-prio-wrap .k { min-width: 84px; color: var(--dim); }
 /* the changes row: the insertions take the done step, the deletions the error step, and the file
    count stays plain dim; the commits are a collapsed details block like the console log ones */
-#p-facts .chg-ins, #p-facts .chg-del, #p-facts .chg-hash, #p-facts .chg-when, #p-facts .chg-commits summary, #p-facts .chg-map summary { font-family: ${MONO}; font-variant-numeric: tabular-nums; }
+#p-facts .chg-ins, #p-facts .chg-del, #p-facts .chg-hash, #p-facts .chg-when { font-family: ${MONO}; font-variant-numeric: tabular-nums; }
 #p-facts .chg-ins { color: var(--accent-done-text); }
 #p-facts .chg-del { color: var(--error-text); }
 #p-facts .chg-files { color: var(--dim); }

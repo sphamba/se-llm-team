@@ -963,6 +963,8 @@ assert.match(themeCss, /#p-facts \.chg-delta \{[^}]*font-variant-numeric: tabula
 assert.match(themeCss, /#p-facts \.chg-hl \{[^}]*var\(--link\)/, "#465 a highlighted row takes the theme accent, so both themes share one rule");
 assert.doesNotMatch(themeCss, /display: contents/, "#469 the details is a full-width block row, so the display:contents hack is gone");
 assert.match(themeCss, /#p-facts \.chg-commits summary, #p-facts \.chg-map summary \{ display: flex; align-items: baseline; gap: 6px/, "#469 the summary is the flex row that carries the label, the counts and the chevron");
+assert.doesNotMatch(themeCss, /#p-facts \.chg-(commits|map) summary[^{]*\{[^}]*font-family/, "#472 the collapsed summaries take the regular family, like every other attribute value");
+assert.match(themeCss, /#p-facts \.chg-ins, #p-facts \.chg-del, #p-facts \.chg-hash, #p-facts \.chg-when \{ font-family/, "#472 the git data spans keep the mono family");
 assert.match(themeCss, /#p-facts \.chg-commits, #p-facts \.chg-map \{[^}]*padding: 2px 0/, "#471 the details rows carry the same 2px row padding as the plain facts rows");
 assert.match(themeCss, /#p-facts \.chg-list \{[^}]*padding: 4px 0/, "#471 the open commits list gains padding above and below");
 assert.doesNotMatch(themeCss, /flex: 1 1 100%/, "#469 the open content needs no width override once the details is the row");
