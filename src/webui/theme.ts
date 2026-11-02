@@ -282,11 +282,11 @@ body.panel-open #board { padding-right: var(--panel-w); }
 #p-facts .k, #p-prio-wrap .k { min-width: 84px; color: var(--dim); }
 /* the changes row: the insertions take the done step, the deletions the error step, and the file
    count stays plain dim; the commits are a collapsed details block like the console log ones */
-#p-facts .chg-ins, #p-facts .chg-del, #p-facts .chg-hash, #p-facts .chg-when, #p-facts .chg-commits summary { font-family: ${MONO}; font-variant-numeric: tabular-nums; }
+#p-facts .chg-ins, #p-facts .chg-del, #p-facts .chg-hash, #p-facts .chg-when, #p-facts .chg-commits summary, #p-facts .chg-map summary { font-family: ${MONO}; font-variant-numeric: tabular-nums; }
 #p-facts .chg-ins { color: var(--accent-done-text); }
 #p-facts .chg-del { color: var(--error-text); }
 #p-facts .chg-files { color: var(--dim); }
-#p-facts .chg-commits summary { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); cursor: pointer; }
+#p-facts .chg-commits summary, #p-facts .chg-map summary { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); cursor: pointer; }
 #p-facts .chg-chev { width: 6px; height: 6px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: rotate(-45deg); transition: transform var(--t-fast) var(--ease-enter); }
 #p-facts details[open] .chg-chev { transform: rotate(45deg); }
 #p-facts .chg-commit { display: grid; grid-template-columns: 7ch minmax(0, 1fr) auto; gap: 8px; align-items: baseline; }
@@ -296,14 +296,19 @@ body.panel-open #board { padding-right: var(--panel-w); }
 /* #456 the map row: the collapsed details shape of the commits list; the open state is a transfer
    ledger, the symbols grouped by file above the unnumbered flow entries. A file label carries no
    count, because the Changes row already carries the file count */
-#p-facts .chg-map { flex: 1 1 100%; }
+/* the collapsed summary never leaves the label line: display:contents takes the details out of
+   the row's box model, so only the summary is a flex item and the open content wraps below it */
+#p-facts .chg-commits, #p-facts .chg-map { display: contents; }
 #p-facts .chg-symbols, #p-facts .chg-ledger { display: block; min-width: 0; padding: 4px 0 0; }
 #p-facts .chg-file, #p-facts .chg-flow, #p-facts .chg-prov { display: block; min-width: 0; padding: 0; }
 #p-facts .chg-file + .chg-file { margin-top: 8px; }
+/* the open content takes one full row each, aligned under the summary start (84px label + 6px gap) */
+#p-facts .chg-commit, #p-facts .chg-prov, #p-facts .chg-symbols, #p-facts .chg-ledger { flex: 1 1 100%; padding-left: 90px; }
 #p-facts .chg-path { color: var(--dim); font-family: ${MONO}; overflow-wrap: anywhere; }
-#p-facts .chg-sym { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 6px; align-items: baseline; min-width: 0; }
+#p-facts .chg-sym { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: baseline; min-width: 0; }
+#p-facts .chg-head { min-width: 0; padding-left: 14px; }
 #p-facts .chg-name { color: var(--text); overflow-wrap: anywhere; }
-#p-facts .chg-kind, #p-facts .chg-new { border-radius: 999px; padding: 0 6px; font-family: ${MONO}; font-size: 0.75rem; white-space: nowrap; }
+#p-facts .chg-kind, #p-facts .chg-new { display: inline-block; margin-left: 6px; border-radius: 999px; padding: 0 6px; font-family: ${MONO}; font-size: 0.75rem; white-space: nowrap; }
 #p-facts .chg-kind { background: var(--code-bg); color: var(--dim); }
 #p-facts .chg-new { background: color-mix(in srgb, var(--accent-done) 16%, transparent); color: var(--accent-done-text); }
 #p-facts .chg-delta { justify-self: end; font-family: ${MONO}; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -524,6 +529,8 @@ html.motion-paused .spine::after, html.motion-paused .st-head::after { animation
 #p-facts .chg-sym { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 #p-facts .chg-delta { justify-self: start; }
 #p-facts .chg-flow-head { flex-wrap: wrap; }
+#p-facts .chg-commit, #p-facts .chg-prov, #p-facts .chg-symbols, #p-facts .chg-ledger { padding-left: 0; }
+#p-facts .chg-head { padding-left: 10px; }
 }
 /* #369 the floor: none disables every animation and transition, the inlined FLIP travel included,
 and the system ask turns everything off whatever the stored choice says; one block, not five */

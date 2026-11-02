@@ -824,6 +824,8 @@ assert.ok(factsUpdating.includes("chg-map") && factsUpdating.includes("2 symbols
 mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: mapSection };
 const factsMap = mapFacts.api.factsHtml(mapTask);
 assert.match(factsMap, /<details class='chg-map'><summary>2 symbols · 1 transfers<span/, "the Map trigger counts the symbols and the transfers");
+assert.match(factsMap, /class='chg-head'><span class='chg-name'>taskChangesPayload<\/span><span class='chg-kind'>fn<\/span>/, "the kind chip sits beside the symbol name, not the delta");
+assert.match(factsMap, /class='chg-name'>mapPayload<\/span><span class='chg-kind'>class<\/span><span class='chg-new'>new</, "the chips follow the symbol name inside the head");
 assert.ok(!/<details[^>]*\bopen\b/.test(factsMap), "the Map row starts collapsed, like the commits row");
 assert.match(factsMap, /class='chg-path'>src\/webui\/payload\.ts</, "the symbols group under a mono file path label with no counts");
 assert.match(factsMap, /class='chg-path'>src\/webui\/payload\.ts<\/div>/, "the file label is the bare path with no count beside it");
@@ -894,6 +896,9 @@ assert.match(themeCss, /#p-facts \.m-map \{[^}]*font-size: 0\.75rem/, "the compu
 assert.match(themeCss, /#p-facts \.chg-prov \{[^}]*color: var\(--faint\)[^}]*font-size: 0\.75rem/, "the provenance line is faint mono at the 0.75rem floor");
 assert.match(themeCss, /#p-facts \.chg-flow \+ \.chg-flow \{[^}]*border-top: 1px solid var\(--hairline\)/, "a 1px hairline separates the flow entries");
 assert.match(themeCss, /#p-facts \.chg-delta \{[^}]*font-variant-numeric: tabular-nums/, "the per-symbol delta is mono with tabular numerals");
+assert.match(themeCss, /#p-facts \.chg-commits, #p-facts \.chg-map \{ display: contents; \}/, "the collapsed summary stays beside the label even when the details opens");
+assert.match(themeCss, /#p-facts \.chg-commit, #p-facts \.chg-prov, #p-facts \.chg-symbols, #p-facts \.chg-ledger \{[^}]*padding-left: 90px/, "the open content takes one full row aligned under the summary start");
+assert.match(themeCss, /#p-facts \.chg-head \{[^}]*padding-left: 14px/, "the symbol names indent under their file path");
 assert.match(themeCss, /summary:focus-visible/, "the Map trigger takes the shared focus ring");
 const mapRules = themeCss.match(/#p-facts \.chg-[a-z]+[^{}]*\{[^{}]*\}/g) ?? [];
 assert.ok(mapRules.length >= 10, `the map rules reach the sheet: ${mapRules.length}`);

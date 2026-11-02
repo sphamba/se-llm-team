@@ -880,10 +880,10 @@ function mapHtml(c, t) {
 		? "<div class='chg-prov'>" + prov.join(" \u00b7 ") + (since ? " \u00b7 <span class='chg-since'>+" + since + " commits since</span>" : "") + "</div>"
 		: "";
 	const symsHtml = files.map(f => "<div class='chg-file'><div class='chg-path'>" + esc(f.path) + "</div>" + f.syms.map(s =>
-		"<div class='chg-sym'><span class='chg-name'>" + esc(s.name) + "</span>" +
+		"<div class='chg-sym'><span class='chg-head'><span class='chg-name'>" + esc(s.name) + "</span>" +
 		(MAP_KINDS[s.kind] ? "<span class='chg-kind'>" + esc(s.kind) + "</span>" : "") +
 		(s.isNew === true ? "<span class='chg-new'>new</span>" : "") +
-		"<span class='chg-delta'><span class='chg-ins'>+" + mapNum(s.ins) + "</span> <span class='chg-del'>\u2212" + mapNum(s.del) + "</span></span></div>"
+		"</span><span class='chg-delta'><span class='chg-ins'>+" + mapNum(s.ins) + "</span> <span class='chg-del'>\u2212" + mapNum(s.del) + "</span></span></div>"
 	).join("") + "</div>").join("");
 	const flowsHtml = flows.map(f =>
 		"<div class='chg-flow'><div class='chg-flow-head'><span class='chg-from'>" + esc(f.from) + "</span><span class='chg-arrow' aria-hidden='true'>\u2192</span><span class='chg-to'>" + esc(f.to) + "</span></div>" +
