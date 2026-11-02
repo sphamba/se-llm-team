@@ -286,7 +286,8 @@ body.panel-open #board { padding-right: var(--panel-w); }
 #p-facts .chg-ins { color: var(--accent-done-text); }
 #p-facts .chg-del { color: var(--error-text); }
 #p-facts .chg-files { color: var(--dim); }
-#p-facts .chg-commits summary, #p-facts .chg-map summary { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); cursor: pointer; }
+/* #469 the details is the row and the label rides in its summary, so the open content takes the full width: a display:contents details is sized to fit-content by Chromium, which left the deltas far from the right edge */
+#p-facts .chg-commits summary, #p-facts .chg-map summary { display: flex; align-items: baseline; gap: 6px; color: var(--dim); cursor: pointer; }
 #p-facts .chg-chev { width: 6px; height: 6px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: rotate(-45deg); transition: transform var(--t-fast) var(--ease-enter); }
 #p-facts details[open] .chg-chev { transform: rotate(45deg); }
 #p-facts .chg-commit { display: grid; grid-template-columns: 7ch minmax(0, 1fr) auto; gap: 8px; align-items: baseline; }
@@ -296,14 +297,9 @@ body.panel-open #board { padding-right: var(--panel-w); }
 /* #456 the map row: the collapsed details shape of the commits list; the open state is a transfer
    ledger, the symbols grouped by file above the unnumbered flow entries. A file label carries no
    count, because the Changes row already carries the file count */
-/* the collapsed summary never leaves the label line: display:contents takes the details out of
-   the row's box model, so only the summary is a flex item and the open content wraps below it */
-#p-facts .chg-commits, #p-facts .chg-map { display: contents; }
 #p-facts .chg-symbols, #p-facts .chg-ledger { display: block; min-width: 0; padding: 4px 0 0; }
 #p-facts .chg-file, #p-facts .chg-flow { display: block; min-width: 0; padding: 0; }
 #p-facts .chg-file + .chg-file { margin-top: 8px; }
-/* #468 the open content takes one full row each, at the panel edge like on the phone */
-#p-facts .chg-commit, #p-facts .chg-symbols, #p-facts .chg-ledger { flex: 1 1 100%; padding-left: 0; }
 #p-facts .chg-group { color: var(--dim); font-family: ${MONO}; font-size: 0.75rem; margin-bottom: 4px; }
 #p-facts .chg-path { color: var(--dim); font-family: ${MONO}; overflow-wrap: anywhere; }
 #p-facts .chg-sym { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: baseline; min-width: 0; }

@@ -823,20 +823,26 @@ assert.match(factsUpdating, /<span class='spin'><\/span><span class='chg-upd'>up
 assert.ok(factsUpdating.includes("chg-map") && factsUpdating.includes("2 symbols"), "the existing map content survives the updating pulse");
 mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: mapSection };
 const factsMap = mapFacts.api.factsHtml(mapTask);
-assert.match(factsMap, /<details class='chg-map'><summary>2 symbols · 1 flow<span/, "the Map trigger counts the symbols and the flows");
+assert.match(factsMap, /<details class='chg-map'><summary><span class='k'>map<\/span>2 symbols · 1 flow<span/, "the Map trigger counts the symbols and the flows");
 mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { files: mapSection.files, transfers: mapSection.flows, role: "developer" } };
-assert.match(mapFacts.api.factsHtml(mapTask), /<details class='chg-map'><summary>2 symbols · 1 flow<span/, "a map stored before the rename still renders its flow");
+assert.match(mapFacts.api.factsHtml(mapTask), /<details class='chg-map'><summary><span class='k'>map<\/span>2 symbols · 1 flow<span/, "a map stored before the rename still renders its flow");
 // #467 a count of one prints the singular noun, and a count of zero or more prints the plural
 mapFacts.api.cache[mapTask.file] = { ...changesPayload, insertions: 1, files: 1, commits: [{ hash: "a1b2c3d", subject: "feat: x", when: "2 hours ago" }], map: { files: [{ path: "src/x.ts", symbols: [{ name: "f", kind: "fn" }] }], flows: [{ from: "src/a.ts", to: "src/x.ts" }] } };
 const factsOne = mapFacts.api.factsHtml(mapTask);
 assert.match(factsOne, /class='chg-files'> - 1 file</, "one changed file prints the singular noun");
-assert.match(factsOne, /<summary>1 commit<span/, "one commit prints the singular noun");
-assert.match(factsOne, /<details class='chg-map'><summary>1 symbol · 1 flow<span/, "one symbol and one flow print the singular nouns");
+assert.match(factsOne, /<summary><span class='k'>commits<\/span>1 commit<span/, "one commit prints the singular noun");
+assert.match(factsOne, /<details class='chg-map'><summary><span class='k'>map<\/span>1 symbol · 1 flow<span/, "one symbol and one flow print the singular nouns");
 mapFacts.api.cache[mapTask.file] = { ...changesPayload, files: 0, map: { files: [{ path: "src/x.ts", symbols: [{ name: "f", kind: "fn" }, { name: "g", kind: "fn" }] }], flows: [{ from: "src/a.ts", to: "src/x.ts" }, { from: "src/x.ts", to: "src/b.ts" }] } };
 const factsPlural = mapFacts.api.factsHtml(mapTask);
 assert.match(factsPlural, /class='chg-files'> - 0 files</, "zero files prints the plural noun");
-assert.match(factsPlural, /<summary>2 commits<span/, "two commits print the plural noun");
-assert.match(factsPlural, /<details class='chg-map'><summary>2 symbols · 2 flows<span/, "two symbols and two flows print the plural nouns");
+assert.match(factsPlural, /<summary><span class='k'>commits<\/span>2 commits<span/, "two commits print the plural noun");
+assert.match(factsPlural, /<details class='chg-map'><summary><span class='k'>map<\/span>2 symbols · 2 flows<span/, "two symbols and two flows print the plural nouns");
+// #469 the details element is the row, so the open content takes the whole width the label column no
+// longer eats: no div wrapper and no display:contents trick, for the commits row either
+assert.doesNotMatch(factsMap, /<div><span class='k'>map<\/span>/, "#469 the map row is the details itself, not a div wrapped around it");
+assert.match(factsMap, /<details class='chg-commits'><summary><span class='k'>commits<\/span>2 commits<span/, "#469 the commits trigger carries its label inside the summary");
+assert.doesNotMatch(factsMap, /<div><span class='k'>commits<\/span>/, "#469 the commits row is the details itself, not a div wrapped around it");
+assert.doesNotMatch(factsMap, /<\/?details[^>]*>\s*<\/div>/, "#469 no row closes on a wrapping div");
 assert.match(factsMap, /class='chg-head'><span class='chg-name'>taskChangesPayload<\/span><span class='chg-kind'>fn<\/span>/, "the kind chip sits beside the symbol name, not the delta");
 assert.match(factsMap, /class='chg-name'>mapPayload<\/span><span class='chg-kind'>class<\/span><span class='chg-new'>new</, "the chips follow the symbol name inside the head");
 assert.ok(!/<details[^>]*\bopen\b/.test(factsMap), "the Map row starts collapsed, like the commits row");
@@ -936,8 +942,9 @@ assert.match(themeCss, /#p-facts \.m-map \{[^}]*font-size: 0\.75rem/, "the compu
 assert.match(themeCss, /#p-facts \.chg-flow \+ \.chg-flow \{[^}]*border-top: 1px solid var\(--hairline\)/, "a 1px hairline separates the flow entries");
 assert.match(themeCss, /#p-facts \.chg-delta \{[^}]*font-variant-numeric: tabular-nums/, "the per-symbol delta is mono with tabular numerals");
 assert.match(themeCss, /#p-facts \.chg-hl \{[^}]*var\(--link\)/, "#465 a highlighted row takes the theme accent, so both themes share one rule");
-assert.match(themeCss, /#p-facts \.chg-commits, #p-facts \.chg-map \{ display: contents; \}/, "the collapsed summary stays beside the label even when the details opens");
-assert.match(themeCss, /#p-facts \.chg-commit, #p-facts \.chg-symbols, #p-facts \.chg-ledger \{[^}]*padding-left: 0/, "#468 the open content takes the whole row on desktop, like it does on the phone");
+assert.doesNotMatch(themeCss, /display: contents/, "#469 the details is a full-width block row, so the display:contents hack is gone");
+assert.match(themeCss, /#p-facts \.chg-commits summary, #p-facts \.chg-map summary \{ display: flex; align-items: baseline; gap: 6px/, "#469 the summary is the flex row that carries the label, the counts and the chevron");
+assert.doesNotMatch(themeCss, /flex: 1 1 100%/, "#469 the open content needs no width override once the details is the row");
 assert.match(themeCss, /#p-facts \.chg-group \{[^}]*color: var\(--dim\)/, "#468 the group label takes the dim token");
 assert.match(themeCss, /#p-facts \.chg-group \{[^}]*font-size: 0\.75rem/, "#468 the group label is small, like the other quiet labels");
 assert.match(themeCss, /#p-facts \.chg-group \{[^}]*margin-bottom: 4px/, "#468 the group label keeps a few px under it, so the list reads as its section");

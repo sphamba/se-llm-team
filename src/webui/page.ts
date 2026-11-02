@@ -911,8 +911,8 @@ function mapHtml(c, t) {
 		"<div class='chg-flow' data-from='" + esc(f.from) + "' data-to='" + esc(f.to) + "'><div class='chg-flow-head'><span class='chg-from'>" + esc(f.from) + "</span><span class='chg-arrow' aria-hidden='true'>\u2192</span><span class='chg-to'>" + esc(f.to) + "</span></div>" +
 		(typeof f.what === "string" && f.what ? "<div class='chg-what'>" + esc(f.what) + "</div>" : "") + "</div>"
 	).join("");
-	return "<div><span class='k'>map</span>" + (running ? "<span class='spin'></span><span class='chg-upd'>updating\u2026</span>" : "") + "<details class='chg-map'><summary>" + chgPlural(count, "symbol") + " \u00b7 " + chgPlural(flows.length, "flow") + "<span class='chg-chev' aria-hidden='true'></span></summary>" +
-		(symsHtml ? "<div class='chg-symbols'><div class='chg-group'>symbols</div>" + symsHtml + "</div>" : "") + (flowsHtml ? "<div class='chg-ledger'><div class='chg-group'>flows</div>" + flowsHtml + "</div>" : "") + "</details></div>";
+	return "<details class='chg-map'><summary><span class='k'>map</span>" + (running ? "<span class='spin'></span><span class='chg-upd'>updating\u2026</span>" : "") + chgPlural(count, "symbol") + " \u00b7 " + chgPlural(flows.length, "flow") + "<span class='chg-chev' aria-hidden='true'></span></summary>" +
+		(symsHtml ? "<div class='chg-symbols'><div class='chg-group'>symbols</div>" + symsHtml + "</div>" : "") + (flowsHtml ? "<div class='chg-ledger'><div class='chg-group'>flows</div>" + flowsHtml + "</div>" : "") + "</details>";
 }
 function changesHtml(t) {
 	const file = t.file;
@@ -922,9 +922,9 @@ function changesHtml(t) {
 		html += "<div><span class='k'>changes</span><span class='chg-ins'>+" + esc(String(c.insertions || 0)) + "</span> <span class='chg-del'>-" + esc(String(c.deletions || 0)) + "</span><span class='chg-files'> - " + esc(chgPlural(c.files || 0, "file")) + "</span></div>";
 	}
 	if (c && Array.isArray(c.commits) && c.commits.length) {
-		html += "<div><span class='k'>commits</span><details class='chg-commits'><summary>" + chgPlural(c.commits.length, "commit") + "<span class='chg-chev' aria-hidden='true'></span></summary>" +
+		html += "<details class='chg-commits'><summary><span class='k'>commits</span>" + chgPlural(c.commits.length, "commit") + "<span class='chg-chev' aria-hidden='true'></span></summary>" +
 			c.commits.map(cm => "<div class='chg-commit'><span class='chg-hash'>" + esc(String(cm.hash || "").slice(0, 7)) + "</span><span class='chg-subj'>" + esc(cm.subject) + "</span><span class='chg-when'>" + esc(chgTime(cm.when)) + "</span></div>").join("") +
-			"</details></div>";
+			"</details>";
 	}
 	return html + mapHtml(c, t);
 }
