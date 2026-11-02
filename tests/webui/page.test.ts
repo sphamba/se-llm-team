@@ -842,6 +842,10 @@ assert.match(factsMap, /class='chg-name'>mapPayload<\/span><span class='chg-kind
 assert.ok(!/<details[^>]*\bopen\b/.test(factsMap), "the Map row starts collapsed, like the commits row");
 assert.match(factsMap, /class='chg-path'>src\/webui\/payload\.ts</, "the symbols group under a mono file path label with no counts");
 assert.match(factsMap, /class='chg-path'>src\/webui\/payload\.ts<\/div>/, "the file label is the bare path with no count beside it");
+// #468 the two open groups carry a static small label, so the unfolded map reads as two sections
+assert.match(factsMap, /<div class='chg-symbols'><div class='chg-group'>symbols<\/div>/, "#468 the symbols group opens with a small symbols label");
+assert.match(factsMap, /<div class='chg-ledger'><div class='chg-group'>flows<\/div>/, "#468 the flows group opens with a small flows label");
+assert.match(mapFacts.api.factsHtml({ ...mapTask, file: mapTask.file, worktree: mapTask.worktree }), /chg-group/, "#468 the label rides inside the group block, so the full-row flex item stays the block");
 assert.match(factsMap, /class='chg-kind'>fn</, "a symbol carries its kind chip");
 assert.match(factsMap, /class='chg-new'>new</, "an added symbol carries the new chip");
 assert.match(factsMap, /<span class='chg-ins'>\+12</, "the added lines take the done step");
@@ -933,7 +937,10 @@ assert.match(themeCss, /#p-facts \.chg-flow \+ \.chg-flow \{[^}]*border-top: 1px
 assert.match(themeCss, /#p-facts \.chg-delta \{[^}]*font-variant-numeric: tabular-nums/, "the per-symbol delta is mono with tabular numerals");
 assert.match(themeCss, /#p-facts \.chg-hl \{[^}]*var\(--link\)/, "#465 a highlighted row takes the theme accent, so both themes share one rule");
 assert.match(themeCss, /#p-facts \.chg-commits, #p-facts \.chg-map \{ display: contents; \}/, "the collapsed summary stays beside the label even when the details opens");
-assert.match(themeCss, /#p-facts \.chg-commit, #p-facts \.chg-symbols, #p-facts \.chg-ledger \{[^}]*padding-left: 90px/, "the open content takes one full row aligned under the summary start");
+assert.match(themeCss, /#p-facts \.chg-commit, #p-facts \.chg-symbols, #p-facts \.chg-ledger \{[^}]*padding-left: 0/, "#468 the open content takes the whole row on desktop, like it does on the phone");
+assert.match(themeCss, /#p-facts \.chg-group \{[^}]*color: var\(--dim\)/, "#468 the group label takes the dim token");
+assert.match(themeCss, /#p-facts \.chg-group \{[^}]*font-size: 0\.75rem/, "#468 the group label is small, like the other quiet labels");
+assert.match(themeCss, /#p-facts \.chg-group \{[^}]*margin-bottom: 4px/, "#468 the group label keeps a few px under it, so the list reads as its section");
 assert.match(themeCss, /#p-facts \.chg-head \{[^}]*padding-left: 14px/, "the symbol names indent under their file path");
 assert.match(themeCss, /summary:focus-visible/, "the Map trigger takes the shared focus ring");
 const mapRules = themeCss.match(/#p-facts \.chg-[a-z]+[^{}]*\{[^{}]*\}/g) ?? [];
@@ -943,6 +950,7 @@ const mapPhoneCss = themeCss.slice(themeCss.indexOf(`@media (max-width: ${MOBILE
 assert.doesNotMatch(mapPhoneCss, /#p-facts \.chg-sym \{[^}]*grid-template-columns/, "the symbol rows keep the desktop grid at the 700px breakpoint");
 assert.doesNotMatch(mapPhoneCss, /#p-facts \.chg-delta \{/, "the phone block leaves the delta right-aligned on the symbol name's line");
 assert.match(mapPhoneCss, /#p-facts \.chg-flow-head \{[^}]*flex-wrap: wrap/, "the flow entries stack at the 700px breakpoint");
+assert.doesNotMatch(mapPhoneCss, /#p-facts \.chg-commit, #p-facts \.chg-symbols, #p-facts \.chg-ledger \{/, "#468 the phone block no longer repeats the desktop padding, which is already 0");
 
 // 17. the open path: the panel un-hides before the detail lands, the light row paints the shell
 // while the heavy detail loads, the detail fetch precedes the history fetch, and a response that

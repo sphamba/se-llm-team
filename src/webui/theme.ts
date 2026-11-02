@@ -302,8 +302,9 @@ body.panel-open #board { padding-right: var(--panel-w); }
 #p-facts .chg-symbols, #p-facts .chg-ledger { display: block; min-width: 0; padding: 4px 0 0; }
 #p-facts .chg-file, #p-facts .chg-flow { display: block; min-width: 0; padding: 0; }
 #p-facts .chg-file + .chg-file { margin-top: 8px; }
-/* the open content takes one full row each, aligned under the summary start (84px label + 6px gap) */
-#p-facts .chg-commit, #p-facts .chg-symbols, #p-facts .chg-ledger { flex: 1 1 100%; padding-left: 90px; }
+/* #468 the open content takes one full row each, at the panel edge like on the phone */
+#p-facts .chg-commit, #p-facts .chg-symbols, #p-facts .chg-ledger { flex: 1 1 100%; padding-left: 0; }
+#p-facts .chg-group { color: var(--dim); font-family: ${MONO}; font-size: 0.75rem; margin-bottom: 4px; }
 #p-facts .chg-path { color: var(--dim); font-family: ${MONO}; overflow-wrap: anywhere; }
 #p-facts .chg-sym { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: baseline; min-width: 0; }
 /* #465 the hover link: a counterpart row takes the selected-row tint and a left accent bar, in both themes through the tokens */
@@ -528,7 +529,6 @@ html.motion-paused .spine::after, html.motion-paused .st-head::after { animation
    the panel edge */
 @media (max-width: ${MOBILE_MAX}px) {
 #p-facts .chg-flow-head { flex-wrap: wrap; }
-#p-facts .chg-commit, #p-facts .chg-symbols, #p-facts .chg-ledger { padding-left: 0; }
 #p-facts .chg-head { padding-left: 10px; }
 }
 /* #369 the floor: none disables every animation and transition, the inlined FLIP travel included,

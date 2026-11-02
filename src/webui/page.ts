@@ -912,7 +912,7 @@ function mapHtml(c, t) {
 		(typeof f.what === "string" && f.what ? "<div class='chg-what'>" + esc(f.what) + "</div>" : "") + "</div>"
 	).join("");
 	return "<div><span class='k'>map</span>" + (running ? "<span class='spin'></span><span class='chg-upd'>updating\u2026</span>" : "") + "<details class='chg-map'><summary>" + chgPlural(count, "symbol") + " \u00b7 " + chgPlural(flows.length, "flow") + "<span class='chg-chev' aria-hidden='true'></span></summary>" +
-		(symsHtml ? "<div class='chg-symbols'>" + symsHtml + "</div>" : "") + (flowsHtml ? "<div class='chg-ledger'>" + flowsHtml + "</div>" : "") + "</details></div>";
+		(symsHtml ? "<div class='chg-symbols'><div class='chg-group'>symbols</div>" + symsHtml + "</div>" : "") + (flowsHtml ? "<div class='chg-ledger'><div class='chg-group'>flows</div>" + flowsHtml + "</div>" : "") + "</details></div>";
 }
 function changesHtml(t) {
 	const file = t.file;
