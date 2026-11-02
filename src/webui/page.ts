@@ -923,8 +923,8 @@ function changesHtml(t) {
 	}
 	if (c && Array.isArray(c.commits) && c.commits.length) {
 		html += "<details class='chg-commits'><summary><span class='k'>commits</span>" + chgPlural(c.commits.length, "commit") + "<span class='chg-chev' aria-hidden='true'></span></summary>" +
-			c.commits.map(cm => "<div class='chg-commit'><span class='chg-hash'>" + esc(String(cm.hash || "").slice(0, 7)) + "</span><span class='chg-subj'>" + esc(cm.subject) + "</span><span class='chg-when'>" + esc(chgTime(cm.when)) + "</span></div>").join("") +
-			"</details>";
+			"<div class='chg-list'>" + c.commits.map(cm => "<div class='chg-commit'><span class='chg-hash'>" + esc(String(cm.hash || "").slice(0, 7)) + "</span><span class='chg-subj'>" + esc(cm.subject) + "</span><span class='chg-when'>" + esc(chgTime(cm.when)) + "</span></div>").join("") +
+			"</div></details>";
 	}
 	return html + mapHtml(c, t);
 }

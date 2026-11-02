@@ -841,6 +841,8 @@ assert.match(factsPlural, /<details class='chg-map'><summary><span class='k'>map
 // longer eats: no div wrapper and no display:contents trick, for the commits row either
 assert.doesNotMatch(factsMap, /<div><span class='k'>map<\/span>/, "#469 the map row is the details itself, not a div wrapped around it");
 assert.match(factsMap, /<details class='chg-commits'><summary><span class='k'>commits<\/span>2 commits<span/, "#469 the commits trigger carries its label inside the summary");
+assert.match(factsMap, /<\/summary><div class='chg-list'><div class='chg-commit'>/, "#471 the commit rows sit in one wrapper inside the details");
+assert.match(factsMap, /<span class='chg-when'>[^<]*<\/span><\/div><\/div><\/details>/, "#471 the wrapper closes after the last commit row");
 assert.doesNotMatch(factsMap, /<div><span class='k'>commits<\/span>/, "#469 the commits row is the details itself, not a div wrapped around it");
 assert.doesNotMatch(factsMap, /<\/?details[^>]*>\s*<\/div>/, "#469 no row closes on a wrapping div");
 assert.match(factsMap, /class='chg-head'><span class='chg-name'>taskChangesPayload<\/span><span class='chg-kind'>fn<\/span>/, "the kind chip sits beside the symbol name, not the delta");
@@ -961,6 +963,8 @@ assert.match(themeCss, /#p-facts \.chg-delta \{[^}]*font-variant-numeric: tabula
 assert.match(themeCss, /#p-facts \.chg-hl \{[^}]*var\(--link\)/, "#465 a highlighted row takes the theme accent, so both themes share one rule");
 assert.doesNotMatch(themeCss, /display: contents/, "#469 the details is a full-width block row, so the display:contents hack is gone");
 assert.match(themeCss, /#p-facts \.chg-commits summary, #p-facts \.chg-map summary \{ display: flex; align-items: baseline; gap: 6px/, "#469 the summary is the flex row that carries the label, the counts and the chevron");
+assert.match(themeCss, /#p-facts \.chg-commits, #p-facts \.chg-map \{[^}]*padding: 2px 0/, "#471 the details rows carry the same 2px row padding as the plain facts rows");
+assert.match(themeCss, /#p-facts \.chg-list \{[^}]*padding: 4px 0/, "#471 the open commits list gains padding above and below");
 assert.doesNotMatch(themeCss, /flex: 1 1 100%/, "#469 the open content needs no width override once the details is the row");
 assert.match(themeCss, /#p-facts \.chg-group \{[^}]*color: var\(--dim\)/, "#468 the group label takes the dim token");
 assert.match(themeCss, /#p-facts \.chg-group \{[^}]*font-size: 0\.75rem/, "#468 the group label is small, like the other quiet labels");
