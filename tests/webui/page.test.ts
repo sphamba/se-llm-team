@@ -742,7 +742,7 @@ const makeFacts = (fetchStub: (u: string) => any = () => new Promise(() => {})) 
 	const factsEl: any = { __html: undefined, querySelectorAll: () => [] };
 	const api = new Function("esc", "numOf", "issuerCell", "blockedRow", "document", "fetch", "projectParam", "visible", "openTask", "writeGated",
 		"let openDetail = null;\n" + factsSrc +
-		"\n; return { factsHtml: factsHtml, changesHtml: changesHtml, mapHtml: mapHtml, computeMap: computeMap, chgTime: chgTime, loadChanges: loadChanges, cache: changesCache, set open(v) { openDetail = v; } };")(
+		"\n; return { factsHtml: factsHtml, changesHtml: changesHtml, mapHtml: mapHtml, chgTime: chgTime, loadChanges: loadChanges, cache: changesCache, set open(v) { openDetail = v; } };")(
 		esc, (f: string) => parseInt(f.slice(0, 6), 10), () => "user", () => "",
 		{ getElementById: (id: string) => (id === "p-facts" ? factsEl : null) },
 		fetchStub, () => "", () => true, () => {}, () => true,
@@ -801,17 +801,14 @@ const mapSection = {
 };
 const mapFacts = makeFacts();
 const factsNoMap = mapFacts.api.factsHtml(mapTask);
-assert.match(factsNoMap, /<span class='k'>map<\/span>.*not computed/, "a task with no map shows the not computed row");
-assert.match(factsNoMap, /<button[^>]*>compute<\/button>/, "the idle row offers the compute button when the task has a worktree");
+assert.ok(!/<span class='k'>map<\/span>/.test(factsNoMap), "#473 a task with no map shows no map row at all");
+assert.ok(!factsNoMap.includes("compute</button>"), "#473 the compute button is gone with the absent row");
 mapFacts.api.cache[mapTask.file] = changesPayload;
-assert.match(mapFacts.api.factsHtml(mapTask), /not computed/, "a payload without a map still shows the not computed row");
+assert.ok(!/<span class='k'>map<\/span>/.test(mapFacts.api.factsHtml(mapTask)), "a payload without a map shows no map row");
 mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: {} };
-assert.match(mapFacts.api.factsHtml(mapTask), /not computed/, "an empty map is treated as absent");
+assert.ok(!/<span class='k'>map<\/span>/.test(mapFacts.api.factsHtml(mapTask)), "an empty map is treated as absent: no map row");
 mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { files: [{ path: "src/x.ts" }, null], flows: [{ from: "src/a.ts" }], role: "developer" } };
-assert.match(mapFacts.api.factsHtml(mapTask), /not computed/, "a partial or odd map is treated as absent: no details row and no error row");
-const factsNoBranch = mapFacts.api.factsHtml({ ...mapTask, worktree: "" });
-assert.match(factsNoBranch, /not computed/);
-assert.ok(!factsNoBranch.includes("compute</button>"), "a task without a worktree shows not computed alone");
+assert.ok(!/<span class='k'>map<\/span>/.test(mapFacts.api.factsHtml(mapTask)), "a partial or odd map is treated as absent: no details row and no error row");
 assert.ok(!mapFacts.api.factsHtml({ ...mapTask, state: "done", worktree: "" }).includes("compute</button>"), "a done task without a branch offers no compute button");
 mapFacts.api.cache[mapTask.file] = { ...changesPayload, mapRunning: true };
 const factsRunning = mapFacts.api.factsHtml(mapTask);
@@ -898,34 +895,7 @@ assert.ok(mapOnly.api.cache[mapTask.file], "a map-only payload survives the cach
 // #459 the compute trigger: the click marks the run at once, a success drops the cached payload, a
 // 409 stays running, another failure restores the idle row, and the pulse clears when the map lands
 const tick = () => new Promise((r) => setTimeout(r, 0));
-const makeTrigger = (resp: any) => {
-	const calls: any[] = [];
-	const h = makeFacts((u: string, o: any) => { calls.push({ u, o }); return Promise.resolve(resp); });
-	h.api.open = mapTask;
-	return { h, calls };
-};
-const okTrigger = makeTrigger({ ok: true, status: 200 });
-okTrigger.h.api.cache[mapTask.file] = changesPayload;
-okTrigger.h.api.computeMap({});
-assert.match(okTrigger.h.api.factsHtml(mapTask), /computing\u2026/, "the click shows the pulse at once");
-await tick();
-assert.equal(okTrigger.calls.length, 1);
-assert.match(okTrigger.calls[0].u, /^\/api\/task-map\?num=263/);
-assert.equal(okTrigger.calls[0].o.method, "POST");
-assert.ok(!okTrigger.h.api.cache[mapTask.file], "a successful POST drops the cached changes, so the row refetches");
-assert.match(okTrigger.h.api.factsHtml(mapTask), /computing\u2026/, "the row keeps the pulse until the map lands");
-okTrigger.h.api.computeMap({});
-await tick();
-assert.equal(okTrigger.calls.length, 1, "a second click while the run is in flight does not fire another POST");
-const conflictTrigger = makeTrigger({ ok: false, status: 409 });
-conflictTrigger.h.api.computeMap({});
-await tick();
-assert.match(conflictTrigger.h.api.factsHtml(mapTask), /computing\u2026/, "a 409 is another run in flight, so the pulse stays");
-const failTrigger = makeTrigger({ ok: false, status: 500 });
-failTrigger.h.api.computeMap({});
-await tick();
-assert.match(failTrigger.h.api.factsHtml(mapTask), /not computed/);
-assert.ok(failTrigger.h.api.factsHtml(mapTask).includes("compute</button>"), "another failure restores the idle row and paints no error");
+assert.ok(!page.includes("computeMap"), "#473 the client compute trigger is gone, so no reference to it survives");
 const refreshFacts = makeFacts(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ ...changesPayload, map: mapSection }) }));
 refreshFacts.api.cache[mapTask.file] = { ...changesPayload, mapRunning: true };
 refreshFacts.api.loadChanges(mapTask.file, true);
@@ -957,7 +927,7 @@ assert.ok(autoLog.some((u) => u.includes("/api/task-changes")), "#461 the open p
 assert.match(autoPoll.facts(mapTask), /<span class='spin'><\/span><span class='chg-upd'>updating\u2026/, "#461 the served flag lights the pulse on the old ledger without a click");
 assert.match(themeCss, /#p-facts \.chg-kind \{[^}]*background: var\(--code-bg\)/, "the kind chip sits on the code background token");
 assert.match(themeCss, /#p-facts \.chg-arrow \{[^}]*color: var\(--link\)/, "the arrow glyph takes the link token");
-assert.match(themeCss, /#p-facts \.m-map \{[^}]*font-size: 0\.75rem/, "the compute button is quiet at the panel's small size");
+assert.doesNotMatch(themeCss, /#p-facts \.m-map/, "#473 the compute button style is gone with the button");
 assert.match(themeCss, /#p-facts \.chg-flow \+ \.chg-flow \{[^}]*border-top: 1px solid var\(--hairline\)/, "a 1px hairline separates the flow entries");
 assert.match(themeCss, /#p-facts \.chg-delta \{[^}]*font-variant-numeric: tabular-nums/, "the per-symbol delta is mono with tabular numerals");
 assert.match(themeCss, /#p-facts \.chg-hl \{[^}]*var\(--link\)/, "#465 a highlighted row takes the theme accent, so both themes share one rule");

@@ -861,7 +861,6 @@ document.addEventListener("mouseout", (e) => {
 // subagent lists, and the later arrival repaints the facts only, so the hold button outside the
 // block is never rebuilt
 const changesCache = Object.create(null);
-const mapRunBusy = Object.create(null);
 const changesFlight = Object.create(null);
 const CHG_UNITS = { minute: "m", hour: "h", day: "d", week: "w", month: "mo", year: "y" };
 const CHG_STEPS = [["year", 31536e6], ["month", 2592e6], ["week", 6048e5], ["day", 864e5], ["hour", 36e5], ["minute", 6e4]];
@@ -886,7 +885,7 @@ function mapNum(x) {
 	const n = Math.trunc(Number(x));
 	return Number.isFinite(n) && n > 0 ? n : 0;
 }
-const mapRunning = file => !!mapRunBusy[file] || !!(changesCache[file] && changesCache[file].mapRunning === true);
+const mapRunning = file => !!(changesCache[file] && changesCache[file].mapRunning === true);
 function mapHtml(c, t) {
 	const m = c && c.map;
 	const running = mapRunning(t.file);
@@ -899,7 +898,7 @@ function mapHtml(c, t) {
 	const count = files.reduce((n, f) => n + f.syms.length, 0);
 	if (!count && !flows.length) {
 		if (running) return "<div><span class='k'>map</span><span class='spin'></span>computing\u2026</div>";
-		return "<div><span class='k'>map</span><span class='chg-none'>not computed</span>" + (t.worktree ? " <button class='m-action m-map' onclick='computeMap(this)'>compute</button>" : "") + "</div>";
+		return "";
 	}
 	const symsHtml = files.map(f => "<div class='chg-file'><div class='chg-path'>" + esc(f.path) + "</div>" + f.syms.map(s =>
 		"<div class='chg-sym' data-file='" + esc(f.path) + "'><span class='chg-head'><span class='chg-name'>" + esc(s.name) + "</span>" +
@@ -940,38 +939,14 @@ function loadChanges(file, force) {
 			const running = c && c.mapRunning === true;
 			const has = c && (typeof c.insertions === "number" || typeof c.deletions === "number" || (Array.isArray(c.commits) && c.commits.length) || (c.map && typeof c.map === "object") || running);
 			if (!has) {
-				if (!(c && c.mapRunning === true)) delete mapRunBusy[file];
 				delete changesCache[file];
 				if (openDetail && openDetail.file === file && visible()) writeFacts(openDetail);
 				return;
 			}
 			changesCache[file] = c;
-			if (c.map || !running) delete mapRunBusy[file];
 			if (openDetail && openDetail.file === file && visible()) writeFacts(openDetail);
 		})
 		.catch(() => { delete changesFlight[file]; delete changesCache[file]; });
-}
-// #459 the compute trigger: the row pulses at once, a success drops the cached payload so the poll
-// refetches, a 409 is another run in flight, and any other failure restores the idle row silently
-function computeMap() {
-	const t = openDetail;
-	if (!t || mapRunning(t.file)) return;
-	const file = t.file;
-	mapRunBusy[file] = true;
-	writeFacts(t);
-	fetch("/api/task-map?num=" + numOf(file) + projectParam(), { method: "POST" })
-		.then(r => {
-			if (r.ok || r.status === 409) {
-				delete changesCache[file];
-				if (openDetail && openDetail.file === file) writeFacts(openDetail);
-				return;
-			}
-			throw new Error("task-map " + r.status);
-		})
-		.catch(() => {
-			delete mapRunBusy[file];
-			if (openDetail && openDetail.file === file) writeFacts(openDetail);
-		});
 }
 // the panel header's facts: number, state slug, complexity, issuer, blockedBy, worktree, then the
 // changes and commits rows when their one payload has data
@@ -1181,7 +1156,6 @@ function hidePanel() {
 	openerFile = null;
 	for (const k in subCache) delete subCache[k];
 	for (const k in changesCache) delete changesCache[k];
-	for (const k in mapRunBusy) delete mapRunBusy[k];
 	clearReveal();
 	document.body.classList.remove("panel-open");
 	if (p.classList.contains("hidden")) return;

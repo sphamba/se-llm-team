@@ -50,8 +50,10 @@ const render = async (payload: any) => {
 	return api.factsHtml(row);
 };
 
-// idle: no branch data, no map, no live run -> the idle row with the trigger
-assert.match(await render(await taskChangesPayload(root, num)), /<span class='k'>map<\/span><span class='chg-none'>not computed<\/span> <button class='m-action m-map' onclick='computeMap\(this\)'>compute<\/button>/, "a fresh task with a branch and no map shows not computed and the compute button");
+// idle: no branch data, no map, no live run -> no map row at all
+const idleHtml = await render(await taskChangesPayload(root, num));
+assert.ok(!/<span class='k'>map<\/span>/.test(idleHtml), "#473 a fresh task with a branch and no map shows no map row");
+assert.ok(!idleHtml.includes("compute</button>") && !idleHtml.includes("computeMap"), "#473 the compute button and its handler are gone");
 
 // in flight: a live map-run pid flips mapRunning true and the row pulses without dropping the map
 updateAttrs(root, task, { map: JSON.stringify(mapSection) });
@@ -87,11 +89,12 @@ const deadHtml = await (async () => {
 	await tick();
 	return api.factsHtml(deadRow);
 })();
-assert.match(deadHtml, /not computed<\/span> <button class='m-action m-map'/, "a failed run without a map falls back to not computed with the compute button");
+assert.ok(!/<span class='k'>map<\/span>/.test(deadHtml), "#473 a failed run without a map shows no map row");
 clearPid(root, `${deadSlug}.mapper.1.analysis`);
 
 // a done task without a branch offers no button, whatever the payload says
 const done = makeRow({ ...landed, mapRunning: false });
 assert.ok(!done.factsHtml({ ...row, state: "done", worktree: "" }).includes("compute</button>"), "a done task without a branch renders no compute button");
+assert.ok(!/<span class='k'>map<\/span>/.test(done.factsHtml({ ...row, state: "done", worktree: "" })), "#473 a done task without a branch renders no map row");
 
 console.log("changes-map-trigger.test.ts: all assertions passed");
