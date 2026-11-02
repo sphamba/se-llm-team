@@ -16,6 +16,9 @@ The orchestrator also reads the project root's `AGENTS.md`. When it exists and i
 | Merger | the task worktree | [agents/merger.md](../agents/merger.md) |
 | Live-tester | the task worktree | [agents/live-tester.md](../agents/live-tester.md) |
 | Doctor | the task worktree | [agents/doctor.md](../agents/doctor.md) |
+| Mapper | the task worktree | [agents/mapper.md](../agents/mapper.md) |
+
+The Mapper is the detached one-shot pass that turns one task branch's diff into the changes map. It runs after every developer and reviewer run, carries no `SPECS.md` link and no role notes, and writes the `map` attr on the task file. Its LLM resolves from the config like every role: set `roles.mapper.provider`, `model`, or `thinking`. The complexity keys do not apply to it.
 
 The Merger rebases the task branch onto the base branch, resolves the conflicts, and runs the full project test suite in its worktree. The daemon only proves that result and fast-forwards the root checkout to that branch. A merger that gives up on the rebase leaves the task in merging and writes `.kanban/.logs/<slug>.merge-stuck` with the reason, the branch and the base. That marker blocks the whole merge lane. The daemon reports the hand-repair recipe, and the sweep moves the task to to-live-test after the root fast-forward.
 

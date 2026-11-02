@@ -753,7 +753,7 @@ setTimeout(() => process.stdout.write(JSON.stringify({ type: "message_end", mess
 );
 chmodSync(mapStub, 0o755);
 // the detached run loads the project config itself, so the stub must be on disk before the trigger
-writeFileSync(join(mapRoot, "se-llm-team.json"), JSON.stringify({ agent: mapStub, roles: { map: { model: "stub-map-model" } } }));
+writeFileSync(join(mapRoot, "se-llm-team.json"), JSON.stringify({ agent: mapStub, roles: { mapper: { model: "stub-map-model" } } }));
 const mapTask = createTask(mapRoot, { name: "feat: map trigger", summary: "s" });
 updateAttrs(mapRoot, mapTask, { worktree: "feat/1-map" });
 const mapSlug = taskSlug(mapTask.file);
@@ -762,7 +762,7 @@ const mapNum = numOf(mapTask.file);
 const oldMap = { files: [], transfers: [], role: "developer", run: 1, model: "old-model", at: "2026-01-01T00:00:00.000Z", head: "0000000" };
 updateAttrs(mapRoot, mapTask, { map: JSON.stringify(oldMap) });
 const pidsDir = join(mapRoot, ".kanban", ".pids");
-const mapPids = () => (existsSync(pidsDir) ? readdirSync(pidsDir) : []).filter((f) => new RegExp(`^${mapSlug}\\.map\\.\\d+\\.analysis\\.pid$`).test(f));
+const mapPids = () => (existsSync(pidsDir) ? readdirSync(pidsDir) : []).filter((f) => new RegExp(`^${mapSlug}\\.mapper\\.\\d+\\.analysis\\.pid$`).test(f));
 const until = async (ok: () => boolean, what: string) => {
 	for (let i = 0; i < 300; i++) {
 		if (ok()) return;
@@ -790,16 +790,16 @@ assert.equal(mapPids().length, 0, "a refused request spawns nothing");
 const mapRes = await mapPost();
 assert.equal(mapRes.status, 200, "the trigger answers 200");
 assert.deepEqual(await mapRes.json(), { ok: true }, "and answers {ok:true}");
-assert.equal(mapPids().length, 1, "the map-only run wrote its <slug>.map.<n>.analysis pid file");
+assert.equal(mapPids().length, 1, "the map-only run wrote its <slug>.mapper.<n>.analysis pid file");
 assert.equal((await changesNow()).mapRunning, true, "/api/task-changes reports mapRunning while the pid is alive");
 const again = await mapPost();
 assert.equal(again.status, 409, "a second trigger while the run is alive answers 409");
 assert.ok((await again.json()).error, "the 409 carries a JSON error body");
 assert.equal(mapPids().length, 1, "the refused trigger spawned nothing");
 
-await until(() => getTask(mapRoot, mapTask.file)?.map?.role === "map", "the map-only run wrote the map attr");
+await until(() => getTask(mapRoot, mapTask.file)?.map?.role === "mapper", "the map-only run wrote the map attr");
 const runMap = getTask(mapRoot, mapTask.file)!.map!;
-assert.deepEqual([runMap.role, runMap.head, runMap.model], ["map", mapHead, "stub-map-model"], "the map-only run replaced the old attr with the new map at the branch head");
+assert.deepEqual([runMap.role, runMap.head, runMap.model], ["mapper", mapHead, "stub-map-model"], "the map-only run replaced the old attr with the new map at the branch head");
 assert.deepEqual(runMap.files.map((f) => f.path), ["a.ts"], "the stored map carries the stub's answer");
 await until(() => mapPids().length === 0, "the map-only run's pid file self-removed at exit");
 assert.equal((await changesNow()).mapRunning, false, "mapRunning reads false once the run exits");

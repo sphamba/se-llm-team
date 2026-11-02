@@ -55,7 +55,7 @@ assert.match(await render(await taskChangesPayload(root, num)), /<span class='k'
 
 // in flight: a live map-run pid flips mapRunning true and the row pulses without dropping the map
 updateAttrs(root, task, { map: JSON.stringify(mapSection) });
-writePid(root, `${slug}.map.0.analysis`, process.pid);
+writePid(root, `${slug}.mapper.0.analysis`, process.pid);
 const livePayload = await taskChangesPayload(root, num);
 assert.equal(livePayload.mapRunning, true, "the backend serves mapRunning true while the map run's pid is alive");
 assert.equal(livePayload.map.files[0].symbols[0].name, "taskMap", "the in-flight payload still carries the ledger");
@@ -65,7 +65,7 @@ assert.ok(updating.includes("chg-map") && updating.includes("1 symbols"), "the o
 assert.ok(!updating.includes("compute</button>"), "the pulse replaces the button, so a second trigger is impossible");
 
 // landed: the pid clears with the map written -> no pulse, the ledger renders from the new payload
-clearPid(root, `${slug}.map.0.analysis`);
+clearPid(root, `${slug}.mapper.0.analysis`);
 const landed = await taskChangesPayload(root, num);
 assert.equal(landed.mapRunning, false, "mapRunning reads false once the run exits");
 const landedHtml = await render(landed);
@@ -75,7 +75,7 @@ assert.ok(!landedHtml.includes("updating\u2026") && landedHtml.includes("1 symbo
 const deadTask = createTask(root, { name: "feat: dead map run", summary: "s" });
 updateAttrs(root, deadTask, { worktree: "feat/2-map" });
 const deadSlug = taskSlug(deadTask.file);
-writePid(root, `${deadSlug}.map.1.analysis`, 999999);
+writePid(root, `${deadSlug}.mapper.1.analysis`, 999999);
 const dead = await taskChangesPayload(root, parseInt(deadTask.file, 10));
 assert.equal(dead.mapRunning, false, "a dead run pid reads as idle");
 assert.equal(dead.map, undefined, "a failed run writes no map");
@@ -88,7 +88,7 @@ const deadHtml = await (async () => {
 	return api.factsHtml(deadRow);
 })();
 assert.match(deadHtml, /not computed<\/span> <button class='m-action m-map'/, "a failed run without a map falls back to not computed with the compute button");
-clearPid(root, `${deadSlug}.map.1.analysis`);
+clearPid(root, `${deadSlug}.mapper.1.analysis`);
 
 // a done task without a branch offers no button, whatever the payload says
 const done = makeRow({ ...landed, mapRunning: false });

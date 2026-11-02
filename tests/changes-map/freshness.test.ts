@@ -45,7 +45,7 @@ process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "ass
 	);
 	chmodSync(stub, 0o755);
 };
-writeFileSync(join(root, "se-llm-team.json"), JSON.stringify({ agent: stub, roles: { map: { model: "stub-map" } } }));
+writeFileSync(join(root, "se-llm-team.json"), JSON.stringify({ agent: stub, roles: { mapper: { model: "stub-map" } } }));
 const cfg = loadConfig(root);
 const readMapAttr = () => splitFrontmatter(readFileSync(join(root, ".kanban", task.file), "utf8"))!.attrs.map;
 

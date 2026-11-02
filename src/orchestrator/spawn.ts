@@ -164,17 +164,17 @@ export function spawnRunAnalysis(root: string, slug: string, role: string): void
 
 // #458 the map-only run the task panel's map trigger fires: the same detached wrapper, pid file
 // and `<slug>.<role>.<n>` shape as spawnRunAnalysis, but no run log to analyse, so the runner
-// sees role `map` and regenerates only the changes map. The index stays 0 because a map run leaves
+// sees role `mapper` and regenerates only the changes map. The index stays 0 because a map run leaves
 // no log to number, and the trigger's in-flight guard keeps one run per task, so the name is
 // reused. Best-effort: a failed map leaves the previous attr untouched.
 export function spawnMapRun(root: string, slug: string): void {
-	const base = `${slug}.map.0`;
+	const base = `${slug}.mapper.0`;
 	const name = `${base}.analysis`;
 	const logs = join(kanbanDir(root), ".logs");
 	mkdirSync(logs, { recursive: true }); // the runner's cwd and log target
 	mkdirSync(join(kanbanDir(root), ".pids"), { recursive: true });
 	const exitPath = exitFilePath(root, name);
-	const child = spawn("sh", ["-c", `"$@" ; echo $? > "${exitPath}" ; rm -f "${pidPath(root, name)}"`, "sh", process.execPath, ANALYSIS_RUNNER, root, logPath(root, base), "map"], {
+	const child = spawn("sh", ["-c", `"$@" ; echo $? > "${exitPath}" ; rm -f "${pidPath(root, name)}"`, "sh", process.execPath, ANALYSIS_RUNNER, root, logPath(root, base), "mapper"], {
 		cwd: logs,
 		detached: true,
 		stdio: ["ignore", "ignore", "ignore"],

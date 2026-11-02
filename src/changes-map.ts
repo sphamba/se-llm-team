@@ -1,15 +1,18 @@
 // #455 the changes map: one detached pass per completed Developer or Reviewer run reads the
-// task branch's diff and asks the `map` role for strict JSON, stored in the task's `map` attr.
+// task branch's diff and asks the `mapper` role for strict JSON, stored in the task's `map` attr.
 // The map is display-only, and the attr is the only record left once doneCleanup drops the
 // branch, so it carries the 7-char branch head the served `since` count needs.
-import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { buildAnalystCommand, spawnAnalyst } from "./efficiency-analysis.ts";
 import { kanbanDir, updateAttrs, type Task } from "./kanban.ts";
 import { claudeAnalystArgs, piLlmFlags } from "./orchestrator/backends.ts";
 import { resolveLlm, type Config } from "./orchestrator/config.ts";
 import { git } from "./orchestrator/board.ts";
 import { log } from "./orchestrator/log.ts";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 import { agentAlive } from "./pid.ts";
 
 export type TaskMapKind = "fn" | "class" | "case";
@@ -133,37 +136,31 @@ function uncappedPaths(diff: string): Set<string> {
 	return cut;
 }
 
-function changesMapPrompt(diff: string, numstat: string): string {
+// the prompt template lives beside analyst.md and doctor.md in the package agents/ dir; a
+// missing file logs and skips the pass instead of failing the run. Function replacements, so a
+// diff containing `$&` cannot corrupt the template.
+function mapperPrompt(diff: string, numstat: string): string | null {
+	let template: string;
+	try {
+		template = readFileSync(join(HERE, "..", "agents", "mapper.md"), "utf8").trimEnd();
+	} catch {
+		return null;
+	}
 	const cut = diff.length > DIFF_CAP ? uncappedPaths(diff) : new Set<string>();
-	const truncated = cut.size
+	const cutNumstat = cut.size
 		? "\n\nNumstat of the files the diff cap cut (added, removed, path):\n" + numstat.split("\n").filter((row) => cut.has(row.split("\t")[2] ?? "")).join("\n")
 		: "";
-	return [
-		"You produce a changes map for one branch diff.",
-		"",
-		'Answer with ONE bare JSON object, no code fence and no prose:',
-		'{"files":[{"path":"<repo-relative path>","symbols":[{"name":"<symbol>","kind":"fn|class|case","ins":<added lines>,"del":<removed lines>,"isNew":<true|false>}]}],"transfers":[{"from":"<path>","to":"<path>","what":"<one short phrase>"}]}',
-		"",
-		"Rules:",
-		"- one entry per changed file, in the order the diff prints it",
-		"- kind is fn for a function or method, class for a class or type, case for a switch case or branch",
-		"- ins and del are that symbol's added and removed line counts, integers, 0 when the diff does not say",
-		"- isNew is true when the diff adds the symbol, false when it only changes it",
-		"- transfers lists code that moved from one file to another; an empty array when nothing moved",
-		"- no other keys, no comments, no markdown",
-		"",
-		`Per-file numstat (added, removed, path):\n${numstat}`,
-		truncated,
-		"",
-		`Diff:\n${diff.slice(0, DIFF_CAP)}`,
-	].join("\n");
+	return template
+		.replace("{{numstat}}", () => numstat)
+		.replace("{{cutNumstat}}", () => cutNumstat)
+		.replace("{{diff}}", () => diff.slice(0, DIFF_CAP));
 }
 
 // #458 the roles whose analysis run writes the map. A live pid file for any of them means the
 // attr write is in flight, so the trigger answers 409 and the served payload flags mapRunning.
 // The name shape keys the check: a doctor run streams under `<slug>.<role>.<n>.analysis` of the
 // analysed run, carries no task map, and is read from the same pid dir.
-const MAP_ROLES = /^(.+)\.(developer|reviewer|map)\.\d+\.analysis\.pid$/;
+const MAP_ROLES = /^(.+)\.(developer|reviewer|mapper)\.\d+\.analysis\.pid$/;
 
 export function mapRunAlive(root: string, slug: string): boolean {
 	let names: string[];
@@ -197,8 +194,12 @@ export async function generateChangesMap(opts: { root: string; cfg: Config; task
 		log(root, `changes map for ${task.file} skipped: git could not read ${base ?? "the base"}...HEAD in ${wt}`);
 		return null;
 	}
-	const llm = resolveLlm(root, cfg, "map", "");
-	const prompt = changesMapPrompt(diff, numstat);
+	const llm = resolveLlm(root, cfg, "mapper", "");
+	const prompt = mapperPrompt(diff, numstat);
+	if (prompt === null) {
+		log(root, `changes map for ${task.file} skipped: agents/mapper.md is missing`);
+		return null;
+	}
 	const argv = cfg.backend === "claude" ? [cfg.agent, ...claudeAnalystArgs(llm, prompt)] : buildAnalystCommand(cfg.agent, piLlmFlags(llm), prompt);
 	const answer = await spawnAnalyst(argv, wt);
 	const content = parseChangesMap(answer ?? undefined, (msg) => log(root, msg));

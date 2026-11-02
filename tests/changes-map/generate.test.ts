@@ -54,7 +54,7 @@ process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "ass
 );
 chmodSync(stub, 0o755);
 // the map role resolves its own model, so the stored attr names the run that wrote it
-writeFileSync(join(root, "se-llm-team.json"), JSON.stringify({ agent: stub, roles: { map: { model: "stub-map-model" } } }));
+writeFileSync(join(root, "se-llm-team.json"), JSON.stringify({ agent: stub, roles: { mapper: { model: "stub-map-model" } } }));
 
 mkdirSync(join(root, ".kanban", ".logs"), { recursive: true });
 const logPath = join(root, ".kanban", ".logs", `${slug}.developer.2.log`);
