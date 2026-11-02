@@ -1,10 +1,10 @@
 import { statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { getTask, kanbanDir, listAll, questionOpen, setState, taskSlug, type Task, type TaskState } from "../kanban.ts";
+import { getTask, kanbanDir, listAll, questionOpen, setState, taskSlug, updateTask, type Task, type TaskState } from "../kanban.ts";
 import { clearPid, killTree, pidAlive, pidEntry } from "../pid.ts";
 import { RESPAWN_CAP, DEFAULT_REVIEWER_CAP } from "./config.ts";
 import { bumpCounter, compactFinishedLogs, counterPath, log, logPath, nextRunIndex, readCounter } from "./log.ts";
-import { classifyRunLog, newestRunLogPath, newestRunRole } from "./classify.ts";
+import { classifyRunLog, newestRunLogPath, newestRunRole, readLogTail } from "./classify.ts";
 import { clearExitFile, readExitCode, readMergerSlug, spawnRunAnalysis } from "./spawn.ts";
 import { clearContextSymlinks } from "./context.ts";
 import { decideReview, dropDoneBlockers, finishMerge, mergeStuck, promoteBacklog } from "./pipeline/index.ts";
@@ -73,6 +73,81 @@ function logStalled(root: string, slug: string, role: string, stallMinutes: numb
 	return now - prev.since >= stallMinutes * 60_000;
 }
 
+// the loop detector: a live agent whose tail is one short sequence repeated without end (a
+// model or wrapper writing a degenerate line until the token budget burns). The window is the
+// log tail read, the unit bounds hold the scan cheap, the repeat floor rules out a banner line
+export const MADNESS_UNIT = 20;
+export const MADNESS_REPS = 200;
+export const MADNESS_TAIL = 16384;
+export const MADNESS_CAP = 3;
+
+// the loop at the very end of a log tail, or null. A backward scan per unit length: take the
+// last L chars as the unit and count the equal blocks before it. The smallest unit wins, so a
+// run of one character reports L=1, and no backtracking regex is needed
+export function madnessLoop(tail: string): { unit: string; repeats: number } | null {
+	const text = tail.endsWith("\n") ? tail.slice(0, -1) : tail;
+	for (let len = 1; len <= MADNESS_UNIT; len++) {
+		const unit = text.slice(-len);
+		if (unit.length < len) return null; // the tail is shorter than the unit
+		let i = text.length;
+		let repeats = 0;
+		while (i - len >= 0 && text.slice(i - len, i) === unit) {
+			repeats++;
+			i -= len;
+		}
+		if (repeats >= MADNESS_REPS) return { unit, repeats };
+	}
+	return null;
+}
+
+// the degenerate tail of one live agent's newest per-run log, with the run index for the log
+// line. A missing, vanished or unreadable log is no loop: the stall check owns a silent agent
+function madnessHit(root: string, slug: string, role: string): { unit: string; repeats: number; run: number } | null {
+	const run = nextRunIndex(root, slug, role) - 1;
+	if (run < 0) return null;
+	let hit: ReturnType<typeof madnessLoop>;
+	try {
+		hit = madnessLoop(readLogTail(logPath(root, `${slug}.${role}.${run}`), MADNESS_TAIL));
+	} catch {
+		return null;
+	}
+	return hit ? { ...hit, run } : null;
+}
+
+// the madness strike counter shares the lifecycle of the dead streak: a completed run or a task
+// that reached done re-arms it
+function clearMadness(root: string, slug: string): void {
+	if (readCounter(root, `${slug}.madness`) > 0) writeFileSync(counterPath(root, `${slug}.madness`), "0");
+}
+
+// the madness bounce: the crash bounce plus its own counter. A strike under the cap lets the
+// respawn machinery retry; the MADNESS_CAP-th strike bounces to the same target but holds the
+// task on an open question, because a loop that survived two respawns needs a human
+function bounceMadness(
+	root: string,
+	task: Task,
+	next: TaskState,
+	pidName: string,
+	pid: number,
+	role: string,
+	hit: { unit: string; repeats: number; run: number },
+): void {
+	const slug = taskSlug(task.file);
+	log(root, `${slug}: agent log loops (${role} run ${hit.run}, ${JSON.stringify(hit.unit)} x${hit.repeats}), killing it, ${task.state} -> ${next}`);
+	bounceDead(root, task, next, pidName, pid, true);
+	const strikes = bumpCounter(root, `${slug}.madness`);
+	if (strikes < MADNESS_CAP) return;
+	// re-read: the bounce wrote the state, and a task that moved on underneath keeps its own
+	const fresh = getTask(root, task.file);
+	if (!fresh || fresh.state !== next) return;
+	updateTask(root, fresh, {
+		blockedBy: [fresh.blockedBy.trim(), "question"].filter(Boolean).join(", "),
+		openQuestions: [fresh.openQuestions.trim(), `- agent output looped ${MADNESS_CAP} times; check the run log before resuming`].filter(Boolean).join("\n"),
+	});
+	clearMadness(root, slug);
+	log(root, `${slug}: agent output looped ${MADNESS_CAP} times, holding the task on an open question (state ${next}); check the run log, fold the answer into the Specs, then clear it`);
+}
+
 // one bounce for both death kinds (dead pid, stalled log): SIGTERM the agent on request,
 // clear its pid files, re-read the task and move it one state back when the state has not
 // moved on, then bump the death counter so the respawn machinery takes over (immediate under
@@ -113,6 +188,7 @@ function clearDeadStreak(root: string, slug: string): void {
 		writeFileSync(counterPath(root, `${slug}.dead`), "0");
 		log(root, `${slug}: run completed, cleared the dead-agent counter`);
 	}
+	clearMadness(root, slug);
 }
 
 // now is injectable so the stall window is testable without waiting out real minutes
@@ -163,7 +239,14 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 				// bounced and killed like a dead agent. A merging task reaching here is the recorded
 				// merger's own (mismatches requeue above), so the sampled per-run log is its merger
 				// run; outside the working states there is no check, and stale samples are dropped
-				if (working && logStalled(root, slug, working.role, stallMinutes, now)) {
+				// a degenerate tail outranks the stall check: the looping log still grows, so the stall
+				// window never catches it. Only a live lane agent is sampled: the mapper, the analysis
+				// runs and the doctor write logs no loop check owns
+				const hit = working ? madnessHit(root, slug, working.role) : null;
+				if (working && hit) {
+					ended = true;
+					bounceMadness(root, task, working.next, pidName, pid, working.role, hit);
+				} else if (working && logStalled(root, slug, working.role, stallMinutes, now)) {
 					log(root, `${task.file}: agent log unchanged for ${stallMinutes}+ min, assuming dead (state ${task.state})`);
 					ended = true;
 					bounceDead(root, task, working.next, pidName, pid, true);
@@ -186,6 +269,8 @@ export function poll(root: string, stallMinutes: number, now = Date.now(), backl
 			// the agent terminated (or its pid file is stale): remove its cwd context symlinks
 			clearContextSymlinks(root, task);
 			if (!working) {
+				// a task that reached done never carries a madness strike into a later reopen
+				if (task.state === "done") clearMadness(root, slug);
 				// a completed run leaves its stale pidfile behind, a bounce clears it first, so a
 				// stale pidfile here means the agent advanced the task out of the mapped state by
 				// its own action: the death streak is over. Clearing on a missing pidfile too would

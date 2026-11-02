@@ -44,12 +44,12 @@ const FAILED_STOP_REASONS = new Set(["error", "aborted", "length"]);
 
 // the log text the classifier scans: a plain log reads its last CLASSIFY_TAIL_BYTES bytes, a
 // compacted .log.gz decompresses whole (zlib has no tail read) and then takes the same tail
-function readLogTail(path: string): string {
-	if (path.endsWith(".gz")) return gunzipSync(readFileSync(path)).toString("utf8").slice(-CLASSIFY_TAIL_BYTES);
+export function readLogTail(path: string, bytes = CLASSIFY_TAIL_BYTES): string {
+	if (path.endsWith(".gz")) return gunzipSync(readFileSync(path)).toString("utf8").slice(-bytes);
 	const fd = openSync(path, "r");
 	try {
 		const size = fstatSync(fd).size;
-		const start = Math.max(0, size - CLASSIFY_TAIL_BYTES);
+		const start = Math.max(0, size - bytes);
 		const buf = Buffer.alloc(size - start);
 		readSync(fd, buf, 0, buf.length, start);
 		return buf.toString("utf8");
