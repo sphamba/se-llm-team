@@ -31,7 +31,7 @@ const makeRow = (payload: any, fetchLog: string[] = []) => {
 	const el: any = { __html: undefined, querySelectorAll: () => [] };
 	const api = new Function("esc", "numOf", "issuerCell", "blockedRow", "document", "fetch", "projectParam", "visible", "openTask", "writeGated",
 		"let openDetail = null;\n" + factsSrc +
-		"\n; return { factsHtml: factsHtml, loadChanges: loadChanges, cache: changesCache, mapRun: mapRun, set open(v) { openDetail = v; } };")(
+		"\n; return { factsHtml: factsHtml, loadChanges: loadChanges, cache: changesCache, set open(v) { openDetail = v; } };")(
 		esc, (f: string) => parseInt(f.slice(0, 6), 10), () => "user", () => "",
 		{ getElementById: (id: string) => (id === "p-facts" ? el : null) },
 		(u: string) => { fetchLog.push(u); return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) }); },

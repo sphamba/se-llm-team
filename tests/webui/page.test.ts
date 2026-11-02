@@ -742,7 +742,7 @@ const makeFacts = (fetchStub: (u: string) => any = () => new Promise(() => {})) 
 	const factsEl: any = { __html: undefined, querySelectorAll: () => [] };
 	const api = new Function("esc", "numOf", "issuerCell", "blockedRow", "document", "fetch", "projectParam", "visible", "openTask", "writeGated",
 		"let openDetail = null;\n" + factsSrc +
-		"\n; return { factsHtml: factsHtml, changesHtml: changesHtml, mapHtml: mapHtml, computeMap: computeMap, chgTime: chgTime, loadChanges: loadChanges, cache: changesCache, mapRun: mapRun, set open(v) { openDetail = v; } };")(
+		"\n; return { factsHtml: factsHtml, changesHtml: changesHtml, mapHtml: mapHtml, computeMap: computeMap, chgTime: chgTime, loadChanges: loadChanges, cache: changesCache, set open(v) { openDetail = v; } };")(
 		esc, (f: string) => parseInt(f.slice(0, 6), 10), () => "user", () => "",
 		{ getElementById: (id: string) => (id === "p-facts" ? factsEl : null) },
 		fetchStub, () => "", () => true, () => {}, () => true,
@@ -836,17 +836,7 @@ assert.match(factsMap, /<span class='chg-del'>−3</, "the removed lines take th
 assert.match(factsMap, /class='chg-flow-head'>.*src\/hub\.ts.*→.*src\/webui\/payload\.ts/, "the flow entry reads from → to in one head");
 assert.match(factsMap, /class='chg-what'>the task-changes request</, "the payload phrase sits below the flow");
 assert.ok(!/<ol|<li/.test(factsMap), "the flow ledger is unnumbered");
-assert.match(factsMap, /class='chg-prov'>generated after developer run 2 · gpt-5\.1-codex · 5m ago</, "the provenance line names the role, the run, the model and the compacted time");
-mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { ...mapSection, run: 0 } };
-assert.match(mapFacts.api.factsHtml(mapTask), /class='chg-prov'>generated after developer run 0 ·/, "the first run names its zero index");
-mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { ...mapSection, role: "reviewer", run: 1 } };
-assert.match(mapFacts.api.factsHtml(mapTask), /class='chg-prov'>generated after reviewer run 1 ·/, "a later run still names its index");
-mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { ...mapSection, run: null } };
-assert.match(mapFacts.api.factsHtml(mapTask), /class='chg-prov'>generated after developer · gpt-5\.1-codex/, "a missing run index keeps the old form");
-mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: mapSection };
-assert.ok(!factsMap.includes("commits since"), "a current map appends no stale commit count");
-mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { ...mapSection, since: 3 } };
-assert.match(mapFacts.api.factsHtml(mapTask), /class='chg-since'>\+3 commits since</, "a stale map appends the commits that landed after it");
+assert.ok(!factsMap.includes("chg-prov") && !factsMap.includes("commits since"), "the map ledger carries no provenance line and no stale commit count");
 assert.equal(mapFacts.api.chgTime("last tuesday"), "last tuesday", "the one time formatter still passes an unknown form through");
 assert.equal(mapFacts.api.chgTime(mapPast), "5m ago", "an ISO stamp compacts through the same formatter the commits row uses");
 const mapOnly = makeFacts(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ map: mapSection }) }));
@@ -916,18 +906,18 @@ assert.match(autoPoll.facts(mapTask), /<span class='spin'><\/span><span class='c
 assert.match(themeCss, /#p-facts \.chg-kind \{[^}]*background: var\(--code-bg\)/, "the kind chip sits on the code background token");
 assert.match(themeCss, /#p-facts \.chg-arrow \{[^}]*color: var\(--link\)/, "the arrow glyph takes the link token");
 assert.match(themeCss, /#p-facts \.m-map \{[^}]*font-size: 0\.75rem/, "the compute button is quiet at the panel's small size");
-assert.match(themeCss, /#p-facts \.chg-prov \{[^}]*color: var\(--faint\)[^}]*font-size: 0\.75rem/, "the provenance line is faint mono at the 0.75rem floor");
 assert.match(themeCss, /#p-facts \.chg-flow \+ \.chg-flow \{[^}]*border-top: 1px solid var\(--hairline\)/, "a 1px hairline separates the flow entries");
 assert.match(themeCss, /#p-facts \.chg-delta \{[^}]*font-variant-numeric: tabular-nums/, "the per-symbol delta is mono with tabular numerals");
 assert.match(themeCss, /#p-facts \.chg-commits, #p-facts \.chg-map \{ display: contents; \}/, "the collapsed summary stays beside the label even when the details opens");
-assert.match(themeCss, /#p-facts \.chg-commit, #p-facts \.chg-prov, #p-facts \.chg-symbols, #p-facts \.chg-ledger \{[^}]*padding-left: 90px/, "the open content takes one full row aligned under the summary start");
+assert.match(themeCss, /#p-facts \.chg-commit, #p-facts \.chg-symbols, #p-facts \.chg-ledger \{[^}]*padding-left: 90px/, "the open content takes one full row aligned under the summary start");
 assert.match(themeCss, /#p-facts \.chg-head \{[^}]*padding-left: 14px/, "the symbol names indent under their file path");
 assert.match(themeCss, /summary:focus-visible/, "the Map trigger takes the shared focus ring");
 const mapRules = themeCss.match(/#p-facts \.chg-[a-z]+[^{}]*\{[^{}]*\}/g) ?? [];
 assert.ok(mapRules.length >= 10, `the map rules reach the sheet: ${mapRules.length}`);
 for (const r of mapRules) assert.doesNotMatch(r, /#[0-9a-fA-F]{3,8}\b|\brgba?\(/, `a map rule uses a theme token, never a colour literal: ${r}`);
 const mapPhoneCss = themeCss.slice(themeCss.indexOf(`@media (max-width: ${MOBILE_MAX}px)`));
-assert.match(mapPhoneCss, /#p-facts \.chg-sym \{[^}]*grid-template-columns: minmax\(0, 1fr\)/, "the symbol rows stack at the 700px breakpoint");
+assert.doesNotMatch(mapPhoneCss, /#p-facts \.chg-sym \{[^}]*grid-template-columns/, "the symbol rows keep the desktop grid at the 700px breakpoint");
+assert.doesNotMatch(mapPhoneCss, /#p-facts \.chg-delta \{/, "the phone block leaves the delta right-aligned on the symbol name's line");
 assert.match(mapPhoneCss, /#p-facts \.chg-flow-head \{[^}]*flex-wrap: wrap/, "the flow entries stack at the 700px breakpoint");
 
 // 17. the open path: the panel un-hides before the detail lands, the light row paints the shell

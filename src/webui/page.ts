@@ -852,12 +852,6 @@ function mapNum(x) {
 	return Number.isFinite(n) && n > 0 ? n : 0;
 }
 const mapRunning = file => !!mapRunBusy[file] || !!(changesCache[file] && changesCache[file].mapRunning === true);
-// run indexes start at 0, so only a missing or invalid value drops the index
-function mapRun(x) {
-	if (x === null || x === undefined || x === "") return null;
-	const n = Number(x);
-	return Number.isInteger(n) && n >= 0 ? n : null;
-}
 function mapHtml(c, t) {
 	const m = c && c.map;
 	const running = mapRunning(t.file);
@@ -871,15 +865,6 @@ function mapHtml(c, t) {
 		if (running) return "<div><span class='k'>map</span><span class='spin'></span>computing\u2026</div>";
 		return "<div><span class='k'>map</span><span class='chg-none'>not computed</span>" + (t.worktree ? " <button class='m-action m-map' onclick='computeMap(this)'>compute</button>" : "") + "</div>";
 	}
-	const prov = [];
-	if (m.role) prov.push("generated after " + esc(m.role) + (mapRun(m.run) !== null ? " run " + mapRun(m.run) : ""));
-	if (m.model) prov.push(esc(m.model));
-	const when = chgTime(m.at);
-	if (when) prov.push(esc(when));
-	const since = mapNum(m.since);
-	const provHtml = prov.length
-		? "<div class='chg-prov'>" + prov.join(" \u00b7 ") + (since ? " \u00b7 <span class='chg-since'>+" + since + " commits since</span>" : "") + "</div>"
-		: "";
 	const symsHtml = files.map(f => "<div class='chg-file'><div class='chg-path'>" + esc(f.path) + "</div>" + f.syms.map(s =>
 		"<div class='chg-sym'><span class='chg-head'><span class='chg-name'>" + esc(s.name) + "</span>" +
 		(MAP_KINDS[s.kind] ? "<span class='chg-kind'>" + esc(s.kind) + "</span>" : "") +
@@ -891,7 +876,7 @@ function mapHtml(c, t) {
 		(typeof f.what === "string" && f.what ? "<div class='chg-what'>" + esc(f.what) + "</div>" : "") + "</div>"
 	).join("");
 	return "<div><span class='k'>map</span>" + (running ? "<span class='spin'></span><span class='chg-upd'>updating\u2026</span>" : "") + "<details class='chg-map'><summary>" + count + " symbols \u00b7 " + flows.length + " transfers<span class='chg-chev' aria-hidden='true'></span></summary>" +
-		provHtml + (symsHtml ? "<div class='chg-symbols'>" + symsHtml + "</div>" : "") + (flowsHtml ? "<div class='chg-ledger'>" + flowsHtml + "</div>" : "") + "</details></div>";
+		(symsHtml ? "<div class='chg-symbols'>" + symsHtml + "</div>" : "") + (flowsHtml ? "<div class='chg-ledger'>" + flowsHtml + "</div>" : "") + "</details></div>";
 }
 function changesHtml(t) {
 	const file = t.file;
