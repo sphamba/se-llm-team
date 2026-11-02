@@ -865,6 +865,10 @@ const mapRunBusy = Object.create(null);
 const changesFlight = Object.create(null);
 const CHG_UNITS = { second: "s", minute: "m", hour: "h", day: "d", week: "w", month: "mo", year: "y" };
 const CHG_STEPS = [["year", 31536e6], ["month", 2592e6], ["week", 6048e5], ["day", 864e5], ["hour", 36e5], ["minute", 6e4], ["second", 1e3]];
+// every facts noun pluralizes with a bare s, so one count helper serves all four labels
+function chgPlural(n, word) {
+	return n + " " + word + (n === 1 ? "" : "s");
+}
 // one formatter for both time forms the panel receives: git's "N units ago" and the map's ISO stamp
 function chgTime(text) {
 	const m = /^(\\d+)\\s+(second|minute|hour|day|week|month|year)s?\\s+ago$/.exec(text || "");
@@ -907,7 +911,7 @@ function mapHtml(c, t) {
 		"<div class='chg-flow' data-from='" + esc(f.from) + "' data-to='" + esc(f.to) + "'><div class='chg-flow-head'><span class='chg-from'>" + esc(f.from) + "</span><span class='chg-arrow' aria-hidden='true'>\u2192</span><span class='chg-to'>" + esc(f.to) + "</span></div>" +
 		(typeof f.what === "string" && f.what ? "<div class='chg-what'>" + esc(f.what) + "</div>" : "") + "</div>"
 	).join("");
-	return "<div><span class='k'>map</span>" + (running ? "<span class='spin'></span><span class='chg-upd'>updating\u2026</span>" : "") + "<details class='chg-map'><summary>" + count + " symbols \u00b7 " + flows.length + " flows<span class='chg-chev' aria-hidden='true'></span></summary>" +
+	return "<div><span class='k'>map</span>" + (running ? "<span class='spin'></span><span class='chg-upd'>updating\u2026</span>" : "") + "<details class='chg-map'><summary>" + chgPlural(count, "symbol") + " \u00b7 " + chgPlural(flows.length, "flow") + "<span class='chg-chev' aria-hidden='true'></span></summary>" +
 		(symsHtml ? "<div class='chg-symbols'>" + symsHtml + "</div>" : "") + (flowsHtml ? "<div class='chg-ledger'>" + flowsHtml + "</div>" : "") + "</details></div>";
 }
 function changesHtml(t) {
@@ -915,10 +919,10 @@ function changesHtml(t) {
 	const c = changesCache[file];
 	let html = "";
 	if (c && (typeof c.insertions === "number" || typeof c.deletions === "number")) {
-		html += "<div><span class='k'>changes</span><span class='chg-ins'>+" + esc(String(c.insertions || 0)) + "</span> <span class='chg-del'>-" + esc(String(c.deletions || 0)) + "</span><span class='chg-files'> - " + esc(String(c.files || 0)) + " files</span></div>";
+		html += "<div><span class='k'>changes</span><span class='chg-ins'>+" + esc(String(c.insertions || 0)) + "</span> <span class='chg-del'>-" + esc(String(c.deletions || 0)) + "</span><span class='chg-files'> - " + esc(chgPlural(c.files || 0, "file")) + "</span></div>";
 	}
 	if (c && Array.isArray(c.commits) && c.commits.length) {
-		html += "<div><span class='k'>commits</span><details class='chg-commits'><summary>" + c.commits.length + " commits<span class='chg-chev' aria-hidden='true'></span></summary>" +
+		html += "<div><span class='k'>commits</span><details class='chg-commits'><summary>" + chgPlural(c.commits.length, "commit") + "<span class='chg-chev' aria-hidden='true'></span></summary>" +
 			c.commits.map(cm => "<div class='chg-commit'><span class='chg-hash'>" + esc(String(cm.hash || "").slice(0, 7)) + "</span><span class='chg-subj'>" + esc(cm.subject) + "</span><span class='chg-when'>" + esc(chgTime(cm.when)) + "</span></div>").join("") +
 			"</details></div>";
 	}

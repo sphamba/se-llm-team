@@ -61,7 +61,7 @@ assert.equal(livePayload.mapRunning, true, "the backend serves mapRunning true w
 assert.equal(livePayload.map.files[0].symbols[0].name, "taskMap", "the in-flight payload still carries the ledger");
 const updating = await render(await taskChangesPayload(root, num));
 assert.match(updating, /<span class='spin'><\/span><span class='chg-upd'>updating\u2026<\/span>/, "a recompute in flight shows the pulse and updating");
-assert.ok(updating.includes("chg-map") && updating.includes("1 symbols"), "the old ledger survives the updating pulse");
+assert.ok(updating.includes("chg-map") && updating.includes("1 symbol"), "the old ledger survives the updating pulse");
 assert.ok(!updating.includes("compute</button>"), "the pulse replaces the button, so a second trigger is impossible");
 
 // landed: the pid clears with the map written -> no pulse, the ledger renders from the new payload
@@ -69,7 +69,7 @@ clearPid(root, `${slug}.mapper.0.analysis`);
 const landed = await taskChangesPayload(root, num);
 assert.equal(landed.mapRunning, false, "mapRunning reads false once the run exits");
 const landedHtml = await render(landed);
-assert.ok(!landedHtml.includes("updating\u2026") && landedHtml.includes("1 symbols"), "the landed map renders with no pulse and no reload");
+assert.ok(!landedHtml.includes("updating\u2026") && landedHtml.includes("1 symbol"), "the landed map renders with no pulse and no reload");
 
 // the run died without writing a map -> the row falls back to the idle state
 const deadTask = createTask(root, { name: "feat: dead map run", summary: "s" });

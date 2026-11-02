@@ -823,9 +823,20 @@ assert.match(factsUpdating, /<span class='spin'><\/span><span class='chg-upd'>up
 assert.ok(factsUpdating.includes("chg-map") && factsUpdating.includes("2 symbols"), "the existing map content survives the updating pulse");
 mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: mapSection };
 const factsMap = mapFacts.api.factsHtml(mapTask);
-assert.match(factsMap, /<details class='chg-map'><summary>2 symbols · 1 flows<span/, "the Map trigger counts the symbols and the flows");
+assert.match(factsMap, /<details class='chg-map'><summary>2 symbols · 1 flow<span/, "the Map trigger counts the symbols and the flows");
 mapFacts.api.cache[mapTask.file] = { ...changesPayload, map: { files: mapSection.files, transfers: mapSection.flows, role: "developer" } };
-assert.match(mapFacts.api.factsHtml(mapTask), /<details class='chg-map'><summary>2 symbols · 1 flows<span/, "a map stored before the rename still renders its flows");
+assert.match(mapFacts.api.factsHtml(mapTask), /<details class='chg-map'><summary>2 symbols · 1 flow<span/, "a map stored before the rename still renders its flow");
+// #467 a count of one prints the singular noun, and a count of zero or more prints the plural
+mapFacts.api.cache[mapTask.file] = { ...changesPayload, insertions: 1, files: 1, commits: [{ hash: "a1b2c3d", subject: "feat: x", when: "2 hours ago" }], map: { files: [{ path: "src/x.ts", symbols: [{ name: "f", kind: "fn" }] }], flows: [{ from: "src/a.ts", to: "src/x.ts" }] } };
+const factsOne = mapFacts.api.factsHtml(mapTask);
+assert.match(factsOne, /class='chg-files'> - 1 file</, "one changed file prints the singular noun");
+assert.match(factsOne, /<summary>1 commit<span/, "one commit prints the singular noun");
+assert.match(factsOne, /<details class='chg-map'><summary>1 symbol · 1 flow<span/, "one symbol and one flow print the singular nouns");
+mapFacts.api.cache[mapTask.file] = { ...changesPayload, files: 0, map: { files: [{ path: "src/x.ts", symbols: [{ name: "f", kind: "fn" }, { name: "g", kind: "fn" }] }], flows: [{ from: "src/a.ts", to: "src/x.ts" }, { from: "src/x.ts", to: "src/b.ts" }] } };
+const factsPlural = mapFacts.api.factsHtml(mapTask);
+assert.match(factsPlural, /class='chg-files'> - 0 files</, "zero files prints the plural noun");
+assert.match(factsPlural, /<summary>2 commits<span/, "two commits print the plural noun");
+assert.match(factsPlural, /<details class='chg-map'><summary>2 symbols · 2 flows<span/, "two symbols and two flows print the plural nouns");
 assert.match(factsMap, /class='chg-head'><span class='chg-name'>taskChangesPayload<\/span><span class='chg-kind'>fn<\/span>/, "the kind chip sits beside the symbol name, not the delta");
 assert.match(factsMap, /class='chg-name'>mapPayload<\/span><span class='chg-kind'>class<\/span><span class='chg-new'>new</, "the chips follow the symbol name inside the head");
 assert.ok(!/<details[^>]*\bopen\b/.test(factsMap), "the Map row starts collapsed, like the commits row");
