@@ -219,7 +219,7 @@ assert.deepEqual([live.insertions, live.deletions, live.files], [wanted[0], want
 assert.deepEqual([live.insertions, live.deletions, live.files], [2, 2, 3], "two text rows and one binary row: 2 added, 2 removed, 3 changed files");
 const handLog = gitIn("log", "main..feat/1-changes", "--format=%h%x1f%s").split("\n").map((l) => l.split("\x1f"));
 assert.deepEqual(live.commits.map((c: any) => [c.hash, c.subject]), handLog, "the commits match git log by hand, newest first");
-assert.ok(live.commits.every((c: any) => /^[0-9a-f]{7,}$/.test(c.hash) && / ago$/.test(c.when)), "each commit carries a hash and git's raw relative date");
+assert.ok(live.commits.every((c: any) => /^[0-9a-f]{7,}$/.test(c.hash) && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(c.when)), "#470 each commit carries a hash and a strict ISO date, so the served payload stays stable");
 assert.equal(live.snapshot, false, "a live task answers from git, not from a snapshot");
 assert.ok(!("map" in live), "a task file without a map attr carries no map key");
 

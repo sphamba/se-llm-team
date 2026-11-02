@@ -734,7 +734,7 @@ export async function cardStatsPayload(root: string, files: string[]) {
 // (the merge lane uses it before the fast-forward, when the range is still non-empty)
 export function branchChanges(root: string, base: string, branch: string): { changes: TaskChanges; commits: TaskCommit[] } | null {
 	const stat = git(root, ["diff", "--numstat", `${base}...${branch}`], true);
-	const log = git(root, ["log", `${base}..${branch}`, "--abbrev=7", "--format=%h%x1f%s%x1f%ar"], true);
+	const log = git(root, ["log", `${base}..${branch}`, "--abbrev=7", "--format=%h%x1f%s%x1f%aI"], true);
 	if (stat === null || log === null) return null;
 	const changes: TaskChanges = { base, ins: 0, del: 0, files: 0 };
 	for (const row of stat.split("\n")) {

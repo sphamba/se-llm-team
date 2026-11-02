@@ -872,6 +872,23 @@ assert.ok(!/<ol|<li/.test(factsMap), "the flow ledger is unnumbered");
 assert.ok(!factsMap.includes("chg-prov") && !factsMap.includes("commits since"), "the map ledger carries no provenance line and no stale commit count");
 assert.equal(mapFacts.api.chgTime("last tuesday"), "last tuesday", "the one time formatter still passes an unknown form through");
 assert.equal(mapFacts.api.chgTime(mapPast), "5m ago", "an ISO stamp compacts through the same formatter the commits row uses");
+// #470 the commit age quantizes to minutes, so the 1 s poll does not re-render the facts block
+const isoAgo = (ms: number) => new Date(Date.now() - ms).toISOString();
+assert.equal(mapFacts.api.chgTime(isoAgo(30_000)), "just now", "#470 a sub-minute ISO age renders just now");
+assert.equal(mapFacts.api.chgTime(isoAgo(30_000)), mapFacts.api.chgTime(isoAgo(30_000)), "#470 one fresh ISO stamp renders the same age on every tick inside the minute");
+assert.equal(mapFacts.api.chgTime(isoAgo(121_000)), "2m ago", "#470 an ISO age quantizes to whole minutes");
+assert.equal(mapFacts.api.chgTime(isoAgo(3_600_000)), "1h ago", "#470 an hour-old ISO age still counts hours");
+assert.equal(mapFacts.api.chgTime("45 seconds ago"), "just now", "#470 a frozen second-granularity attr renders just now");
+// #470 writeFacts saves each details open state and re-applies it after a changed write
+const wfSrc = page.match(/function writeFacts\(t\) \{[\s\S]*?\n\}/)![0];
+const wgSrc = page.match(/function writeGated\(el, html\) \{[\s\S]*?\n\}/)![0];
+const wfDetails: any[] = [{ className: "chg-map", open: true }, { className: "chg-commits", open: false }];
+const wfEl: any = { __html: "", get innerHTML() { return ""; }, set innerHTML(_v: string) { for (const d of wfDetails) d.open = false; }, querySelectorAll: (s: string) => (s === "details" ? wfDetails : []) };
+const writeFactsLive = new Function("document", "openTask", "factsHtml", wgSrc + wfSrc + "\n; return writeFacts;")(
+	{ getElementById: () => wfEl }, () => {}, () => "<details class='chg-map'>x</details>",
+);
+writeFactsLive({ file: "000263_task.md" });
+assert.deepEqual(wfDetails.map((d) => d.open), [true, false], "#470 the open map survives the write and the closed list stays closed");
 const mapOnly = makeFacts(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ map: mapSection }) }));
 mapOnly.api.loadChanges(mapTask.file);
 await new Promise((r) => setTimeout(r, 0));

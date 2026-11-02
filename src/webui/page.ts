@@ -863,8 +863,8 @@ document.addEventListener("mouseout", (e) => {
 const changesCache = Object.create(null);
 const mapRunBusy = Object.create(null);
 const changesFlight = Object.create(null);
-const CHG_UNITS = { second: "s", minute: "m", hour: "h", day: "d", week: "w", month: "mo", year: "y" };
-const CHG_STEPS = [["year", 31536e6], ["month", 2592e6], ["week", 6048e5], ["day", 864e5], ["hour", 36e5], ["minute", 6e4], ["second", 1e3]];
+const CHG_UNITS = { minute: "m", hour: "h", day: "d", week: "w", month: "mo", year: "y" };
+const CHG_STEPS = [["year", 31536e6], ["month", 2592e6], ["week", 6048e5], ["day", 864e5], ["hour", 36e5], ["minute", 6e4]];
 // every facts noun pluralizes with a bare s, so one count helper serves all four labels
 function chgPlural(n, word) {
 	return n + " " + word + (n === 1 ? "" : "s");
@@ -872,7 +872,7 @@ function chgPlural(n, word) {
 // one formatter for both time forms the panel receives: git's "N units ago" and the map's ISO stamp
 function chgTime(text) {
 	const m = /^(\\d+)\\s+(second|minute|hour|day|week|month|year)s?\\s+ago$/.exec(text || "");
-	if (m) return m[1] + CHG_UNITS[m[2]] + " ago";
+	if (m) return m[2] === "second" ? "just now" : m[1] + CHG_UNITS[m[2]] + " ago";
 	const t = /^\\d{4}-\\d{2}-\\d{2}T/.test(text || "") ? Date.parse(text) : NaN;
 	const d = Date.now() - t;
 	if (!Number.isFinite(t) || d < 0) return text;
@@ -986,7 +986,14 @@ function factsHtml(t) {
 }
 function writeFacts(t) {
 	const el = document.getElementById("p-facts");
-	if (writeGated(el, factsHtml(t))) for (const a of el.querySelectorAll(".num-link")) a.onclick = () => openTask(a.dataset.task);
+	if (!el) return;
+	const open = [...el.querySelectorAll("details")].map(d => [d.className, d.open]);
+	if (!writeGated(el, factsHtml(t))) return;
+	for (const d of el.querySelectorAll("details")) {
+		const was = open.find(o => o[0] === d.className);
+		if (was) d.open = was[1];
+	}
+	for (const a of el.querySelectorAll(".num-link")) a.onclick = () => openTask(a.dataset.task);
 }
 // the actions: hold or unhold the task, except that a question never takes the unhold button,
 // because only the answer clears that hold. The hold toggle stays outside the rebuilt facts block,
