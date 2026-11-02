@@ -837,6 +837,16 @@ assert.match(factsMap, /<span class='chg-ins'>\+12</, "the added lines take the 
 assert.match(factsMap, /<span class='chg-del'>−3</, "the removed lines take the error step");
 assert.match(factsMap, /class='chg-flow-head'>.*src\/hub\.ts.*→.*src\/webui\/payload\.ts/, "the flow entry reads from → to in one head");
 assert.match(factsMap, /class='chg-what'>the task-changes request</, "the payload phrase sits below the flow");
+// #465 the hover link: each symbol row names its file, each flow row names its two ends, and one
+// delegated mouseover/mouseout pair tints the counterpart rows inside the open map
+assert.match(factsMap, /class='chg-sym' data-file='src\/webui\/payload\.ts'/, "#465 a symbol row carries the data-file attribute");
+assert.match(factsMap, /class='chg-flow' data-from='src\/hub\.ts' data-to='src\/webui\/payload\.ts'/, "#465 a flow row carries data-from and data-to");
+const hlSrc = page.slice(page.indexOf("// #465 hover a map row"), page.indexOf("// the changes block"));
+assert.ok(hlSrc.includes('document.addEventListener("mouseover"') && hlSrc.includes('document.addEventListener("mouseout"'), "#465 one delegated mouseover/mouseout pair carries the hover, so a poll re-render keeps it");
+assert.ok(hlSrc.includes('closest(".chg-map")'), "#465 the hover work is guarded behind the map area");
+assert.ok(hlSrc.includes('closest(".chg-sym")') && hlSrc.includes("el.dataset.from === file || el.dataset.to === file"), "#465 a symbol row tints the flows whose from or to is its file");
+assert.ok(hlSrc.includes('closest(".chg-flow")') && hlSrc.includes("el.dataset.file === from || el.dataset.file === to"), "#465 a flow row tints the symbols of its from and to files");
+assert.ok(hlSrc.includes('"chg-hl"'), "#465 the highlight class is the one the stylesheet rules");
 assert.ok(!/<ol|<li/.test(factsMap), "the flow ledger is unnumbered");
 assert.ok(!factsMap.includes("chg-prov") && !factsMap.includes("commits since"), "the map ledger carries no provenance line and no stale commit count");
 assert.equal(mapFacts.api.chgTime("last tuesday"), "last tuesday", "the one time formatter still passes an unknown form through");
@@ -910,6 +920,7 @@ assert.match(themeCss, /#p-facts \.chg-arrow \{[^}]*color: var\(--link\)/, "the 
 assert.match(themeCss, /#p-facts \.m-map \{[^}]*font-size: 0\.75rem/, "the compute button is quiet at the panel's small size");
 assert.match(themeCss, /#p-facts \.chg-flow \+ \.chg-flow \{[^}]*border-top: 1px solid var\(--hairline\)/, "a 1px hairline separates the flow entries");
 assert.match(themeCss, /#p-facts \.chg-delta \{[^}]*font-variant-numeric: tabular-nums/, "the per-symbol delta is mono with tabular numerals");
+assert.match(themeCss, /#p-facts \.chg-hl \{[^}]*var\(--link\)/, "#465 a highlighted row takes the theme accent, so both themes share one rule");
 assert.match(themeCss, /#p-facts \.chg-commits, #p-facts \.chg-map \{ display: contents; \}/, "the collapsed summary stays beside the label even when the details opens");
 assert.match(themeCss, /#p-facts \.chg-commit, #p-facts \.chg-symbols, #p-facts \.chg-ledger \{[^}]*padding-left: 90px/, "the open content takes one full row aligned under the summary start");
 assert.match(themeCss, /#p-facts \.chg-head \{[^}]*padding-left: 14px/, "the symbol names indent under their file path");

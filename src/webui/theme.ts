@@ -306,6 +306,8 @@ body.panel-open #board { padding-right: var(--panel-w); }
 #p-facts .chg-commit, #p-facts .chg-symbols, #p-facts .chg-ledger { flex: 1 1 100%; padding-left: 90px; }
 #p-facts .chg-path { color: var(--dim); font-family: ${MONO}; overflow-wrap: anywhere; }
 #p-facts .chg-sym { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: baseline; min-width: 0; }
+/* #465 the hover link: a counterpart row takes the selected-row tint and a left accent bar, in both themes through the tokens */
+#p-facts .chg-hl { background: color-mix(in srgb, var(--link) 12%, transparent); box-shadow: inset 2px 0 0 var(--link); }
 #p-facts .chg-head { min-width: 0; padding-left: 14px; }
 #p-facts .chg-name { color: var(--text); overflow-wrap: anywhere; }
 #p-facts .chg-kind, #p-facts .chg-new { display: inline-block; margin-left: 6px; border-radius: 999px; padding: 0 6px; font-family: ${MONO}; font-size: 0.75rem; white-space: nowrap; }

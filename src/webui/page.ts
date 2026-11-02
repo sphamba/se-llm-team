@@ -826,6 +826,37 @@ function issuerCell(t) {
 	const target = t.issuer && t.issuer !== "user" && t.issuer !== "auto" ? taskByNum(t.issuer) : null;
 	return target ? numLinkHtml(target.file) : esc(t.issuer || "user");
 }
+// #465 hover a map row and tint its linked rows: a symbol links every flow whose file it travels
+// from or to, a flow links the symbols of its two files, and the match is the path alone. The
+// delegation on document survives the poll re-renders, and the map guard keeps the work local
+function chgHlClear() {
+	const panel = document.getElementById("panel");
+	if (!panel) return;
+	for (const el of panel.querySelectorAll(".chg-hl")) el.classList.remove("chg-hl");
+}
+function chgHl(rows, hit) {
+	for (const el of rows) if (hit(el)) el.classList.add("chg-hl");
+}
+document.addEventListener("mouseover", (e) => {
+	const map = e.target.closest && e.target.closest(".chg-map");
+	if (!map) { chgHlClear(); return; }
+	const sym = e.target.closest(".chg-sym");
+	const flow = sym ? null : e.target.closest(".chg-flow");
+	chgHlClear();
+	if (sym) {
+		const file = sym.dataset.file;
+		chgHl(map.querySelectorAll(".chg-flow"), (el) => el.dataset.from === file || el.dataset.to === file);
+	} else if (flow) {
+		const from = flow.dataset.from, to = flow.dataset.to;
+		chgHl(map.querySelectorAll(".chg-sym"), (el) => el.dataset.file === from || el.dataset.file === to);
+	}
+});
+document.addEventListener("mouseout", (e) => {
+	const map = e.target.closest && e.target.closest(".chg-map");
+	if (!map) return;
+	const next = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest(".chg-map") : null;
+	if (next !== map) chgHlClear();
+});
 // the changes block: one fetch per panel open and one per poll tick, cached per task like the
 // subagent lists, and the later arrival repaints the facts only, so the hold button outside the
 // block is never rebuilt
@@ -867,13 +898,13 @@ function mapHtml(c, t) {
 		return "<div><span class='k'>map</span><span class='chg-none'>not computed</span>" + (t.worktree ? " <button class='m-action m-map' onclick='computeMap(this)'>compute</button>" : "") + "</div>";
 	}
 	const symsHtml = files.map(f => "<div class='chg-file'><div class='chg-path'>" + esc(f.path) + "</div>" + f.syms.map(s =>
-		"<div class='chg-sym'><span class='chg-head'><span class='chg-name'>" + esc(s.name) + "</span>" +
+		"<div class='chg-sym' data-file='" + esc(f.path) + "'><span class='chg-head'><span class='chg-name'>" + esc(s.name) + "</span>" +
 		(MAP_KINDS[s.kind] ? "<span class='chg-kind'>" + esc(s.kind) + "</span>" : "") +
 		(s.isNew === true ? "<span class='chg-new'>new</span>" : "") +
 		"</span><span class='chg-delta'><span class='chg-ins'>+" + mapNum(s.ins) + "</span> <span class='chg-del'>\u2212" + mapNum(s.del) + "</span></span></div>"
 	).join("") + "</div>").join("");
 	const flowsHtml = flows.map(f =>
-		"<div class='chg-flow'><div class='chg-flow-head'><span class='chg-from'>" + esc(f.from) + "</span><span class='chg-arrow' aria-hidden='true'>\u2192</span><span class='chg-to'>" + esc(f.to) + "</span></div>" +
+		"<div class='chg-flow' data-from='" + esc(f.from) + "' data-to='" + esc(f.to) + "'><div class='chg-flow-head'><span class='chg-from'>" + esc(f.from) + "</span><span class='chg-arrow' aria-hidden='true'>\u2192</span><span class='chg-to'>" + esc(f.to) + "</span></div>" +
 		(typeof f.what === "string" && f.what ? "<div class='chg-what'>" + esc(f.what) + "</div>" : "") + "</div>"
 	).join("");
 	return "<div><span class='k'>map</span>" + (running ? "<span class='spin'></span><span class='chg-upd'>updating\u2026</span>" : "") + "<details class='chg-map'><summary>" + count + " symbols \u00b7 " + flows.length + " flows<span class='chg-chev' aria-hidden='true'></span></summary>" +
