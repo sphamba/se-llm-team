@@ -826,8 +826,9 @@ function issuerCell(t) {
 	const target = t.issuer && t.issuer !== "user" && t.issuer !== "auto" ? taskByNum(t.issuer) : null;
 	return target ? numLinkHtml(target.file) : esc(t.issuer || "user");
 }
-// the changes block: one lazy fetch per panel open, cached per task like the subagent lists, and
-// the later arrival repaints the facts only, so the hold button outside the block is never rebuilt
+// the changes block: one fetch per panel open and one per poll tick, cached per task like the
+// subagent lists, and the later arrival repaints the facts only, so the hold button outside the
+// block is never rebuilt
 const changesCache = Object.create(null);
 const mapRunBusy = Object.create(null);
 const changesFlight = Object.create(null);
@@ -1258,7 +1259,9 @@ function pollDetail() {
 		openDetail = Object.assign({}, openDetail, d);
 		writePanel(openDetail);
 		markLiveLine();
-		if (mapRunning(file)) loadChanges(file, true);
+		// #461 the refetch never waits on client state: a Developer/Reviewer auto-trigger sets no
+		// local run, so only the served flag can report it, and the land must paint without a reopen
+		loadChanges(file, true);
 		return fetch(historyUrl(file)).then(r => r.ok ? r.json() : null).catch(() => null).then(h => {
 			if (!h || panelFile !== d.file || !visible()) return;
 			openDetail = Object.assign({}, openDetail, h);

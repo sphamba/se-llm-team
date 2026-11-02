@@ -787,7 +787,7 @@ openApi.openPanel({ file: "000264_other.md" });
 await new Promise((r) => setTimeout(r, 0));
 assert.equal(changesLog.filter((u) => u.includes("/api/task-changes")).length, 2, "a fresh task starts its own changes fetch");
 const pollDetailSrc = page.match(/function pollDetail\(\) \{[\s\S]*?\n\}/)![0];
-assert.ok(pollDetailSrc.includes("mapRunning(file)") && pollDetailSrc.includes("loadChanges(file, true)"), "the poll refetches the changes only while a map run is in flight");
+assert.ok(pollDetailSrc.includes("loadChanges(file, true)") && !pollDetailSrc.includes("mapRunning(file)"), "#461 the poll refetches the changes every tick, without a client-side run gate");
 assert.ok(hideSrc.includes("changesCache"), "hidePanel drops the changes cache with the other per-panel caches");
 
 // 16c. #456 the Map row: a third facts row from the same payload, collapsed, a file-grouped symbol
@@ -890,6 +890,29 @@ refreshFacts.api.loadChanges(mapTask.file, true);
 await tick();
 assert.match(refreshFacts.api.factsHtml(mapTask), /chg-map/, "a forced load that brings the map replaces the running row");
 assert.ok(!refreshFacts.api.factsHtml(mapTask).includes("updating\u2026"), "the pulse clears when the map lands, so normal caching resumes");
+// #461 a map run started server-side: the poll tick carries no client-side run state, so only an
+// unconditional refetch can see the served flag and light the pulse on the old ledger
+const autoLog: string[] = [];
+const autoPoll = new Function("document", "fetch", "detailUrl", "historyUrl", "writePanel", "markLiveLine", "visible", "esc", "numOf", "issuerCell", "blockedRow", "projectParam", "openTask", "writeGated",
+	"let openDetail = null, panelFile = null;\n" + factsSrc + pollDetailSrc +
+	"\n; return { poll: pollDetail, facts: factsHtml, cache: changesCache, set file(v) { panelFile = v; }, set open(v) { openDetail = v; } };") (
+	{ getElementById: () => ({ __html: undefined, querySelectorAll: () => [] }) },
+	(u: string) => {
+		autoLog.push(u);
+		if (u.includes("/api/task-changes")) return Promise.resolve({ ok: true, json: () => Promise.resolve({ ...changesPayload, map: mapSection, mapRunning: true }) });
+		if (u.startsWith("/d?")) return Promise.resolve({ ok: true, json: () => Promise.resolve({ file: mapTask.file }) });
+		return Promise.resolve({ ok: false });
+	},
+	(f: string) => "/d?" + f, (f: string) => "/h?" + f, () => {}, () => {}, () => true,
+	esc, (f: string) => parseInt(f.slice(0, 6), 10), () => "user", () => "", () => "", () => {}, () => true,
+);
+autoPoll.file = mapTask.file;
+autoPoll.open = { ...mapTask };
+autoPoll.cache[mapTask.file] = { ...changesPayload, map: mapSection };
+await autoPoll.poll();
+await tick();
+assert.ok(autoLog.some((u) => u.includes("/api/task-changes")), "#461 the open panel refetches its changes on a tick with no client-side run state, so a server-started run is seen");
+assert.match(autoPoll.facts(mapTask), /<span class='spin'><\/span><span class='chg-upd'>updating\u2026/, "#461 the served flag lights the pulse on the old ledger without a click");
 assert.match(themeCss, /#p-facts \.chg-kind \{[^}]*background: var\(--code-bg\)/, "the kind chip sits on the code background token");
 assert.match(themeCss, /#p-facts \.chg-arrow \{[^}]*color: var\(--link\)/, "the arrow glyph takes the link token");
 assert.match(themeCss, /#p-facts \.m-map \{[^}]*font-size: 0\.75rem/, "the compute button is quiet at the panel's small size");
