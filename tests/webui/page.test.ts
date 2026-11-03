@@ -1437,13 +1437,11 @@ assert.deepEqual([dragHeights, taps], [[200], 0], "the drag writes the live heig
 drag.down(pointerAt(880)); drag.up(); drag.tap();
 assert.equal(taps, 1, "a pointer that holds still is a tap and still toggles the raised sheet");
 
-// #474 the dock's left edge is a drag-resize band: an 8px hit strip with a hairline, the phone sheet
-// ignores it, the default clamp is untouched and the chosen px persists under one key
+// #474 the dock's left edge is a drag-resize band: an 8px hit strip with a transparent border, the
+// phone sheet ignores it, the default clamp is untouched and the chosen px persists under one key
 assert.match(themeCss, /#panel::before \{[^}]*width: 8px[^}]*cursor: ew-resize/, "the band is an 8px strip on the panel's left edge and names the resize cursor");
-assert.match(themeCss, /body\.panel-band #panel::before \{[^}]*border-left-color: var\(--dim\)/, "the hairline darkens only when the cursor is on the 8px band, never anywhere in the drawer, and the rule keys on a body class because Chrome never matches :hover on a pseudo-element (#476)");
 assert.equal(themeCss.includes("#panel::before:hover"), false, "the inert pseudo-element :hover form is gone, so the band never depends on a selector Chrome ignores");
-assert.match(themeCss, /body\.panel-drag #panel::before \{[^}]*border-left-color: var\(--dim\)/, "an in-flight drag keeps the hairline lit while the pointer leaves the band");
-assert.ok(script.includes('classList.add("panel-drag")') && script.includes('classList.remove("panel-drag")'), "pointerdown sets the drag class on body and pointerup or cancel clears it");
+assert.match(themeCss, /#panel::before \{[^}]*border-left: 1px solid transparent/, "the band's border stays transparent, so the edge never lights");
 assert.ok(themeCss.includes("#panel::before { display: none; }"), "the phone sheet hides the band, so its full-width layout keeps the p-handle as its only drag target");
 assert.match(themeCss, /body \{ --panel-w: clamp\(28rem, 32vw, 35rem\)/, "the default panel clamp is unchanged, so the double-click reset falls back to the same width as before");
 assert.ok(script.includes('"panel-w"') && script.includes("panelEl.onpointerdown") && script.includes("panelEl.setPointerCapture"), "the panel carries the pointer drag and one localStorage key");
@@ -1455,25 +1453,22 @@ const panelRun = (stored: string | null, width = 1440) => {
 	const store = new Map<string, string>();
 	if (stored !== null) store.set("panel-w", stored);
 	const panelEl = { setPointerCapture() {} };
-	const dragClasses = new Set<string>();
 	let redraws = 0;
 	const api = new Function("document", "innerWidth", "localStorage", "queueRelations", resizeSrc + "; return { applyPanelW, resetPanelW, panelEl };")({
-		body: { style: { setProperty: (k: string, v: string) => { vars[k] = v; }, removeProperty: (k: string) => { delete vars[k]; } }, classList: { add: (k: string) => dragClasses.add(k), remove: (k: string) => dragClasses.delete(k), contains: (k: string) => dragClasses.has(k) } },
+		body: { style: { setProperty: (k: string, v: string) => { vars[k] = v; }, removeProperty: (k: string) => { delete vars[k]; } }, classList: { add() {}, remove() {}, contains: () => false } },
 		getElementById: () => panelEl,
 	}, width, { getItem: (k: string) => (store.has(k) ? (store.get(k) as string) : null), setItem: (k: string, v: string) => { store.set(k, String(v)); }, removeItem: (k: string) => { store.delete(k); } }, () => redraws++) as any;
-	return { api, vars, store, panelEl, dragClasses, redraws: () => redraws };
+	return { api, vars, store, panelEl, redraws: () => redraws };
 };
 const panelDrag = panelRun(null);
 const at = (clientX: number, target: any = panelDrag.panelEl, offsetX = 4) => ({ pointerId: 1, clientX, target, offsetX, preventDefault() {} });
 panelDrag.api.panelEl.onpointerdown(at(1000));
-assert.equal(panelDrag.dragClasses.has("panel-drag"), true, "a pointerdown on the band sets the body drag class, so the hairline holds while the pointer drifts off it");
 panelDrag.api.panelEl.onpointermove(at(1100));
 assert.equal(panelDrag.vars["--panel-w"], "384px", "a drag that would pass 24rem clamps to the minimum");
 assert.equal(panelDrag.store.get("panel-w"), "384", "the clamped px lands under the panel-w key on every drag");
 panelDrag.api.panelEl.onpointermove(at(600));
 assert.equal(panelDrag.vars["--panel-w"], "720px", "a drag that would pass 50vw clamps to half the viewport, so the board keeps a column");
 panelDrag.api.panelEl.onpointerup();
-assert.equal(panelDrag.dragClasses.has("panel-drag"), false, "pointerup clears the body drag class, so the hairline goes back to the band only");
 assert.equal(panelDrag.redraws(), 1, "pointerup queues one relations redraw, so the lines settle after the drag");
 panelDrag.api.panelEl.onpointermove(at(500));
 assert.equal(panelDrag.vars["--panel-w"], "720px", "a move after pointerup does not resize, so the drag ends with the pointer");
@@ -1481,16 +1476,6 @@ panelDrag.api.panelEl.ondblclick();
 assert.deepEqual([panelDrag.vars["--panel-w"], panelDrag.store.has("panel-w")], [undefined, false], "a double-click drops the stored px and the inline property, so the CSS clamp takes over");
 assert.equal(panelRun("900").vars["--panel-w"], "720px", "a reload reapplies the stored width and re-clamps it to the current viewport");
 assert.equal(panelRun("300").vars["--panel-w"], "384px", "a stored width under the minimum comes back clamped, so a narrow choice never breaks the layout");
-// #476 the band's hover is a body class the pointermove toggles from the same 8px offset the drag uses,
-// because Chrome never matches :hover on a pseudo-element
-const bandRun = panelRun(null);
-bandRun.api.panelEl.onpointermove(at(985, bandRun.panelEl, 4));
-assert.equal(bandRun.dragClasses.has("panel-band"), true, "a pointer that rests on the 8px band sets the body band class, so the hairline lights from the element and not from a pseudo-element :hover");
-bandRun.api.panelEl.onpointermove(at(700, bandRun.panelEl, 300));
-assert.equal(bandRun.dragClasses.has("panel-band"), false, "a pointer mid-panel clears the band class, so the drawer never lights away from the edge");
-bandRun.api.panelEl.onpointermove(at(985, bandRun.panelEl, 4));
-bandRun.api.panelEl.onpointerleave();
-assert.equal(bandRun.dragClasses.has("panel-band"), false, "leaving the panel clears the band class, so the hairline goes back to transparent");
 
 // 26. #377 the spacing scale: six steps in the light :root block, and the chrome, the station heads and
 // the cards read their spacing from it, so no rule carries a hand-picked pixel rhythm
