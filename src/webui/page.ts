@@ -1155,9 +1155,9 @@ try { const saved = Number(localStorage.getItem(PANEL_KEY)); if (saved) applyPan
 // width is the viewport's right edge minus the pointer, the same shape as the console handle's drag
 let panelDrag = false;
 const panelEl = document.getElementById("panel");
-panelEl.onpointerdown = e => { if (e.target !== panelEl || e.offsetX > 8) return; panelDrag = true; if (panelEl.setPointerCapture) panelEl.setPointerCapture(e.pointerId); e.preventDefault(); };
+panelEl.onpointerdown = e => { if (e.target !== panelEl || e.offsetX > 8) return; panelDrag = true; document.body.classList.add("panel-drag"); if (panelEl.setPointerCapture) panelEl.setPointerCapture(e.pointerId); e.preventDefault(); };
 panelEl.onpointermove = e => { if (!panelDrag) return; applyPanelW(innerWidth - e.clientX); };
-panelEl.onpointerup = panelEl.onpointercancel = () => { if (!panelDrag) return; panelDrag = false; queueRelations(); };
+panelEl.onpointerup = panelEl.onpointercancel = () => { if (!panelDrag) return; panelDrag = false; document.body.classList.remove("panel-drag"); queueRelations(); };
 panelEl.ondblclick = resetPanelW;
 // on open, focus moves to the panel's first heading; the board keeps its own width, so no backdrop
 // and no dim

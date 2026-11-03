@@ -269,10 +269,12 @@ names the reason where the station is wide enough */
 @keyframes panelOut { to { transform: translateX(100%); } }
 body.panel-open #board { padding-right: var(--panel-w); }
 /* #474 the dock's left edge resizes the panel: an 8px hit band inside the panel's border box with a
-   hairline that darkens on hover. Fixed, so the panel's own scroll never carries the band away, and
-   its px offset follows the same variable, so the drag, the board and the archive stay in step */
+   hairline that darkens on the band itself, and stays dark for the whole drag. Fixed, so the panel's
+   own scroll never carries the band away, and its px offset follows the same variable, so the drag,
+   the board and the archive stay in step */
 #panel::before { content: ""; position: fixed; top: var(--chrome); bottom: var(--console-h); right: calc(var(--panel-w) - 8px); width: 8px; cursor: ew-resize; border-left: 1px solid transparent; }
-#panel:hover::before { border-left-color: var(--dim); }
+#panel::before:hover { border-left-color: var(--dim); }
+body.panel-drag #panel::before { border-left-color: var(--dim); }
 /* the header is sticky at every width, so the title and the close control never scroll away */
 #p-head { position: sticky; top: 0; display: flex; align-items: flex-start; gap: 10px; padding: 14px 0 8px; background: var(--panel); z-index: 1; }
 #p-head h2 { flex: 1 1 auto; min-width: 0; font-size: 1.0625rem; font-weight: 500; margin: 0; line-height: 1.3; }
