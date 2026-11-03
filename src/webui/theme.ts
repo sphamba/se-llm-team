@@ -268,6 +268,11 @@ names the reason where the station is wide enough */
 #panel.closing { animation: panelOut var(--t-base) var(--ease-exit) forwards; }
 @keyframes panelOut { to { transform: translateX(100%); } }
 body.panel-open #board { padding-right: var(--panel-w); }
+/* #474 the dock's left edge resizes the panel: an 8px hit band inside the panel's border box with a
+   hairline that darkens on hover. Fixed, so the panel's own scroll never carries the band away, and
+   its px offset follows the same variable, so the drag, the board and the archive stay in step */
+#panel::before { content: ""; position: fixed; top: var(--chrome); bottom: var(--console-h); right: calc(var(--panel-w) - 8px); width: 8px; cursor: ew-resize; border-left: 1px solid transparent; }
+#panel:hover::before { border-left-color: var(--dim); }
 /* the header is sticky at every width, so the title and the close control never scroll away */
 #p-head { position: sticky; top: 0; display: flex; align-items: flex-start; gap: 10px; padding: 14px 0 8px; background: var(--panel); z-index: 1; }
 #p-head h2 { flex: 1 1 auto; min-width: 0; font-size: 1.0625rem; font-weight: 500; margin: 0; line-height: 1.3; }
@@ -461,6 +466,7 @@ header { flex-wrap: wrap; padding: 10px 12px 6px; }
    and a visible close button, and the back gesture follows the existing hash route */
 @media (max-width: ${MOBILE_MAX}px) {
 #panel { top: 0; bottom: 0; left: 0; width: auto; z-index: 5; border-left: 0; padding: 0 12px calc(12px + env(safe-area-inset-bottom)); }
+#panel::before { display: none; }
 #p-head { gap: 12px; padding: calc(18px + env(safe-area-inset-top)) 0 8px; }
 #p-handle { display: block; position: absolute; top: calc(6px + env(safe-area-inset-top)); left: 50%; width: 40px; height: 4px; margin-left: -20px; border-radius: 2px; background: var(--hairline); }
 #p-close { min-width: var(--ctl-h); min-height: var(--ctl-h); }

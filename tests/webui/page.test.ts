@@ -1437,6 +1437,45 @@ assert.deepEqual([dragHeights, taps], [[200], 0], "the drag writes the live heig
 drag.down(pointerAt(880)); drag.up(); drag.tap();
 assert.equal(taps, 1, "a pointer that holds still is a tap and still toggles the raised sheet");
 
+// #474 the dock's left edge is a drag-resize band: an 8px hit strip with a hairline, the phone sheet
+// ignores it, the default clamp is untouched and the chosen px persists under one key
+assert.match(themeCss, /#panel::before \{[^}]*width: 8px[^}]*cursor: ew-resize/, "the band is an 8px strip on the panel's left edge and names the resize cursor");
+assert.match(themeCss, /#panel:hover::before \{[^}]*border-left-color: var\(--dim\)/, "the hairline darkens on hover, so the edge reads as a control");
+assert.ok(themeCss.includes("#panel::before { display: none; }"), "the phone sheet hides the band, so its full-width layout keeps the p-handle as its only drag target");
+assert.match(themeCss, /body \{ --panel-w: clamp\(28rem, 32vw, 35rem\)/, "the default panel clamp is unchanged, so the double-click reset falls back to the same width as before");
+assert.ok(script.includes('"panel-w"') && script.includes("panelEl.onpointerdown") && script.includes("panelEl.setPointerCapture"), "the panel carries the pointer drag and one localStorage key");
+assert.ok(page.match(/function showPanel\(\) \{[\s\S]*?\n\}/)![0].includes("if (panelW) applyPanelW(panelW)"), "opening the panel reapplies the stored width, re-clamped to the current viewport");
+const resizeSrc = page.slice(page.indexOf("const PANEL_KEY = "), page.indexOf("\n// on open, focus moves to the panel's first heading"));
+assert.ok(resizeSrc.includes("queueRelations()") && resizeSrc.includes("panelEl.ondblclick = resetPanelW"), "a drag ends with one relations redraw and a double-click resets the width");
+const panelRun = (stored: string | null, width = 1440) => {
+	const vars: Record<string, string> = {};
+	const store = new Map<string, string>();
+	if (stored !== null) store.set("panel-w", stored);
+	const panelEl = { setPointerCapture() {} };
+	let redraws = 0;
+	const api = new Function("document", "innerWidth", "localStorage", "queueRelations", resizeSrc + "; return { applyPanelW, resetPanelW, panelEl };")({
+		body: { style: { setProperty: (k: string, v: string) => { vars[k] = v; }, removeProperty: (k: string) => { delete vars[k]; } } },
+		getElementById: () => panelEl,
+	}, width, { getItem: (k: string) => (store.has(k) ? (store.get(k) as string) : null), setItem: (k: string, v: string) => { store.set(k, String(v)); }, removeItem: (k: string) => { store.delete(k); } }, () => redraws++) as any;
+	return { api, vars, store, panelEl, redraws: () => redraws };
+};
+const panelDrag = panelRun(null);
+const at = (clientX: number, target: any = panelDrag.panelEl, offsetX = 4) => ({ pointerId: 1, clientX, target, offsetX, preventDefault() {} });
+panelDrag.api.panelEl.onpointerdown(at(1000));
+panelDrag.api.panelEl.onpointermove(at(1100));
+assert.equal(panelDrag.vars["--panel-w"], "384px", "a drag that would pass 24rem clamps to the minimum");
+assert.equal(panelDrag.store.get("panel-w"), "384", "the clamped px lands under the panel-w key on every drag");
+panelDrag.api.panelEl.onpointermove(at(600));
+assert.equal(panelDrag.vars["--panel-w"], "720px", "a drag that would pass 50vw clamps to half the viewport, so the board keeps a column");
+panelDrag.api.panelEl.onpointerup();
+assert.equal(panelDrag.redraws(), 1, "pointerup queues one relations redraw, so the lines settle after the drag");
+panelDrag.api.panelEl.onpointermove(at(500));
+assert.equal(panelDrag.vars["--panel-w"], "720px", "a move after pointerup does not resize, so the drag ends with the pointer");
+panelDrag.api.panelEl.ondblclick();
+assert.deepEqual([panelDrag.vars["--panel-w"], panelDrag.store.has("panel-w")], [undefined, false], "a double-click drops the stored px and the inline property, so the CSS clamp takes over");
+assert.equal(panelRun("900").vars["--panel-w"], "720px", "a reload reapplies the stored width and re-clamps it to the current viewport");
+assert.equal(panelRun("300").vars["--panel-w"], "384px", "a stored width under the minimum comes back clamped, so a narrow choice never breaks the layout");
+
 // 26. #377 the spacing scale: six steps in the light :root block, and the chrome, the station heads and
 // the cards read their spacing from it, so no rule carries a hand-picked pixel rhythm
 for (const tok of ["--sp-1: 4px", "--sp-2: 6px", "--sp-3: 8px", "--sp-4: 12px", "--sp-5: 16px", "--sp-6: 24px"])

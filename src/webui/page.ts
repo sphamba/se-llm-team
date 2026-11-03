@@ -1133,11 +1133,38 @@ function syncPanelTop() {
 	const el = document.getElementById(archiveView ? "archive" : "board");
 	if (el) document.body.style.setProperty("--chrome", Math.max(0, Math.round(el.getBoundingClientRect().top)) + "px");
 }
+// #474 the dock's left edge resizes the panel: --panel-w drives the panel, the board's padding and
+// the archive at once, so the drag writes one variable. The phone sheet hides the band in the
+// stylesheet, and the px survives a reload under one key, re-clamped on load and on panel open
+const PANEL_KEY = "panel-w";
+const PANEL_MIN = 384;
+let panelW = 0;
+const clampPanelW = w => Math.max(PANEL_MIN, Math.min(Math.round(w) || PANEL_MIN, Math.round(innerWidth * 0.5)));
+function applyPanelW(w) {
+	panelW = clampPanelW(w);
+	document.body.style.setProperty("--panel-w", panelW + "px");
+	try { localStorage.setItem(PANEL_KEY, String(panelW)); } catch {}
+}
+function resetPanelW() {
+	panelW = 0;
+	document.body.style.removeProperty("--panel-w");
+	try { localStorage.removeItem(PANEL_KEY); } catch {}
+}
+try { const saved = Number(localStorage.getItem(PANEL_KEY)); if (saved) applyPanelW(saved); } catch {}
+// the band is the panel's own left 8px, so a pointer that starts on a child never grabs the edge; the
+// width is the viewport's right edge minus the pointer, the same shape as the console handle's drag
+let panelDrag = false;
+const panelEl = document.getElementById("panel");
+panelEl.onpointerdown = e => { if (e.target !== panelEl || e.offsetX > 8) return; panelDrag = true; if (panelEl.setPointerCapture) panelEl.setPointerCapture(e.pointerId); e.preventDefault(); };
+panelEl.onpointermove = e => { if (!panelDrag) return; applyPanelW(innerWidth - e.clientX); };
+panelEl.onpointerup = panelEl.onpointercancel = () => { if (!panelDrag) return; panelDrag = false; queueRelations(); };
+panelEl.ondblclick = resetPanelW;
 // on open, focus moves to the panel's first heading; the board keeps its own width, so no backdrop
 // and no dim
 function showPanel() {
 	syncPanelTop();
 	clearReveal();
+	if (panelW) applyPanelW(panelW);
 	const p = document.getElementById("panel");
 	const wasHidden = p.classList.contains("hidden");
 	document.body.classList.add("panel-open");
