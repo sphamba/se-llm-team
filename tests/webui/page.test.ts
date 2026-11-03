@@ -1440,7 +1440,8 @@ assert.equal(taps, 1, "a pointer that holds still is a tap and still toggles the
 // #474 the dock's left edge is a drag-resize band: an 8px hit strip with a hairline, the phone sheet
 // ignores it, the default clamp is untouched and the chosen px persists under one key
 assert.match(themeCss, /#panel::before \{[^}]*width: 8px[^}]*cursor: ew-resize/, "the band is an 8px strip on the panel's left edge and names the resize cursor");
-assert.match(themeCss, /#panel::before:hover \{[^}]*border-left-color: var\(--dim\)/, "the hairline darkens only when the cursor is on the 8px band, never anywhere in the drawer");
+assert.match(themeCss, /body\.panel-band #panel::before \{[^}]*border-left-color: var\(--dim\)/, "the hairline darkens only when the cursor is on the 8px band, never anywhere in the drawer, and the rule keys on a body class because Chrome never matches :hover on a pseudo-element (#476)");
+assert.equal(themeCss.includes("#panel::before:hover"), false, "the inert pseudo-element :hover form is gone, so the band never depends on a selector Chrome ignores");
 assert.match(themeCss, /body\.panel-drag #panel::before \{[^}]*border-left-color: var\(--dim\)/, "an in-flight drag keeps the hairline lit while the pointer leaves the band");
 assert.ok(script.includes('classList.add("panel-drag")') && script.includes('classList.remove("panel-drag")'), "pointerdown sets the drag class on body and pointerup or cancel clears it");
 assert.ok(themeCss.includes("#panel::before { display: none; }"), "the phone sheet hides the band, so its full-width layout keeps the p-handle as its only drag target");
@@ -1480,6 +1481,16 @@ panelDrag.api.panelEl.ondblclick();
 assert.deepEqual([panelDrag.vars["--panel-w"], panelDrag.store.has("panel-w")], [undefined, false], "a double-click drops the stored px and the inline property, so the CSS clamp takes over");
 assert.equal(panelRun("900").vars["--panel-w"], "720px", "a reload reapplies the stored width and re-clamps it to the current viewport");
 assert.equal(panelRun("300").vars["--panel-w"], "384px", "a stored width under the minimum comes back clamped, so a narrow choice never breaks the layout");
+// #476 the band's hover is a body class the pointermove toggles from the same 8px offset the drag uses,
+// because Chrome never matches :hover on a pseudo-element
+const bandRun = panelRun(null);
+bandRun.api.panelEl.onpointermove(at(985, bandRun.panelEl, 4));
+assert.equal(bandRun.dragClasses.has("panel-band"), true, "a pointer that rests on the 8px band sets the body band class, so the hairline lights from the element and not from a pseudo-element :hover");
+bandRun.api.panelEl.onpointermove(at(700, bandRun.panelEl, 300));
+assert.equal(bandRun.dragClasses.has("panel-band"), false, "a pointer mid-panel clears the band class, so the drawer never lights away from the edge");
+bandRun.api.panelEl.onpointermove(at(985, bandRun.panelEl, 4));
+bandRun.api.panelEl.onpointerleave();
+assert.equal(bandRun.dragClasses.has("panel-band"), false, "leaving the panel clears the band class, so the hairline goes back to transparent");
 
 // 26. #377 the spacing scale: six steps in the light :root block, and the chrome, the station heads and
 // the cards read their spacing from it, so no rule carries a hand-picked pixel rhythm

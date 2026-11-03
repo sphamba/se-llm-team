@@ -273,7 +273,9 @@ body.panel-open #board { padding-right: var(--panel-w); }
    own scroll never carries the band away, and its px offset follows the same variable, so the drag,
    the board and the archive stay in step */
 #panel::before { content: ""; position: fixed; top: var(--chrome); bottom: var(--console-h); right: calc(var(--panel-w) - 8px); width: 8px; cursor: ew-resize; border-left: 1px solid transparent; }
-#panel::before:hover { border-left-color: var(--dim); }
+/* #476 a pointermove toggles body.panel-band from the same 8px offset the drag uses: Chrome never
+   matches :hover on a pseudo-element, so the band's hairline keys on the element's own class */
+body.panel-band #panel::before { border-left-color: var(--dim); }
 body.panel-drag #panel::before { border-left-color: var(--dim); }
 /* the header is sticky at every width, so the title and the close control never scroll away */
 #p-head { position: sticky; top: 0; display: flex; align-items: flex-start; gap: 10px; padding: 14px 0 8px; background: var(--panel); z-index: 1; }
