@@ -38,7 +38,7 @@ export function clearMergerAttempt(root: string, slug: string): void {
 // (a project's own tracked real file is mode 100644 and untouched) with one follow-up commit
 function stripContextSymlinks(root: string): void {
 	const removed: string[] = [];
-	for (const name of ["AGENTS.md", "SPECS.md"]) {
+	for (const name of ["AGENTS.md", "TASK.md"]) {
 		if (git(root, ["ls-tree", "HEAD", "--", name], true)?.startsWith("120000 ")) removed.push(name);
 	}
 	if (!removed.length) return;

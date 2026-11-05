@@ -104,11 +104,11 @@ assert.equal(getTask(root, t2.file)?.worktree, "feat/1-x");
 await run(setWorktreeTool, { file: t2.file, worktree: "" });
 assert.equal(getTask(root, t2.file)?.worktree ?? "", "", "empty worktree must clear the attribute");
 
-// kanban_set_state and kanban_get resolve the task from the cwd SPECS.md symlink when the
+// kanban_set_state and kanban_get resolve the task from the cwd TASK.md symlink when the
 // file is omitted, and report no task without one
 assert.equal(stateValidator.Check({ state: "doing" }), true, "file is optional on kanban_set_state");
-assert.equal((await run(setStateTool, { state: "to-review" })).content[0].text, "no task; pass the file name or run from a worktree with SPECS.md");
-symlinkSync(join(".kanban", t2.file), join(root, "SPECS.md"));
+assert.equal((await run(setStateTool, { state: "to-review" })).content[0].text, "no task; pass the file name or run from a worktree with TASK.md");
+symlinkSync(join(".kanban", t2.file), join(root, "TASK.md"));
 assert.equal((await run(setStateTool, { state: "to-review" })).content[0].text, `${t2.file} (#${taskNum(t2.file)}): state -> to-review`);
 assert.equal(getTask(root, t2.file)?.state, "to-review");
 assert.equal(JSON.parse((await run(tools["kanban_get"], {})).content[0].text).file, t2.file, "kanban_get resolves from the cwd symlink");

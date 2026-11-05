@@ -168,7 +168,7 @@ writeFileSync(
 const { readFileSync, appendFileSync } = require("node:fs");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 let front = "";
-try { front = readFileSync("SPECS.md", "utf8"); } catch {}
+try { front = readFileSync("TASK.md", "utf8"); } catch {}
 if (!prompt.includes("Developer agent") || !front.match(/^state: /m)) process.exit(0);
 const state = (front.match(/^state: "(.*)"$/m) ?? [])[1] ?? "";
 appendFileSync(${JSON.stringify(join(rootAF, "guard.log"))}, JSON.stringify({ pid: process.pid, wrapper: process.ppid, state }) + "\\n");

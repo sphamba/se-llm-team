@@ -62,7 +62,7 @@ export function spawnAgent(root: string, cfg: Config, role: string, task: Task, 
 	// the splitter has no role notes: its guidance is the shipped prompt plus the project's
 	// own root AGENTS.md, so no .kanban/AGENTS.splitter.md is ever created for it
 	if (role !== "splitter") ensureRoleNotes(root, role);
-	// the cwd symlinks give the session its task (SPECS.md) and role guidance (AGENTS.md) at startup
+	// the cwd symlinks give the session its task (TASK.md) and role guidance (AGENTS.md) at startup
 	ensureContextSymlinks(root, cwd, task.file, role);
 	// hide both context paths from git status, so a blanket git add never commits them
 	ensureInfoExclude(root, cwd);

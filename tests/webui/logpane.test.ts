@@ -242,7 +242,7 @@ const sidechain = [
 	JSON.stringify({ isSidechain: true, agentId: "aaaa1111", type: "user", message: { role: "user", content: "Review the diff" } }),
 	JSON.stringify({ isSidechain: true, agentId: "aaaa1111", type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "Reading the diff." }], usage: {}, model: "m", provider: "p" } }),
 	JSON.stringify({ isSidechain: true, agentId: "aaaa1111", type: "toolResult", message: { role: "toolResult", toolCallId: "t9", toolName: "bash", content: [{ type: "text", text: "diff looks fine" }], isError: false, durationMs: 7 } }),
-	JSON.stringify({ isSidechain: true, agentId: "aaaa1111", type: "assistant", message: { role: "assistant", content: [{ type: "thinking", thinking: "Plan the fix." }, { type: "toolCall", id: "t8", name: "read", arguments: { path: "/r/SPECS.md" } }] } }),
+	JSON.stringify({ isSidechain: true, agentId: "aaaa1111", type: "assistant", message: { role: "assistant", content: [{ type: "thinking", thinking: "Plan the fix." }, { type: "toolCall", id: "t8", name: "read", arguments: { path: "/r/TASK.md" } }] } }),
 	JSON.stringify({ isSidechain: true, agentId: "aaaa1111", type: "toolResult", message: { role: "toolResult", toolCallId: "t8", toolName: "read", content: [{ type: "text", text: "specs" }], isError: false } }),
 ].join("\n") + "\n";
 const side = renderLogChunk(sidechain);
@@ -259,7 +259,7 @@ sidePane.appendChild(sideOrphan);
 logFixups(sidePane, logDoc);
 assert.ok(sidePane.children[0].children[0].textContent === "result" && sidePane.children[0].children[1].textContent === "diff looks fine", "an orphan tool result without a data-sum promotes with a generic result summary");
 assert.ok(side.includes('<details class="lg-think"><summary>Thinking</summary><pre><p>Plan the fix.</p></pre></details>'), "a sidechain thinking block renders as a collapsed details");
-assert.equal(side.split("<summary>read: /r/SPECS.md</summary>").length - 1, 1, "one tool block per call: the toolcall args render once");
+assert.equal(side.split("<summary>read: /r/TASK.md</summary>").length - 1, 1, "one tool block per call: the toolcall args render once");
 assert.ok(!side.includes('lg-tres" data-tc="t8'), "a sidechain toolResult dedupes against its toolcall within the chunk");
 assert.ok(side.includes('<pre class="lg-out">specs</pre>'), "the sidechain toolResult fills its tool block");
 assert.ok(!side.includes('"type"'), "sidechain records never leak raw JSON");

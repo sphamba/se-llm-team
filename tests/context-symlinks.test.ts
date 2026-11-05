@@ -1,4 +1,4 @@
-// fix #234: the cwd context symlinks (AGENTS.md, SPECS.md) must never reach a task branch or
+// fix #234: the cwd context symlinks (AGENTS.md, TASK.md) must never reach a task branch or
 // block the merge lane. Part CS1: the spawn hides both paths in the shared info/exclude
 // (fresh project, idempotent). Part CS2: an unwritable exclude never fails the spawn.
 // Part CS3: symlinks committed and then deleted (the pre-fix bug) no longer stick the merge
@@ -22,7 +22,7 @@ import { renderPrompt } from "../src/orchestrator/prompt.ts";
 
 const cleaned: string[] = [];
 
-// a fresh project: no tracked AGENTS.md or SPECS.md, no ignore entries for them (the bug case)
+// a fresh project: no tracked AGENTS.md or TASK.md, no ignore entries for them (the bug case)
 function freshFixture(): string {
 	const root = mkdtempSync(join(tmpdir(), "ctx-sym-"));
 	execSync("git init -q", { cwd: root });
@@ -92,7 +92,7 @@ const ignored = (cwd: string, name: string): boolean => {
 const contextNoise = (cwd: string): string =>
 	execSync("git status --porcelain", { cwd, encoding: "utf8" })
 		.split("\n")
-		.filter((l) => l.includes("AGENTS.md") || l.includes("SPECS.md"))
+		.filter((l) => l.includes("AGENTS.md") || l.includes("TASK.md"))
 		.join("\n");
 
 // a finished-run analysis the poll spawned (spawnRunAnalysis) keeps running detached for up
@@ -145,8 +145,8 @@ const wt1 = join(root1, ".worktrees", parseTask(root1, task1.file).worktree);
 assert.ok(existsSync(wt1), "precondition: the worktree exists");
 const exclude1 = readFileSync(join(root1, ".git", "info", "exclude"), "utf8").split("\n");
 assert.ok(exclude1.includes("AGENTS.md"), "AGENTS.md is in info/exclude after the spawn");
-assert.ok(exclude1.includes("SPECS.md"), "SPECS.md is in info/exclude after the spawn");
-assert.ok(ignored(wt1, "AGENTS.md") && ignored(wt1, "SPECS.md"), "check-ignore reports both context paths in the worktree");
+assert.ok(exclude1.includes("TASK.md"), "TASK.md is in info/exclude after the spawn");
+assert.ok(ignored(wt1, "AGENTS.md") && ignored(wt1, "TASK.md"), "check-ignore reports both context paths in the worktree");
 assert.equal(contextNoise(wt1), "", "no untracked context symlinks in the worktree status");
 // idempotent: a second spawn appends no duplicate lines
 const task1b = createTask(root1, { name: "feat: hide context paths again", summary: "Exclude smoke two", specs: "n/a", complexity: "simple" });
@@ -154,7 +154,7 @@ setState(root1, task1b, "to-do");
 rescan(root1, loadConfig(root1));
 const exclude1b = readFileSync(join(root1, ".git", "info", "exclude"), "utf8").split("\n");
 assert.equal(exclude1b.filter((l) => l === "AGENTS.md").length, 1, "AGENTS.md appears once in info/exclude");
-assert.equal(exclude1b.filter((l) => l === "SPECS.md").length, 1, "SPECS.md appears once in info/exclude");
+assert.equal(exclude1b.filter((l) => l === "TASK.md").length, 1, "TASK.md appears once in info/exclude");
 console.log("context-symlinks.test.ts: part CS1 passed (info/exclude at spawn)");
 
 // --- part CS2: an unwritable info dir never fails the spawn ---
@@ -185,8 +185,8 @@ const wt3 = ensured3.wtDir;
 // the legacy damage: a pre-fix developer committed the context symlinks into the task branch,
 // then the orchestrator's clearContextSymlinks deleted them, leaving unstaged deletions
 symlinkSync(join(".kanban", "AGENTS.developer.md"), join(wt3, "AGENTS.md"));
-symlinkSync(join(".kanban", task3.file), join(wt3, "SPECS.md"));
-execSync("git add -f AGENTS.md SPECS.md && git commit -qm 'add context symlinks'", { cwd: wt3, shell: "/bin/bash" });
+symlinkSync(join(".kanban", task3.file), join(wt3, "TASK.md"));
+execSync("git add -f AGENTS.md TASK.md && git commit -qm 'add context symlinks'", { cwd: wt3, shell: "/bin/bash" });
 clearContextSymlinks(root3, { ...task3, worktree: ensured3.wt });
 assert.ok(contextNoise(wt3).includes("AGENTS.md"), "precondition: the committed symlink deletion sits unstaged");
 setState(root3, task3, "to-merge");
@@ -194,13 +194,13 @@ rescan(root3, loadConfig(root3));
 await waitForExit(root3, "merger");
 poll(root3, 5);
 assert.equal(parseTask(root3, task3.file).state, "to-live-test", "the merge lane completes past the deleted committed symlinks");
-assert.equal(execSync("git ls-tree HEAD -- AGENTS.md SPECS.md", { cwd: root3, encoding: "utf8" }).trim(), "", "the merged branch carries no context symlinks");
+assert.equal(execSync("git ls-tree HEAD -- AGENTS.md TASK.md", { cwd: root3, encoding: "utf8" }).trim(), "", "the merged branch carries no context symlinks");
 assert.deepEqual(
 	execSync("git log --format=%s HEAD", { cwd: root3, encoding: "utf8" }).trim().split("\n"),
 	["chore: remove task context symlinks committed by mistake", "add context symlinks", "init"],
 	"one strip commit removes the symlinks from the merged branch",
 );
-assert.ok(!existsSync(join(root3, "AGENTS.md")) && !existsSync(join(root3, "SPECS.md")), "the strip commit removed the symlinks from the root checkout too");
+assert.ok(!existsSync(join(root3, "AGENTS.md")) && !existsSync(join(root3, "TASK.md")), "the strip commit removed the symlinks from the root checkout too");
 console.log("context-symlinks.test.ts: part CS3 passed (merge self-heal)");
 
 // --- part CS4: a project's own tracked real AGENTS.md survives the merge untouched ---
@@ -234,32 +234,32 @@ console.log("context-symlinks.test.ts: part CS4 passed (real AGENTS.md survives)
 
 // --- part CS5: the developer prompt forbids committing the context symlinks ---
 const devPrompt = renderPrompt(root1, "developer", 60);
-assert.ok(devPrompt.includes("Never commit AGENTS.md or SPECS.md"), "the developer prompt forbids committing the context symlinks");
+assert.ok(devPrompt.includes("Never commit AGENTS.md or TASK.md"), "the developer prompt forbids committing the context symlinks");
 assert.ok(devPrompt.includes("Work only here, in the worktree you run in"), "the prompt-scope rule stays");
 console.log("context-symlinks.test.ts: part CS5 passed (developer prompt)");
 
-// --- part CS6: a root-cwd run leaves no SPECS.md link behind ---
+// --- part CS6: a root-cwd run leaves no TASK.md link behind ---
 const root6 = freshFixture();
 writeFileSync(join(root6, "AGENTS.md"), "# project rules\n");
 const task6 = createTask(root6, { name: "fix: root link cleanup", summary: "Root link cleanup", specs: "n/a", complexity: "simple" });
 ensureContextSymlinks(root6, root6, task6.file, "reviewer");
-assert.equal(readlinkSync(join(root6, "SPECS.md")), join(".kanban", task6.file), "precondition: the root SPECS.md points at the task file");
+assert.equal(readlinkSync(join(root6, "TASK.md")), join(".kanban", task6.file), "precondition: the root TASK.md points at the task file");
 clearContextSymlinks(root6, { ...task6, worktree: "" }, { rootCwd: true });
-assert.ok(!existsSync(join(root6, "SPECS.md")), "a root-cwd exit removes its SPECS.md link");
+assert.ok(!existsSync(join(root6, "TASK.md")), "a root-cwd exit removes its TASK.md link");
 assert.ok(lstatSync(join(root6, "AGENTS.md")).isFile(), "the real AGENTS.md at the root is untouched");
 assert.equal(readFileSync(join(root6, "AGENTS.md"), "utf8"), "# project rules\n", "the real AGENTS.md content survives");
 // the root link is shared: another live root-cwd run may have repointed it since this run started
 const task6b = createTask(root6, { name: "fix: someone else", summary: "Another root run", specs: "n/a" });
-symlinkSync(join(".kanban", task6b.file), join(root6, "SPECS.md"));
+symlinkSync(join(".kanban", task6b.file), join(root6, "TASK.md"));
 clearContextSymlinks(root6, { ...task6, worktree: "" }, { rootCwd: true });
-assert.equal(readlinkSync(join(root6, "SPECS.md")), join(".kanban", task6b.file), "a root link that points at another task survives");
+assert.equal(readlinkSync(join(root6, "TASK.md")), join(".kanban", task6b.file), "a root link that points at another task survives");
 // the worktree case is unchanged: the link is the run's own, so it always goes
 const ensured6 = ensureWorktree(root6, task6);
 assert.ok(ensured6, "precondition: the worktree exists");
-symlinkSync(join(".kanban", task6.file), join(ensured6.wtDir, "SPECS.md"));
+symlinkSync(join(".kanban", task6.file), join(ensured6.wtDir, "TASK.md"));
 symlinkSync(join(".kanban", "AGENTS.developer.md"), join(ensured6.wtDir, "AGENTS.md"));
 clearContextSymlinks(root6, { ...task6, worktree: ensured6.wt });
-assert.ok(!existsSync(join(ensured6.wtDir, "SPECS.md")) && !existsSync(join(ensured6.wtDir, "AGENTS.md")), "a worktree still loses both context links");
+assert.ok(!existsSync(join(ensured6.wtDir, "TASK.md")) && !existsSync(join(ensured6.wtDir, "AGENTS.md")), "a worktree still loses both context links");
 console.log("context-symlinks.test.ts: part CS6 passed (root link cleanup)");
 
 // --- part CS7: #335: a to-do task's poll miss must not remove a live splitter's root link ---
@@ -268,12 +268,12 @@ const task7 = createTask(root7, { name: "fix: live splitter link", summary: "Liv
 setState(root7, task7, "to-do");
 writePid(root7, `${taskSlug(task7.file)}.splitter`, process.pid);
 ensureContextSymlinks(root7, root7, task7.file, "splitter");
-assert.equal(readlinkSync(join(root7, "SPECS.md")), join(".kanban", task7.file), "precondition: the root SPECS.md points at the splitter's task file");
+assert.equal(readlinkSync(join(root7, "TASK.md")), join(".kanban", task7.file), "precondition: the root TASK.md points at the splitter's task file");
 assert.ok(pidAlive(pidEntry(root7, `${taskSlug(task7.file)}.splitter`).pid), "precondition: the splitter pid is live");
 clearContextSymlinks(root7, { ...task7, worktree: "" });
-assert.equal(readlinkSync(join(root7, "SPECS.md")), join(".kanban", task7.file), "a no-worktree clear without the flag leaves the live splitter's root link");
+assert.equal(readlinkSync(join(root7, "TASK.md")), join(".kanban", task7.file), "a no-worktree clear without the flag leaves the live splitter's root link");
 clearContextSymlinks(root7, { ...task7, worktree: "" }, { rootCwd: true });
-assert.ok(!existsSync(join(root7, "SPECS.md")), "the explicit root-cwd clear removes it once the splitter is gone");
+assert.ok(!existsSync(join(root7, "TASK.md")), "the explicit root-cwd clear removes it once the splitter is gone");
 console.log("context-symlinks.test.ts: part CS7 passed (live splitter keeps the root link)");
 
 cleanupAll(...cleaned);

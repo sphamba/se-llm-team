@@ -79,13 +79,13 @@ assert.match(parseTask(root, t1.file).notes, /first note/);
 assert.equal(getTask(root, t1.file)?.name, "feat: nice thing");
 assert.equal(getTask(root, "000001"), undefined); // exact file names only
 
-// resolveTaskFromCwd: the task behind the cwd SPECS.md symlink (the orchestrator re-points it
+// resolveTaskFromCwd: the task behind the cwd TASK.md symlink (the orchestrator re-points it
 // in the worktree root), undefined without one
 const cwdRoot = mkdtempSync(join(tmpdir(), "kanban-cwd-"));
 const tCwd = createTask(cwdRoot, { name: "feat: cwd resolve", summary: "s", specs: "s" });
-assert.equal(resolveTaskFromCwd(cwdRoot), undefined, "no SPECS.md: no task");
-symlinkSync(join(".kanban", tCwd.file), join(cwdRoot, "SPECS.md"));
-assert.equal(resolveTaskFromCwd(cwdRoot)?.file, tCwd.file, "the task resolves through the SPECS.md symlink");
+assert.equal(resolveTaskFromCwd(cwdRoot), undefined, "no TASK.md: no task");
+symlinkSync(join(".kanban", tCwd.file), join(cwdRoot, "TASK.md"));
+assert.equal(resolveTaskFromCwd(cwdRoot)?.file, tCwd.file, "the task resolves through the TASK.md symlink");
 assert.equal(resolveTaskFromCwd(cwdRoot)?.name, "feat: cwd resolve");
 rmSync(cwdRoot, { recursive: true, force: true });
 assert.equal(listAll(root).length, 2);

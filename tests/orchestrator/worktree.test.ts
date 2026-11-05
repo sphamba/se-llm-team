@@ -65,15 +65,15 @@ await waitFor(
 	d.output,
 );
 assert.equal(readlinkSync(wtBoardD), kanbanDir(rootD)); // absolute path to the shared board
-// the context symlinks exist before the agent spawn: SPECS.md is the task file through the
+// the context symlinks exist before the agent spawn: TASK.md is the task file through the
 // linked board, AGENTS.md the role's notes; the agent reads both from its cwd at startup
 await waitFor(
-	() => existsSync(join(wtD, "SPECS.md")) && existsSync(join(wtD, "AGENTS.md")),
+	() => existsSync(join(wtD, "TASK.md")) && existsSync(join(wtD, "AGENTS.md")),
 	30000,
 	"context symlinks before spawn",
 	d.output,
 );
-assert.equal(readlinkSync(join(wtD, "SPECS.md")), join(".kanban", taskD.file));
+assert.equal(readlinkSync(join(wtD, "TASK.md")), join(".kanban", taskD.file));
 assert.equal(readlinkSync(join(wtD, "AGENTS.md")), join(".kanban", "AGENTS.developer.md"));
 // the excludes setup lands milliseconds after the symlink: wait for convergence before asserting
 await waitFor(
@@ -97,14 +97,14 @@ writeFileSync(wtTask, readFileSync(wtTask, "utf8").replace(/^state: .*/m, 'state
 assert.match(readFileSync(join(kanbanDir(rootD), taskD.file), "utf8"), /^state: "doing"$/m);
 execSync("git add -A", { cwd: wtD });
 assert.equal(
-	execSync("git diff --cached --name-only", { cwd: wtD, encoding: "utf8" }).split("\n").filter((l) => l.includes(".kanban") || l.includes("SPECS.md") || l.includes("AGENTS.md")).length,
+	execSync("git diff --cached --name-only", { cwd: wtD, encoding: "utf8" }).split("\n").filter((l) => l.includes(".kanban") || l.includes("TASK.md") || l.includes("AGENTS.md")).length,
 	0,
 	"blanket git add -A staged board or context-symlink changes",
 );
 // after the agent terminates the orchestrator removes both symlinks; the next role's spawn
-// re-points AGENTS.md at its own notes file (SPECS.md stays the task file)
+// re-points AGENTS.md at its own notes file (TASK.md stays the task file)
 await waitFor(
-	() => !existsSync(join(wtD, "SPECS.md")) && !existsSync(join(wtD, "AGENTS.md")) && parseTask(rootD, taskD.file).state === "to-review",
+	() => !existsSync(join(wtD, "TASK.md")) && !existsSync(join(wtD, "AGENTS.md")) && parseTask(rootD, taskD.file).state === "to-review",
 	30000,
 	"context symlinks removed after the developer terminated",
 	d.output,
@@ -121,8 +121,8 @@ await waitFor(
 	"AGENTS.md re-pointed for the reviewer",
 	d.output,
 );
-assert.equal(readlinkSync(join(wtD, "SPECS.md")), join(".kanban", taskD.file), "SPECS.md re-pointed for the next role");
-await waitFor(() => !existsSync(join(wtD, "SPECS.md")) && !existsSync(join(wtD, "AGENTS.md")), 30000, "context symlinks removed after the reviewer terminated", d.output);
+assert.equal(readlinkSync(join(wtD, "TASK.md")), join(".kanban", taskD.file), "TASK.md re-pointed for the next role");
+await waitFor(() => !existsSync(join(wtD, "TASK.md")) && !existsSync(join(wtD, "AGENTS.md")), 30000, "context symlinks removed after the reviewer terminated", d.output);
 d.daemon.kill("SIGTERM");
 
 // --- part E: to-review tasks get their worktree ensured before the spawn (to-live-test no

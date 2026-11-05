@@ -63,7 +63,7 @@ function readPid(root: string): number | null {
 }
 
 const ok = (text: string, details?: unknown): ToolResult => ({ text, details });
-const NO_TASK = "no task; pass the file name or run from a worktree with SPECS.md";
+const NO_TASK = "no task; pass the file name or run from a worktree with TASK.md";
 
 export const TOOLS: Record<string, ToolDef> = {
 	kanban_list: {
@@ -85,11 +85,11 @@ export const TOOLS: Record<string, ToolDef> = {
 
 	kanban_get: {
 		description:
-			"Read one kanban task in full detail (state, worktree, issuer, complexity, blockedBy, summary, specs, notes, openQuestions). openQuestions is the task body's # Open questions section, empty when none. file is optional; resolved from the cwd SPECS.md symlink when omitted.",
+			"Read one kanban task in full detail (state, worktree, issuer, complexity, blockedBy, summary, specs, notes, openQuestions). openQuestions is the task body's # Open questions section, empty when none. file is optional; resolved from the cwd TASK.md symlink when omitted.",
 		parameters: {
 			type: "object",
 			properties: {
-				file: { type: "string", description: "Task file name, e.g. 000001_nice_thing.md. Optional: resolved from the cwd SPECS.md symlink when omitted" },
+				file: { type: "string", description: "Task file name, e.g. 000001_nice_thing.md. Optional: resolved from the cwd TASK.md symlink when omitted" },
 			},
 		},
 		async run(params: { file?: string }, ctx) {
@@ -125,11 +125,11 @@ export const TOOLS: Record<string, ToolDef> = {
 
 	kanban_update: {
 		description:
-			"Update an existing task. Use this instead of creating a duplicate when a not-done task already covers the same need. Omitted fields stay unchanged. file is optional; resolved from the cwd SPECS.md symlink when omitted.",
+			"Update an existing task. Use this instead of creating a duplicate when a not-done task already covers the same need. Omitted fields stay unchanged. file is optional; resolved from the cwd TASK.md symlink when omitted.",
 		parameters: {
 			type: "object",
 			properties: {
-				file: { type: "string", description: "Task file name. Optional: resolved from the cwd SPECS.md symlink when omitted" },
+				file: { type: "string", description: "Task file name. Optional: resolved from the cwd TASK.md symlink when omitted" },
 				name: { type: "string" },
 				priority: { type: "string", enum: ["low", "medium", "high", "critical"] },
 				complexity: { type: "string", enum: ["trivial", "simple", "moderate", "complex"] },
@@ -157,11 +157,11 @@ export const TOOLS: Record<string, ToolDef> = {
 	},
 
 	kanban_set_state: {
-		description: `Move a task to a new state. States: ${STATES.join(", ")}. file is optional; resolved from the cwd SPECS.md symlink when omitted.`,
+		description: `Move a task to a new state. States: ${STATES.join(", ")}. file is optional; resolved from the cwd TASK.md symlink when omitted.`,
 		parameters: {
 			type: "object",
 			properties: {
-				file: { type: "string", description: "Task file name. Optional: resolved from the cwd SPECS.md symlink when omitted" },
+				file: { type: "string", description: "Task file name. Optional: resolved from the cwd TASK.md symlink when omitted" },
 				state: { type: "string", enum: [...STATES] },
 			},
 			required: ["state"],

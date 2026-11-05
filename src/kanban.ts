@@ -375,14 +375,14 @@ export function getTask(root: string, file: string): Task | undefined {
 	return !task || task.malformed ? undefined : task;
 }
 
-// the task behind the cwd's SPECS.md symlink (the orchestrator re-points it in the worktree
+// the task behind the cwd's TASK.md symlink (the orchestrator re-points it in the worktree
 // root before every agent spawn): the readlink target ".kanban/<taskFile>" feeds getTask
-// through the linked board. undefined when SPECS.md is missing or not a symlink (a PM
+// through the linked board. undefined when TASK.md is missing or not a symlink (a PM
 // session in the main checkout, or the links removed after the agent terminated)
 export function resolveTaskFromCwd(root: string): Task | undefined {
 	let target: string;
 	try {
-		target = readlinkSync(join(root, "SPECS.md"));
+		target = readlinkSync(join(root, "TASK.md"));
 	} catch {
 		return undefined;
 	}

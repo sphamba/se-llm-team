@@ -71,9 +71,9 @@ const loopStub = (root: string) => {
 const { readFileSync, appendFileSync } = require("node:fs");
 const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
-// the task comes from the cwd SPECS.md symlink, which the orchestrator re-points at spawn
+// the task comes from the cwd TASK.md symlink, which the orchestrator re-points at spawn
 let front = "";
-try { front = readFileSync("SPECS.md", "utf8"); } catch {}
+try { front = readFileSync("TASK.md", "utf8"); } catch {}
 if (!front.match(/^state: /m)) process.exit(0);
 // appended, so every pass's commit differs and moves the worktree HEAD off the recorded base
 if (prompt.includes("Reviewer agent")) {
@@ -155,7 +155,7 @@ writeFileSync(
 	`#!/usr/bin/env node
 const { appendFileSync, existsSync, readFileSync, writeFileSync } = require("node:fs");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
-const file = "SPECS.md";
+const file = "TASK.md";
 let front = "";
 try { front = readFileSync(file, "utf8"); } catch {}
 if (!front.match(/^state: /m)) process.exit(0);

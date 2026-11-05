@@ -360,7 +360,7 @@ assert.ok(!toolInit.text.includes("lg-tres"), "no orphan-result span: the window
 // tool_result shows its failed span
 const claudeLog = [
 	JSON.stringify({ type: "system", subtype: "init", cwd: "/r", session_id: "s1" }),
-	JSON.stringify({ type: "assistant", parent_tool_use_id: null, message: { role: "assistant", model: "claude-opus-4-6", content: [{ type: "thinking", thinking: "claude plans" }, { type: "text", text: "claude says" }, { type: "tool_use", id: "toolu_1", name: "Read", input: { file_path: "/r/SPECS.md" } }] } }),
+	JSON.stringify({ type: "assistant", parent_tool_use_id: null, message: { role: "assistant", model: "claude-opus-4-6", content: [{ type: "thinking", thinking: "claude plans" }, { type: "text", text: "claude says" }, { type: "tool_use", id: "toolu_1", name: "Read", input: { file_path: "/r/TASK.md" } }] } }),
 	JSON.stringify({ type: "user", parent_tool_use_id: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", is_error: false, content: "specs body" }] } }),
 	JSON.stringify({ type: "assistant", parent_tool_use_id: null, message: { role: "assistant", model: "claude-opus-4-6", content: [{ type: "text", text: "claude done" }], usage: { input_tokens: 30, output_tokens: 70 } } }),
 	JSON.stringify({ type: "user", parent_tool_use_id: null, message: { role: "user", content: "initial prompt" } }),
@@ -372,8 +372,8 @@ writeFileSync(logFile, claudeLog);
 const claudeServed = await (await fetch(`${base}/api/agent-log?file=${enc}`)).json();
 assert.ok(claudeServed.text.includes('<details class="lg-think"><summary>Thinking</summary>'), "the claude thinking block renders as a closed Thinking block");
 assert.ok(claudeServed.text.includes("<p>claude plans</p>"), "the claude thinking content renders inside the block");
-assert.ok(claudeServed.text.includes("<summary>Read: /r/SPECS.md</summary>"), "the tool_use block summarizes off its file_path input");
-assert.ok(claudeServed.text.includes("&quot;file_path&quot;: &quot;/r/SPECS.md&quot;"), "the tool_use input renders as the escaped args JSON block");
+assert.ok(claudeServed.text.includes("<summary>Read: /r/TASK.md</summary>"), "the tool_use block summarizes off its file_path input");
+assert.ok(claudeServed.text.includes("&quot;file_path&quot;: &quot;/r/TASK.md&quot;"), "the tool_use input renders as the escaped args JSON block");
 assert.ok(claudeServed.text.includes('<pre class="lg-out">specs body</pre>'), "a string tool_result content joins its block once");
 assert.ok(claudeServed.text.includes("<p>claude done</p>"), "the claude text block renders as pending text");
 assert.ok(claudeServed.text.includes("[prompt] initial prompt\n"), "a plain-string user content renders as a prompt line");

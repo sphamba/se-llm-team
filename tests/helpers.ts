@@ -29,7 +29,7 @@ export function fixture(): string {
 	writeFileSync(join(root, "README.md"), "x\n");
 	// mirrors the repo .gitignore: the worktrees share it, so the cwd context symlinks are
 	// never staged or committed by an agent's blanket git add -A
-	writeFileSync(join(root, ".gitignore"), "AGENTS.md\nSPECS.md\n");
+	writeFileSync(join(root, ".gitignore"), "AGENTS.md\nTASK.md\n");
 	execSync("git add -A && git commit -qm init", { cwd: root, shell: "/bin/bash" });
 	return root;
 }
@@ -53,7 +53,7 @@ export const showTip = (root: string, file: string): string | null => {
 	}
 };
 
-// stub agent: parses its role out of the prompt and the task from the cwd SPECS.md symlink,
+// stub agent: parses its role out of the prompt and the task from the cwd TASK.md symlink,
 // then acts per the new contract: the developer commits a code change and finishes (the
 // orchestrator moves the state on the exit 0), the reviewer just finishes (the orchestrator
 // reads the commits it leaves; a `reviewer-fix` marker in the task content makes it commit a
@@ -68,15 +68,15 @@ export const roleStub = (root: string) => {
 const { readFileSync, readlinkSync, writeFileSync } = require("node:fs");
 const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
-// the task comes from the cwd SPECS.md symlink, which the orchestrator re-points at spawn
-const file = "SPECS.md";
+// the task comes from the cwd TASK.md symlink, which the orchestrator re-points at spawn
+const file = "TASK.md";
 let front = "";
 try { front = readFileSync(file, "utf8"); } catch {}
 if (!front.match(/^state: /m)) process.exit(0);
 if (prompt.includes("Splitter agent")) {
 	// splitter behavior is selected by a marker in the task content: no marker is a silent
 	// no-split, so the shared parts that spawn the splitter stay unaffected
-	const num = parseInt(readlinkSync("SPECS.md").split("/").pop() ?? "", 10) || 0;
+	const num = parseInt(readlinkSync("TASK.md").split("/").pop() ?? "", 10) || 0;
 	const priority = (front.match(/^priority: .*/m) ?? [])[0] ?? 'priority: "medium"';
 	if (front.includes("splitter-crash")) process.exit(1);
 	if (front.includes("splitter-linger")) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000);
@@ -85,7 +85,7 @@ if (prompt.includes("Splitter agent")) {
 		writeFileSync(".kanban/999001_piece_one.md", sub("one"));
 		writeFileSync(".kanban/999002_piece_two.md", sub("two"));
 		const parent = front.replace(/^state: .*/m, 'state: "backlog"').replace(/^complexity: .*/m, 'complexity: "simple"').replace(/\\n---\\n/, '\\nblockedBy: "#999001, #999002"\\n---\\n');
-		writeFileSync("SPECS.md", parent);
+		writeFileSync("TASK.md", parent);
 	}
 	process.exit(0);
 }
@@ -108,7 +108,7 @@ if (prompt.includes("Developer agent")) {
 	}
 	// one file per task: two branches that add the same path hit add/add conflicts or a commit
 	// dropped as already-applied in the merge lane
-	const workFile = readlinkSync("SPECS.md").split("/").pop().replace(/\\.md$/, "") + ".txt";
+	const workFile = readlinkSync("TASK.md").split("/").pop().replace(/\\.md$/, "") + ".txt";
 	writeFileSync(workFile, "work\\n");
 	execSync("git add -A && git commit -qm work", { stdio: "ignore" });
 }
@@ -159,9 +159,9 @@ const role = prompt.includes("Merger agent") ? "merger"
 	: prompt.includes("Developer agent") ? "developer"
 	: prompt.includes("Reviewer agent") ? "reviewer"
 	: prompt.includes("Live-tester") ? "live-tester" : "";
-// the task comes from the cwd SPECS.md symlink: the prompt carries no absolute paths, so
+// the task comes from the cwd TASK.md symlink: the prompt carries no absolute paths, so
 // spawns are attributed by the task name read from the task file
-const file = "SPECS.md";
+const file = "TASK.md";
 let front = "";
 try { front = readFileSync(file, "utf8"); } catch {}
 const task = (front.match(/^name: "(.*)"$/m) ?? [])[1] ?? "";

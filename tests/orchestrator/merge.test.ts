@@ -76,9 +76,9 @@ for (let i = 0; i < 9; i++) {
 	for (const f of files) { trySh("git checkout --theirs -- " + f); trySh("git add -- " + f); }
 	if (!trySh("GIT_EDITOR=true git rebase --continue")) break;
 }
-if (cmd === "note") appendFileSync("SPECS.md", "- merge: README.md hunk one, kept both sides\\n- merge: README.md hunk two, kept both sides\\n");
-if (cmd === "drop") appendFileSync("SPECS.md", "\\n# Open questions\\n\\n- the other task changed README.md too, see " + other + "\\n");
-if (cmd === "fail") writeFileSync("SPECS.md", readFileSync("SPECS.md", "utf8").replace(/^state: .*/m, 'state: "to-do"'));
+if (cmd === "note") appendFileSync("TASK.md", "- merge: README.md hunk one, kept both sides\\n- merge: README.md hunk two, kept both sides\\n");
+if (cmd === "drop") appendFileSync("TASK.md", "\\n# Open questions\\n\\n- the other task changed README.md too, see " + other + "\\n");
+if (cmd === "fail") writeFileSync("TASK.md", readFileSync("TASK.md", "utf8").replace(/^state: .*/m, 'state: "to-do"'));
 process.exit(0);
 `,
 		{ mode: 0o755 },
@@ -111,7 +111,7 @@ writeFileSync(
 	`#!/usr/bin/env node
 const { readFileSync, appendFileSync } = require("node:fs");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
-const file = "SPECS.md";
+const file = "TASK.md";
 let front = "";
 try {
 	front = readFileSync(file, "utf8");
@@ -325,7 +325,7 @@ console.log("merge.test.ts: + merger question smoke passed");
 // untracked and staged files survive the fast-forward, the merge succeeds and the stash list is
 // empty afterwards ---
 const rootF = mergeRoot();
-writeFileSync(join(rootF, ".gitignore"), "AGENTS.md\nSPECS.md\n.kanban\n.worktrees\n");
+writeFileSync(join(rootF, ".gitignore"), "AGENTS.md\nTASK.md\n.kanban\n.worktrees\n");
 writeFileSync(join(rootF, "dirty.txt"), "clean\n");
 execSync("git add .gitignore dirty.txt && git commit -qm dirty-base", { cwd: rootF, shell: "/bin/bash" });
 execSync("git checkout -qb feat/dirty-root && git commit -q --allow-empty -m dirty-branch && git checkout -q main", { cwd: rootF, shell: "/bin/bash" });
@@ -400,7 +400,7 @@ const { readFileSync } = require("node:fs");
 const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 let front = "";
-try { front = readFileSync("SPECS.md", "utf8"); } catch {}
+try { front = readFileSync("TASK.md", "utf8"); } catch {}
 if (!front.match(/^state: /m) || !prompt.includes("Merger agent")) process.exit(0);
 const trySh = (c) => { try { execSync(c, { stdio: "ignore" }); } catch (e) {} };
 trySh("git rebase main");
@@ -460,7 +460,7 @@ writeFileSync(
 const { readFileSync, appendFileSync, existsSync } = require("node:fs");
 const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
-const file = "SPECS.md";
+const file = "TASK.md";
 let front = "";
 try { front = readFileSync(file, "utf8"); } catch {}
 if (!front.match(/^state: /m)) process.exit(0);
@@ -533,7 +533,7 @@ const { readFileSync } = require("node:fs");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
 if (!prompt.includes("Merger agent")) process.exit(0);
 let front = "";
-try { front = readFileSync("SPECS.md", "utf8"); } catch (e) {}
+try { front = readFileSync("TASK.md", "utf8"); } catch (e) {}
 if (!front.match(/^state: /m)) process.exit(0);
 Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
 `,

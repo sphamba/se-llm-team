@@ -45,7 +45,7 @@ assert.equal(compactLogLine("plain stderr line"), "plain stderr line", "non-JSON
 const claudeFixture = (): string =>
 	[
 		JSON.stringify({ type: "system", subtype: "init", cwd: "/r", session_id: "s1", tools: ["Bash"], model: "claude-opus-4-6" }),
-		JSON.stringify({ type: "assistant", parent_tool_use_id: null, message: { role: "assistant", model: "claude-opus-4-6", content: [{ type: "thinking", thinking: "claude plans" }, { type: "text", text: "claude says" }, { type: "tool_use", id: "toolu_1", name: "Read", input: { file_path: "/r/SPECS.md" } }], id: "msg_1", usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }, timestamp: "2026-10-11T09:36:24.121Z" }),
+		JSON.stringify({ type: "assistant", parent_tool_use_id: null, message: { role: "assistant", model: "claude-opus-4-6", content: [{ type: "thinking", thinking: "claude plans" }, { type: "text", text: "claude says" }, { type: "tool_use", id: "toolu_1", name: "Read", input: { file_path: "/r/TASK.md" } }], id: "msg_1", usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }, timestamp: "2026-10-11T09:36:24.121Z" }),
 		JSON.stringify({ type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "cla" } } }),
 		JSON.stringify({ type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_stop", index: 0 } }),
 		JSON.stringify({ type: "user", parent_tool_use_id: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", is_error: false, content: "specs body" }] } }),
