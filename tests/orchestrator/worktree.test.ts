@@ -404,9 +404,10 @@ process.env.HOME = realHomeWt;
 console.log("orchestrator.test.ts: ... + worktree hub candidacy smoke passed");
 
 // --- part Z: a daemon restart preserves in-flight working-tree state and notes on a file
-// already on the mirror. Mirror commits carry only creates and dones, so an agent's state
-// and notes write lives in the working tree alone; the startup reconcile must keep it
-// instead of reverting the task to its create-time mirror content and re-running it.
+// already on the mirror. Every lane transition mirrors the whole board (the Notes a lane left
+// behind is captured at the boundary), but an agent's in-flight state and notes write lives
+// in the working tree alone; the startup reconcile must keep it instead of reverting the task
+// to its create-time mirror content and re-running it.
 const rootZ = fixture();
 cleaned.push(rootZ);
 mkdirSync(kanbanDir(rootZ), { recursive: true });
