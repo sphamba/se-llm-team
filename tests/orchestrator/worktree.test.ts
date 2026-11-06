@@ -6,7 +6,7 @@ import { basename, join } from "node:path";
 import { startHub } from "../../src/hub.ts";
 import { createTask, kanbanDir, parseTask, setState, setWorktree } from "../../src/kanban.ts";
 import { promoteBacklog } from "../../src/orchestrator.ts";
-import { HERE, fixture, mirrorSubjects, showTip, deadStub, runDaemon, waitFor, waitForAsync, freePort, runIdx, daemons, cleaned } from "../helpers.ts";
+import { HERE, fixture, mirrorSubjects, showTip, deadStub, ROLE_JS, runDaemon, waitFor, waitForAsync, freePort, runIdx, daemons, cleaned } from "../helpers.ts";
 
 // an external mirror-head move, built with the same plumbing the daemon uses (full-tree
 // snapshot, parent = current tip): files is name -> content for the whole .kanban board
@@ -166,8 +166,10 @@ mkdirSync(kanbanDir(rootF), { recursive: true });
 writeFileSync(
 	join(rootF, "merge-only.cjs"),
 	`#!/usr/bin/env node
+const { readlinkSync } = require("node:fs");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
-process.exit(prompt.includes("Merger agent") ? 0 : 1);
+${ROLE_JS}
+process.exit(role === "merger" ? 0 : 1);
 `,
 	{ mode: 0o755 },
 );

@@ -9,7 +9,7 @@ import { loadConfig, promoteBacklog } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline/index.ts";
 import { ensureContextSymlinks } from "../../src/orchestrator/context.ts";
 import { renderPrompt } from "../../src/orchestrator/prompt.ts";
-import { HERE, fixture, mirrorSubjects, showTip, roleStub, argvStub, llmArgs, runDaemon, waitFor, cleanupAll, daemons, cleaned } from "../helpers.ts";
+import { HERE, fixture, mirrorSubjects, showTip, roleStub, argvStub, llmArgs, roleOf, runDaemon, waitFor, cleanupAll, daemons, cleaned } from "../helpers.ts";
 
 // --- part A: happy pipeline with a working stub ---
 const rootA = fixture();
@@ -471,7 +471,7 @@ appendFileSync(${JSON.stringify(join(rootAY, "argv.log"))}, JSON.stringify({ arg
 	assert.equal(aySpawn.argv[1], stubAY, "the config executable is spawned");
 	const a = aySpawn.argv.slice(2);
 	assert.equal(a[0], "-p", "the prompt travels as the -p positional");
-	assert.ok(a[1].includes("Developer agent"), "the -p prompt is the role prompt");
+	assert.equal(roleOf(a[1]), "developer", "the -p prompt is the role prompt");
 	assert.ok(a[1].includes("under 60 minutes"), "the developer prompt names the configured stall window");
 	for (const flag of ["--approve", "--mode", "--thinking", "--provider", "--append-system-prompt"]) assert.equal(a.indexOf(flag), -1, `${flag} stays out of the claude spawn argv`);
 	assert.deepEqual(a.slice(a.indexOf("--permission-mode"), a.indexOf("--permission-mode") + 2), ["--permission-mode", "bypassPermissions"]);
@@ -564,7 +564,7 @@ const azArgv = () =>
 		.split("\n")
 		.filter(Boolean)
 		.map((l) => JSON.parse(l) as string[]);
-const azSplitters = () => azArgv().filter((a) => (a[a.indexOf("-p") + 1] ?? "").includes("Splitter agent"));
+const azSplitters = () => azArgv().filter((a) => roleOf(a[a.indexOf("-p") + 1] ?? "") === "splitter");
 const azTodo = (name: string) => {
 	const task = createTask(rootAZ, { name, summary: "Splitter notes smoke", specs: "n/a", complexity: "moderate" });
 	setState(rootAZ, task, "to-do");
@@ -628,10 +628,10 @@ const rootFilePR = "000313_root_specs_pointer.md";
 const splitterTemplatePR = readFileSync(join(HERE, "..", "agents", "splitter.md"), "utf8");
 assert.ok(splitterTemplatePR.includes("{{taskFile}}"), "the splitter template carries the taskFile placeholder");
 const rootPromptPR = renderPrompt(rootAZ, "splitter", 60, rootFilePR);
-assert.ok(rootPromptPR.startsWith("You are the Splitter agent"), "the splitter prompt starts with its own template, no prepended block");
+assert.ok(rootPromptPR.startsWith("Task file: `.kanban/" + rootFilePR + "`"), "the splitter prompt starts with its task path, no prepended block");
 assert.ok(!rootPromptPR.includes("in this checkout"), "the splitter prompt carries no prepended task-file paragraph");
 assert.ok(rootPromptPR.includes(`\`.kanban/${rootFilePR}\``), "the splitter prompt names the literal .kanban path");
-assert.ok(rootPromptPR.includes("pass it as the `file` argument of every kanban_* call"), "the splitter prompt names the kanban file argument");
+assert.ok(rootPromptPR.includes("pass it as the `file` argument"), "the splitter prompt names the kanban file argument");
 assert.ok(!rootPromptPR.includes("{{taskFile}}") && !rootPromptPR.includes("{{"), "the splitter render leaves no placeholder");
 const wtPromptPR = renderPrompt(rootAZ, "developer", 60, rootFilePR);
 assert.equal(wtPromptPR, renderPrompt(rootAZ, "developer", 60), "a worktree run keeps today's prompt");

@@ -53,7 +53,22 @@ export const showTip = (root: string, file: string): string | null => {
 	}
 };
 
-// stub agent: parses its role out of the prompt and the task from the prompt's literal
+// the prompts carry no role title: a stub reads its role from the AGENTS.md role-notes symlink
+// that the spawn points at the cwd. The splitter runs at the project root with no such symlink,
+// and its first line is the only one that names a literal .kanban task path
+export const ROLE_JS = `let notes = "";
+try { notes = readlinkSync("AGENTS.md"); } catch {}
+const role = notes.includes("AGENTS.") ? notes.split("AGENTS.")[1].slice(0, -3) : prompt.slice(0, 40).includes(".kanban/") ? "splitter" : "";`;
+
+// the role a rendered prompt belongs to, for the prompt-level assertions
+export const roleOf = (prompt: string) =>
+	prompt.includes("Test the change like a user") ? "live-tester"
+		: prompt.includes("You own the whole merge of your branch") ? "merger"
+			: prompt.includes("Review the work in the worktree you run in") ? "reviewer"
+				: prompt.includes("Test policy by task type") ? "developer"
+					: prompt.includes("Split only when the work genuinely parallelizes") ? "splitter" : "";
+
+// stub agent: parses its role out of the cwd AGENTS.md role-notes symlink and the task from the prompt's literal
 // .kanban path (the Splitter, which has no cwd TASK.md) or the cwd TASK.md symlink,
 // then acts per the new contract: the developer commits a code change and finishes (the
 // orchestrator moves the state on the exit 0), the reviewer just finishes (the orchestrator
@@ -76,7 +91,8 @@ const file = rootTask ? ".kanban/" + rootTask : "TASK.md";
 let front = "";
 try { front = readFileSync(file, "utf8"); } catch {}
 if (!front.match(/^state: /m)) process.exit(0);
-if (prompt.includes("Splitter agent")) {
+${ROLE_JS}
+if (role === "splitter") {
 	// splitter behavior is selected by a marker in the task content: no marker is a silent
 	// no-split, so the shared parts that spawn the splitter stay unaffected
 	const name = rootTask ?? readlinkSync("TASK.md").split("/").pop();
@@ -93,7 +109,7 @@ if (prompt.includes("Splitter agent")) {
 	}
 	process.exit(0);
 }
-if (prompt.includes("Developer agent")) {
+if (role === "developer") {
 	// emit JSONL only when spawned with --mode json, print-mode final text otherwise, so the
 	// developer-log assertion below actually verifies the orchestrator's spawn args
 	const m = process.argv.indexOf("--mode");
@@ -116,7 +132,7 @@ if (prompt.includes("Developer agent")) {
 	writeFileSync(workFile, "work\\n");
 	execSync("git add -A && git commit -qm work", { stdio: "ignore" });
 }
-if (prompt.includes("Merger agent")) {
+if (role === "merger") {
 	// the merger owns the rebase: the daemon spawns no git of its own, so the stub starts the
 	// rebase the prompt names and keeps its own side on every conflict (--theirs in a rebase).
 	// The daemon owns the state moves and the base fast-forward
@@ -137,7 +153,7 @@ if (prompt.includes("Merger agent")) {
 // the reviewer-fix marker in the task content makes it commit a fix like the developer
 // The developer and the live-tester just finish and the orchestrator moves the task on their
 // exit 0
-if (prompt.includes("Reviewer agent") && front.includes("reviewer-fix")) {
+if (role === "reviewer" && front.includes("reviewer-fix")) {
 	writeFileSync("review-fix.txt", "fix\\n");
 	execSync("git add -A && git commit -qm review fix", { stdio: "ignore" });
 }
@@ -156,13 +172,10 @@ export const argvStub = (root: string) => {
 	writeFileSync(
 		stub,
 		`#!/usr/bin/env node
-const { readFileSync, writeFileSync, appendFileSync } = require("node:fs");
+const { readFileSync, readlinkSync, writeFileSync, appendFileSync } = require("node:fs");
 const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
-const role = prompt.includes("Merger agent") ? "merger"
-	: prompt.includes("Developer agent") ? "developer"
-	: prompt.includes("Reviewer agent") ? "reviewer"
-	: prompt.includes("Live-tester") ? "live-tester" : "";
+${ROLE_JS}
 // the task comes from the cwd TASK.md symlink: the prompt carries no absolute paths, so
 // spawns are attributed by the task name read from the task file
 const file = "TASK.md";

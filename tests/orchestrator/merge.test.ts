@@ -9,7 +9,7 @@ import { reportsDir } from "../../src/orchestrator/report.ts";
 import { agentAlive, pidAlive, pidPath } from "../../src/pid.ts";
 import { exitFilePath, readMergerSlug, readExitCode } from "../../src/orchestrator/spawn.ts";
 import { renderPrompt } from "../../src/orchestrator/prompt.ts";
-import { cleanupAll, cleaned, fixture, mirrorSubjects, roleStub, runDaemon, waitFor } from "../helpers.ts";
+import { cleanupAll, cleaned, fixture, mirrorSubjects, ROLE_JS, roleOf, roleStub, runDaemon, waitFor } from "../helpers.ts";
 
 const mergeRoot = () => {
 	const root = fixture();
@@ -58,10 +58,11 @@ const caseStub = (root: string, mode: string, other = "") => {
 	writeFileSync(
 		stub,
 		`#!/usr/bin/env node
-const { readFileSync, writeFileSync, appendFileSync } = require("node:fs");
+const { readFileSync, readlinkSync, writeFileSync, appendFileSync } = require("node:fs");
 const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
-if (!prompt.includes("Merger agent")) process.exit(0);
+${ROLE_JS}
+if (role !== "merger") process.exit(0);
 const cmd = ${JSON.stringify(mode)};
 const other = ${JSON.stringify(other)};
 const sh = (c) => { try { return execSync(c).toString(); } catch { return ""; } };
@@ -109,20 +110,21 @@ const wtG = join(rootG, ".worktrees", "fix/1-defer-merge-while");
 writeFileSync(
 	join(rootG, "linger-agent.cjs"),
 	`#!/usr/bin/env node
-const { readFileSync, appendFileSync } = require("node:fs");
+const { readFileSync, readlinkSync, appendFileSync } = require("node:fs");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
+${ROLE_JS}
 const file = "TASK.md";
 let front = "";
 try {
 	front = readFileSync(file, "utf8");
 } catch {}
 if (!front.match(/^state: /m)) process.exit(0);
-if (prompt.includes("Reviewer agent")) {
+if (role === "reviewer") {
 	setTimeout(() => process.exit(0), 3000);
-} else if (prompt.includes("Live-tester")) {
+} else if (role === "live-tester") {
 	appendFileSync(file, "\\nLive test report: merge deferred until the reviewer finished.\\n");
 	process.exit(0);
-} else if (prompt.includes("Merger agent")) {
+} else if (role === "merger") {
 	try {
 		require("node:child_process").execSync("git rebase main", { stdio: "ignore" });
 	} catch (e) {}
@@ -365,7 +367,7 @@ console.log("merge.test.ts: + detached root smoke passed");
 const rootAL = fixture();
 const taskAL = createTask(rootAL, { name: "fix: merger prompt", summary: "Prompt smoke", specs: "n/a" });
 const promptAL = renderPrompt(rootAL, "merger", 60, taskAL.file);
-assert.ok(promptAL.includes("Merger agent"), "prompt is the merger's");
+assert.equal(roleOf(promptAL), "merger", "prompt is the merger's");
 assert.ok(promptAL.includes("git rebase --abort"), "the merger aborts a stale rebase first");
 assert.ok(promptAL.includes("git rebase main"), "the prompt names the literal base branch");
 assert.ok(promptAL.includes("git checkout --theirs"), "the merger keeps its own side per hunk");
@@ -396,12 +398,13 @@ const rootK2 = mergeRoot();
 writeFileSync(
 	join(rootK2, "slow-merger.cjs"),
 	`#!/usr/bin/env node
-const { readFileSync } = require("node:fs");
+const { readFileSync, readlinkSync } = require("node:fs");
 const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
+${ROLE_JS}
 let front = "";
 try { front = readFileSync("TASK.md", "utf8"); } catch {}
-if (!front.match(/^state: /m) || !prompt.includes("Merger agent")) process.exit(0);
+if (!front.match(/^state: /m) || role !== "merger") process.exit(0);
 const trySh = (c) => { try { execSync(c, { stdio: "ignore" }); } catch (e) {} };
 trySh("git rebase main");
 setTimeout(() => trySh("git checkout --theirs README.md && git add -A && GIT_EDITOR=true git rebase --continue"), 2500);
@@ -457,18 +460,19 @@ execSync("git add -A && git commit -qm main-only", { cwd: rootK3, shell: "/bin/b
 writeFileSync(
 	join(rootK3, "probe-live.cjs"),
 	`#!/usr/bin/env node
-const { readFileSync, appendFileSync, existsSync } = require("node:fs");
+const { readFileSync, readlinkSync, appendFileSync, existsSync } = require("node:fs");
 const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
+${ROLE_JS}
 const file = "TASK.md";
 let front = "";
 try { front = readFileSync(file, "utf8"); } catch {}
 if (!front.match(/^state: /m)) process.exit(0);
-if (prompt.includes("Merger agent")) {
+if (role === "merger") {
 	try { execSync("git rebase main", { stdio: "ignore" }); } catch (e) {}
 	process.exit(0);
 }
-if (prompt.includes("Live-tester")) {
+if (role === "live-tester") {
 	const files = ["other.txt", "race.txt", "main-only.txt"].filter((f) => existsSync(f)).join(",");
 	appendFileSync(file, "\\nLive test report: worktree has " + files + ".\\n");
 }
@@ -529,9 +533,10 @@ const rootAU = mergeRoot();
 writeFileSync(
 	join(rootAU, "au-merger.cjs"),
 	`#!/usr/bin/env node
-const { readFileSync } = require("node:fs");
+const { readFileSync, readlinkSync } = require("node:fs");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
-if (!prompt.includes("Merger agent")) process.exit(0);
+${ROLE_JS}
+if (role !== "merger") process.exit(0);
 let front = "";
 try { front = readFileSync("TASK.md", "utf8"); } catch (e) {}
 if (!front.match(/^state: /m)) process.exit(0);

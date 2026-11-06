@@ -11,7 +11,7 @@ import { REPORT_MAX_AGE_MS, reportsDir } from "../../src/orchestrator/report.ts"
 import { loadConfig, poll, removeTask } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline/index.ts";
 import { pidPath } from "../../src/pid.ts";
-import { fixture, mirrorSubjects, showTip, roleStub, deadStub, runDaemon, waitFor, cleaned } from "../helpers.ts";
+import { fixture, mirrorSubjects, showTip, roleStub, deadStub, ROLE_JS, runDaemon, waitFor, cleaned } from "../helpers.ts";
 
 // --- part N: the PM report: one report per done sweep, queued for the PM session ---
 const rootN = fixture();
@@ -168,11 +168,12 @@ const guardStub = join(rootAF, "guard-agent.cjs");
 writeFileSync(
 	guardStub,
 	`#!/usr/bin/env node
-const { readFileSync, appendFileSync } = require("node:fs");
+const { readFileSync, readlinkSync, appendFileSync } = require("node:fs");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
+${ROLE_JS}
 let front = "";
 try { front = readFileSync("TASK.md", "utf8"); } catch {}
-if (!prompt.includes("Developer agent") || !front.match(/^state: /m)) process.exit(0);
+if (role !== "developer" || !front.match(/^state: /m)) process.exit(0);
 const state = (front.match(/^state: "(.*)"$/m) ?? [])[1] ?? "";
 appendFileSync(${JSON.stringify(join(rootAF, "guard.log"))}, JSON.stringify({ pid: process.pid, wrapper: process.ppid, state }) + "\\n");
 // exit 1: a crash exit reads as a bounce (the to-do rewrite survives), while exit 0 would

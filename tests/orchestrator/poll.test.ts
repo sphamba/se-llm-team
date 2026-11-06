@@ -46,7 +46,7 @@ for (let n = 0; n <= 5; n++) {
 	assert.match(readFileSync(deadPath, "utf8").trim(), /^\d+$/, `death marker of run ${n} records the dying pid`);
 }
 // the cooldown log fired once at cap+1, and the deferred spawn has not fired yet
-await waitFor(() => b.output().includes("respawn waits for the idle cooldown"), 30000, "cooldown log at cap+1", b.output);
+await waitFor(() => cooldownB() > 0, 30000, "cooldown log at cap+1", b.output);
 assert.equal(cooldownB(), 1, "cooldown log fired exactly once");
 assert.ok(!existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.6.log`)) && !existsSync(join(kanbanDir(rootB), ".logs", `${slugB}.developer.6.log.gz`)), "no fresh spawn while the idle cooldown runs");
 // the death counter survived the cooldown wait: a bounce clears the pidfile first, so the

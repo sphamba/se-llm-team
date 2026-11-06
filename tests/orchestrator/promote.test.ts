@@ -9,7 +9,7 @@ import { dropDoneBlockers, loadConfig, poll, promoteBacklog } from "../../src/or
 import { rescan } from "../../src/orchestrator/pipeline/index.ts";
 import { reviewBasePath } from "../../src/orchestrator/pipeline/review.ts";
 import { pidPath } from "../../src/pid.ts";
-import { fixture, roleStub, deadStub, runDaemon, waitFor, runIdx, cleanupAll, cleaned } from "../helpers.ts";
+import { fixture, roleStub, deadStub, ROLE_JS, runDaemon, waitFor, runIdx, cleanupAll, cleaned } from "../helpers.ts";
 
 // --- part R: promotion is event-driven: every schedulable backlog task promotes on the
 // sweep, in parallel lanes, even while other tasks run; open questions hold a task ---
@@ -68,15 +68,16 @@ const loopStub = (root: string) => {
 	writeFileSync(
 		stub,
 		`#!/usr/bin/env node
-const { readFileSync, appendFileSync } = require("node:fs");
+const { readFileSync, readlinkSync, appendFileSync } = require("node:fs");
 const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
+${ROLE_JS}
 // the task comes from the cwd TASK.md symlink, which the orchestrator re-points at spawn
 let front = "";
 try { front = readFileSync("TASK.md", "utf8"); } catch {}
 if (!front.match(/^state: /m)) process.exit(0);
 // appended, so every pass's commit differs and moves the worktree HEAD off the recorded base
-if (prompt.includes("Reviewer agent")) {
+if (role === "reviewer") {
 	appendFileSync("review-fix.txt", "fix\\n");
 	execSync("git add -A && git commit -qm review-fix", { stdio: "ignore" });
 }
@@ -153,13 +154,14 @@ const bounceStub = join(rootAA3, "bounce-agent.cjs");
 writeFileSync(
 	bounceStub,
 	`#!/usr/bin/env node
-const { appendFileSync, existsSync, readFileSync, writeFileSync } = require("node:fs");
+const { appendFileSync, existsSync, readlinkSync, readFileSync, writeFileSync } = require("node:fs");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
+${ROLE_JS}
 const file = "TASK.md";
 let front = "";
 try { front = readFileSync(file, "utf8"); } catch {}
 if (!front.match(/^state: /m)) process.exit(0);
-if (prompt.includes("Reviewer agent")) {
+if (role === "reviewer") {
 	if (!existsSync(".bounced")) {
 		writeFileSync(".bounced", "1");
 		writeFileSync(file, front.replace(/^state: .*/m, 'state: "to-do"'));
@@ -169,7 +171,7 @@ if (prompt.includes("Reviewer agent")) {
 	}
 	process.exit(0);
 }
-if (prompt.includes("Developer agent")) appendFileSync(".marker", "dev\\n");
+if (role === "developer") appendFileSync(".marker", "dev\\n");
 `,
 );
 chmodSync(bounceStub, 0o755);
