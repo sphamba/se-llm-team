@@ -78,7 +78,7 @@ export function spawnAgent(root: string, cfg: Config, role: string, task: Task, 
 	// --append-system-prompt), claude swaps in bypassPermissions and stream-json and carries
 	// the system prompt as one file ref
 	const llm = resolveLlm(root, cfg, role, task.complexity ?? "moderate");
-	const prompt = renderPrompt(root, role, cfg.logStallMinutes, task.file, rootCwd, cfg.testCommand);
+	const prompt = renderPrompt(root, role, cfg.logStallMinutes, task.file, cfg.testCommand);
 	const agentArgs = cfg.backend === "claude"
 		? claudeSpawnArgs(llm, prompt, claudeSystemPromptFile(root, name, role, projectPrompt))
 		: piSpawnArgs(llm, piPrompt, prompt);

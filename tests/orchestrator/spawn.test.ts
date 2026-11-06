@@ -622,18 +622,21 @@ assert.ok(lstatSync(join(rootBA, "TASK.md")).isFile(), "a root-cwd ensure leaves
 cleanupAll(rootBA);
 console.log("orchestrator.test.ts: ... + root real-file symlink guard passed");
 
-// --- a root-cwd spawn names the literal task path: the splitter's root TASK.md link is shared,
-// so a later spawn re-points it mid-run (#313) ---
+// --- the splitter prompt names the literal task path from its own template, with no
+// daemon-side prepended block (#486) ---
 const rootFilePR = "000313_root_specs_pointer.md";
-const rootPromptPR = renderPrompt(rootAZ, "splitter", 60, rootFilePR, true);
-assert.ok(rootPromptPR.includes(`\`.kanban/${rootFilePR}\``), "the root-cwd prompt names the literal .kanban path");
-assert.ok(!rootPromptPR.includes("shared link"), "the root-cwd prompt carries no shared-link line");
-assert.ok(rootPromptPR.includes(`pass \`${rootFilePR}\` as the \`file\` argument of every kanban_* call`), "the root-cwd prompt names the kanban file argument");
-const wtPromptPR = renderPrompt(rootAZ, "developer", 60, rootFilePR, false);
-assert.ok(!wtPromptPR.includes("shared link"), "the worktree prompt carries no shared-link line");
+const splitterTemplatePR = readFileSync(join(HERE, "..", "agents", "splitter.md"), "utf8");
+assert.ok(splitterTemplatePR.includes("{{taskFile}}"), "the splitter template carries the taskFile placeholder");
+const rootPromptPR = renderPrompt(rootAZ, "splitter", 60, rootFilePR);
+assert.ok(rootPromptPR.startsWith("You are the Splitter agent"), "the splitter prompt starts with its own template, no prepended block");
+assert.ok(!rootPromptPR.includes("in this checkout"), "the splitter prompt carries no prepended task-file paragraph");
+assert.ok(rootPromptPR.includes(`\`.kanban/${rootFilePR}\``), "the splitter prompt names the literal .kanban path");
+assert.ok(rootPromptPR.includes("pass it as the `file` argument of every kanban_* call"), "the splitter prompt names the kanban file argument");
+assert.ok(!rootPromptPR.includes("{{taskFile}}") && !rootPromptPR.includes("{{"), "the splitter render leaves no placeholder");
+const wtPromptPR = renderPrompt(rootAZ, "developer", 60, rootFilePR);
 assert.equal(wtPromptPR, renderPrompt(rootAZ, "developer", 60), "a worktree run keeps today's prompt");
 // the merger prompt embeds the project's suite command: "npm test" by default (config
-// testCommand), overridden by the optional 6th renderPrompt argument
+// testCommand), overridden by the optional renderPrompt argument
 assert.ok(renderPrompt(rootAZ, "merger", 60).includes("npm test"), "the merger prompt defaults to the npm test suite command");
-assert.ok(renderPrompt(rootAZ, "merger", 60, undefined, false, "pnpm -r test").includes("pnpm -r test"), "the testCommand argument overrides the suite command");
-console.log("orchestrator.test.ts: ... + root-cwd prompt task path passed");
+assert.ok(renderPrompt(rootAZ, "merger", 60, undefined, "pnpm -r test").includes("pnpm -r test"), "the testCommand argument overrides the suite command");
+console.log("orchestrator.test.ts: ... + splitter prompt task path passed");
