@@ -641,7 +641,7 @@ function assertNoBlockCycle(root: string, selfNum: number, blockedBy: string): v
 export function updateTask(
 	root: string,
 	task: Task,
-	patch: { name?: string; priority?: string; complexity?: string; blockedBy?: string; summary?: string; specs?: string; openQuestions?: string },
+	patch: { name?: string; priority?: string; complexity?: string; blockedBy?: string; summary?: string; specs?: string; notes?: string; openQuestions?: string },
 ): void {
 	const rawTask = readFileSync(join(kanbanDir(root), task.file), "utf8");
 	if (hasConflictMarkers(rawTask)) throw new Error(`unresolved merge conflict markers in ${task.file}; not rewriting`);
@@ -658,6 +658,7 @@ export function updateTask(
 	const sections: Record<string, string> = {};
 	if (patch.summary !== undefined) sections.summary = patch.summary;
 	if (patch.specs !== undefined) sections.specs = patch.specs;
+	if (patch.notes !== undefined) sections.notes = patch.notes;
 	if (patch.openQuestions !== undefined) sections["open questions"] = patch.openQuestions;
 	if (Object.keys(sections).length) replaceSections(root, task, sections);
 }

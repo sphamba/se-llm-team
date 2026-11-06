@@ -49,15 +49,16 @@ const run = (def: any, params: any) => def.execute("t1", params, undefined, unde
 
 // kanban_update is registered and rejects unknown fields at the schema level,
 // the validator pi runs before execute (typebox Compile) fails the call, so an
-// unrecognized parameter (e.g. notes) errors instead of a false "Updated"
+// unrecognized parameter errors instead of a false "Updated"; notes is a supported field
 const update = tools["kanban_update"];
 if (!update) fail("kanban_update not registered");
 assert.equal(update.parameters.additionalProperties, false);
 const { Compile } = await import("typebox/compile");
 const validator = Compile(update.parameters);
-assert.equal(validator.Check({ file: "000001_x.md", notes: "anything" }), false, "unknown field must fail validation");
-assert.ok([...validator.Errors({ file: "000001_x.md", notes: "anything" })].some((e: any) => e.keyword === "additionalProperties"));
-assert.equal(validator.Check({ file: "000001_x.md", summary: "s", notes: "anything" }), false, "mixed call must fail validation too");
+assert.equal(validator.Check({ file: "000001_x.md", notes: "anything" }), true, "notes is a supported update field");
+assert.equal(validator.Check({ file: "000001_x.md", bogus: "anything" }), false, "unknown field must fail validation");
+assert.ok([...validator.Errors({ file: "000001_x.md", bogus: "anything" })].some((e: any) => e.keyword === "additionalProperties"));
+assert.equal(validator.Check({ file: "000001_x.md", summary: "s", bogus: "anything" }), false, "mixed call must fail validation too");
 
 // kanban_create gets the same guard: an unsupported field (e.g. notes) must fail
 // pi's validator instead of being dropped while the tool reports "Created"

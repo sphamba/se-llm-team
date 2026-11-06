@@ -45,6 +45,31 @@ assert.equal(listTasks(qRoot, "backlog").find((t) => t.file === tn.file)?.openQu
 assert.equal(listTasks(root, "in-progress").find((t) => t.file === t4.file)?.openQuestions, "");
 rmSync(qRoot, { recursive: true, force: true });
 
+// notes: replaces the whole # Notes section, clears with an empty string, creates the
+// section when absent, and leaves every other section byte-for-byte
+const nRoot = mkdtempSync(join(tmpdir(), "kanban-notes-"));
+const tno = createTask(nRoot, { name: "feat: notes", summary: "the summary", specs: "the specs", notes: "old note", openQuestions: "- [user] keep?" });
+const nfile = join(nRoot, ".kanban", tno.file);
+assert.equal(parseTask(nRoot, tno.file).notes, "old note");
+updateTask(nRoot, tno, { notes: "new note line 1\nnew note line 2" });
+assert.equal(parseTask(nRoot, tno.file).notes, "new note line 1\nnew note line 2");
+assert.equal(
+	readFileSync(nfile, "utf8"),
+	`---\nname: "feat: notes"\npriority: "medium"\nstate: "backlog"\nworktree: ""\nissuer: "user"\ncomplexity: "moderate"\n---\n\n# Summary\nthe summary\n\n# Specs\nthe specs\n\n# Notes\nnew note line 1\nnew note line 2\n\n# Open questions\n- [user] keep?\n`,
+);
+updateTask(nRoot, tno, { notes: "" });
+assert.equal(parseTask(nRoot, tno.file).notes, "");
+const ncleared = readFileSync(nfile, "utf8");
+assert.equal(ncleared, `---\nname: "feat: notes"\npriority: "medium"\nstate: "backlog"\nworktree: ""\nissuer: "user"\ncomplexity: "moderate"\n---\n\n# Summary\nthe summary\n\n# Specs\nthe specs\n\n# Notes\n\n\n# Open questions\n- [user] keep?\n`);
+assert.equal((ncleared.match(/^# Notes$/gm) ?? []).length, 1, "no second Notes header");
+const noNotesFile = "000101_no_notes.md";
+writeFileSync(join(nRoot, ".kanban", noNotesFile), '---\nname: "no notes"\n---\n\n# Summary\ns\n\n# Specs\nspec\n');
+const tnoNotes = parseTask(nRoot, noNotesFile);
+updateTask(nRoot, tnoNotes, { notes: "fresh note" });
+assert.equal(parseTask(nRoot, noNotesFile).notes, "fresh note");
+assert.equal(readFileSync(join(nRoot, ".kanban", noNotesFile), "utf8"), '---\nname: "no notes"\n---\n\n# Summary\ns\n\n# Specs\nspec\n\n# Notes\nfresh note\n');
+rmSync(nRoot, { recursive: true, force: true });
+
 // body-level "^# " headings that are not one of the four section names are content:
 // they neither open nor end a section, so a spec structured as "# 1. ..." stays whole
 const hRoot = mkdtempSync(join(tmpdir(), "kanban-headings-"));

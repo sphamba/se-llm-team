@@ -62,4 +62,9 @@ assert.ok(cleared.text.includes(guarded.file), "the guarded clear reports the up
 assert.equal(getTask(root, guarded.file)?.openQuestions, "", "the clear with the answer lands");
 assert.ok(getTask(root, guarded.file)?.specs.includes("the first way"), "the answer reached the Specs");
 
+// kanban_update routes notes to the whole # Notes section
+const noted = await TOOLS.kanban_update.run({ file: guarded.file, notes: "- did the thing" }, ctx);
+assert.ok(noted.text.includes(guarded.file), "the notes update reports it");
+assert.equal(getTask(root, guarded.file)?.notes, "- did the thing", "the notes update landed");
+
 console.log("tools.test.ts: all assertions passed");

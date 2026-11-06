@@ -136,6 +136,7 @@ export const TOOLS: Record<string, ToolDef> = {
 				summary: { type: "string", description: "Replaces the whole Summary section" },
 				specs: { type: "string", description: "Replaces the whole Specs section" },
 				openQuestions: { type: "string", description: "User/client clarification questions, written to the task body's # Open questions section" },
+				notes: { type: "string", description: "Current state of the task, not its history (history lives in git). Replaces the whole # Notes section; an empty string empties it" },
 				blockedBy: { type: "string", description: "Comma-joined blocker task refs, e.g. '#42, #43'; replaces the whole list, empty string clears it" },
 			},
 			additionalProperties: false,
