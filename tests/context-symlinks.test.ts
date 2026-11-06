@@ -10,7 +10,7 @@ import { execSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentAlive, pidAlive, pidEntry, writePid } from "../src/pid.ts";
+import { agentAlive, pidAlive } from "../src/pid.ts";
 import { createTask, kanbanDir, parseTask, setState, taskSlug } from "../src/kanban.ts";
 import { loadConfig, poll } from "../src/orchestrator.ts";
 import { rescan } from "../src/orchestrator/pipeline/index.ts";
@@ -238,43 +238,22 @@ assert.ok(devPrompt.includes("Never commit AGENTS.md or TASK.md"), "the develope
 assert.ok(devPrompt.includes("Work only here, in the worktree you run in"), "the prompt-scope rule stays");
 console.log("context-symlinks.test.ts: part CS5 passed (developer prompt)");
 
-// --- part CS6: a root-cwd run leaves no TASK.md link behind ---
+// --- part CS6: a root-cwd ensure creates no context links; a worktree ensure creates both ---
 const root6 = freshFixture();
 writeFileSync(join(root6, "AGENTS.md"), "# project rules\n");
 const task6 = createTask(root6, { name: "fix: root link cleanup", summary: "Root link cleanup", specs: "n/a", complexity: "simple" });
-ensureContextSymlinks(root6, root6, task6.file, "reviewer");
-assert.equal(readlinkSync(join(root6, "TASK.md")), join(".kanban", task6.file), "precondition: the root TASK.md points at the task file");
-clearContextSymlinks(root6, { ...task6, worktree: "" }, { rootCwd: true });
-assert.ok(!existsSync(join(root6, "TASK.md")), "a root-cwd exit removes its TASK.md link");
+ensureContextSymlinks(root6, root6, task6.file, "splitter");
+assert.ok(!existsSync(join(root6, "TASK.md")), "a root-cwd ensure creates no TASK.md link");
 assert.ok(lstatSync(join(root6, "AGENTS.md")).isFile(), "the real AGENTS.md at the root is untouched");
 assert.equal(readFileSync(join(root6, "AGENTS.md"), "utf8"), "# project rules\n", "the real AGENTS.md content survives");
-// the root link is shared: another live root-cwd run may have repointed it since this run started
-const task6b = createTask(root6, { name: "fix: someone else", summary: "Another root run", specs: "n/a" });
-symlinkSync(join(".kanban", task6b.file), join(root6, "TASK.md"));
-clearContextSymlinks(root6, { ...task6, worktree: "" }, { rootCwd: true });
-assert.equal(readlinkSync(join(root6, "TASK.md")), join(".kanban", task6b.file), "a root link that points at another task survives");
-// the worktree case is unchanged: the link is the run's own, so it always goes
 const ensured6 = ensureWorktree(root6, task6);
 assert.ok(ensured6, "precondition: the worktree exists");
-symlinkSync(join(".kanban", task6.file), join(ensured6.wtDir, "TASK.md"));
-symlinkSync(join(".kanban", "AGENTS.developer.md"), join(ensured6.wtDir, "AGENTS.md"));
+ensureContextSymlinks(root6, ensured6.wtDir, task6.file, "developer");
+assert.equal(readlinkSync(join(ensured6.wtDir, "TASK.md")), join(".kanban", task6.file), "a worktree ensure links the task file");
+assert.equal(readlinkSync(join(ensured6.wtDir, "AGENTS.md")), join(".kanban", "AGENTS.developer.md"), "a worktree ensure links the role notes");
 clearContextSymlinks(root6, { ...task6, worktree: ensured6.wt });
 assert.ok(!existsSync(join(ensured6.wtDir, "TASK.md")) && !existsSync(join(ensured6.wtDir, "AGENTS.md")), "a worktree still loses both context links");
-console.log("context-symlinks.test.ts: part CS6 passed (root link cleanup)");
-
-// --- part CS7: #335: a to-do task's poll miss must not remove a live splitter's root link ---
-const root7 = freshFixture();
-const task7 = createTask(root7, { name: "fix: live splitter link", summary: "Live splitter keeps the root link", specs: "n/a" });
-setState(root7, task7, "to-do");
-writePid(root7, `${taskSlug(task7.file)}.splitter`, process.pid);
-ensureContextSymlinks(root7, root7, task7.file, "splitter");
-assert.equal(readlinkSync(join(root7, "TASK.md")), join(".kanban", task7.file), "precondition: the root TASK.md points at the splitter's task file");
-assert.ok(pidAlive(pidEntry(root7, `${taskSlug(task7.file)}.splitter`).pid), "precondition: the splitter pid is live");
-clearContextSymlinks(root7, { ...task7, worktree: "" });
-assert.equal(readlinkSync(join(root7, "TASK.md")), join(".kanban", task7.file), "a no-worktree clear without the flag leaves the live splitter's root link");
-clearContextSymlinks(root7, { ...task7, worktree: "" }, { rootCwd: true });
-assert.ok(!existsSync(join(root7, "TASK.md")), "the explicit root-cwd clear removes it once the splitter is gone");
-console.log("context-symlinks.test.ts: part CS7 passed (live splitter keeps the root link)");
+console.log("context-symlinks.test.ts: part CS6 passed (root ensure creates no links + worktree links)");
 
 cleanupAll(...cleaned);
-console.log("context-symlinks.test.ts: all parts passed (spawn exclude + unwritable exclude + merge self-heal + real AGENTS.md survives + developer prompt + root link cleanup)");
+console.log("context-symlinks.test.ts: all parts passed (spawn exclude + unwritable exclude + merge self-heal + real AGENTS.md survives + developer prompt + root ensure creates no links)");

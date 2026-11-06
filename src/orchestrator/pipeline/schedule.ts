@@ -5,7 +5,6 @@ import { agentPid, pidAlive, pidEntry } from "../../pid.ts";
 import { RESPAWN_CAP, type Config } from "../config.ts";
 import { log, readCounter } from "../log.ts";
 import { readExitCode, spawnAgent } from "../spawn.ts";
-import { clearContextSymlinks } from "../context.ts";
 import { ensureWorktree } from "../board.ts";
 
 // moderate and complex to-do tasks meet the Splitter first: the task stays in to-do while the
@@ -50,8 +49,7 @@ export function startTodo(root: string, cfg: Config, task: Task, tasks: Task[]):
 		if (!cfg.splitting) log(root, `${fresh.file}: splitting is off, moving to the developer`);
 		// the attr is the ran-once marker: a task that already met the Splitter never meets it again,
 		// however often it re-enters to-do, and there is no reset path
-		else if (fresh.splitter === "done") clearContextSymlinks(root, fresh, { rootCwd: true });
-		else {
+		else if (fresh.splitter !== "done") {
 			const entry = pidEntry(root, `${slug}.splitter`);
 			if (pidAlive(entry.pid, entry.disc)) return;
 			// no splitter pid file yet: the Splitter runs detached at the project root (it works the
@@ -61,11 +59,9 @@ export function startTodo(root: string, cfg: Config, task: Task, tasks: Task[]):
 				return;
 			}
 			// a dead splitter pid file means the Splitter ran and left the task in to-do (a decline
-			// or a crash): mark a successful exit, clear its root run link, then fall through to the
-			// Developer, no second splitter pass. liveness never sees the pid, so the cleanup happens
-			// here instead
+			// or a crash): mark a successful exit, then fall through to the Developer, no second
+			// splitter pass. liveness never sees the pid, so the cleanup happens here instead
 			markSplitterDone(root, fresh);
-			clearContextSymlinks(root, fresh, { rootCwd: true });
 		}
 	}
 	const ensured = ensureWorktree(root, fresh);

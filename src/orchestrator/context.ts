@@ -69,15 +69,13 @@ function repointContextSymlink(root: string, link: string, target: string): void
 }
 
 // the two cwd context symlinks the agent session reads at startup: TASK.md is the task file
-// through the linked board, AGENTS.md the role's notes. Re-pointed at every spawn so the
-// correct role guidance loads (idempotent: a matching link stays untouched)
+// through the linked board, AGENTS.md the role's notes. Re-pointed at every worktree spawn so
+// the correct role guidance loads (idempotent: a matching link stays untouched). A root-cwd
+// run (the Splitter) creates neither: its prompt names the literal .kanban task path, a
+// role-notes link would shadow the project's own AGENTS.md, and the project root stays untouched
 export function ensureContextSymlinks(root: string, cwd: string, taskFile: string, role: string): void {
-	repointContextSymlink(root, join(cwd, "TASK.md"), join(".kanban", taskFile));
-	// the Splitter runs at the project root, where a role-notes symlink would shadow the
-	// project's own AGENTS.md and poison the projectAgentsPrompt read of every later spawn:
-	// no AGENTS.md link at the root; the splitter has no notes file and runs on its shipped
-	// prompt plus the project's own root AGENTS.md
 	if (realpathOrSelf(cwd) === realpathOrSelf(root)) return;
+	repointContextSymlink(root, join(cwd, "TASK.md"), join(".kanban", taskFile));
 	// a target project's own tracked AGENTS.md sits where the role-notes symlink must go:
 	// skip-worktree hides the replacement from git status (an untracked file cannot be marked;
 	// the failure is ignored), then the symlink replaces it
@@ -114,21 +112,17 @@ export function ensureInfoExclude(root: string, cwd: string): void {
 	}
 }
 
-// after the agent terminated: remove both context symlinks from the task's cwd (its worktree,
-// or the project root for a role that runs there), so a cwd without a running agent resolves no
-// task (the kanban tools then say so). Hooked where the orchestrator clears the agent pid; the
-// done cleanup removes the whole worktree. The shared root TASK.md goes only on an explicit
-// rootCwd opt-in, from the sites that know the root-cwd run is gone (#335)
-export function clearContextSymlinks(root: string, task: Task, opts?: { rootCwd?: boolean }): void {
-	if (!task.worktree && !opts?.rootCwd) return;
-	const cwd = task.worktree ? join(root, ".worktrees", task.worktree) : root;
+// after the agent terminated: remove both context symlinks from the task's worktree, so a cwd
+// without a running agent resolves no task (the kanban tools then say so). Hooked where the
+// orchestrator clears the agent pid; the done cleanup removes the whole worktree. A root-cwd
+// run creates no links, so it has nothing to clear
+export function clearContextSymlinks(root: string, task: Task): void {
+	if (!task.worktree) return;
+	const cwd = join(root, ".worktrees", task.worktree);
 	for (const name of ["TASK.md", "AGENTS.md"]) {
 		try {
 			const path = join(cwd, name);
 			if (!lstatSync(path).isSymbolicLink()) continue;
-			// the root link is shared by every root-cwd run, and a live one may have repointed it
-			// since this run started: remove it only while it still points at this run's task file
-			if (!task.worktree && (name !== "TASK.md" || readlinkSync(path) !== join(".kanban", task.file))) continue;
 			rmSync(path);
 		} catch {
 			/* already gone */

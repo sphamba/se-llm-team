@@ -576,7 +576,7 @@ const piSplitAZ = azSplitters().at(-1)!;
 assert.equal(piSplitAZ.indexOf("--append-system-prompt"), -1, "the splitter spawn carries no inline injection: pi loads the root AGENTS.md natively");
 assert.ok(!existsSync(join(kanbanDir(rootAZ), "AGENTS.splitter.md")), "a splitter spawn creates no .kanban/AGENTS.splitter.md");
 assert.ok(!lstatSync(join(rootAZ, "AGENTS.md")).isSymbolicLink(), "the project's own root AGENTS.md stays in place: no role-notes symlink at the root");
-assert.ok(lstatSync(join(rootAZ, "TASK.md")).isSymbolicLink(), "the splitter cwd still links the task file");
+assert.ok(!existsSync(join(rootAZ, "TASK.md")), "the splitter root spawn creates no TASK.md link");
 // claude: the concatenated system-prompt file degrades to the project part alone
 azTodo("feat: splitter no notes claude");
 rescan(rootAZ, cfgClaudeAZ);
@@ -618,11 +618,7 @@ assert.ok(lstatSync(join(wtBA, "TASK.md")).isSymbolicLink(), "a worktree cwd sti
 assert.equal(readlinkSync(join(wtBA, "TASK.md")), join(".kanban", taskFileBA), "the worktree TASK.md links the task file");
 assert.ok(lstatSync(join(wtBA, "AGENTS.md")).isSymbolicLink(), "a worktree cwd still gets the AGENTS.md role-notes symlink");
 assert.equal(readlinkSync(join(wtBA, "AGENTS.md")), join(".kanban", "AGENTS.reviewer.md"), "the worktree AGENTS.md links the role notes");
-const refusalsBA = readFileSync(join(kanbanDir(rootBA), ".logs", "orchestrator.log"), "utf8")
-	.split("\n")
-	.filter((l) => l.includes("refusing to replace the real file"));
-assert.equal(refusalsBA.length, 3, "one refusal line per root cwd spelling");
-assert.ok(refusalsBA.every((l) => l.includes("TASK.md")), "each refusal names the real root TASK.md");
+assert.ok(lstatSync(join(rootBA, "TASK.md")).isFile(), "a root-cwd ensure leaves the real root TASK.md file in place");
 cleanupAll(rootBA);
 console.log("orchestrator.test.ts: ... + root real-file symlink guard passed");
 
@@ -631,7 +627,7 @@ console.log("orchestrator.test.ts: ... + root real-file symlink guard passed");
 const rootFilePR = "000313_root_specs_pointer.md";
 const rootPromptPR = renderPrompt(rootAZ, "splitter", 60, rootFilePR, true);
 assert.ok(rootPromptPR.includes(`\`.kanban/${rootFilePR}\``), "the root-cwd prompt names the literal .kanban path");
-assert.ok(rootPromptPR.includes("The root `TASK.md` is a shared link"), "the root-cwd prompt says the root link is shared");
+assert.ok(!rootPromptPR.includes("shared link"), "the root-cwd prompt carries no shared-link line");
 assert.ok(rootPromptPR.includes(`pass \`${rootFilePR}\` as the \`file\` argument of every kanban_* call`), "the root-cwd prompt names the kanban file argument");
 const wtPromptPR = renderPrompt(rootAZ, "developer", 60, rootFilePR, false);
 assert.ok(!wtPromptPR.includes("shared link"), "the worktree prompt carries no shared-link line");

@@ -53,7 +53,8 @@ export const showTip = (root: string, file: string): string | null => {
 	}
 };
 
-// stub agent: parses its role out of the prompt and the task from the cwd TASK.md symlink,
+// stub agent: parses its role out of the prompt and the task from the prompt's literal
+// .kanban path (the Splitter, which has no cwd TASK.md) or the cwd TASK.md symlink,
 // then acts per the new contract: the developer commits a code change and finishes (the
 // orchestrator moves the state on the exit 0), the reviewer just finishes (the orchestrator
 // reads the commits it leaves; a `reviewer-fix` marker in the task content makes it commit a
@@ -68,15 +69,18 @@ export const roleStub = (root: string) => {
 const { readFileSync, readlinkSync, writeFileSync } = require("node:fs");
 const { execSync } = require("node:child_process");
 const prompt = process.argv[process.argv.indexOf("-p") + 1] ?? "";
-// the task comes from the cwd TASK.md symlink, which the orchestrator re-points at spawn
-const file = "TASK.md";
+// the Splitter runs at the root with no cwd TASK.md: its prompt names the literal .kanban path
+const rootTask = (prompt.match(/Task file: .\\.kanban\\/([^\\x60]+)\\x60/) ?? [])[1];
+// every worktree role reads the task from the cwd TASK.md symlink, which the orchestrator re-points at spawn
+const file = rootTask ? ".kanban/" + rootTask : "TASK.md";
 let front = "";
 try { front = readFileSync(file, "utf8"); } catch {}
 if (!front.match(/^state: /m)) process.exit(0);
 if (prompt.includes("Splitter agent")) {
 	// splitter behavior is selected by a marker in the task content: no marker is a silent
 	// no-split, so the shared parts that spawn the splitter stay unaffected
-	const num = parseInt(readlinkSync("TASK.md").split("/").pop() ?? "", 10) || 0;
+	const name = rootTask ?? readlinkSync("TASK.md").split("/").pop();
+	const num = parseInt(name ?? "", 10) || 0;
 	const priority = (front.match(/^priority: .*/m) ?? [])[0] ?? 'priority: "medium"';
 	if (front.includes("splitter-crash")) process.exit(1);
 	if (front.includes("splitter-linger")) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000);
@@ -85,7 +89,7 @@ if (prompt.includes("Splitter agent")) {
 		writeFileSync(".kanban/999001_piece_one.md", sub("one"));
 		writeFileSync(".kanban/999002_piece_two.md", sub("two"));
 		const parent = front.replace(/^state: .*/m, 'state: "backlog"').replace(/^complexity: .*/m, 'complexity: "simple"').replace(/\\n---\\n/, '\\nblockedBy: "#999001, #999002"\\n---\\n');
-		writeFileSync("TASK.md", parent);
+		writeFileSync(file, parent);
 	}
 	process.exit(0);
 }

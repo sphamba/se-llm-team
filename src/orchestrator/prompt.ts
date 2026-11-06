@@ -8,9 +8,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export function renderPrompt(root: string, role: string, logStallMinutes: number, taskFile?: string, rootCwd?: boolean, testCommand = "npm test"): string {
 	// the agents dir sits two levels up from src/orchestrator/
 	let prompt = readFileSync(join(HERE, "..", "..", "agents", `${role}.md`), "utf8");
-	// a root-cwd run (the splitter) shares one root TASK.md link that a
-	// later root-cwd spawn re-points mid-run: name the literal task path instead (#313)
-	if (rootCwd && taskFile) prompt = `Task file: \`.kanban/${taskFile}\` in this checkout. The root \`TASK.md\` is a shared link that another root-cwd spawn can re-point at any time. Read and write the task file only through \`.kanban/${taskFile}\`, and pass \`${taskFile}\` as the \`file\` argument of every kanban_* call.\n\n${prompt}`;
+	// a root-cwd run (the splitter) has no cwd TASK.md link: name the literal task path
+	// instead, and make the explicit file argument the only resolution path (#313)
+	if (rootCwd && taskFile) prompt = `Task file: \`.kanban/${taskFile}\` in this checkout. Read and write the task file only through \`.kanban/${taskFile}\`, and pass \`${taskFile}\` as the \`file\` argument of every kanban_* call.\n\n${prompt}`;
 	// the reviewer's base-branch resolution is the one remaining {{ROOT}} use: it diffs against
 	// the branch the project root checkout has checked out. The other roles carry no absolute
 	// path: the cwd TASK.md and AGENTS.md symlinks give them the task and the role notes

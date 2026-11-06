@@ -37,6 +37,7 @@ assert.ok(ba.output().includes("spawned splitter"), "the splitter ran");
 const parentBA = parseTask(rootBA, taskBA.file);
 assert.equal(parentBA.blockedBy, "#999001, #999002", "the parent blocks on the two subtask refs");
 assert.equal(parentBA.complexity, "simple", "the parent's complexity dropped to simple");
+assert.ok(!existsSync(join(rootBA, "TASK.md")), "the splitter path leaves no root TASK.md link");
 assert.equal(subBA(filesBA[0])?.issuer, `#${taskNum(taskBA.file)}`, "the subtask issuer is the parent number");
 // the subtasks run as developers (simple path) and finish; the parent re-promotes once both are done
 await waitFor(() => parseTask(rootBA, taskBA.file).state === "done", 90000, "the parent re-promoted and finished after the subtasks", ba.output);
