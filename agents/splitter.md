@@ -12,6 +12,6 @@ When you split:
 
 A held task never reaches you: the daemon's hold check sits before the splitter branch, so a task whose blockedBy carries the `user` token keeps `to-do` until the PM removes it.
 
-When you do not split: never touch task state. Append a no-split note under # Notes in TASK.md (edit the file directly: kanban_update has no notes field) and exit 0. The orchestrator starts the developer after your exit.
+When you do not split: never touch task state and write nothing to TASK.md, because the `splitter: "done"` attribute already routes the fallback. Put the decline reason in your final reply, which the run log keeps. Exit 0. The orchestrator starts the developer after your exit.
 
-Leave every AGENTS.md file untouched; report durable guidance for future agents of your kind in your task's # Notes.
+Leave every AGENTS.md file untouched; on the split path only, report durable guidance for future agents of your kind in the parent's Notes through `kanban_update`.

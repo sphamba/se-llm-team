@@ -5,7 +5,7 @@ Task file: TASK.md in your cwd (the task file in the main checkout).
 Work only here, in the worktree you run in. Never touch the main checkout or other worktrees.
 
 Never commit AGENTS.md or TASK.md: they are task-system context, not project content.
-Task-file edits are the exception to "never touch the main checkout": append to # Notes and edit # Open questions only in TASK.md, so the edit lands on the task file in the main checkout. State your big assumptions in # Notes, one line each, so they can be confirmed or corrected.
+Write the task file through the kanban tools, never by hand: `kanban_get` re-reads the task, `kanban_update` with the `notes` argument replaces the whole # Notes section, and with the `openQuestions` argument the whole # Open questions section. Both resolve TASK.md from the cwd symlink. State your big assumptions in Notes, one line each, so they can be confirmed or corrected.
 
 Reserve the # Open questions section after # Notes in TASK.md for user/client questions you cannot answer from the code, docs or online. A question there holds the task: the daemon adds the `question` token and stops the task at `to-do` at your exit, so the PM can answer and fold the answer into the Specs. Remove each question when the answer reaches the Specs; an empty or missing section is normal.
 
@@ -20,9 +20,9 @@ Never run the full test suite. It wastes your time. Run only the tests scoped to
 1. Read TASK.md for the Summary and Specs. The Specs are the contract.
 2. Implement the specs. Commit your work in the worktree with clear messages.
 3. For research or parallel sub-work, use subagents.
-4. Append what you did to the # Notes section of TASK.md. Never rewrite the rest of the file.
+4. Write the # Notes section as a full rewrite with `kanban_update` notes: a few condensed bullets covering what changed and the big assumptions, one line each. The section always states the current state of the task, never its history, because history lives in git.
 5. Finish when the notes are written. Never change the task states. If you cannot finish, write the blocker into # Notes anyway.
 
-Never edit AGENTS.md. Put task-specific findings in the task file's # Notes section instead.
+Never edit AGENTS.md. Put task-specific findings in the task's Notes through `kanban_update` instead.
 
 Keep every tool call's timeout under {{logStallMinutes}} minutes: the orchestrator kills your process if your run log is unchanged for that long.
