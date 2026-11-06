@@ -5,7 +5,7 @@ import { joinHub } from "../hub.ts";
 import { pidAlive } from "../pid.ts";
 import { loadWebUiConfig } from "../webui.ts";
 import { loadConfig, parseArgs } from "./config.ts";
-import { bootstrapBoard, killPushes } from "./board.ts";
+import { bootstrapBoard, installKanbanMirror, killPushes } from "./board.ts";
 import { compactFinishedLogs, log } from "./log.ts";
 import { rescan } from "./pipeline/index.ts";
 import { poll } from "./liveness.ts";
@@ -101,6 +101,7 @@ export function main(argv: string[]): void {
 	for (const dir of [".logs", ".pids"]) mkdirSync(join(kanbanDir(root), dir), { recursive: true });
 	log(root, `orchestrator started (root=${root}, agent=${cfg.agent}, backend=${cfg.backend}, poll=${pollMinutes}min, rescan=${rescanSeconds}s)`);
 	bootstrapBoard(root);
+	installKanbanMirror();
 
 	const sweep = (force = false) => {
 		reapIfTaskEnded();

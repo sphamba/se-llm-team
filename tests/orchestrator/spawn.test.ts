@@ -63,7 +63,13 @@ assert.ok(!existsSync(join(rootA, ".worktrees", "feat/1-smoke-test")), "worktree
 // the board mirrors to refs/heads/meta/kanban via plumbing, never onto the current branch:
 // done folds in the whole task life, and main history gets no board commits
 const boardLog = mirrorSubjects(rootA).split("\n");
-assert.deepEqual(boardLog.filter((s) => s.includes(taskA.file)), [`kanban: done ${taskA.file}`, `kanban: create ${taskA.file}`]);
+assert.equal(boardLog[0], `kanban: done ${taskA.file}`, "the done commit is the newest label");
+assert.equal(boardLog[boardLog.length - 1], `kanban: create ${taskA.file}`, "the create commit is the oldest label");
+assert.deepEqual(
+	boardLog.filter((s) => s.startsWith(`kanban: state ${taskA.file} -> `)).reverse(),
+	["doing", "to-review", "reviewing", "to-merge", "merging", "to-live-test", "live-testing", "done"].map((s) => `kanban: state ${taskA.file} -> ${s}`),
+	"one mirror commit per lane transition, in order",
+);
 assert.equal(execSync("git log --format=%s -- .kanban", { cwd: rootA, encoding: "utf8" }).trim(), "", "board commits landed on main history");
 const committed = execSync(`git show refs/heads/meta/kanban:.kanban/${taskA.file}`, { cwd: rootA, encoding: "utf8", shell: "/bin/bash" });
 assert.match(committed, /^state: "done"$/m);

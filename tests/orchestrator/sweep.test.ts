@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTask, kanbanDir, parseTask, setState, setWorktree, taskNum, taskSlug, updateTask } from "../../src/kanban.ts";
 import { reviewBasePath } from "../../src/orchestrator/pipeline/review.ts";
+import { installKanbanMirror } from "../../src/orchestrator/board.ts";
 import { REPORT_MAX_AGE_MS, reportsDir } from "../../src/orchestrator/report.ts";
 import { loadConfig, poll, removeTask } from "../../src/orchestrator.ts";
 import { rescan } from "../../src/orchestrator/pipeline/index.ts";
@@ -103,9 +104,11 @@ const taskO2 = createTask(rootO, { name: "fix: late arrival", summary: "Created 
 // generous timeout: under load the daemon's scan loop can stall past 10s (silence, no crash),
 // so a fixed 10s wait flakes (000083); 30s matches the first-wait timeouts above
 await waitFor(() => mirrorSubjects(rootO).includes(`kanban: create ${taskO2.file}`), 30000, "late task create commit", mo.output);
-// further sweeps change nothing: no done-label folding, no commit churn
+// the late create never folds under another label: exactly one create commit per task
 await new Promise((r) => setTimeout(r, 1500));
-assert.deepEqual(mirrorSubjects(rootO).split("\n"), [`kanban: create ${taskO2.file}`, `kanban: create ${taskO1.file}`]);
+const lateO = mirrorSubjects(rootO).split("\n");
+assert.equal(lateO.filter((s) => s === `kanban: create ${taskO2.file}`).length, 1, "the late task gets exactly one create commit");
+assert.ok(lateO.includes(`kanban: create ${taskO1.file}`), "the settled done task was mirrored");
 mo.daemon.kill("SIGTERM");
 
 console.log("orchestrator.test.ts: ... + settled done task create-event smoke passed");
@@ -464,3 +467,25 @@ rescan(rootBQs, cfgBQs);
 assert.equal(alertsBQs().length, 1, "the second pass queues no report");
 assert.deepEqual([parseTask(rootBQs, askedBQs.file).blockedBy, parseTask(rootBQs, askedBQs2.file).blockedBy], tokensBQs, "the second pass adds no token twice");
 console.log("orchestrator.test.ts: ... + question hold alert fires once smoke passed");
+
+// --- part BM: every state transition mirror-commits the board at the lane boundary ---
+// the Notes a lane wrote is captured before the next lane rewrites it; a pure notes rewrite
+// and a setState to the same state commit nothing
+const rootBM = fixture();
+cleaned.push(rootBM);
+installKanbanMirror();
+const taskBM = createTask(rootBM, { name: "fix: transition mirror", summary: "Transition mirror smoke", specs: "n/a" });
+appendFileSync(join(kanbanDir(rootBM), taskBM.file), "- note from the doing lane\n");
+setState(rootBM, taskBM, "doing");
+const firstBM = mirrorSubjects(rootBM).split("\n");
+assert.deepEqual(firstBM, [`kanban: create ${taskBM.file}`], "a file not yet on the mirror folds its first transition into the create label");
+assert.ok((showTip(rootBM, taskBM.file) ?? "").includes("- note from the doing lane"), "the committed tree carries the notes the lane wrote");
+const beforeNotesBM = mirrorSubjects(rootBM);
+appendFileSync(join(kanbanDir(rootBM), taskBM.file), "- note with no transition\n");
+assert.equal(mirrorSubjects(rootBM), beforeNotesBM, "a pure notes rewrite commits nothing");
+setState(rootBM, taskBM, "doing");
+assert.equal(mirrorSubjects(rootBM), beforeNotesBM, "a no-op setState commits nothing");
+setState(rootBM, taskBM, "to-review");
+assert.ok(mirrorSubjects(rootBM).includes(`kanban: state ${taskBM.file} -> to-review`), "a later transition mirrors the board with a state label");
+assert.ok((showTip(rootBM, taskBM.file) ?? "").includes("- note with no transition"), "the transition commit carries the notes written since the last mirror");
+console.log("orchestrator.test.ts: ... + state transition mirror smoke passed");

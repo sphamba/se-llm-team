@@ -31,8 +31,9 @@ export function rescan(root: string, cfg: Config, force = false): void {
 	// The release runs before the lanes, so a repaired merge frees the Merge column in this sweep
 	for (const task of tasks) releaseStuckMerge(root, task);
 	const created = new Set<string>();
-	// sole commit points: board files not on the mirror yet are new, finished tasks fold in
-	// their whole life; everything else stays unmirrored until done. Creates run first:
+	// commits: board files not on the mirror yet are new, a state transition mirrors at its
+	// lane boundary (the kanban hook), a finished task folds its cleanup write under the done
+	// label. Creates run first:
 	// commitKanban rebuilds the tree from the whole board, so a done commit later in the
 	// sweep would fold pending creates under its label and the create events would never
 	// surface on the mirror
@@ -149,8 +150,10 @@ export function rescan(root: string, cfg: Config, force = false): void {
 				// the commit is gated on the file actually differing from the mirror, since
 				// an unchanged done task would otherwise issue a whole-board commit every sweep and
 				// fold other tasks' pending changes under its label
-				doneCleanup(root, task);
-				if (code) commitKanban(root, `kanban: done ${task.file}`, files);
+				const cleaned = doneCleanup(root, task);
+				// the transition's own state commit already mirrored the file, so the sweep-start
+				// snapshot is stale: the cleanup's write decides. A clean cleanup commits nothing
+				if (code || cleaned) commitKanban(root, `kanban: done ${task.file}`, files);
 			}
 		} catch (err) {
 			log(root, `error handling ${task.file} (${task.state}): ${err instanceof Error ? err.message : err}`);

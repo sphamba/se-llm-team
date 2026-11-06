@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { kanbanDir, noteSelfWrite, setWorktree, slugWorktree, taskFiles, taskSlug, writeTaskFile, type Task } from "../kanban.ts";
+import { kanbanDir, noteSelfWrite, setStateHook, setWorktree, slugWorktree, taskFiles, taskSlug, writeTaskFile, type Task } from "../kanban.ts";
 import { pidAlive } from "../pid.ts";
 import { bumpCounter, counterPath, log, readCounter } from "./log.ts";
 
@@ -64,6 +64,20 @@ export function commitKanban(root: string, message: string, files: string[], all
 	lastMirrorHash = commit;
 	pushMirror(root);
 	return true;
+}
+
+// the kanban state hook: every lane boundary mirrors the whole board, so the Notes a lane left
+// behind is captured before the next lane rewrites it. Both writers register it (the daemon in
+// main.ts, the extension/MCP tool path in tools.ts); kanban.ts cannot import this module
+// itself, because this module imports kanban.ts and the cycle breaks the extension load
+export function installKanbanMirror(): void {
+	setStateHook((root, file, state) => {
+		// a file not on the mirror yet folds into its create label: the poll can promote a task
+		// between sweeps, before the sweep's create pass, and a create event must never fold
+		// under a state label. The next transition carries the state label
+		const known = git(root, ["ls-tree", "--name-only", KANBAN_REF, "--", join(".kanban", file)], true);
+		commitKanban(root, known ? `kanban: state ${file} -> ${state}` : `kanban: create ${file}`, taskFiles(root));
+	});
 }
 
 // serialized in-flight push: the pushes were synchronous, so "consecutive failures" was
@@ -254,9 +268,10 @@ function everOnMirror(root: string, file: string): boolean {
 // materialize refs/heads/meta/kanban into the working-tree .kanban. Files the working tree
 // lacks are written from the tip; local files the tip lacks that the last known mirror tree
 // had are deleted (external deletions propagate). A local file that exists wins over the
-// tip: agents write state and notes into the working tree while only creates and dones
-// reach the mirror, so a differing local file is an in-flight write (the mirror cannot tell
-// it from a stale copy). Never touches the index. Trigger: only when the branch head moved
+// tip: agents write notes into the working tree while a state transition (or the create and
+// done commits) is the only mirror point, so a differing local file is an in-flight write
+// (the mirror cannot tell it from a stale copy). Never touches the index. Trigger: only when
+// the branch head moved
 // past the head this process last materialized or wrote; our own commits never re-trigger.
 export function reconcileBoard(root: string): boolean {
 	const head = git(root, ["rev-parse", "--verify", KANBAN_REF], true);

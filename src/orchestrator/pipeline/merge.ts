@@ -232,28 +232,28 @@ function fastForward(root: string, base: string, wt: string): boolean {
 // left here. -d
 // refuses an unmerged branch, so a manual done with unfinished work keeps both branch and
 // worktree for a manual merge.
-function doneCleanup(root: string, task: Task): void {
+// returns whether it wrote: the done commit is gated on that write, because the transition's
+// state commit already mirrored the file
+function doneCleanup(root: string, task: Task): boolean {
 	const wt = task.worktree;
-	if (!wt) return;
+	if (!wt) return false;
 	const wtDir = join(root, ".worktrees", wt);
 	const hasBranch = git(root, ["branch", "--list", wt], true) !== "";
 	if (!hasBranch && !existsSync(wtDir)) {
 		// stale attribute: nothing left to clean
-		setWorktree(root, task, "");
-		return;
+		return setWorktree(root, task, "");
 	}
 	if (!hasBranch) {
 		// worktree dir without a branch: nothing mergeable, drop the dir and the attribute
 		git(root, ["worktree", "remove", wtDir, "--force"], true);
-		setWorktree(root, task, "");
-		return;
+		return setWorktree(root, task, "");
 	}
-	if (git(root, ["merge-base", "--is-ancestor", wt, "HEAD"], true) === null) return;
+	if (git(root, ["merge-base", "--is-ancestor", wt, "HEAD"], true) === null) return false;
 	// --force only drops uncommitted worktree debris; the merged branch content is already in main
 	if (existsSync(wtDir)) git(root, ["worktree", "remove", wtDir, "--force"], true);
 	git(root, ["branch", "-d", wt], true);
-	setWorktree(root, task, "");
 	log(root, `merged ${wt} for ${task.file}`);
+	return setWorktree(root, task, "");
 }
 
 // the PM's merge gate: one marker per task the sweep already put to the PM, next to the stuck

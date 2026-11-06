@@ -533,22 +533,32 @@ function writeTask(root: string, file: string, content: string): void {
 
 // Attribute-only rewrite; skips unchanged keys and refuses a conflicted file. Exported for
 // the orchestrator's automatic blockedBy maintenance (updateTask would add a needless cycle
-// check and board re-read to a pure ref removal).
-export function updateAttrs(root: string, task: Task, patch: Record<string, string>): void {
-	withLock(root, taskLockName(task.file), () => {
+// check and board re-read to a pure ref removal). Returns whether the write happened, so a
+// caller can tell a real lane boundary from an unchanged state.
+export function updateAttrs(root: string, task: Task, patch: Record<string, string>): boolean {
+	return withLock(root, taskLockName(task.file), () => {
 		const raw = readFileSync(join(kanbanDir(root), task.file), "utf8");
 		if (hasConflictMarkers(raw)) throw new Error(`unresolved merge conflict markers in ${task.file}; not rewriting`);
 		const fm = splitFrontmatter(raw);
 		if (!fm) throw new Error(`no frontmatter in ${task.file}`);
 		const changed = Object.entries(patch).filter(([k, v]) => fm.attrs[k] !== v);
-		if (!changed.length) return;
+		if (!changed.length) return false;
 		for (const [k, v] of changed) fm.attrs[k] = v;
 		writeTask(root, task.file, serializeFrontmatter(fm.attrs) + fm.body);
+		return true;
 	});
 }
 
+// the board side registers its mirror commit here: kanban must not import the orchestrator
+// (the orchestrator imports kanban, and the cycle breaks the extension load)
+let stateWritten: ((root: string, file: string, state: TaskState) => void) | null = null;
+export function setStateHook(hook: ((root: string, file: string, state: TaskState) => void) | null): void {
+	stateWritten = hook;
+}
+
 export function setState(root: string, task: Task, state: TaskState): void {
-	updateAttrs(root, task, { state });
+	// only a real write is a lane boundary: an unchanged state writes nothing and commits nothing
+	if (updateAttrs(root, task, { state })) stateWritten?.(root, task.file, state);
 }
 
 // Rewrites only the given body sections; everything else stays byte-for-byte.
@@ -663,8 +673,8 @@ export function updateTask(
 	if (Object.keys(sections).length) replaceSections(root, task, sections);
 }
 
-export function setWorktree(root: string, task: Task, worktree: string): void {
-	updateAttrs(root, task, { worktree });
+export function setWorktree(root: string, task: Task, worktree: string): boolean {
+	return updateAttrs(root, task, { worktree });
 }
 
 // strict creation slug: lowercase letters/digits, single hyphens between words

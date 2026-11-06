@@ -12,7 +12,11 @@ import { createTask, getTask, gitWritableError, kanbanDir, listAll, listTasks, p
 import { pidAlive, procPgrp } from "./pid.ts";
 import { removeTask } from "./orchestrator.ts";
 import { loadConfig, resolveLlm } from "./orchestrator/config.ts";
+import { installKanbanMirror } from "./orchestrator/board.ts";
 import { writeOwner } from "./orchestrator/report.ts";
+
+// the tool path is a writer too: its kanban_set_state transitions mirror the board like the daemon's
+installKanbanMirror();
 
 export interface ToolResult {
 	text: string;

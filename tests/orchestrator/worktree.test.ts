@@ -323,7 +323,9 @@ const q = await runDaemon(rootQ);
 await waitFor(() => mirrorSubjects(rootQ).includes(`kanban: create ${taskQ.file}`), 30000, "task mirrored", q.output);
 // branch-only file: the tip gains it while the working tree lacks it (the drift that used to erase it)
 const externalQ = "000002_feat_branch_only.md";
-const externalContentQ = taskContent("fix: branch-only task");
+// held in backlog by the user token: the promotion pass leaves it untouched, so its mirrored
+// bytes stay stable for the byte-for-byte assert below
+const externalContentQ = taskContent("fix: branch-only task").replace('worktree: ""', 'worktree: ""\nblockedBy: "user"');
 const extQ = externalCommit(rootQ, { [taskQ.file]: readFileSync(join(kanbanDir(rootQ), taskQ.file), "utf8"), [externalQ]: externalContentQ }, "external: add a branch-only task");
 // an in-flight PM write, never mirrored: the reconcile that materializes the branch-only
 // file must keep it. The open question holds it in backlog: promoteBacklog would otherwise
@@ -409,7 +411,9 @@ const rootZ = fixture();
 cleaned.push(rootZ);
 mkdirSync(kanbanDir(rootZ), { recursive: true });
 writeFileSync(join(rootZ, "se-llm-team.json"), JSON.stringify({ agent: deadStub(rootZ), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
-const taskZ = createTask(rootZ, { name: "fix: restart keeps in-flight state", summary: "Restart smoke", specs: "n/a" });
+// held in backlog: the daemon never promotes it, so the create-time mirror state stays the
+// precondition for the in-flight assert below
+const taskZ = createTask(rootZ, { name: "fix: restart keeps in-flight state", summary: "Restart smoke", specs: "n/a", blockedBy: "user" });
 const z1 = await runDaemon(rootZ);
 await waitFor(() => mirrorSubjects(rootZ).includes(`kanban: create ${taskZ.file}`), 30000, "task mirrored before the restart", z1.output);
 z1.daemon.kill("SIGTERM");
