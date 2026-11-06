@@ -204,3 +204,39 @@ assert.ok(existsSync(pidPath(rootBH, taskSlug(taskBH.file))), "splitting off spa
 const bhLog = readFileSync(join(kanbanDir(rootBH), ".logs", "orchestrator.log"), "utf8");
 assert.ok(bhLog.includes(`${taskBH.file}: splitting is off, moving to the developer`), "the skip is logged");
 console.log("orchestrator.test.ts: ... + splitting off skips the splitter smoke passed");
+
+// --- part BI: the splitter-ran attr. A Splitter that declines leaves the task in to-do; the
+// daemon writes the marker on the successful exit, and a bounce back to to-do goes straight to
+// the Developer with no second splitter spawn ---
+const rootBI = fixture();
+cleaned.push(rootBI);
+mkdirSync(join(kanbanDir(rootBI), ".logs"), { recursive: true });
+writeFileSync(join(rootBI, "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootBI), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+const taskBI = createTask(rootBI, { name: "feat: no split twice", summary: "Splitter marker smoke", specs: "splitter-nosplit" });
+setState(rootBI, taskBI, "to-do");
+const bi = await runDaemon(rootBI);
+await waitFor(() => bi.output().includes("spawned developer"), 30000, "the declined split fell through to the developer", bi.output);
+await waitFor(() => parseTask(rootBI, taskBI.file).splitter === "done", 10000, "the daemon marked the completed splitter run", bi.output);
+setState(rootBI, parseTask(rootBI, taskBI.file), "to-do");
+await waitFor(() => bi.output().split("spawned developer").length - 1 >= 2, 90000, "the marked task went straight to a second developer run", bi.output);
+assert.equal(bi.output().split("spawned splitter").length - 1, 1, "exactly one splitter spawn across the bounce-back");
+bi.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + splitter marker bounce-back smoke passed");
+
+// --- part BJ: a crashed splitter (exit 1) writes no marker, so a bounce back to to-do retries
+// the Splitter once ---
+const rootBJ = fixture();
+cleaned.push(rootBJ);
+mkdirSync(join(kanbanDir(rootBJ), ".logs"), { recursive: true });
+writeFileSync(join(rootBJ, "se-llm-team.json"), JSON.stringify({ agent: roleStub(rootBJ), pollMinutes: 0.01, backlogIdleMinutes: 0 }));
+const taskBJ = createTask(rootBJ, { name: "feat: splitter crash again", summary: "Splitter crash retry smoke", specs: "splitter-crash" });
+setState(rootBJ, taskBJ, "to-do");
+const bj = await runDaemon(rootBJ);
+await waitFor(() => bj.output().includes("spawned developer"), 30000, "the crashed splitter fell back to the developer", bj.output);
+await waitFor(() => parseTask(rootBJ, taskBJ.file).state === "done", 90000, "the crash fallback task finished", bj.output);
+assert.equal(parseTask(rootBJ, taskBJ.file).splitter, "", "a crashed splitter writes no marker");
+assert.equal(bj.output().split("spawned splitter").length - 1, 1, "one splitter run before the bounce-back");
+setState(rootBJ, parseTask(rootBJ, taskBJ.file), "to-do");
+await waitFor(() => bj.output().split("spawned splitter").length - 1 === 2, 30000, "the unmarked task retried the splitter", bj.output);
+bj.daemon.kill("SIGTERM");
+console.log("orchestrator.test.ts: ... + crashed splitter retry smoke passed");

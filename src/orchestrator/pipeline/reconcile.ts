@@ -4,6 +4,7 @@ import { kanbanDir, listAll, setState, taskSlug, updateAttrs, type Task } from "
 import { agentAlive, pidAlive, pidEntry } from "../../pid.ts";
 import { log } from "../log.ts";
 import { queueAlert } from "../report.ts";
+import { markSplitterDone } from "./schedule.ts";
 
 // the question reconcile: one pass, no memory, the board is the whole state. An open question
 // adds the daemon's hold token and the task stops at the next gate; an answered task drops the
@@ -79,13 +80,20 @@ function janitorPids(root: string, tasks: Task[]): void {
 			// and per-run analyses (<slug>.<role>.<n>.analysis.pid). Every live process keeps its
 			// file. A dead one goes once its reader is done with it: the poll consumes a board
 			// task's per-task pid in every state (exit code, review base marker, dead-streak
-			// clear) and clears the file itself; startTodo reads a to-do task's splitter pid as
-			// the splitter-ran marker that routes the fallback to the Developer; spawnRunAnalysis
+			// clear) and clears the file itself; a dead to-do task's splitter pid routes startTodo
+			// to the Developer, and the splitter attr (not the pid file) is the persistent ran-once
+			// marker; spawnRunAnalysis
 			// reads an analysis pid only while it is alive (the wrapper self-removes its file at
 			// exit, a killed analysis leaves it behind)
 			const name = f.slice(0, -".pid".length);
 			const { pid, disc } = pidEntry(root, name);
 			if (pidAlive(pid, disc)) continue; // never remove a running process's pid file
+			// a successful Splitter exit writes the persistent ran-once attr before the dead pid file
+			// can go; a crash stays unmarked, so the next to-do pass may retry the Splitter once
+			if (name.endsWith(".splitter")) {
+				const splitTask = tasks.find((t) => taskSlug(t.file) === name.slice(0, -".splitter".length));
+				if (splitTask) markSplitterDone(root, splitTask);
+			}
 			if (!name.endsWith(".analysis")) {
 				const slug = name.endsWith(".splitter") ? name.slice(0, -".splitter".length) : name;
 				if (name.endsWith(".splitter") ? todo.has(slug) : slugs.has(slug)) continue;

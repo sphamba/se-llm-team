@@ -4,13 +4,13 @@ import { getTask, hasHold, isSelfWrite, kanbanDir, listAll, PRIORITY_RANK, ROLE_
 import { agentPid, pidAlive, pidEntry } from "../../pid.ts";
 import { RESPAWN_CAP, type Config } from "../config.ts";
 import { log, readCounter } from "../log.ts";
-import { spawnAgent } from "../spawn.ts";
+import { readExitCode, spawnAgent } from "../spawn.ts";
 import { clearContextSymlinks } from "../context.ts";
 import { ensureWorktree } from "../board.ts";
 
 // moderate and complex to-do tasks meet the Splitter first: the task stays in to-do while the
-// Splitter decomposes it (or declines), and the dead splitter pid file routes the fallback to
-// the Developer below with no second splitter pass
+// Splitter decomposes it (or declines), and a successful exit writes the persistent splitter
+// attr that routes every later to-do pass straight to the Developer
 const SPLITTER_COMPLEXITIES = new Set(["moderate", "complex"]);
 
 // the states the maxParallel cap counts: state-based, so a task whose agent died still holds
@@ -42,12 +42,15 @@ export function startTodo(root: string, cfg: Config, task: Task, tasks: Task[]):
 	const fresh = getTask(root, task.file);
 	if (!fresh || fresh.state !== "to-do") return;
 	// the same gate as the promotion loop: a held token or a blocker that still blocks keeps the
-	// task in to-do, and removing the hold restarts the path with the Splitter first because no
-	// splitter marker was written
+	// task in to-do, and removing the hold restarts the path with the Splitter first unless the
+	// splitter-ran attr already marked the task
 	if (blockedByUndone(tasks, fresh)) return;
 	if (SPLITTER_COMPLEXITIES.has(fresh.complexity ?? "")) {
 		// splitting off: the task skips the decomposition and starts its Developer directly
 		if (!cfg.splitting) log(root, `${fresh.file}: splitting is off, moving to the developer`);
+		// the attr is the ran-once marker: a task that already met the Splitter never meets it again,
+		// however often it re-enters to-do, and there is no reset path
+		else if (fresh.splitter === "done") clearContextSymlinks(root, fresh, { rootCwd: true });
 		else {
 			const entry = pidEntry(root, `${slug}.splitter`);
 			if (pidAlive(entry.pid, entry.disc)) return;
@@ -58,8 +61,10 @@ export function startTodo(root: string, cfg: Config, task: Task, tasks: Task[]):
 				return;
 			}
 			// a dead splitter pid file means the Splitter ran and left the task in to-do (a decline
-			// or a crash): clear its root run link, then fall through to the Developer, no second
-			// splitter pass. liveness never sees the pid, so the cleanup happens here instead
+			// or a crash): mark a successful exit, clear its root run link, then fall through to the
+			// Developer, no second splitter pass. liveness never sees the pid, so the cleanup happens
+			// here instead
+			markSplitterDone(root, fresh);
 			clearContextSymlinks(root, fresh, { rootCwd: true });
 		}
 	}
@@ -70,6 +75,13 @@ export function startTodo(root: string, cfg: Config, task: Task, tasks: Task[]):
 	// state before spawn: the next sweep reads doing and defers, with the pid check as the belt
 	setState(root, fresh, "doing");
 	spawnAgent(root, cfg, "developer", { ...fresh, worktree: ensured.wt }, ensured.wtDir);
+}
+
+// the persistent ran-once marker: only a successful Splitter exit (a decline counts) writes it,
+// so a crash or a killed wrapper stays unmarked and the next to-do pass may retry once
+export function markSplitterDone(root: string, task: Task): void {
+	if (task.splitter === "done" || readExitCode(root, `${taskSlug(task.file)}.splitter`) !== 0) return;
+	updateAttrs(root, task, { splitter: "done" });
 }
 
 // past RESPAWN_CAP the fresh agent waits for the idle cooldown: the unconditional bounce

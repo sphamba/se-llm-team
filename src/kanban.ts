@@ -51,6 +51,7 @@ export interface Task {
 	issuer: string;
 	complexity: string;
 	blockedBy: string;
+	splitter: string;
 	summary: string;
 	specs: string;
 	notes: string;
@@ -307,6 +308,8 @@ export function parseTask(root: string, file: string): Task {
 		issuer: attrs.issuer ?? "user",
 		complexity: (COMPLEXITIES as readonly string[]).includes(attrs.complexity) ? attrs.complexity : "moderate",
 		blockedBy: attrs.blockedBy ?? "",
+		// "done" is the daemon-written ran-once marker for the Splitter (000479)
+		splitter: attrs.splitter ?? "",
 		summary: trim(sections["summary"]),
 		specs: trim(sections["specs"]),
 		notes: trim(sections["notes"]),
